@@ -16,6 +16,7 @@ use App\Services\Compliance\ComplianceAuditLifecycleService;
 use App\Services\Compliance\ComplianceAuditScopeService;
 use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeHandoffService;
 use App\Services\Improvements\ImprovementCaseCreator;
+use App\Support\CalendarDate;
 use App\Support\Compliance\ComplianceValidationMessages;
 use App\Support\CustomerContext;
 use App\Support\Improvements\ImprovementValidationMessages;
@@ -196,7 +197,7 @@ class ComplianceAuditController extends Controller
             'finding_options' => $canRecordFindings ? $this->findings->options($user, $audit) : null,
             // What «Følg opp i Avvik og forbedringer» needs from that module — only while there is a
             // finding left to hand off. The areas are those the person may register cases in.
-            'handoff' => $awaitingHandoff ? $this->handoff->formOptions($user) + ['today' => now()->toDateString()] : null,
+            'handoff' => $awaitingHandoff ? $this->handoff->formOptions($user) + ['today' => CalendarDate::todayString()] : null,
             // Reached through visibleAudits(); the history carries no access of its own.
             'status_history' => $audit->statusChanges()->with('changedBy:id,name')->get()
                 ->map(fn (ComplianceAuditStatusChange $change): array => [

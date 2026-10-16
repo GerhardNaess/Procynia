@@ -9,6 +9,7 @@ use App\Models\SupplierProfile;
 use App\Models\User;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Services\Suppliers\SupplierReviewSchedule;
+use App\Support\CalendarDate;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -62,7 +63,7 @@ class SupplierDueDiligenceService
             'conclusion' => ['required', 'string', Rule::in(SupplierDueDiligenceAssessment::CONCLUSIONS)],
             'rationale' => ['required', 'string', 'max:10000'],
             'review_interval_months' => ['required', 'integer', Rule::in(SupplierDueDiligenceAssessment::REVIEW_INTERVALS)],
-            'assessed_on' => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
+            'assessed_on' => ['required', 'date_format:Y-m-d', 'before_or_equal:'.CalendarDate::todayString()],
         ];
     }
 
@@ -242,7 +243,7 @@ class SupplierDueDiligenceService
                 'levels' => SupplierDueDiligenceAssessment::LEVELS,
                 'conclusions' => SupplierDueDiligenceAssessment::CONCLUSIONS,
                 'review_intervals' => SupplierDueDiligenceAssessment::REVIEW_INTERVALS,
-                'today' => $today->toDateString(),
+                'today' => CalendarDate::todayString(),
             ],
         ];
     }

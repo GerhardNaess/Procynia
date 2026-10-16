@@ -393,6 +393,54 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertNull($savedNotice->next_process_date_at);
     }
 
+    /**
+     * «12,5» is how a Norwegian writes twelve and a half; it used to be refused as not a number.
+     * The server reads it — and the plain «12.5» the page sends after reading the field keeps its
+     * meaning — but refuses what could be read more than one way instead of guessing.
+     */
+    public function test_contract_value_accepts_norwegian_notation_and_refuses_what_does_not_read(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, '2026-1002-v', 'Avtaleverdi', archived: true, status: null);
+
+        $save = fn (mixed $value) => $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from('/app/notices?mode=history')
+            ->patch("/app/notices/saved/{$savedNotice->id}/history-metadata", [
+                'contract_value_mnok' => $value,
+                'procurement_type' => SavedNotice::PROCUREMENT_TYPE_ONE_TIME,
+                'follow_up_mode' => SavedNotice::FOLLOW_UP_MODE_NONE,
+            ]);
+
+        foreach ([
+            '12,5' => '12.50',
+            '1 250,75' => '1250.75',
+            "1\u{00A0}250" => '1250.00',
+            '12.5' => '12.50',
+            '0,05' => '0.05',
+        ] as $typed => $stored) {
+            $save($typed)->assertSessionHasNoErrors();
+            $this->assertSame($stored, $savedNotice->fresh()->contract_value_mnok, "«{$typed}»");
+        }
+
+        foreach (['1.250,5', '12,5,0', '1 25', 'tolv', '1,250.5'] as $typed) {
+            $save($typed)->assertSessionHasErrors([
+                'contract_value_mnok' => 'Skriv avtaleverdien som et tall i millioner kroner, for eksempel 12,5 eller 1 250.',
+            ]);
+        }
+
+        $save('-1')->assertSessionHasErrors(['contract_value_mnok' => 'Avtaleverdien kan ikke være negativ.']);
+        // decimal(12,2): larger would not fit the column and used to be a server error.
+        $save('10 000 000 000')->assertSessionHasErrors(['contract_value_mnok' => 'Avtaleverdien kan være høyst 9 999 999 999,99 MNOK.']);
+
+        // A refused value never overwrote the last good one.
+        $this->assertSame('0.05', $savedNotice->fresh()->contract_value_mnok);
+
+        $save('')->assertSessionHasNoErrors();
+        $this->assertNull($savedNotice->fresh()->contract_value_mnok);
+    }
+
     public function test_customer_can_save_one_time_history_with_manual_offset_follow_up_from_today(): void
     {
         $context = $this->customerAdminContext();
@@ -1111,6 +1159,72 @@ class CustomerSavedNoticeWorklistTest extends TestCase
 
         $this->assertSame($original['admin']->id, $savedNotice->fresh()->saved_by_user_id);
         $this->assertSame($original['admin']->id, $savedNotice->fresh()->opportunity_owner_user_id);
+    }
+
+    public function test_store_saved_notice_keeps_a_long_register_title_and_buyer_in_full(): void
+    {
+        // notices.title is text, so a Doffin/TED title longer than 255 characters is ordinary
+        // register data. Saving it used to pass validation (max:1000) and then fail the insert
+        // into a varchar(255) column as an HTTP 500.
+        $context = $this->customerAdminContext();
+        $title = str_repeat('Rammeavtale for drift og forvaltning av fagsystemer ', 18);
+        $title = trim(mb_substr($title, 0, 900));
+        $buyerName = trim(mb_substr(str_repeat('Interkommunalt innkjøpssamarbeid ', 20), 0, 600));
+
+        $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from('/app/notices')
+            ->post('/app/notices/save', [
+                'notice_id' => '2026-1017-long-title',
+                'title' => $title,
+                'buyer_name' => $buyerName,
+                'external_url' => 'https://doffin.no/notices/2026-1017-long-title',
+                'summary' => 'Kort oppsummering',
+                'status' => 'ACTIVE',
+            ])
+            ->assertRedirect('/app/notices')
+            ->assertSessionHasNoErrors();
+
+        $record = SavedNotice::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('external_id', '2026-1017-long-title')
+            ->firstOrFail();
+
+        $this->assertSame($title, $record->title);
+        $this->assertSame($buyerName, $record->buyer_name);
+    }
+
+    public function test_store_saved_notice_rejects_overlong_text_as_validation_error_not_server_error(): void
+    {
+        $context = $this->customerAdminContext();
+
+        foreach ([
+            ['title' => str_repeat('a', 1001)],
+            ['buyer_name' => str_repeat('b', 1001)],
+            ['reference_number' => str_repeat('c', 256)],
+            ['contact_person_name' => str_repeat('d', 256)],
+        ] as $overlong) {
+            $field = array_key_first($overlong);
+
+            $this->actingAs($context['admin'])
+                ->withSession(['_token' => 'test-token'])
+                ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+                ->from('/app/notices')
+                ->post('/app/notices/save', array_merge([
+                    'source_type' => SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+                    'title' => 'Privat forespørsel med for lang tekst',
+                    'buyer_name' => 'Advania Norge AS',
+                    'summary' => 'Manuelt registrert forespørsel',
+                ], $overlong))
+                ->assertRedirect('/app/notices')
+                ->assertSessionHasErrors($field);
+        }
+
+        $this->assertDatabaseMissing('saved_notices', [
+            'customer_id' => $context['customer']->id,
+            'source_type' => SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+        ]);
     }
 
     public function test_customer_can_create_private_request_saved_notice_and_see_source_metadata(): void

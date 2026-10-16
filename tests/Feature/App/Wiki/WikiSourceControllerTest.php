@@ -249,6 +249,76 @@ class WikiSourceControllerTest extends TestCase
         $this->assertTrue($doc->owner->is($user));
     }
 
+    /**
+     * Upload used to check wiki.source.manage only, while changing the owner afterwards also
+     * required the right to assign an owner — so naming a colleague at upload bypassed the rule.
+     */
+    public function test_uploader_without_assign_right_cannot_name_another_owner(): void
+    {
+        Storage::fake('local');
+        $this->mockExtractorReturning('Innhold.');
+
+        $customer = $this->createCustomer();
+        $contributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $systemOwner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $this->actingAs($contributor)->post('/app/wiki/sources', [
+            'file' => UploadedFile::fake()->create('annen-eier.pdf', 64, 'application/pdf'),
+            'owner_user_id' => $systemOwner->id,
+            'tab' => 'sources',
+        ])->assertForbidden();
+
+        $this->assertSame(0, EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->count());
+    }
+
+    public function test_uploader_without_assign_right_still_owns_what_they_upload(): void
+    {
+        Storage::fake('local');
+        $this->mockExtractorReturning('Innhold.');
+
+        $customer = $this->createCustomer();
+        $contributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+
+        $this->actingAs($contributor)->post('/app/wiki/sources', [
+            'file' => UploadedFile::fake()->create('egen-eier.pdf', 64, 'application/pdf'),
+            'owner_user_id' => $contributor->id,
+            'tab' => 'sources',
+        ])->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
+
+        $doc = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->firstOrFail();
+        $this->assertSame($contributor->id, $doc->owner_user_id);
+    }
+
+    public function test_uploader_with_assign_right_can_name_another_owner_in_the_same_customer_only(): void
+    {
+        Storage::fake('local');
+        $this->mockExtractorReturning('Innhold.');
+
+        $customer = $this->createCustomer('Egen kunde');
+        $otherCustomer = $this->createCustomer('Annen kunde');
+        $bidManager = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+        $contributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $foreignUser = $this->createUser($otherCustomer, User::BID_ROLE_BID_MANAGER);
+
+        $this->actingAs($bidManager)->post('/app/wiki/sources', [
+            'file' => UploadedFile::fake()->create('fremmed-eier.pdf', 64, 'application/pdf'),
+            'owner_user_id' => $foreignUser->id,
+            'tab' => 'sources',
+        ])->assertSessionHasErrors(['owner_user_id']);
+
+        $this->assertSame(0, EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->count());
+
+        $this->actingAs($bidManager)->post('/app/wiki/sources', [
+            'file' => UploadedFile::fake()->create('kollega-eier.pdf', 64, 'application/pdf'),
+            'owner_user_id' => $contributor->id,
+            'tab' => 'sources',
+        ])->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
+
+        $doc = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->firstOrFail();
+        $this->assertSame($contributor->id, $doc->owner_user_id);
+        $this->assertSame($bidManager->id, $doc->uploaded_by_user_id);
+    }
+
     public function test_system_owner_can_change_document_owner(): void
     {
         Storage::fake('local');

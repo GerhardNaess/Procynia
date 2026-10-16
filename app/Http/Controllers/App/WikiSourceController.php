@@ -56,10 +56,21 @@ class WikiSourceController extends Controller
         ]);
 
         $file = $validated['file'];
-        $ownerUserId = $this->resolveOwnerUserIdForCustomer(
-            $customerId,
-            (int) ($validated['owner_user_id'] ?? $user?->id ?? 0),
-        );
+        $requestedOwnerId = isset($validated['owner_user_id']) ? (int) $validated['owner_user_id'] : null;
+
+        if ($requestedOwnerId !== null && $requestedOwnerId !== (int) $user?->id) {
+            // Naming someone else as owner is assigning an owner, and assigning is gated the same
+            // way here as in updateOwner(): wiki.source.manage alone lets a person upload, not
+            // hand the document — and its owner approvals — to a colleague.
+            abort_unless($user?->canAssignEnterpriseWikiDocumentOwner() ?? false, 403);
+
+            $ownerUserId = $this->resolveOwnerUserIdForCustomer($customerId, $requestedOwnerId);
+        } else {
+            // The uploader owns what they upload when their role may own a document at all, and the
+            // document is otherwise left ownerless — the same rule Kvalitet applies to the same
+            // upload service (QualityController::storeDocument()).
+            $ownerUserId = ($user?->canBeEnterpriseWikiDocumentOwner() ?? false) ? $user->id : null;
+        }
 
         // Wiki refuses a file it already holds rather than quietly reusing it: re-uploading a
         // source that has already been ingested is nearly always a mistake, and the uploader needs

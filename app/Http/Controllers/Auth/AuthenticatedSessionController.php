@@ -82,11 +82,18 @@ class AuthenticatedSessionController extends Controller
 
         $this->ensureIsNotRateLimited($request, $throttleKey, $credentials['email']);
 
+        // The address is matched without regard to letter case: what the person types is normalized,
+        // and the stored spelling is looked up through lower(email) so a row saved before addresses
+        // were normalized still signs in. The lower(email) unique index makes the match single.
+        $storedEmail = User::query()
+            ->whereRaw('lower(email) = ?', [User::normalizeEmail($credentials['email'])])
+            ->value('email') ?? User::normalizeEmail($credentials['email']);
+
         // is_active is part of the credential match on purpose: a correct password for a deactivated
         // account fails here, indistinguishably from a wrong password, and counts against the limiter
         // like any other failure. There is no cheaper path for an attacker and nothing is revealed.
         if (! Auth::attempt([
-            'email' => $credentials['email'],
+            'email' => $storedEmail,
             'password' => $credentials['password'],
             'is_active' => true,
         ], $request->boolean('remember'))) {

@@ -14,6 +14,7 @@ import { refocusIfLost, useFocusFirstError } from '../../../Support/focusManagem
 import { businessReviewFocusCandidates } from './businessReviewFocus';
 import { announce } from '../../../Support/announcer';
 import { rowErrorId, trackRowAction, useRowActionError } from '../../../Support/rowActionError';
+import { formatKpiNumber, kpiNumberProblemMessage, parseKpiNumber } from '../Objectives/kpiNumber';
 
 
 const noticeSummaryPreviewLimit = 280;
@@ -321,20 +322,6 @@ function publicationDateRangeFromFilters(filters) {
     };
 }
 
-function formatNumberWithSpaces(value) {
-    if (value === null || value === undefined || value === '') {
-        return '';
-    }
-
-    const numeric = value.toString().replace(/\s/g, '');
-
-    return numeric.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-}
-
-function parseNumberFromSpaces(value) {
-    return (value ?? '').replace(/\s/g, '');
-}
-
 function addMonthsNoOverflow(date, months) {
     const baseDate = new Date(date.getTime());
     const target = new Date(baseDate.getFullYear(), baseDate.getMonth() + months, 1);
@@ -417,7 +404,13 @@ function deriveHistorySelection(notice) {
     };
 }
 
-function buildHistoryFormData(notice) {
+/**
+ * The form holds the contract value as the person sees and types it — «1 250,5» in Norwegian — and
+ * it is read into the plain value the server stores only when saved (updateHistoryMetadata), with
+ * the KPI fields' rules: no reformatting under the cursor, and «1.500» refused as ambiguous rather
+ * than guessed.
+ */
+function buildHistoryFormData(notice, locale) {
     const selection = deriveHistorySelection(notice);
     const legacyOffsetMonths = selection.followUpMode === 'contract_end'
         ? estimateFollowUpOffsetMonthsFromDate(notice.next_process_date_at)
@@ -428,7 +421,7 @@ function buildHistoryFormData(notice) {
 
     return {
         selected_supplier_name: notice.selected_supplier_name ?? '',
-        contract_value_mnok: notice.contract_value_mnok !== null && notice.contract_value_mnok !== undefined ? String(notice.contract_value_mnok) : '',
+        contract_value_mnok: notice.contract_value_mnok !== null && notice.contract_value_mnok !== undefined ? formatKpiNumber(String(notice.contract_value_mnok), locale) : '',
         procurement_type: selection.procurementType,
         follow_up_mode: normalizedFollowUpMode,
         follow_up_offset_months: selection.followUpMode === 'contract_end'
@@ -750,6 +743,9 @@ export default function NoticeIndex({
         savedLabel: nt.saved_label,
         selectedSupplierLabel: nt.selected_supplier_label,
         contractValueLabel: nt.contract_value_label,
+        contractValueHint: nt.contract_value_hint,
+        contractValueInvalid: nt.contract_value_invalid,
+        contractValueAmbiguous: nt.contract_value_ambiguous,
         procurementTypeLabel: nt.procurement_type_label,
         selectProcurementType: nt.select_procurement_type,
         followUpLabel: nt.follow_up_label,
@@ -1260,7 +1256,7 @@ export default function NoticeIndex({
         }));
         setEditingHistoryNoticeId(notice.id);
         historyForm.clearErrors();
-        historyForm.setData(buildHistoryFormData(notice));
+        historyForm.setData(buildHistoryFormData(notice, locale));
     };
 
     /**
@@ -1334,6 +1330,25 @@ export default function NoticeIndex({
     };
 
     const updateHistoryMetadata = (notice) => {
+        const typedContractValue = historyForm.data.contract_value_mnok;
+        const contractValue = parseKpiNumber(typedContractValue, locale);
+
+        // Said before the server is asked, and kept in the field: the person corrects the value
+        // they typed instead of retyping it. The server reads and checks it again regardless.
+        if (contractValue.problem) {
+            historyForm.setError('contract_value_mnok', kpiNumberProblemMessage(contractValue.problem, typedContractValue, {
+                number_input: {
+                    invalid: noticesText.contractValueInvalid ?? 'Skriv avtaleverdien som et tall i millioner kroner, for eksempel 12,5 eller 1 250.',
+                    ambiguous: noticesText.contractValueAmbiguous ?? '«:value» kan bety både :thousands og :decimal. Skriv :thousands_plain eller :decimal_plain.',
+                },
+            }, locale));
+            focusEditingCardError();
+
+            return;
+        }
+
+        historyForm.clearErrors('contract_value_mnok');
+        historyForm.transform((data) => ({ ...data, contract_value_mnok: contractValue.value }));
         historyForm.patch(`/app/notices/saved/${notice.saved_notice_id}/history-metadata`, {
             preserveScroll: true,
             preserveState: true,
@@ -2922,14 +2937,14 @@ export default function NoticeIndex({
                                                                         )}
                                                                     </FormField>
 
-                                                                    <FormField id={`contract_value_mnok_${notice.id}`} label={noticesText.contractValueLabel} error={historyForm.errors.contract_value_mnok} {...WORKLIST_FIELD}>
+                                                                    <FormField id={`contract_value_mnok_${notice.id}`} label={noticesText.contractValueLabel} hint={noticesText.contractValueHint ?? 'I millioner kroner, for eksempel 12,5 eller 1 250.'} error={historyForm.errors.contract_value_mnok} {...WORKLIST_FIELD}>
                                                                         {(field) => (
                                                                             <input
                                                                                 {...field}
                                                                                 type="text"
                                                                                 inputMode="decimal"
-                                                                                value={formatNumberWithSpaces(historyForm.data.contract_value_mnok)}
-                                                                                onChange={(event) => historyForm.setData('contract_value_mnok', parseNumberFromSpaces(event.target.value))}
+                                                                                value={historyForm.data.contract_value_mnok}
+                                                                                onChange={(event) => historyForm.setData('contract_value_mnok', event.target.value)}
                                                                                 className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                             />
                                                                         )}

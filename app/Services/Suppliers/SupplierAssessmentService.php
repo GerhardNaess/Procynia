@@ -5,6 +5,7 @@ namespace App\Services\Suppliers;
 use App\Models\Supplier;
 use App\Models\SupplierAssessment;
 use App\Models\User;
+use App\Support\CalendarDate;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -39,7 +40,7 @@ class SupplierAssessmentService
         return $rules + [
             'overall_result' => ['required', 'string', Rule::in(SupplierAssessment::RESULTS)],
             'rationale' => ['required', 'string', 'max:10000'],
-            'assessed_on' => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
+            'assessed_on' => ['required', 'date_format:Y-m-d', 'before_or_equal:'.CalendarDate::todayString()],
         ];
     }
 

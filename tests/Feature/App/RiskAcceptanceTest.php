@@ -345,6 +345,30 @@ class RiskAcceptanceTest extends TestCase
             ->assertSessionHasErrors('valid_until');
     }
 
+    /**
+     * 22:30 UTC on 15 October is already 16 October in Norway. «Gyldig til» from today means from
+     * the Norwegian day: the 15th is yesterday and is refused, which the UTC day let through.
+     */
+    public function test_valid_until_from_today_means_the_norwegian_day(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $risk = $this->risk($customer, $hr, 'Lønnsfeil');
+        $assessment = $this->assessment($risk, residual: true);
+        $decider = $this->member($customer);
+        $this->grant($customer, $decider, self::DECIDER, [$hr]);
+
+        Carbon::setTestNow(Carbon::parse('2026-10-15 22:30:00', 'UTC'));
+
+        $this->actingAs($decider)->post($this->url($risk), ['assessment_id' => $assessment->id, 'rationale' => 'x', 'valid_until' => '2026-10-15'])
+            ->assertSessionHasErrors(['valid_until' => 'Gyldig til kan ikke være tilbake i tid.']);
+        $this->assertSame(0, RiskAcceptance::query()->where('risk_id', $risk->id)->count());
+
+        $this->actingAs($decider)->post($this->url($risk), ['assessment_id' => $assessment->id, 'rationale' => 'x', 'valid_until' => '2026-10-16'])
+            ->assertSessionHasNoErrors();
+        $this->assertSame('2026-10-16', RiskAcceptance::query()->where('risk_id', $risk->id)->sole()->valid_until->toDateString());
+    }
+
     public function test_hidden_and_foreign_risks_assessments_and_acceptances_do_not_leak(): void
     {
         ['customer' => $customer] = $this->context();

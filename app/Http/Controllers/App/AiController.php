@@ -42,6 +42,7 @@ use App\Support\CustomerContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -346,7 +347,7 @@ class AiController extends Controller
         $request->validate([
             'documents' => ['required', 'array', 'min:1'],
             'documents.*' => ['file', 'mimes:pdf,docx,xlsx', 'max:20480'],
-        ]);
+        ], $this->documentUploadMessages($request));
 
         $documents = $request->file('documents', []);
         $usageWarning = $this->aiUsageGuard->assertCanStartAiOperation(
@@ -605,6 +606,33 @@ class AiController extends Controller
     }
 
     /**
+     * The upload's messages, naming the file that was refused. Only PDF, DOCX and XLSX: those are the
+     * formats DocumentTextExtractor and the Excel import can read, so an old .doc or .xls is told
+     * how to get in rather than accepted and left unreadable.
+     *
+     * @return array<string, string>
+     */
+    private function documentUploadMessages(Request $request): array
+    {
+        $messages = [
+            'documents.required' => __('procynia.ai.upload_required'),
+            'documents.array' => __('procynia.ai.upload_required'),
+            'documents.min' => __('procynia.ai.upload_required'),
+        ];
+
+        foreach ((array) $request->file('documents', []) as $index => $file) {
+            $name = $file instanceof UploadedFile ? $file->getClientOriginalName() : '';
+
+            $messages["documents.{$index}.file"] = __('procynia.ai.upload_failed', ['file' => $name]);
+            $messages["documents.{$index}.uploaded"] = __('procynia.ai.upload_failed', ['file' => $name]);
+            $messages["documents.{$index}.mimes"] = __('procynia.ai.upload_invalid_file_type', ['file' => $name]);
+            $messages["documents.{$index}.max"] = __('procynia.ai.upload_file_too_large', ['file' => $name]);
+        }
+
+        return $messages;
+    }
+
+    /**
      * Purpose: Persist one or more supplier-owned answer basis documents on a visible AI case.
      * Inputs: The current request and the route-bound saved notice.
      * Returns: A redirect back to the AI case view after saving the uploads.
@@ -618,7 +646,7 @@ class AiController extends Controller
         $request->validate([
             'documents' => ['required', 'array', 'min:1'],
             'documents.*' => ['file', 'mimes:pdf,docx,xlsx', 'max:20480'],
-        ]);
+        ], $this->documentUploadMessages($request));
 
         $createdItems = $this->requirementAnswerBasisService->createDocumentItems(
             $record,
@@ -1150,7 +1178,7 @@ class AiController extends Controller
 
             return response()->json([
                 'requirement_id' => $ownedRequirement->id,
-                'error' => 'Kunne ikke generere Wiki-svar. Prøv igjen senere.',
+                'error' => __('procynia.ai.wiki_answer_generation_failed'),
             ], 422);
         }
 

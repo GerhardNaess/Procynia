@@ -10,6 +10,7 @@ use App\Models\Department;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Rules\UniqueUserEmail;
 use App\Support\CustomerContext;
 use BackedEnum;
 use Filament\Actions\EditAction;
@@ -57,7 +58,7 @@ class UserResource extends Resource
                             ->email()
                             ->required()
                             ->maxLength(255)
-                            ->unique(ignoreRecord: true),
+                            ->rule(fn (?User $record): UniqueUserEmail => new UniqueUserEmail($record?->getKey())),
                         TextInput::make('password')
                             ->label(__('procynia.user.password'))
                             ->password()

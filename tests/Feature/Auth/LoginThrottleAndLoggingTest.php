@@ -254,6 +254,41 @@ class LoginThrottleAndLoggingTest extends TestCase
     }
 
     // -----------------------------------------------------------------------
+    // E2. Email letter case — the address is matched case-insensitively
+    // -----------------------------------------------------------------------
+
+    public function test_login_matches_the_email_regardless_of_letter_case_and_whitespace(): void
+    {
+        $user = $this->createCustomerUser('case.login@procynia.test');
+
+        $response = $this->post('/login', [
+            'email' => '  Case.Login@Procynia.TEST ',
+            'password' => self::PASSWORD,
+        ]);
+
+        $response->assertRedirect(route('app.notices.index', ['mode' => 'saved']));
+        $this->assertAuthenticatedAs($user);
+    }
+
+    /**
+     * A row stored before addresses were normalized keeps its original spelling (no data is
+     * rewritten), and still signs in however the address is typed.
+     */
+    public function test_login_finds_a_legacy_mixed_case_address(): void
+    {
+        $user = $this->createCustomerUser('legacy.case@procynia.test');
+        \Illuminate\Support\Facades\DB::table('users')->where('id', $user->id)->update(['email' => 'Legacy.Case@Procynia.test']);
+
+        $response = $this->post('/login', [
+            'email' => 'legacy.case@procynia.test',
+            'password' => self::PASSWORD,
+        ]);
+
+        $response->assertRedirect(route('app.notices.index', ['mode' => 'saved']));
+        $this->assertAuthenticatedAs($user->fresh());
+    }
+
+    // -----------------------------------------------------------------------
     // F. Inactive users — pre-existing behaviour preserved
     // -----------------------------------------------------------------------
 

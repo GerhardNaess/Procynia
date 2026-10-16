@@ -31,6 +31,7 @@ use App\Services\Suppliers\SupplierNotificationService;
 use App\Services\Suppliers\SupplierRegistration;
 use App\Services\Suppliers\SupplierReviewSchedule;
 use App\Services\Suppliers\SupplierRiskService;
+use App\Support\CalendarDate;
 use App\Support\CustomerContext;
 use App\Support\PrivateFiles\PrivateFileScanStatus;
 use App\Support\PrivateFiles\PrivateFileType;
@@ -403,7 +404,7 @@ class SupplierManagementController extends Controller
             'results' => SupplierAssessment::RESULTS,
             'document_types' => SupplierDocument::TYPES,
             'document_standards' => SupplierDocument::STANDARD_SUGGESTIONS,
-            'today' => $today->toDateString(),
+            'today' => CalendarDate::todayString(),
             'owner_options' => $canEdit && $open ? $this->access->ownerCandidates($user) : [],
         ]);
     }

@@ -174,6 +174,109 @@ class CustomerWatchProfileManagementTest extends TestCase
         $this->actingAs($admin)->get("/app/watch-profiles/{$foreignProfile->id}/edit")->assertNotFound();
     }
 
+    public function test_customer_admin_editing_another_users_personal_profile_keeps_the_owner(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $department = $this->createDepartment($customer->id, 'Salg');
+        $admin = $this->createUser($customer->id, $department->id, User::ROLE_CUSTOMER_ADMIN, 'admin@procynia.test');
+        $owner = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'eier@procynia.test');
+        $profile = $this->createWatchProfile($customer->id, 'Eiers profil', $owner->id, null);
+
+        // The edit form submits the profile's own scope back. Saving used to read "personal" as
+        // "personal to whoever is saving", and quietly moved the profile to the administrator.
+        $this->updateProfile($admin, $profile, ['owner_scope' => 'user', 'name' => 'Eiers profil (justert)'])
+            ->assertRedirect('/app/watch-profiles')
+            ->assertSessionHasNoErrors();
+
+        $profile->refresh();
+        $this->assertSame($owner->id, (int) $profile->user_id);
+        $this->assertNull($profile->department_id);
+        $this->assertSame('Eiers profil (justert)', $profile->name);
+    }
+
+    public function test_customer_admin_may_still_explicitly_move_a_personal_profile_to_a_department(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $department = $this->createDepartment($customer->id, 'Salg');
+        $admin = $this->createUser($customer->id, $department->id, User::ROLE_CUSTOMER_ADMIN, 'admin@procynia.test');
+        $owner = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'eier@procynia.test');
+        $profile = $this->createWatchProfile($customer->id, 'Eiers profil', $owner->id, null);
+
+        $this->updateProfile($admin, $profile, ['owner_scope' => 'department', 'department_id' => $department->id])
+            ->assertRedirect('/app/watch-profiles')
+            ->assertSessionHasNoErrors();
+
+        $profile->refresh();
+        $this->assertNull($profile->user_id);
+        $this->assertSame($department->id, (int) $profile->department_id);
+    }
+
+    public function test_department_member_edits_department_profile_without_changing_its_owner(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $department = $this->createDepartment($customer->id, 'Salg');
+        $member = $this->createUser($customer->id, null, User::ROLE_USER, 'medlem@procynia.test');
+        $member->departments()->attach($department->id);
+        $profile = $this->createWatchProfile($customer->id, 'Salg Discovery', null, $department->id);
+
+        $this->updateProfile($member, $profile, ['owner_scope' => 'department', 'department_id' => $department->id, 'keywords' => "salg\nrammeavtale"])
+            ->assertRedirect('/app/watch-profiles')
+            ->assertSessionHasNoErrors();
+
+        $profile->refresh();
+        $this->assertNull($profile->user_id);
+        $this->assertSame($department->id, (int) $profile->department_id);
+    }
+
+    public function test_department_member_cannot_take_a_department_profile_as_personal(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $department = $this->createDepartment($customer->id, 'Salg');
+        $member = $this->createUser($customer->id, null, User::ROLE_USER, 'medlem@procynia.test');
+        $member->departments()->attach($department->id);
+        $profile = $this->createWatchProfile($customer->id, 'Salg Discovery', null, $department->id);
+
+        $this->updateProfile($member, $profile, ['owner_scope' => 'user'])
+            ->assertSessionHasErrors('owner_scope');
+
+        $profile->refresh();
+        $this->assertNull($profile->user_id);
+        $this->assertSame($department->id, (int) $profile->department_id);
+    }
+
+    public function test_personal_owner_may_move_their_own_profile_to_their_department(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $department = $this->createDepartment($customer->id, 'Salg');
+        $owner = $this->createUser($customer->id, null, User::ROLE_USER, 'eier@procynia.test');
+        $owner->departments()->attach($department->id);
+        $profile = $this->createWatchProfile($customer->id, 'Min profil', $owner->id, null);
+
+        $this->updateProfile($owner, $profile, ['owner_scope' => 'department', 'department_id' => $department->id])
+            ->assertRedirect('/app/watch-profiles')
+            ->assertSessionHasNoErrors();
+
+        $profile->refresh();
+        $this->assertNull($profile->user_id);
+        $this->assertSame($department->id, (int) $profile->department_id);
+    }
+
+    private function updateProfile(User $actor, WatchProfile $profile, array $overrides)
+    {
+        return $this->actingAs($actor)
+            ->withSession(['_token' => 'test-token'])
+            ->put("/app/watch-profiles/{$profile->id}", array_merge([
+                '_token' => 'test-token',
+                'owner_scope' => $profile->ownerScope(),
+                'name' => $profile->name,
+                'description' => null,
+                'is_active' => true,
+                'department_id' => $profile->department_id,
+                'keywords' => 'rammeavtale',
+                'cpv_codes' => [],
+            ], $overrides));
+    }
+
     public function test_cpv_lookup_endpoint_returns_matches_from_cpv_codes_by_code(): void
     {
         $customer = $this->createCustomer('Procynia AS');

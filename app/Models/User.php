@@ -9,6 +9,7 @@ use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -124,6 +125,22 @@ class User extends Authenticatable implements FilamentUser
             'is_qa' => 'boolean',
             'is_wiki_approver' => 'boolean',
         ];
+    }
+
+    /**
+     * The one spelling of an email address Procynia stores and compares: trimmed and lower-cased.
+     * Every write path goes through the email() mutator below, and every lookup that starts from
+     * typed input (login, uniqueness) compares lower(email) so rows written before normalization
+     * are still found. The database backs this with a unique index on lower(email).
+     */
+    public static function normalizeEmail(?string $email): ?string
+    {
+        return $email === null ? null : mb_strtolower(trim($email));
+    }
+
+    protected function email(): Attribute
+    {
+        return Attribute::make(set: fn (?string $value): ?string => self::normalizeEmail($value));
     }
 
     /**

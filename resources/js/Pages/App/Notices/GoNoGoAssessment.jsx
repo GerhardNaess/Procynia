@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import PageHelpPanel from '../../../Components/App/PageHelpPanel';
 import { useTranslations } from '../../../Support/useTranslations';
 import { useTransitionAnnouncement } from '../../../Support/statusAnnouncement';
+import { COMMENT_LENGTH_SHOWN_FROM, COMMENT_MAX_LENGTH, criterionErrors, saveErrorMessage } from './goNoGoErrors';
 
 function ChevronDown({ className = '' }) {
     return (
@@ -132,7 +133,9 @@ function WeightBadge({ weight, isReversed }) {
  * focusable while it saves and once saved (aria-disabled), so focus is not dropped to <body>.
  */
 export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
-    const a11y = useTranslations().a11y ?? {};
+    const translations = useTranslations();
+    const a11y = translations.a11y ?? {};
+    const gt = translations.go_no_go_assessment ?? {};
     // Initialise local answer state from persisted assessment (if any)
     const [answers, setAnswers] = useState(() => {
         const map = {};
@@ -148,6 +151,10 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
     const [lastSavedAt, setLastSavedAt]   = useState(assessment?.updated_at ?? null);
     const [hasPendingChanges, setHasPendingChanges] = useState(false);
     const [saveFailed, setSaveFailed] = useState(false);
+    // A refused save: the message per criterion (under its reasoning) and the one beside the button.
+    // The answers themselves are local state and stay exactly as the person left them.
+    const [fieldErrors, setFieldErrors] = useState({});
+    const [saveError, setSaveError] = useState(null);
     const helpTriggerRef = useRef(null);
 
     const criteria = template?.criteria ?? [];
@@ -167,7 +174,17 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
             : { message: (a11y.gonogo_verdict ?? 'Foreløpig beslutningsgrunnlag: :verdict').replace(':verdict', verdict.label) }
     ));
 
+    function clearCriterionError(criterionId) {
+        setFieldErrors(prev => {
+            if (!prev[criterionId]) return prev;
+            const next = { ...prev };
+            delete next[criterionId];
+            return next;
+        });
+    }
+
     function handleRatingClick(criterionId, value) {
+        clearCriterionError(criterionId);
         setAnswers(prev => {
             const current = prev[criterionId] ?? { selected_value: null, comment: '' };
             return {
@@ -182,6 +199,7 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
     }
 
     function handleCommentChange(criterionId, value) {
+        clearCriterionError(criterionId);
         setAnswers(prev => ({
             ...prev,
             [criterionId]: { ...(prev[criterionId] ?? { selected_value: null }), comment: value },
@@ -193,6 +211,7 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
         if (!saveUrl || saveUnavailable) return;
         setIsSaving(true);
         setSaveFailed(false);
+        setSaveError(null);
         router.patch(saveUrl, {
             template_id: template.id,
             answers: criteria.map(c => ({
@@ -207,10 +226,14 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                 setIsSaving(false);
                 setLastSavedAt(new Date().toISOString());
                 setHasPendingChanges(false);
+                setFieldErrors({});
             },
-            onError: () => {
+            onError: (errors) => {
+                const refused = criterionErrors(errors, criteria);
                 setIsSaving(false);
                 setSaveFailed(true);
+                setFieldErrors(refused.byCriterion);
+                setSaveError(saveErrorMessage(refused, criteria, { ...gt, save_failed: a11y.gonogo_save_failed }));
             },
         });
     }
@@ -308,6 +331,12 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                                 const a = answers[criterion.id] ?? { selected_value: null, comment: '' };
                                 const titleId = `go-no-go-criterion-${criterion.id}-title`;
                                 const descriptionId = `go-no-go-criterion-${criterion.id}-description`;
+                                const commentErrorId = `go-no-go-criterion-${criterion.id}-comment-error`;
+                                const commentLengthId = `go-no-go-criterion-${criterion.id}-comment-length`;
+                                const commentError = fieldErrors[criterion.id] ?? null;
+                                const commentLength = (a.comment ?? '').length;
+                                const showCommentLength = commentLength >= COMMENT_LENGTH_SHOWN_FROM;
+                                const commentDescribedBy = [commentError ? commentErrorId : null, showCommentLength ? commentLengthId : null].filter(Boolean).join(' ') || undefined;
                                 return (
                                     <div key={criterion.id} className="rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3">
                                         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
@@ -365,9 +394,23 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                                             onChange={e => handleCommentChange(criterion.id, e.target.value)}
                                             rows={1}
                                             aria-label={(a11y.gonogo_comment ?? 'Begrunnelse for :criterion (valgfritt)').replace(':criterion', criterion.title)}
+                                            aria-invalid={commentError ? true : undefined}
+                                            aria-describedby={commentDescribedBy}
                                             placeholder="Begrunnelse (valgfritt)…"
-                                            className="mt-2 w-full resize-none rounded-xl border border-field-border bg-white px-3 py-1.5 text-base text-slate-900 placeholder:text-slate-500 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                            className={`mt-2 w-full resize-none rounded-xl border bg-white px-3 py-1.5 text-base text-slate-900 placeholder:text-slate-500 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100 ${commentError ? 'border-rose-400' : 'border-field-border'}`}
                                         />
+                                        {/* The length only once it nears the limit, and checked on save, not on
+                                            every keystroke: the text is never cut. */}
+                                        {showCommentLength ? (
+                                            <p id={commentLengthId} className={`mt-1 text-base ${commentLength > COMMENT_MAX_LENGTH ? 'text-rose-700' : 'text-slate-600'}`}>
+                                                {(gt.comment_length ?? ':count av maks :max tegn')
+                                                    .replace(':count', commentLength.toLocaleString('nb-NO'))
+                                                    .replace(':max', COMMENT_MAX_LENGTH.toLocaleString('nb-NO'))}
+                                            </p>
+                                        ) : null}
+                                        {commentError ? (
+                                            <p id={commentErrorId} className="mt-1 text-base text-rose-700">{commentError}</p>
+                                        ) : null}
                                     </div>
                                 );
                             })}
@@ -396,7 +439,7 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                                 </div>
                                 {saveFailed ? (
                                     <p id="go-no-go-save-error" role="alert" className="mt-2 text-base text-rose-700">
-                                        {a11y.gonogo_save_failed ?? 'Vurderingen ble ikke lagret. Prøv igjen.'}
+                                        {saveError ?? a11y.gonogo_save_failed ?? 'Vurderingen ble ikke lagret. Prøv igjen.'}
                                     </p>
                                 ) : null}
                             </div>

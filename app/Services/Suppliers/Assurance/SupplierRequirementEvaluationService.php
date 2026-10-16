@@ -10,6 +10,7 @@ use App\Models\SupplierRequirementEvaluation;
 use App\Models\SupplierRequirementEvaluationDocument;
 use App\Models\User;
 use App\Services\Suppliers\SupplierAccessService;
+use App\Support\CalendarDate;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -51,13 +52,13 @@ class SupplierRequirementEvaluationService
             'requirement_id' => ['required', 'integer'],
             'status' => ['required', 'string', Rule::in(SupplierRequirementEvaluation::STATUSES)],
             'rationale' => ['required', 'string', 'max:10000'],
-            'evaluated_on' => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
+            'evaluated_on' => ['required', 'date_format:Y-m-d', 'before_or_equal:'.CalendarDate::todayString()],
             'accepted_until' => [
                 'exclude_unless:status,'.SupplierRequirementEvaluation::STATUS_TEMPORARILY_ACCEPTED,
                 'required',
                 'date_format:Y-m-d',
-                'after_or_equal:today',
-                'before_or_equal:'.now()->addMonthsNoOverflow(SupplierRequirementEvaluation::MAX_ACCEPTANCE_MONTHS)->toDateString(),
+                'after_or_equal:'.CalendarDate::todayString(),
+                'before_or_equal:'.CalendarDate::today()->addMonthsNoOverflow(SupplierRequirementEvaluation::MAX_ACCEPTANCE_MONTHS)->toDateString(),
             ],
             'document_ids' => ['nullable', 'array', 'max:50'],
             'document_ids.*' => ['integer', 'distinct'],

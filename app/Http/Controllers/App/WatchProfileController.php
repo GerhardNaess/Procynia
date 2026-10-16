@@ -138,7 +138,7 @@ class WatchProfileController extends Controller
     {
         [$user, $customerId] = $this->frontendContext($request);
         $record = $this->scopedWatchProfile($user, $customerId, $watchProfile);
-        $payload = $this->validatedPayload($request, $user, $customerId, $record->id);
+        $payload = $this->validatedPayload($request, $user, $customerId, $record);
 
         DB::transaction(function () use ($record, $payload): void {
             $record->fill([
@@ -381,7 +381,7 @@ class WatchProfileController extends Controller
             ->all();
     }
 
-    private function validatedPayload(Request $request, User $user, int $customerId, ?int $ignoreId = null): array
+    private function validatedPayload(Request $request, User $user, int $customerId, ?WatchProfile $existing = null): array
     {
         $request->merge([
             'owner_scope' => trim((string) $request->input('owner_scope', WatchProfile::OWNER_SCOPE_USER)),
@@ -417,18 +417,18 @@ class WatchProfileController extends Controller
             'user_id' => ['prohibited'],
         ]);
 
-        $ownerPayload = $this->validatedOwnerScope(
-            $user,
-            $validated['owner_scope'],
-            isset($validated['department_id']) ? (int) $validated['department_id'] : null,
-        );
+        $requestedDepartmentId = isset($validated['department_id']) ? (int) $validated['department_id'] : null;
+
+        $ownerPayload = $existing !== null && ! $this->requestsOwnerChange($existing, $validated['owner_scope'], $requestedDepartmentId)
+            ? ['user_id' => $existing->user_id, 'department_id' => $existing->department_id]
+            : $this->validatedOwnerScope($user, $validated['owner_scope'], $requestedDepartmentId, $existing);
 
         $this->ensureUniqueWatchProfileName(
             $customerId,
             $validated['name'],
             $ownerPayload['user_id'],
             $ownerPayload['department_id'],
-            $ignoreId,
+            $existing?->id,
         );
 
         $cpvCodes = $this->normalizeCpvRules($validated['cpv_codes'] ?? []);
@@ -445,8 +445,40 @@ class WatchProfileController extends Controller
         ];
     }
 
-    private function validatedOwnerScope(User $user, string $ownerScope, ?int $departmentId): array
+    /**
+     * Editing a profile keeps its owner. The owner only changes when the form explicitly asks for
+     * another scope or another department — "personal" on someone else's personal profile means
+     * "leave it theirs", never "make it mine", which is what saving used to do.
+     */
+    private function requestsOwnerChange(WatchProfile $existing, string $ownerScope, ?int $departmentId): bool
     {
+        if ($ownerScope !== $existing->ownerScope()) {
+            return true;
+        }
+
+        return $ownerScope === WatchProfile::OWNER_SCOPE_DEPARTMENT
+            && $departmentId !== (int) $existing->department_id;
+    }
+
+    /**
+     * Being able to edit a profile is not the right to give it away or take it. Changing who owns an
+     * existing profile is for a customer administrator, or for the person whose personal profile it
+     * is. A department member edits the department's profile but cannot move or privatise it.
+     */
+    private function canChangeOwner(User $user, WatchProfile $existing): bool
+    {
+        return $user->isCustomerAdmin()
+            || ($existing->user_id !== null && (int) $existing->user_id === (int) $user->id);
+    }
+
+    private function validatedOwnerScope(User $user, string $ownerScope, ?int $departmentId, ?WatchProfile $existing = null): array
+    {
+        if ($existing !== null && ! $this->canChangeOwner($user, $existing)) {
+            throw ValidationException::withMessages([
+                'owner_scope' => __('procynia.watch_profile.owner_change_not_allowed'),
+            ]);
+        }
+
         if ($ownerScope === WatchProfile::OWNER_SCOPE_USER) {
             return [
                 'user_id' => $user->id,

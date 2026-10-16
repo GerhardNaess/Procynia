@@ -26,6 +26,7 @@ import {
     normalizeWikiAnswerText,
 } from './wikiAnswerPresentation';
 import { WikiAnswerBody } from './wikiAnswerMarkdown';
+import { describeRequestError } from '../../../Support/requestError';
 
 /**
  * The look the requirement fields had before they were wired through FormField (Fase 4, A11Y-135):
@@ -808,12 +809,8 @@ async function writeSingleImageClipboardPayload(source) {
     }
 }
 
-function extractAxiosErrorMessage(error, fallbackMessage) {
-    return error?.response?.data?.message
-        ?? error?.response?.data?.error
-        ?? error?.message
-        ?? fallbackMessage;
-}
+// The answer editor's limit, the same as updateRequirementWikiAnswer's max:20000.
+const WIKI_ANSWER_MAX_LENGTH = 20000;
 
 const DOCUMENT_PROCESSING_ACTIVE_STATUSES = new Set([
     'queued',
@@ -897,6 +894,10 @@ export default function AiShow({
     } = usePage().props;
     const tai = translations?.ai ?? {};
     const a11y = translations?.a11y ?? {};
+    const requestErrorTexts = translations?.common?.request_errors ?? {};
+    // What a failed request says (Support/requestError.js): a 422's field message, or a plain-language
+    // reason — never axios' «Request failed with status code 500».
+    const requestFailure = (error, fallback) => describeRequestError(error, { fallback, texts: requestErrorTexts });
     const aiQuotaText = translations?.ai_quota ?? {};
     const isEnglish = isEnglishLocale(locale);
     const documentListTexts = {
@@ -1199,7 +1200,9 @@ export default function AiShow({
     const editingRequirement = editingRequirementId !== null
         ? requirementRows.find((requirement) => requirement.id === editingRequirementId) ?? null
         : null;
-    const documentError = Object.values(documentUploadForm.errors).find(Boolean) ?? null;
+    // One message per refused file («a.doc» kan ikke lastes opp …), so every file that must be
+    // replaced is named, not only the first.
+    const documentError = [...new Set(Object.values(documentUploadForm.errors).filter(Boolean))].join(' ') || null;
     const manualRequirementError = formLevelError(manualRequirementForm.errors);
     const requirementEditError = formLevelError(requirementEditForm.errors);
     const requirementCountLabel = Number(requirementsCount ?? requirementRows.length);
@@ -1395,6 +1398,12 @@ export default function AiShow({
     const activeRequirementWikiAnswerServerText = normalizeWikiAnswerText(activeRequirementWikiAnswer?.text ?? '');
     const activeRequirementWikiAnswerLocalEdit = activeRequirementKey !== null
         ? wikiAnswerEditsByRequirementId[activeRequirementKey] ?? null
+        : null;
+    // A refusal that belongs to the answer text is said under the editor, the rest in the panel's alert.
+    const activeWikiAnswerFieldError = activeRequirement !== null
+        && wikiAnswerError?.requirementId === activeRequirement.id
+        && wikiAnswerError.field === 'answer_text'
+        ? wikiAnswerError.message
         : null;
     // The operative, editable answer text: the local hand-edit when dirty, otherwise the server
     // value — same pattern the legacy answer-draft flow used for its editable textarea.
@@ -1810,7 +1819,7 @@ export default function AiShow({
 
             closeResponsiblePicker();
         } catch (error) {
-            setResponsibleUpdateError(extractAxiosErrorMessage(error, tai.could_not_update_responsible_user));
+            setResponsibleUpdateError(requestFailure(error, tai.could_not_update_responsible_user).message);
         } finally {
             setResponsibleSavingRequirementId(null);
         }
@@ -1975,9 +1984,13 @@ export default function AiShow({
             });
             announce(a11y.ai_answer_ready ?? 'Svarutkastet er klart.');
         } catch (error) {
+            const failure = requestFailure(error, tai.wiki_answer_error_default);
+
+            // A refused instruction is said under the instruction, where it is corrected.
             setWikiAnswerError({
                 requirementId: requirement.id,
-                message: extractAxiosErrorMessage(error, tai.wiki_answer_error_default),
+                message: failure.message,
+                field: failure.fieldErrors.user_answer_prompt ? 'user_answer_prompt' : null,
             });
         } finally {
             setWikiAnswerGeneratingRequirementId(null);
@@ -2150,7 +2163,19 @@ export default function AiShow({
         const normalizedText = normalizeWikiAnswerText(activeRequirementWikiAnswerText).trim();
 
         if (normalizedText === '') {
-            setWikiAnswerError({ requirementId: activeRequirement.id, message: tai.wiki_answer_cannot_be_empty });
+            setWikiAnswerError({ requirementId: activeRequirement.id, message: tai.wiki_answer_cannot_be_empty, field: 'answer_text' });
+            return;
+        }
+
+        // Checked on save, not while typing, against the server's own limit; the text stays as it is.
+        if (normalizedText.length > WIKI_ANSWER_MAX_LENGTH) {
+            setWikiAnswerError({
+                requirementId: activeRequirement.id,
+                message: (tai.wiki_answer_too_long ?? 'Svaret er :count tegn. Det kan ha maks :max tegn. Kort ned teksten og lagre igjen.')
+                    .replace(':count', normalizedText.length.toLocaleString(locale))
+                    .replace(':max', WIKI_ANSWER_MAX_LENGTH.toLocaleString(locale)),
+                field: 'answer_text',
+            });
             return;
         }
 
@@ -2174,9 +2199,12 @@ export default function AiShow({
             setWikiAnswerEditingRequirementId(null);
             announce(a11y.ai_answer_saved ?? 'Svaret er lagret.');
         } catch (error) {
+            const failure = requestFailure(error, tai.wiki_answer_save_failed ?? 'Svaret ble ikke lagret. Teksten din er beholdt i feltet. Prøv igjen.');
+
             setWikiAnswerError({
                 requirementId: activeRequirement.id,
-                message: extractAxiosErrorMessage(error, 'Kunne ikke lagre Wiki-svar.'),
+                message: failure.message,
+                field: failure.fieldErrors.answer_text ? 'answer_text' : null,
             });
         } finally {
             setWikiAnswerSavingRequirementId(null);
@@ -2496,7 +2524,7 @@ export default function AiShow({
                                         <FilePickerField
                                             id="ai-documents"
                                             label={null}
-                                            accept=".pdf,.doc,.docx,.xls,.xlsx"
+                                            accept=".pdf,.docx,.xlsx"
                                             multiple
                                             files={documentUploadForm.data.documents}
                                             inputRef={fileInputRef}
@@ -3032,6 +3060,9 @@ export default function AiShow({
                                     const requirementUserPrompt = answerDraftPromptsByRequirementId[requirementKey] ?? '';
                                     const requirementPromptEditorOpen = promptEditorOpenRequirementId === requirementKey;
                                     const requirementHasUserPrompt = normalizeAnswerDraftText(requirementUserPrompt).trim() !== '';
+                                    const requirementPromptError = wikiAnswerError?.requirementId === requirement.id && wikiAnswerError.field === 'user_answer_prompt'
+                                        ? wikiAnswerError.message
+                                        : null;
                                     const requirementDetailsExpanded = Boolean(expandedRequirementDetailsById[requirementKey]);
 
                                     return (
@@ -3220,7 +3251,10 @@ export default function AiShow({
                                                         </p>
                                                         <textarea
                                                             id={`requirement-prompt-${requirement.id}`}
-                                                            aria-describedby={`requirement-prompt-${requirement.id}-hint`}
+                                                            aria-describedby={requirementPromptError
+                                                                ? `requirement-prompt-${requirement.id}-hint requirement-prompt-${requirement.id}-error`
+                                                                : `requirement-prompt-${requirement.id}-hint`}
+                                                            aria-invalid={requirementPromptError ? true : undefined}
                                                             value={requirementUserPrompt}
                                                             onChange={(event) => updateRequirementUserPrompt(requirement, event.target.value)}
                                                             maxLength={5000}
@@ -3229,6 +3263,11 @@ export default function AiShow({
                                                             className="mt-3 w-full resize-y rounded-2xl border border-field-border bg-white px-3 py-3 text-base leading-6 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                             placeholder={tai.example_prompt_placeholder}
                                                         />
+                                                        {requirementPromptError ? (
+                                                            <p id={`requirement-prompt-${requirement.id}-error`} role="alert" className="mt-2 text-base text-rose-700">
+                                                                {requirementPromptError}
+                                                            </p>
+                                                        ) : null}
                                                         <div className="mt-3 flex justify-end">
                                                             <button
                                                                 type="button"
@@ -3728,7 +3767,7 @@ export default function AiShow({
                                             </div>
                                         ) : null}
 
-                                        {wikiAnswerError?.requirementId === activeRequirement.id ? (
+                                        {wikiAnswerError?.requirementId === activeRequirement.id && !wikiAnswerError.field ? (
                                             <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base leading-6 text-rose-700">
                                                 {wikiAnswerError.message}
                                             </div>
@@ -3813,7 +3852,12 @@ export default function AiShow({
                                                             <textarea
                                                                 id="wiki-answer-editor"
                                                                 aria-label={`${tai.wiki_answer_for_requirement} ${activeRequirementDisplayIdentifier}`}
-                                                                aria-describedby={activeRequirementWikiAnswerFigures.length > 0 ? 'wiki-answer-editor-hint wiki-answer-figure-edit-notice' : 'wiki-answer-editor-hint'}
+                                                                aria-describedby={[
+                                                                    'wiki-answer-editor-hint',
+                                                                    activeRequirementWikiAnswerFigures.length > 0 ? 'wiki-answer-figure-edit-notice' : null,
+                                                                    activeWikiAnswerFieldError ? 'wiki-answer-editor-error' : null,
+                                                                ].filter(Boolean).join(' ')}
+                                                                aria-invalid={activeWikiAnswerFieldError ? true : undefined}
                                                                 value={activeRequirementWikiAnswerText}
                                                                 onChange={(event) => updateActiveWikiAnswerText(event.target.value)}
                                                                 rows={14}
@@ -3824,6 +3868,11 @@ export default function AiShow({
                                                                 className="h-[18rem] w-full resize-y overflow-y-auto rounded-2xl border border-field-border bg-white px-3 py-3 font-mono text-base leading-7 text-slate-950 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 placeholder={tai.answer_draft_placeholder}
                                                             />
+                                                            {activeWikiAnswerFieldError ? (
+                                                                <p id="wiki-answer-editor-error" role="alert" className="text-base text-rose-700">
+                                                                    {activeWikiAnswerFieldError}
+                                                                </p>
+                                                            ) : null}
                                                             <p id="wiki-answer-editor-hint" className="text-base text-slate-600">
                                                                 {tai.wiki_answer_edit_markdown_hint ?? 'Teksten redigeres som Markdown. Tabeller skrives med | og vises som tabell når du lagrer.'}
                                                             </p>

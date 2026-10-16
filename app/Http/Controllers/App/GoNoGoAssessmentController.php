@@ -9,14 +9,20 @@ use App\Models\GoNoGoAssessmentCriterion;
 use App\Models\GoNoGoAssessmentTemplate;
 use App\Models\SavedNotice;
 use App\Models\User;
+use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 class GoNoGoAssessmentController extends Controller
 {
+    /** A criterion's reasoning; the page shows the same limit (GoNoGoAssessment.jsx). */
+    public const COMMENT_MAX_LENGTH = 2000;
+
     public function __construct(
         private readonly CustomerContext $customerContext,
+        private readonly SavedNoticeAccessService $savedNoticeAccess,
     ) {
     }
 
@@ -36,18 +42,36 @@ class GoNoGoAssessmentController extends Controller
             abort(404);
         }
 
-        // Verify notice belongs to this customer
-        $record = SavedNotice::query()
+        // The case must be one this person can see (404 otherwise, so nothing is revealed about
+        // cases outside their visibility) and one they may work on: assessing is a write, so a
+        // viewer who can read the case gets 403, the same line every other case write draws.
+        $record = $this->savedNoticeAccess->visibleQueryFor($user)
             ->where('customer_id', $customerId)
             ->whereKey($savedNotice->id)
             ->firstOrFail();
+
+        abort_unless($this->savedNoticeAccess->canManage($user, $record), 403);
+
+        // A Go/No-go assessment belongs to the Go/No-go phase of an active case. Once the case has
+        // moved on or been archived, the assessment is part of its history and is not rewritten.
+        if ($record->archived_at !== null || $record->bid_status !== SavedNotice::BID_STATUS_GO_NO_GO) {
+            throw ValidationException::withMessages([
+                'template_id' => __('procynia.go_no_go_assessment.case_not_assessable'),
+            ]);
+        }
 
         $validated = $request->validate([
             'template_id'              => ['required', 'integer'],
             'answers'                  => ['required', 'array'],
             'answers.*.criterion_id'   => ['required', 'integer'],
             'answers.*.selected_value' => ['nullable', 'string', 'in:lav,middels,hoy'],
-            'answers.*.comment'        => ['nullable', 'string', 'max:2000'],
+            'answers.*.comment'        => ['nullable', 'string', 'max:'.self::COMMENT_MAX_LENGTH],
+        ], [
+            // Keyed answers.{index}.comment: the page maps the index back to its criterion and
+            // shows the message under that criterion's reasoning.
+            'answers.*.comment.max'       => __('procynia.go_no_go_assessment.comment_too_long', ['max' => self::COMMENT_MAX_LENGTH]),
+            'answers.*.comment.string'    => __('procynia.go_no_go_assessment.comment_invalid'),
+            'answers.*.selected_value.in' => __('procynia.go_no_go_assessment.rating_invalid'),
         ]);
 
         // Verify template belongs to this customer
@@ -55,6 +79,14 @@ class GoNoGoAssessmentController extends Controller
             ->where('customer_id', $customerId)
             ->whereKey($validated['template_id'])
             ->firstOrFail();
+
+        // A deactivated template is retired: existing assessments keep it as history, but no
+        // assessment is started or changed against it.
+        if (! $template->is_active) {
+            throw ValidationException::withMessages([
+                'template_id' => __('procynia.go_no_go_assessment.template_inactive'),
+            ]);
+        }
 
         // Upsert assessment — template_id is locked at creation to preserve history
         $assessment = GoNoGoAssessment::query()->firstOrCreate(
@@ -64,9 +96,11 @@ class GoNoGoAssessmentController extends Controller
 
         $assessment->forceFill(['updated_by' => $user->id])->save();
 
-        // Build a fast lookup of valid criterion IDs for this template
+        // Build a fast lookup of valid criterion IDs for this template. A deactivated criterion is
+        // not shown and does not count in the score, so it is not answerable either.
         $validCriterionIds = GoNoGoAssessmentCriterion::query()
             ->where('template_id', $template->id)
+            ->where('is_active', true)
             ->pluck('id')
             ->flip()
             ->all();
@@ -76,7 +110,7 @@ class GoNoGoAssessmentController extends Controller
             $criterionId   = (int) $answerData['criterion_id'];
             $selectedValue = $answerData['selected_value'] ?? null;
 
-            // Silently ignore answers for criteria outside this template
+            // Silently ignore answers for criteria outside this template or no longer active
             if (! array_key_exists($criterionId, $validCriterionIds)) {
                 continue;
             }

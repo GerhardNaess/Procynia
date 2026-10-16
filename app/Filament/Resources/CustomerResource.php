@@ -10,7 +10,7 @@ use App\Filament\Resources\CustomerResource\Pages\ManageCustomerBilling;
 use App\Models\Customer;
 use App\Models\Language;
 use App\Models\Nationality;
-use App\Models\User;
+use App\Rules\UniqueUserEmail;
 use App\Support\CustomerContext;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -84,7 +84,7 @@ class CustomerResource extends Resource
                             ->email()
                             ->required(fn (string $operation): bool => $operation === 'create')
                             ->maxLength(255)
-                            ->unique(User::class, 'email'),
+                            ->rule(new UniqueUserEmail),
                     ]),
             ]);
     }

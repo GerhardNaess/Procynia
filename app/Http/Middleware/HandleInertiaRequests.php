@@ -126,6 +126,7 @@ class HandleInertiaRequests extends Middleware
                 // Accessible names and labels of the shared components, shared as a block: every
                 // page renders them (help panel, file picker, dialogs).
                 'a11y' => __('procynia.a11y'),
+                'go_no_go_assessment' => __('procynia.go_no_go_assessment'),
                 'home' => __('procynia.home'),
                 'governance' => __('procynia.governance'),
                 'dashboard' => __('procynia.dashboard'),
@@ -160,6 +161,7 @@ class HandleInertiaRequests extends Middleware
                 'watch_profile_page' => __('procynia.watch_profile_page'),
                 'common' => [
                     'back' => __('procynia.frontend.back'),
+                    'request_errors' => __('procynia.common.request_errors'),
                     'cancel' => __('procynia.common.cancel'),
                     'customer' => __('procynia.common.customer'),
                     'deadline' => __('procynia.notice.deadline'),
@@ -440,6 +442,9 @@ class HandleInertiaRequests extends Middleware
                     'admin_scope_not_set' => __('procynia.users_form.admin_scope_not_set'),
                     'password_hint' => __('procynia.users_form.password_hint'),
                     'password_empty_hint' => __('procynia.users_form.password_empty_hint'),
+                    'password_empty_hint_min' => __('procynia.users_form.password_empty_hint_min'),
+                    'password_reenter_create' => __('procynia.users_form.password_reenter_create'),
+                    'password_reenter_edit' => __('procynia.users_form.password_reenter_edit'),
                     'email_readonly_hint' => __('procynia.users_form.email_readonly_hint'),
                     'departments_label' => __('procynia.users_form.departments_label'),
                     'departments_help' => __('procynia.users_form.departments_help'),

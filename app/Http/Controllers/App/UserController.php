@@ -9,11 +9,13 @@ use App\Models\Customer;
 use App\Models\CustomerRole;
 use App\Models\Department;
 use App\Models\User;
+use App\Rules\UniqueUserEmail;
 use App\Services\Billing\BillingEntitlementService;
 use App\Services\Billing\BillingService;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -69,6 +71,7 @@ class UserController extends Controller
             'canEditUserLicense' => $actor->isSystemOwner(),
             'customerBilling' => $this->customerBillingPayload($customer),
             'userLicenseOptions' => $this->userLicenseOptions($customer),
+            'oldInput' => $this->oldFormInput($request),
         ]);
     }
 
@@ -107,6 +110,7 @@ class UserController extends Controller
             // part of that answer. Tilganger stays the place where a role is defined.
             'canEditCustomerRoles' => $this->canEditCustomerRoles($actor),
             'customerRoleOptions' => $this->customerRoleOptions($customerId, $record),
+            'oldInput' => $this->oldFormInput($request),
         ]);
     }
 
@@ -122,6 +126,10 @@ class UserController extends Controller
             throw ValidationException::withMessages([
                 'name' => __('procynia.users_form.user_limit_reached'),
             ]);
+        }
+
+        if (is_string($request->input('email'))) {
+            $request->merge(['email' => User::normalizeEmail($request->input('email'))]);
         }
 
         $validated = $request->validate($this->storeValidationRules($actor));
@@ -167,7 +175,7 @@ class UserController extends Controller
         ): void {
             $user = User::create([
                 'name' => Str::squish($validated['name']),
-                'email' => Str::lower(trim($validated['email'])),
+                'email' => $validated['email'],
                 'password' => $validated['password'],
                 'role' => User::customerRoleForBidRole($targetBidRole),
                 'bid_role' => $targetBidRole,
@@ -1220,6 +1228,24 @@ class UserController extends Controller
         return array_diff($candidateIds, $allowedIds) !== [];
     }
 
+    /**
+     * What the person submitted before a refused save, so the form opens with it again instead of
+     * empty. The forms post natively, and Laravel keeps the input in the session for exactly the next
+     * request. Passwords are never in it — the exception handler does not flash them — and are left
+     * out here as well, so a password is never sent back to the browser. Null when nothing was refused.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function oldFormInput(Request $request): ?array
+    {
+        $old = Arr::except(
+            (array) $request->session()->getOldInput(),
+            ['_token', '_method', 'password', 'password_confirmation', 'current_password'],
+        );
+
+        return $old === [] ? null : $old;
+    }
+
     private function successRedirect(Request $request, string $fallbackRoute, bool $useBack = false): RedirectResponse
     {
         $redirectTo = $this->redirectTarget($request);
@@ -1239,7 +1265,7 @@ class UserController extends Controller
     {
         return [
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class, 'email')],
+            'email' => ['required', 'string', 'email', 'max:255', new UniqueUserEmail],
             'redirect_to' => ['nullable', 'string', 'max:2048'],
             'user_license_price_id' => $actor->isSystemOwner()
                 ? ['nullable', 'integer']

@@ -163,7 +163,8 @@ describe('Go/No-go can be read and set without seeing colour (A11Y-003)', () => 
     test('saving keeps focus on the button and says when it failed', () => {
         assert.match(source, /aria-disabled=\{saveUnavailable \|\| undefined\}/);
         assert.ok(!source.includes('disabled={isSaving || !hasPendingChanges}'));
-        assert.match(source, /role="alert"[^>]*>\s*\{a11y\.gonogo_save_failed/);
+        // The alert names the criteria to correct when the server says which (validation work package 2).
+        assert.match(source, /role="alert"[^>]*>\s*\{saveError \?\? a11y\.gonogo_save_failed/);
     });
 
     test('a verdict that appears or changes is spoken once', () => {

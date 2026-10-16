@@ -312,7 +312,9 @@ test.describe.serial('WCAG Fase 4 — tenders and the AI workspace', () => {
         await page.goto(`/app/ai/${aiCaseId}`);
         await approvedCard(page).getByRole('button', { name: 'Lag svar' }).click();
 
-        await expect(page.locator('#ai-answer-panel').getByRole('alert')).toHaveText('E2E a11y: generering feilet.');
+        // A server error's own text is technical and never shown (F12, validation work package 2):
+        // the panel says in plain words that the answer was not generated.
+        await expect(page.locator('#ai-answer-panel').getByRole('alert')).toHaveText('Kunne ikke generere Wiki-svar.');
     });
 
     test('AI workspace: editing, saving and copying the answer keep focus and say what happened (A11Y-014, -116)', async ({ page, context }) => {

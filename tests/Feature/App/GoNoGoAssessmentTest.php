@@ -9,6 +9,7 @@ use App\Models\GoNoGoAssessmentTemplate;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\SavedNotice;
+use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -294,6 +295,192 @@ class GoNoGoAssessmentTest extends TestCase
 
         $this->assertDatabaseMissing('go_no_go_assessments', [
             'saved_notice_id' => $notice->id,
+        ]);
+    }
+
+    public function test_user_who_cannot_see_the_case_gets_404_and_no_assessment(): void
+    {
+        $ctx = $this->systemOwnerContext();
+        [$template, $criteria] = $this->createTemplate($ctx['customer']->id, 1);
+        $notice = $this->createSavedNotice($ctx['customer']->id, 'invisible-case');
+        $outsider = $this->contributor($ctx['customer']);
+
+        $this->actingAs($outsider)
+            ->patch("/app/notices/saved/{$notice->id}/go-no-go-assessment", $this->payload($template, $criteria))
+            ->assertNotFound();
+
+        $this->assertDatabaseMissing('go_no_go_assessments', ['saved_notice_id' => $notice->id]);
+    }
+
+    public function test_viewer_who_can_read_the_case_cannot_assess_it(): void
+    {
+        $ctx = $this->systemOwnerContext();
+        [$template, $criteria] = $this->createTemplate($ctx['customer']->id, 1);
+        $notice = $this->createSavedNotice($ctx['customer']->id, 'viewer-case');
+        $viewer = $this->contributor($ctx['customer'], User::BID_ROLE_VIEWER);
+        $this->grantCaseAccess($notice, $viewer, $ctx['owner'], SavedNoticeUserAccess::ACCESS_ROLE_VIEWER);
+
+        $this->actingAs($viewer)
+            ->patch("/app/notices/saved/{$notice->id}/go-no-go-assessment", $this->payload($template, $criteria))
+            ->assertForbidden();
+
+        $this->assertDatabaseMissing('go_no_go_assessments', ['saved_notice_id' => $notice->id]);
+    }
+
+    public function test_contributor_with_case_access_can_still_assess(): void
+    {
+        $ctx = $this->systemOwnerContext();
+        [$template, $criteria] = $this->createTemplate($ctx['customer']->id, 1);
+        $notice = $this->createSavedNotice($ctx['customer']->id, 'contributor-case');
+        $contributor = $this->contributor($ctx['customer']);
+        $this->grantCaseAccess($notice, $contributor, $ctx['owner'], SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR);
+
+        $this->actingAs($contributor)
+            ->patch("/app/notices/saved/{$notice->id}/go-no-go-assessment", $this->payload($template, $criteria))
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('go_no_go_assessments', [
+            'saved_notice_id' => $notice->id,
+            'created_by' => $contributor->id,
+        ]);
+    }
+
+    public function test_case_page_offers_saving_only_to_someone_who_may_assess(): void
+    {
+        $ctx = $this->systemOwnerContext();
+        $notice = $this->createSavedNotice($ctx['customer']->id, 'save-url-case');
+        $viewer = $this->contributor($ctx['customer'], User::BID_ROLE_VIEWER);
+        $this->grantCaseAccess($notice, $viewer, $ctx['owner'], SavedNoticeUserAccess::ACCESS_ROLE_VIEWER);
+
+        $saveUrlFor = function (User $user) use ($notice): ?string {
+            $response = $this->actingAs($user)->get("/app/notices/saved/{$notice->id}")->assertOk();
+            $page = $response->viewData('page');
+            $page = is_array($page) ? $page : json_decode($page, true, 512, JSON_THROW_ON_ERROR);
+
+            $this->assertNotNull($page['props']['goNoGoData']);
+
+            return $page['props']['goNoGoData']['save_url'];
+        };
+
+        $this->assertNotNull($saveUrlFor($ctx['owner']));
+        $this->assertNull($saveUrlFor($viewer));
+    }
+
+    public function test_inactive_template_cannot_be_used(): void
+    {
+        $ctx = $this->systemOwnerContext();
+        [$template, $criteria] = $this->createTemplate($ctx['customer']->id, 1);
+        $template->forceFill(['is_active' => false])->save();
+        $notice = $this->createSavedNotice($ctx['customer']->id, 'inactive-template');
+
+        $this->actingAs($ctx['owner'])
+            ->patch("/app/notices/saved/{$notice->id}/go-no-go-assessment", $this->payload($template, $criteria))
+            ->assertSessionHasErrors('template_id');
+
+        $this->assertDatabaseMissing('go_no_go_assessments', ['saved_notice_id' => $notice->id]);
+    }
+
+    public function test_case_outside_the_go_no_go_phase_or_archived_cannot_be_assessed(): void
+    {
+        $ctx = $this->systemOwnerContext();
+        [$template, $criteria] = $this->createTemplate($ctx['customer']->id, 1);
+
+        $movedOn = $this->createSavedNotice($ctx['customer']->id, 'moved-on');
+        $movedOn->forceFill(['bid_status' => SavedNotice::BID_STATUS_NO_GO])->save();
+
+        $archived = $this->createSavedNotice($ctx['customer']->id, 'archived');
+        $archived->forceFill(['archived_at' => now()])->save();
+
+        foreach ([$movedOn, $archived] as $notice) {
+            $this->actingAs($ctx['owner'])
+                ->patch("/app/notices/saved/{$notice->id}/go-no-go-assessment", $this->payload($template, $criteria))
+                ->assertSessionHasErrors('template_id');
+
+            $this->assertDatabaseMissing('go_no_go_assessments', ['saved_notice_id' => $notice->id]);
+        }
+    }
+
+    public function test_answers_to_inactive_criteria_are_not_stored(): void
+    {
+        $ctx = $this->systemOwnerContext();
+        [$template, $criteria] = $this->createTemplate($ctx['customer']->id, 2);
+        $criteria[1]->forceFill(['is_active' => false])->save();
+        $notice = $this->createSavedNotice($ctx['customer']->id, 'inactive-criterion');
+
+        $this->actingAs($ctx['owner'])
+            ->patch("/app/notices/saved/{$notice->id}/go-no-go-assessment", $this->payload($template, $criteria))
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('go_no_go_assessment_answers', ['criterion_id' => $criteria[0]->id]);
+        $this->assertDatabaseMissing('go_no_go_assessment_answers', ['criterion_id' => $criteria[1]->id]);
+    }
+
+    public function test_an_overlong_reasoning_is_refused_on_its_own_criterion_and_nothing_is_saved(): void
+    {
+        $ctx = $this->systemOwnerContext();
+        [$template, $criteria] = $this->createTemplate($ctx['customer']->id, 3);
+        $notice = $this->createSavedNotice($ctx['customer']->id, 'overlong-comment');
+        $payload = $this->payload($template, $criteria);
+        $payload['answers'][0]['comment'] = 'Kort begrunnelse.';
+        $payload['answers'][2]['comment'] = str_repeat('a', 2001);
+
+        $this->actingAs($ctx['owner'])
+            ->patch("/app/notices/saved/{$notice->id}/go-no-go-assessment", $payload)
+            ->assertRedirect()
+            // Keyed by the answer's place in the list, which is how the page finds the criterion.
+            ->assertSessionHasErrors(['answers.2.comment' => 'Begrunnelsen kan ha maks 2000 tegn. Kort den ned og lagre igjen.'])
+            ->assertSessionDoesntHaveErrors(['answers.0.comment', 'answers.1.comment']);
+
+        $this->assertDatabaseMissing('go_no_go_assessments', ['saved_notice_id' => $notice->id]);
+
+        // Exactly at the limit is accepted.
+        $payload['answers'][2]['comment'] = str_repeat('a', 2000);
+
+        $this->actingAs($ctx['owner'])
+            ->patch("/app/notices/saved/{$notice->id}/go-no-go-assessment", $payload)
+            ->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('go_no_go_assessment_answers', ['criterion_id' => $criteria[2]->id, 'comment' => str_repeat('a', 2000)]);
+    }
+
+    /**
+     * @param  list<GoNoGoAssessmentCriterion>  $criteria
+     */
+    private function payload(GoNoGoAssessmentTemplate $template, array $criteria): array
+    {
+        return [
+            'template_id' => $template->id,
+            'answers' => array_map(fn (GoNoGoAssessmentCriterion $c): array => [
+                'criterion_id' => $c->id,
+                'selected_value' => 'hoy',
+                'comment' => '',
+            ], $criteria),
+        ];
+    }
+
+    private function contributor(Customer $customer, string $bidRole = User::BID_ROLE_CONTRIBUTOR): User
+    {
+        // Department affiliation without a department: the person sees only cases they are
+        // involved in, so visibility below is decided by explicit case access alone.
+        return User::factory()->create([
+            'role' => User::ROLE_USER,
+            'bid_role' => $bidRole,
+            'customer_id' => $customer->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT,
+            'primary_department_id' => null,
+        ]);
+    }
+
+    private function grantCaseAccess(SavedNotice $notice, User $user, User $grantedBy, string $accessRole): void
+    {
+        SavedNoticeUserAccess::query()->create([
+            'saved_notice_id' => $notice->id,
+            'user_id' => $user->id,
+            'granted_by_user_id' => $grantedBy->id,
+            'access_role' => $accessRole,
         ]);
     }
 

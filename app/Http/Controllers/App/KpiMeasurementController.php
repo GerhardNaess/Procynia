@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\Objectives\KpiMeasurementService;
 use App\Services\Objectives\KpiUnitRules;
 use App\Services\Objectives\ObjectiveAccessService;
+use App\Support\CalendarDate;
 use App\Support\CustomerContext;
 use App\Support\Objectives\ObjectiveValidationMessages;
 use Brick\Math\BigDecimal;
@@ -66,7 +67,7 @@ class KpiMeasurementController extends Controller
             throw ValidationException::withMessages(['value' => $message]);
         }
 
-        $period = $this->measurements->periodFor($kpi, $validated['period'] ?? null, $validated['measured_on'] ?? null, now());
+        $period = $this->measurements->periodFor($kpi, $validated['period'] ?? null, $validated['measured_on'] ?? null, CalendarDate::today());
         $this->measurements->record($kpi, $user, $period, $validated['value'], $validated['comment'] ?? null);
 
         return redirect()

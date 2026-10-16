@@ -33,6 +33,7 @@ use App\Services\OpportunitySources\OpportunityStatus;
 use App\Services\SavedNoticeAccessService;
 use App\Services\SavedNoticeNoGoDecisionService;
 use App\Support\CustomerContext;
+use App\Support\LocalizedNumber;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -694,9 +695,16 @@ class NoticeController extends Controller
             ->whereKey($savedNotice->id)
             ->firstOrFail();
 
+        // «12,5» and «1 250» are how a Norwegian writes the value; read them before the numeric rule
+        // does, which knows only «12.5». Anything that does not read is left for that rule to refuse.
+        if ($request->has('contract_value_mnok')) {
+            $request->merge(['contract_value_mnok' => LocalizedNumber::normalize($request->input('contract_value_mnok'))]);
+        }
+
         $validated = $request->validate([
             'selected_supplier_name' => ['nullable', 'string', 'max:255'],
-            'contract_value_mnok' => ['nullable', 'numeric', 'min:0'],
+            // decimal(12,2): a larger value would not fit the column.
+            'contract_value_mnok' => ['nullable', 'numeric', 'min:0', 'max:9999999999.99'],
             'procurement_type' => ['required', 'string', Rule::in(SavedNotice::PROCUREMENT_TYPES)],
             'follow_up_mode' => ['required', 'string', Rule::in(SavedNotice::EDITABLE_FOLLOW_UP_MODES)],
             'follow_up_offset_months' => [
@@ -711,6 +719,10 @@ class NoticeController extends Controller
                 'integer',
                 'min:1',
             ],
+        ], [
+            'contract_value_mnok.numeric' => __('procynia.notices.contract_value_invalid'),
+            'contract_value_mnok.min' => __('procynia.notices.contract_value_negative'),
+            'contract_value_mnok.max' => __('procynia.notices.contract_value_too_large'),
         ]);
 
         $followUpOffsetMonths = array_key_exists('follow_up_offset_months', $validated) && $validated['follow_up_offset_months'] !== null
@@ -883,12 +895,12 @@ class NoticeController extends Controller
         return Inertia::render('App/Notices/SavedShow', [
             'notice' => $this->savedNoticeCasePayload($record, $canManageCase, $canManageContributorAccess, $canComment, $canArchive, $canReopenAfterNoGo),
             'goNoGoData' => $record->bid_status === SavedNotice::BID_STATUS_GO_NO_GO
-                ? $this->buildGoNoGoData($record, $customerId, $user)
+                ? $this->buildGoNoGoData($record, $customerId, $user, $canManageCase)
                 : null,
         ]);
     }
 
-    private function buildGoNoGoData(SavedNotice $record, int $customerId, User $user): array
+    private function buildGoNoGoData(SavedNotice $record, int $customerId, User $user, bool $canManageCase): array
     {
         $template = $this->goNoGoDefaultTemplateService->ensureDefaultExists($customerId);
 
@@ -943,7 +955,11 @@ class NoticeController extends Controller
                 'updated_at' => $assessment->updated_at?->toIso8601String(),
                 'answers' => $answers,
             ] : null,
-            'save_url' => route('app.notices.saved.go-no-go-assessment.upsert', ['savedNotice' => $record->id]),
+            // Null hides the save bar: the assessment is shown to everyone who can see the case, but
+            // only someone who may work on an active case can change it (GoNoGoAssessmentController).
+            'save_url' => $canManageCase && $record->archived_at === null
+                ? route('app.notices.saved.go-no-go-assessment.upsert', ['savedNotice' => $record->id])
+                : null,
         ];
     }
 

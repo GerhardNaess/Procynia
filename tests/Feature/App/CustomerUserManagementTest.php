@@ -244,6 +244,171 @@ class CustomerUserManagementTest extends TestCase
         $this->assertTrue(Hash::check('SecretPass123!', (string) $user->password));
     }
 
+    /**
+     * The form posts natively, so a refused save comes back as a fresh page. That page used to open
+     * empty: everything typed was lost. It now opens with what was entered — except the password,
+     * which is never flashed or sent back to the browser.
+     */
+    public function test_a_refused_create_reopens_the_form_with_what_was_entered_but_not_the_password(): void
+    {
+        $context = $this->customerAdminContext();
+        $department = $this->createDepartment($context['customer']->id, 'Salg');
+
+        $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->from('/app/users/create')
+            ->post('/app/users', [
+                '_token' => 'test-token',
+                'name' => 'Kari Nordmann',
+                'email' => 'kari@example.test',
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'is_qa' => '1',
+                'department_ids' => [(string) $department->id],
+                'password' => 'kort',
+                'password_confirmation' => 'kort',
+            ])
+            ->assertRedirect('/app/users/create')
+            // Norwegian, with the field's name as the form shows it — not «validation.min.string».
+            ->assertSessionHasErrors(['password' => 'Passord må ha minst 8 tegn.']);
+
+        $this->assertDatabaseMissing('users', ['email' => 'kari@example.test']);
+
+        $this->actingAs($context['admin'])
+            ->get('/app/users/create')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('oldInput.name', 'Kari Nordmann')
+                ->where('oldInput.email', 'kari@example.test')
+                ->where('oldInput.is_qa', '1')
+                ->where('oldInput.department_ids', [(string) $department->id])
+                ->missing('oldInput.password')
+                ->missing('oldInput.password_confirmation')
+                ->missing('oldInput._token'));
+
+        // Only the page that answers the refusal carries it.
+        $this->actingAs($context['admin'])
+            ->get('/app/users/create')
+            ->assertInertia(fn (Assert $page) => $page->where('oldInput', null));
+    }
+
+    public function test_a_refused_edit_reopens_the_form_with_what_was_entered(): void
+    {
+        $context = $this->customerAdminContext();
+        $target = User::factory()->create([
+            'name' => 'Gammelt Navn',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->from("/app/users/{$target->id}/edit")
+            ->put("/app/users/{$target->id}", [
+                '_token' => 'test-token',
+                'name' => 'Nytt Navn',
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'password' => 'NyttPassord1',
+                'password_confirmation' => 'EtAnnetPassord1',
+            ])
+            ->assertRedirect("/app/users/{$target->id}/edit")
+            ->assertSessionHasErrors(['password' => 'Passord og bekreftelsen er ikke like.']);
+
+        $this->assertSame('Gammelt Navn', $target->fresh()->name);
+
+        $this->actingAs($context['admin'])
+            ->get("/app/users/{$target->id}/edit")
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('oldInput.name', 'Nytt Navn')
+                ->missing('oldInput.password')
+                ->missing('oldInput.password_confirmation'));
+    }
+
+    public function test_created_user_email_is_stored_trimmed_and_lower_cased(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $this->postWithCsrf($context['admin'], '/app/users', [
+            'name' => 'Blandet Bokstav',
+            'email' => 'Blandet.Bokstav@Example.TEST',
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'password' => 'SecretPass123!',
+            'password_confirmation' => 'SecretPass123!',
+        ])->assertRedirect('/app/users');
+
+        $this->assertDatabaseHas('users', ['email' => 'blandet.bokstav@example.test']);
+    }
+
+    /**
+     * Uniqueness was checked against the address as typed while the lower-cased address was what got
+     * inserted, so a case variant of an existing address passed validation and failed the insert as
+     * an HTTP 500. It is now a validation error.
+     */
+    public function test_creating_a_user_with_a_case_variant_of_an_existing_email_is_a_validation_error(): void
+    {
+        $context = $this->customerAdminContext();
+
+        User::factory()->create([
+            'email' => 'eksisterende@example.test',
+            'role' => User::ROLE_USER,
+            'customer_id' => $context['customer']->id,
+        ]);
+
+        foreach (['Eksisterende@Example.test', 'EKSISTERENDE@EXAMPLE.TEST'] as $variant) {
+            $this->postWithCsrf($context['admin'], '/app/users', [
+                'name' => 'Duplikat',
+                'email' => $variant,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'password' => 'SecretPass123!',
+                'password_confirmation' => 'SecretPass123!',
+            ])->assertSessionHasErrors('email');
+        }
+
+        $this->assertSame(1, User::query()->whereRaw('lower(email) = ?', ['eksisterende@example.test'])->count());
+    }
+
+    public function test_case_variant_of_a_legacy_mixed_case_email_is_rejected(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $legacy = User::factory()->create(['role' => User::ROLE_USER, 'customer_id' => $context['customer']->id]);
+        DB::table('users')->where('id', $legacy->id)->update(['email' => 'Legacy.Person@Example.test']);
+
+        $this->postWithCsrf($context['admin'], '/app/users', [
+            'name' => 'Duplikat',
+            'email' => 'legacy.person@example.test',
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'password' => 'SecretPass123!',
+            'password_confirmation' => 'SecretPass123!',
+        ])->assertSessionHasErrors('email');
+    }
+
+    public function test_every_user_write_normalizes_the_email_and_the_database_refuses_case_variants(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $user = User::factory()->create([
+            'email' => '  Model.Path@Example.TEST ',
+            'role' => User::ROLE_USER,
+            'customer_id' => $context['customer']->id,
+        ]);
+
+        $this->assertSame('model.path@example.test', $user->fresh()->email);
+
+        $this->expectException(\Illuminate\Database\QueryException::class);
+
+        DB::table('users')->insert([
+            'name' => 'Omgår modellen',
+            'email' => 'MODEL.PATH@example.test',
+            'password' => 'x',
+            'role' => User::ROLE_USER,
+            'customer_id' => $context['customer']->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
     public function test_customer_admin_can_create_a_user_with_a_user_service_level_when_subscription_allows_it(): void
     {
         $context = $this->customerAdminContext();

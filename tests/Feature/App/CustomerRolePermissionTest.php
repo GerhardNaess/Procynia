@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\App;
 
+use App\Models\BusinessArea;
 use App\Models\Customer;
 use App\Models\CustomerRole;
 use App\Models\Language;
@@ -327,6 +328,63 @@ class CustomerRolePermissionTest extends TestCase
             ->assertSessionHasErrors('name');
 
         $this->assertSame(1, CustomerRole::query()->where('customer_id', $own->id)->count());
+    }
+
+    /**
+     * A blank name is trimmed to null by the middleware and refused by «required» before the
+     * controller's own check runs, so it used to answer with Laravel's default — in English, or as
+     * the raw key «validation.required». It now answers with the area's and the role's own message.
+     */
+    public function test_a_blank_or_overlong_business_area_name_is_refused_with_its_own_norwegian_message(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $owner = $this->systemOwner($customer);
+
+        foreach (['', '   ', "\u{00A0}"] as $blank) {
+            $this->actingAs($owner)
+                ->post('/app/customer-environment/business-areas', ['name' => $blank])
+                ->assertSessionHasErrors(['name' => 'Fagområdet må ha et navn.']);
+        }
+
+        $this->actingAs($owner)
+            ->post('/app/customer-environment/business-areas', ['name' => str_repeat('x', 121)])
+            ->assertSessionHasErrors(['name' => 'Navnet på fagområdet kan ha maks 120 tegn.']);
+
+        $this->assertSame(0, BusinessArea::query()->where('customer_id', $customer->id)->count());
+
+        $this->actingAs($owner)
+            ->post('/app/customer-environment/business-areas', ['name' => '  Beredskap '])
+            ->assertSessionHasNoErrors();
+
+        $area = BusinessArea::query()->where('customer_id', $customer->id)->sole();
+        $this->assertSame('Beredskap', $area->name);
+
+        $this->actingAs($owner)
+            ->patch("/app/customer-environment/business-areas/{$area->id}", ['name' => ' '])
+            ->assertSessionHasErrors(['name' => 'Fagområdet må ha et navn.']);
+
+        $this->actingAs($owner)
+            ->post('/app/customer-environment/business-areas', ['name' => 'beredskap'])
+            ->assertSessionHasErrors(['name' => 'Dere har allerede et fagområde med dette navnet.']);
+
+        $this->assertSame('Beredskap', $area->fresh()->name);
+    }
+
+    public function test_a_blank_role_name_is_refused_with_the_roles_own_norwegian_message(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $owner = $this->systemOwner($customer);
+        $role = $this->createRole($customer, 'Kvalitetsleder', []);
+
+        $this->actingAs($owner)
+            ->post('/app/customer-environment/roles', ['name' => '  ', 'permissions' => []])
+            ->assertSessionHasErrors(['name' => 'Rollen må ha et navn.']);
+
+        $this->actingAs($owner)
+            ->patch("/app/customer-environment/roles/{$role->id}", ['name' => ''])
+            ->assertSessionHasErrors(['name' => 'Rollen må ha et navn.']);
+
+        $this->assertSame('Kvalitetsleder', $role->fresh()->name);
     }
 
     public function test_the_edit_screen_offers_the_customers_roles_and_remembers_which_are_held(): void

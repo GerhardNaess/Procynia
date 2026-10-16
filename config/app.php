@@ -68,6 +68,13 @@ return [
     'timezone' => 'UTC',
 
     /*
+    | The time zone a calendar date the user picks is read in — «i dag» on a date field means today
+    | in Norway, not in UTC. Timestamps are still stored and compared in UTC. See App\Support\CalendarDate.
+    */
+
+    'calendar_timezone' => env('APP_CALENDAR_TIMEZONE', 'Europe/Oslo'),
+
+    /*
     |--------------------------------------------------------------------------
     | Application Locale Configuration
     |--------------------------------------------------------------------------
