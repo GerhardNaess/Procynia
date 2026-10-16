@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { RequiredFieldsNote } from '../../../../Components/App/FormField';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
+import { BUSY_STYLE, submitWhenIdle } from '../../../../Support/focusManagement';
 import { HINT, INPUT, LABEL } from '../../../../Support/formStyles';
 import RequiredMark from '../RequiredMark';
 import FieldError from '../FieldError';
@@ -20,7 +21,7 @@ export default function RequirementForm({ form, onSubmit, onCancel, sourceOption
     useFocusOnRejectedSubmit(form, formRef);
 
     return (
-        <form ref={formRef} onSubmit={onSubmit} className="space-y-5">
+        <form ref={formRef} onSubmit={submitWhenIdle(form, onSubmit)} className="space-y-5">
             {/* A requirement from Kravbiblioteket: source, reference, title and text follow the library. */}
             {fromLibrary ? (
                 <p className="text-base text-slate-700" data-testid="compliance-library-owned-fields">
@@ -147,7 +148,7 @@ export default function RequirementForm({ form, onSubmit, onCancel, sourceOption
                 {onCancel && (
                     <button type="button" onClick={onCancel} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
                 )}
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`}>
                     {form.processing ? (tr.saving ?? 'Lagrer...') : (tr.save ?? 'Lagre')}
                 </button>
             </div>

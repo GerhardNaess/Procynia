@@ -586,23 +586,23 @@ function RunListItem({
 
                     <div className="grid grid-cols-2 gap-3 text-sm leading-5 text-slate-600">
                         <div className="min-w-0">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Beslutning</div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_decision ?? 'Beslutning'}</div>
                             <div className="mt-1">{renderDecisionBadge()}</div>
                         </div>
                         <div className="min-w-0 text-center">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Sider</div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_pages ?? 'Sider'}</div>
                             <div className="mt-1">{renderPagesCell(true)}</div>
                         </div>
                         <div className="min-w-0 text-center">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Funn</div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_lint ?? 'Funn'}</div>
                             <div className="mt-1">{renderFindingsCell(true)}</div>
                         </div>
                         <div className="min-w-0">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Opprettet</div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_created ?? 'Opprettet'}</div>
                             <div className="mt-1">{formatDate(run.created_at, locale)}</div>
                         </div>
                         <div className="min-w-0">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Fullført</div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_finished ?? 'Fullført'}</div>
                             <div className="mt-1">{run.finished_at ? formatDate(run.finished_at, locale) : '—'}</div>
                         </div>
                     </div>
@@ -1278,13 +1278,13 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
                         onClick={onReload}
                         className="text-base leading-6 text-slate-600 underline hover:text-slate-800"
                     >
-                        Oppdater
+                        {tw.ingest_activity_reload ?? 'Oppdater'}
                     </button>
                 )}
             </div>
             {run.status === 'queued' && (
                 <p className="text-base leading-6 text-slate-600">
-                    {queuedSince ? `I kø siden ${queuedSince} · ` : ''}
+                    {queuedSince ? `${(tw.ingest_activity_queued_since ?? 'I kø siden :time').replace(':time', queuedSince)} · ` : ''}
                     {tw.ingest_activity_queued_note ?? 'Behandlingen er ikke startet ennå.'}
                 </p>
             )}
@@ -1653,9 +1653,9 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                                     for anything a person actually reads. */}
                                 <thead className="sticky top-0 z-10 bg-slate-50 shadow-[0_1px_0_rgba(226,232,240,1)]">
                                     <tr className="text-left text-sm font-semibold uppercase tracking-[0.08em] text-slate-500">
-                                        <th scope="col" className="px-6 py-3.5">Tittel</th>
-                                        <th scope="col" className="px-6 py-3.5">Type</th>
-                                        <th scope="col" className="px-6 py-3.5">Status</th>
+                                        <th scope="col" className="px-6 py-3.5">{tw.pages_col_title ?? 'Tittel'}</th>
+                                        <th scope="col" className="px-6 py-3.5">{tw.pages_col_type ?? 'Type'}</th>
+                                        <th scope="col" className="px-6 py-3.5">{tw.pages_col_status ?? 'Status'}</th>
                                         <th scope="col" className="px-6 py-3.5">{tw.document_owner_column ?? 'Dokumenteier'}</th>
                                         <th scope="col" className="px-6 py-3.5">{tw.claims_approved_column ?? 'Påstander kvalitetssikret'}</th>
                                         <th scope="col" className="px-6 py-3.5">{tw.updated ?? 'Oppdatert'}</th>
@@ -2016,7 +2016,16 @@ function SourcesTab({
                                         id="wiki-source-file"
                                         type="file"
                                         accept=".pdf,.docx"
-                                        disabled={uploadForm.processing}
+                                        // Unavailable while uploading, but still focusable (A11Y-156):
+                                        // `disabled` dropped focus to <body> for the whole request.
+                                        // The click is refused so the file dialog does not open, and
+                                        // handleFileSelected ignores a choice made meanwhile.
+                                        aria-disabled={uploadForm.processing || undefined}
+                                        onClick={(event) => {
+                                            if (uploadForm.processing) {
+                                                event.preventDefault();
+                                            }
+                                        }}
                                         onChange={handleFileSelected}
                                         aria-invalid={uploadForm.errors.file ? true : undefined}
                                         aria-describedby={['wiki-source-file-name', 'wiki-source-file-hint', uploadForm.errors.file ? 'wiki-source-file-error' : null].filter(Boolean).join(' ')}
@@ -2024,7 +2033,7 @@ function SourcesTab({
                                     />
                                     <label
                                         htmlFor="wiki-source-file"
-                                        className={`inline-flex h-11 shrink-0 cursor-pointer items-center justify-center rounded-full px-5 text-base font-semibold shadow-sm transition peer-disabled:cursor-not-allowed peer-disabled:opacity-50 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-violet-600 ${PRIMARY_COLOURS}`}
+                                        className={`inline-flex h-11 shrink-0 cursor-pointer items-center justify-center rounded-full px-5 text-base font-semibold shadow-sm transition peer-disabled:cursor-not-allowed peer-disabled:opacity-50 peer-aria-disabled:cursor-not-allowed peer-aria-disabled:opacity-50 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-violet-600 ${PRIMARY_COLOURS}`}
                                     >
                                         {tw.sources_file_label ?? 'Velg fil'}
                                     </label>
@@ -2466,7 +2475,7 @@ function SourcesTab({
                             )}
 
                             {!deletePreview.loading && deletePreview.error && (
-                                <p role="alert" className="text-base text-rose-700">Kunne ikke laste forhåndsvisning. Prøv igjen.</p>
+                                <p role="alert" className="text-base text-rose-700">{tw.sources_delete_preview_failed ?? 'Kunne ikke laste forhåndsvisning. Prøv igjen.'}</p>
                             )}
 
                             {!deletePreview.loading && !deletePreview.error && deletePreview.blocked && (
@@ -2952,7 +2961,7 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
                             type="button"
                             onClick={() => navigate({ run_src: '' })}
                             className="ml-0.5 text-violet-700 hover:text-violet-900"
-                            aria-label="Fjern kildefilter"
+                            aria-label={tw.runs_filter_src_clear ?? 'Fjern kildefilter'}
                         >
                             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                 <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />

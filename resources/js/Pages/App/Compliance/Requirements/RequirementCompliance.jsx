@@ -3,6 +3,7 @@ import { useForm } from '@inertiajs/react';
 import { RequiredFieldsNote } from '../../../../Components/App/FormField';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
+import { BUSY_STYLE, submitWhenIdle } from '../../../../Support/focusManagement';
 import { INPUT, LABEL } from '../../../../Support/formStyles';
 import RequiredMark from '../RequiredMark';
 import { formatDay } from '../../Improvements/improvementStatus';
@@ -64,7 +65,7 @@ function AssessmentForm({ requirementId, results, onDone, tr }) {
     };
 
     return (
-        <form ref={ref} onSubmit={send} className="mt-4 scroll-mt-6 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-labelledby="compliance-assess-heading" data-testid="compliance-assessment-form" data-inline-panel="assess">
+        <form ref={ref} onSubmit={submitWhenIdle(form, send)} className="mt-4 scroll-mt-6 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-labelledby="compliance-assess-heading" data-testid="compliance-assessment-form" data-inline-panel="assess">
             <div>
                 <h3 id="compliance-assess-heading" className="text-lg font-semibold text-slate-950">{ta.form_heading ?? 'Vurder etterlevelse'}</h3>
                 <p className="mt-1 text-base text-slate-600">{ta.form_intro ?? 'Vurderingen lagres med dagens dato og kan ikke endres etterpå. Er noe feil, registrerer du en ny vurdering.'}</p>
@@ -125,7 +126,7 @@ function AssessmentForm({ requirementId, results, onDone, tr }) {
             <RequiredFieldsNote text={tr.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`}>
                     {form.processing ? (tr.saving ?? 'Lagrer...') : (ta.submit ?? 'Lagre vurdering')}
                 </button>
             </div>

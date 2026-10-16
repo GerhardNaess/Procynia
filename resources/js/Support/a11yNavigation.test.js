@@ -102,6 +102,74 @@ describe('focus after a page change goes to the new page, unless the page placed
         assert.equal(focused.length, 1, 'a search on the same page leaves focus alone');
     });
 
+    test('a title that <Head> writes after the frame still makes a same-path visit a page change (OPPF-001)', () => {
+        const handlers = [];
+        const router = { on: (name, handler) => { handlers.push({ name, handler }); return () => {}; } };
+        const on = (name) => handlers.find((entry) => entry.name === name).handler;
+        const focused = [];
+        const heading = { matches: () => false, hasAttribute: () => false, setAttribute() {}, focus: (options) => focused.push(options) };
+        const mainElement = { querySelector: (selector) => (selector === 'h1' ? heading : null), contains: () => false };
+        const link = { tagName: 'A', id: '', textContent: 'Saksliste', getAttribute: (name) => (name === 'href' ? '/app/notices?mode=saved' : null), closest: () => null };
+        const observers = [];
+        class FakeObserver {
+            constructor(callback) { this.callback = callback; this.connected = false; observers.push(this); }
+            observe() { this.connected = true; }
+            disconnect() { this.connected = false; }
+        }
+        const timers = [];
+        const doc = {
+            title: 'Kunngjøringer · Procynia',
+            documentElement: { lang: 'no' },
+            head: {},
+            body: { tagName: 'BODY' },
+            activeElement: link,
+            getElementById: (id) => (id === MAIN_CONTENT_ID ? mainElement : null),
+            querySelector: () => null,
+            querySelectorAll: () => [],
+        };
+        const win = {
+            requestAnimationFrame: (callback) => callback(),
+            setTimeout: (callback, delay) => { if (delay) { timers.push(callback); } else { callback(); } return timers.length; },
+            clearTimeout() {},
+            MutationObserver: FakeObserver,
+        };
+        installRouteFocus(router, { initialPage: { component: 'App/Notices/Index', url: '/app/notices' }, doc, win });
+
+        // The visit: the frame has passed, but the title is still the old one.
+        on('start')();
+        on('navigate')({ detail: { page: { component: 'App/Notices/Index', url: '/app/notices?mode=saved', props: {} } } });
+        on('finish')();
+        assert.equal(focused.length, 0, 'with the old title it looks like a filter');
+        assert.equal(observers.length, 1);
+
+        // A mutation that leaves the title as it was changes nothing.
+        observers[0].callback();
+        assert.equal(focused.length, 0);
+
+        // Then <Head> writes the new title, while focus is still on the pressed link.
+        doc.title = 'I arbeid · Procynia';
+        observers[0].callback();
+        assert.deepEqual(focused, [{ preventScroll: true }]);
+        assert.equal(observers[0].connected, false, 'the watch ends with the title');
+
+        // A filter whose title never changes: the watch ends at the next visit, and nothing moves.
+        on('start')();
+        on('navigate')({ detail: { page: { component: 'App/Notices/Index', url: '/app/notices?mode=saved&q=vei', props: {} } } });
+        assert.equal(observers.length, 2);
+        on('start')();
+        assert.equal(observers[1].connected, false);
+        assert.equal(focused.length, 1);
+
+        // A late title after the user has moved on does not pull focus back.
+        doc.activeElement = link;
+        on('start')();
+        on('navigate')({ detail: { page: { component: 'App/Notices/Index', url: '/app/notices', props: {} } } });
+        doc.activeElement = { tagName: 'INPUT', id: 'elsewhere', textContent: '', getAttribute: () => null, closest: () => null };
+        doc.title = 'Kunngjøringer · Procynia';
+        observers[2].callback();
+        assert.equal(focused.length, 1);
+    });
+
     test('the locale becomes a valid lang attribute', () => {
         assert.equal(documentLang('nb_NO'), 'nb-NO');
         assert.equal(documentLang('en'), 'en');

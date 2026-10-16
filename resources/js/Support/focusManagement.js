@@ -97,6 +97,28 @@ export function refocusIfLost(candidates, { doc = document, win = window, always
     }, 0));
 }
 
+/**
+ * A save button that is `disabled` while its request runs drops keyboard focus to <body> (2.4.3,
+ * A11Y-143, -196). It stays focusable instead: `aria-disabled={form.processing || undefined}` says it
+ * is unavailable, `BUSY_STYLE` dims it, and the form's submit goes through `submitWhenIdle`, which
+ * refuses a second submit while the first is running. `disabled` stays for fixed preconditions only
+ * (nothing chosen yet).
+ */
+export const BUSY_STYLE = 'aria-disabled:cursor-not-allowed aria-disabled:opacity-60';
+
+/** Wraps a form's submit handler so it does nothing while `form.processing` is true. */
+export function submitWhenIdle(form, handler) {
+    return (event) => {
+        if (form?.processing) {
+            event?.preventDefault?.();
+
+            return;
+        }
+
+        handler(event);
+    };
+}
+
 /** Whether an Inertia/Laravel error bag holds anything. Pure, so it is unit-tested. */
 export function hasErrors(errors) {
     return Boolean(errors) && Object.values(errors).some((message) => Boolean(message));

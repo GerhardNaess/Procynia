@@ -47,10 +47,10 @@
 
         @if ($unreadCount > 0)
             <div class="flex flex-wrap items-center justify-between gap-2">
-                <h2 id="admin-notifications-unread-heading" class="text-base font-semibold text-gray-900 dark:text-white">{{ $unreadCount }} uleste varsel{{ $unreadCount !== 1 ? 'er' : '' }}</h2>
+                <h2 id="admin-notifications-unread-heading" class="text-base font-semibold text-gray-900 dark:text-white">{{ $unreadCount === 1 ? \App\Filament\Support\AdminText::get('admin_a11y.notifications_unread_one', '1 ulest varsel') : \App\Filament\Support\AdminText::get('admin_a11y.notifications_unread_many', ':count uleste varsler', ['count' => $unreadCount]) }}</h2>
                 <button x-on:click="markAll()" type="button" data-notifications-mark-all
                     class="rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 px-3 py-1.5 text-base font-semibold text-gray-700 dark:text-gray-200 shadow-sm transition hover:bg-gray-50 dark:hover:bg-white/5">
-                    Merk alle som lest
+                    {{ \App\Filament\Support\AdminText::get('admin_a11y.notifications_mark_all', 'Merk alle som lest') }}
                 </button>
             </div>
         @endif
@@ -94,7 +94,7 @@
                                 data-notification-mark-read
                                 aria-describedby="{{ $titleId }}"
                                 class="shrink-0 rounded-full border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 px-3 py-1.5 text-base font-semibold leading-6 text-gray-700 dark:text-gray-200 transition hover:bg-gray-50 dark:hover:bg-white/5">
-                                Merk lest
+                                {{ \App\Filament\Support\AdminText::get('admin_a11y.notifications_mark_read', 'Merk lest') }}
                             </button>
                         </div>
                     </li>
@@ -102,13 +102,13 @@
             </ul>
         @else
             <div class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 px-5 py-10 text-center shadow-sm">
-                <p class="text-base text-gray-600 dark:text-gray-400" @if (count($recentNotifications) === 0) data-notifications-focus-fallback @endif>Ingen uleste varsler.</p>
+                <p class="text-base text-gray-600 dark:text-gray-400" @if (count($recentNotifications) === 0) data-notifications-focus-fallback @endif>{{ \App\Filament\Support\AdminText::get('admin_a11y.notifications_none_unread', 'Ingen uleste varsler.') }}</p>
             </div>
         @endif
 
         @if (count($recentNotifications) > 0)
             <div class="mt-6">
-                <h2 class="mb-3 text-base font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400" data-notifications-focus-fallback>Leste varsler (siste 30)</h2>
+                <h2 class="mb-3 text-base font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400" data-notifications-focus-fallback>{{ \App\Filament\Support\AdminText::get('admin_a11y.notifications_read_heading', 'Leste varsler (siste 30)') }}</h2>
                 <ul role="list" class="divide-y divide-gray-100 dark:divide-white/10 rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
                     @foreach ($recentNotifications as $n)
                         <li class="px-5 py-3 text-base text-gray-600 dark:text-gray-400" wire:key="admin-notification-read-{{ $n['id'] }}">

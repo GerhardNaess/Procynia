@@ -1,6 +1,6 @@
 # Plan: Universell utforming (WCAG 2.2 AA)
 
-**Status: Fase 0 er ferdig. Fase 1 er committet (`4c594ebf`) og Fase 2 er committet (`683246a7`); manuell verifisering med skjermleser, Firefox og Safari gjenstår for begge (§15.8, §16.8). Fase 3 er implementert, automatisk verifisert, teknisk sluttkontrollert (§17.12) og committet (`5559fcb9`); manuell verifisering gjenstår, og OPPF-001 (én eksisterende E2E-feil) må lukkes før merge. Fase 4 er implementert, automatisk verifisert, teknisk sluttkontrollert (§18.14) og committet (`8240951e`). Fase 5 er implementert, automatisk verifisert, sluttkontrollert (§19.17) og committet; manuell verifisering gjenstår. OPPF-001 ble lukket i Fase 5; OPPF-002 og OPPF-003 er åpne og må løses før merge. Fase 6 er implementert, automatisk verifisert, sluttkontrollert (§20.16) og committet; manuell verifisering gjenstår. OPPF-001 er gjenåpnet, og OPPF-001–004 må løses før merge. Fase 7 er ikke startet.**
+**Status: Fase 0 er ferdig. Fase 1 er committet (`4c594ebf`) og Fase 2 er committet (`683246a7`); manuell verifisering med skjermleser, Firefox og Safari gjenstår for begge (§15.8, §16.8). Fase 3 er implementert, automatisk verifisert, teknisk sluttkontrollert (§17.12) og committet (`5559fcb9`); manuell verifisering gjenstår, og OPPF-001 (én eksisterende E2E-feil) må lukkes før merge. Fase 4 er implementert, automatisk verifisert, teknisk sluttkontrollert (§18.14) og committet (`8240951e`). Fase 5 er implementert, automatisk verifisert, sluttkontrollert (§19.17) og committet; manuell verifisering gjenstår. OPPF-001 ble lukket i Fase 5; OPPF-002 og OPPF-003 er åpne og må løses før merge. Fase 6 er implementert, automatisk verifisert, sluttkontrollert (§20.16) og committet; manuell verifisering gjenstår. OPPF-001 ble gjenåpnet. Fase 7A (teknisk opprydding) er gjennomført 2026-10-16 (§21): OPPF-001–004 er rettet (OPPF-001 lukkes formelt etter samlet regresjon i 7C), ni WCAG-funn er rettet, resten er klassifisert. Ikke committet. Fase 7B, første manuelle runde (Safari, VoiceOver, zoom), er dokumentert (§22) uten nye feil; Utviklingsarbeidet er avsluttet 2026-10-16 etter prosjektbeslutning (§23): Fase 7C gjennomføres ikke, full regresjon på endelig kode er ikke kjørt, OPPF-001 er ikke formelt lukket, og åpne funn står åpne. Full WCAG 2.2 AA-etterlevelse er ikke dokumentert.**
 Branch: `feature/wcag-accessibility`
 Utgangspunkt: `bc9070c2` (2026-10-14)
 Sist oppdatert: **2026-10-16**
@@ -58,7 +58,7 @@ Dette er også rammer for arbeidet:
 | 4 | Anbud, dokumenter og AI-arbeidsflyter | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-15 (§18.14). Manuell verifisering gjenstår (§18.9). | `8240951e` |
 | 5 | Enterprise Wiki og editor | Implementert, automatisk verifisert og sluttkontrollert 2026-10-16 (§19.17). Manuell verifisering gjenstår (§19.12). Åpne før merge: OPPF-002, OPPF-003. | `feat(a11y): improve enterprise wiki accessibility` |
 | 6 | Kvalitet/GRC, administrasjon og resterende flater | Implementert, automatisk verifisert og sluttkontrollert 2026-10-16 (§20.16). Manuell verifisering gjenstår (§20.11). Åpne før merge: OPPF-001 (gjenåpnet), OPPF-002, OPPF-003, OPPF-004. | `feat(a11y): improve GRC and admin accessibility` |
-| 7 | Samlet testing, regresjon og dokumentasjon | Ikke startet | — |
+| 7 | Samlet testing, regresjon og dokumentasjon | 7A (teknisk opprydding) gjennomført og automatisk verifisert 2026-10-16 (§21), ikke committet. 7B: første manuelle runde dokumentert 2026-10-16 (§22). 7C gjennomføres ikke (prosjektbeslutning, §23). | — |
 
 ---
 
@@ -724,6 +724,8 @@ Følgende kunne ikke avgjøres statisk og verifiseres i den fasen som berører d
   (Fase 4: AI-uttrekkets polling flytter ikke fokus i E2E; skriving under polling er ikke testet.)
 - Om skjermlesere faktisk leser kunngjøringene fra AI-arbeidsflaten én gang (§18.9).
 
+**Status etter Fase 7A (§21):** OPPF-001–004 er rettet (OPPF-001 lukkes formelt etter 7C); A11Y-153, -156, -161, -172, -184, -193, -195 og -196 er rettet; gjenstående forhold står i §21.5 og beslutningspunktene i §21.7. Teksten under er historikk.
+
 **Åpne oppfølgingsoppgaver:** OPPF-001 (gjenåpnet i sluttkontrollen av Fase 6, §20.16.3), OPPF-002 (ustabil `wiki-graph-labels.spec.js:82`, også på baseline) og OPPF-003 (eksisterende PHP-feil i `WikiQualityTabRemovalTest`), begge må løses før merge (§19.17.3). OPPF-001 ble lukket i §19.17.3, men er gjenåpnet (§20.16.3). Fra Fase 4: A11Y-145 (utsatt produktbeslutning om ansvarlig-velgeren, §18.14). Fra Fase 5: A11Y-153, -154, -156 (§19.9). Fra Fase 6: OPPF-004 (eksisterende PHP-feil i `CustomerCreatePageTest`, må løses før merge) og A11Y-160, -161, -172, -184, -186, -193, -195, -196, -214 (§20.8).
 
 **Beslutninger som trengs før eller i fasene:**
@@ -740,6 +742,9 @@ Følgende kunne ikke avgjøres statisk og verifiseres i den fasen som berører d
 
 | Dato | Endring |
 |---|---|
+| 2026-10-16 | Avslutning (§23): utviklingsarbeidet avsluttes, 7C gjennomføres ikke; full regresjon ikke kjørt, OPPF-001 ikke formelt lukket, åpne funn beholdt. Fase 7A og 7B committet. |
+| 2026-10-16 | Fase 7B, første runde (§22): brukerens manuelle kontroll i Safari på macOS – tastatur, fokus ved sideskift, PageHelp-dialog, zoom 200/400 %, VoiceOver i Wiki – uten rapporterte problemer. Ingen nye funn, ingen avvik lukket. Gjenstående kontroller prioritert (§22.6). Ingen kodeendringer. |
+| 2026-10-16 | Fase 7A (§21): OPPF-001 (årsak påvist: sen tittel fra `<Head>` mot fokusavgjørelsen i `routeFocus.js`, rettet i appen), OPPF-002–004 rettet; A11Y-153, -156, -161, -172, -184, -193, -195, -196 og Wiki/Varsler-delen av -105/-155 rettet; systemisk restforhold (`disabled` under lagring, 126 kontroller) klassifisert; A11Y-145, -126, -154 som beslutningspunkter. Enhet 2065/0, målrettet PHP 327/0, målrettet E2E 125/0. Ikke committet. |
 | 2026-10-16 | Sluttkontroll av Fase 6 (§20.16): ingen Fase 6-regresjoner; samlet E2E 255/1/0, feilen er OPPF-001, som er gjenåpnet; OPPF-002–004 åpne før merge. Committet. |
 | 2026-10-16 | Fase 6 implementert og automatisk verifisert (§20): Kvalitet (diagram som navngitt gruppe, stegliste med redigering og innsetting, struktureditor med navn), Risiko, Avvik, Mål og KPI (graf som bilde med sammendrag), Ledelsens gjennomgåelse (statustekst, HTML-alternativ til PDF), Etterlevelse og revisjon, Leverandøroppfølging (import), offentlige sider og resterende felleskomponenter; Filament med mørk modus støttet, mørkere primærfarge, vedleggsknapp, driftssider. `lint:a11y` 189 filer. Nye funn A11Y-160 til A11Y-215, OPPF-004. Ikke committet. |
 | 2026-10-16 | Sluttkontroll av Fase 5 (§19.17): ingen regresjoner; OPPF-001 lukket (kriteriet oppfylt, årsak ikke endelig funnet); OPPF-002 og ny OPPF-003 åpne før merge. Committet. |
@@ -2302,3 +2307,360 @@ Kontroll på Fase 6-koden før commit. Branch `feature/wcag-accessibility`, HEAD
 #### 20.16.5 Vurdering
 
 Sluttkontrollen fant ingen Fase 6-regresjoner og ingen endring i forretningslogikk, tilganger, data eller API. Den ene feilen i den samlede kjøringen er den kjente OPPF-001, som er gjenåpnet. Fase 6 committes. **Fase 7 er ikke startet.** Fasen er ikke manuelt verifisert og gir ikke grunnlag for å hevde at Procynia oppfyller WCAG 2.2 AA.
+
+---
+
+## 21. Fase 7A – teknisk opprydding (2026-10-16)
+
+Branch `feature/wcag-accessibility`, utgangspunkt HEAD `c7feb597`, rent arbeidstre. Fase 7A gjelder bare åpne
+og delvis rettede funn og oppfølgingsoppgavene OPPF-001–004. Lukkede funn er ikke gjennomgått på nytt.
+Det er ikke gjort en ny kartlegging. Ingenting er committet.
+
+### 21.1 Klassifisering av gjenværende forhold (før 7A)
+
+Kategorier: 1 = bekreftet A/AA-avvik, 2 = teknisk testfeil, 3 = mulig avvik som krever manuell verifisering,
+4 = innhold, 5 = produktbeslutning, 6 = forbedring utover AA.
+
+| ID | Kategori | Hindrer sentral oppgave? | Behandling i 7A |
+|---|---|---|---|
+| OPPF-001 | 2 (viste seg å være en appfeil, se 21.2) | Nei, men fokus ved sideskift | Rettet |
+| OPPF-002 | 2 | Nei | Rettet |
+| OPPF-003 | 2 | Nei | Rettet |
+| OPPF-004 | 2 | Nei | Rettet |
+| A11Y-153 | 1 (1.4.13) | Nei (innholdet står i panelet og listen) | Rettet |
+| A11Y-156, -196 | 1 (2.4.3), forbigående | Nei | Rettet for de dokumenterte kontrollene |
+| A11Y-184 | 1 (1.3.1/3.3.2-nær: grunnen bare i `title`) | Nei | Rettet |
+| A11Y-161 | 1 (3.3.1) | Ja, i Kvalitet → Wiki | Rettet |
+| A11Y-193 | 1 (3.3.1, seende) | Nei | Rettet for fjerning fra omfanget (eneste vanlige kilde) |
+| A11Y-195 | 1 (2.4.3) | Nei | Rettet |
+| A11Y-172 | 1 (3.1.2) | Nei | Rettet |
+| A11Y-105, -155 | 1 (3.1.2) der teksten vises i engelsk UI | Nei | Rettet for Wiki og Varsler i admin; resten se 21.5 |
+| A11Y-121 | — | — | Lukket i Fase 6; ingen tegn til regresjon, ikke gjennomgått på nytt |
+| A11Y-011 (leverandørdokumenter) | — | — | Ikke et avvik: native filfelt med etikett, beskrivelse og feil; avsluttes |
+| A11Y-154 | 4 | Nei | Rutine dokumentert (21.6) |
+| A11Y-145 | 5 | — | Eget beslutningspunkt (21.7) |
+| A11Y-126 | 5 | — | Uendret, beslutningspunkt (21.7) |
+| A11Y-160, -186 | 6 | Nei | Uendret (21.5) |
+| A11Y-127 | 6 | Nei | Uendret, delvis med vilje (Fase 6) |
+| A11Y-162, -163, -194, -214, -215 | Informasjon | Nei | Uendret |
+
+### 21.2 Oppfølgingsoppgaver
+
+**OPPF-001 – rettet (feil i appen, ikke i testen).**
+
+- *Årsak, påvist:* `routeFocus.js` avgjør om et Inertia-besøk er et sideskifte én ramme etter `navigate`
+  (`requestAnimationFrame` + `setTimeout 0`). Kunngjøringer → Saksliste er samme komponent og samme sti; bare
+  tittelen skiller dem. Inertias `<Head>` skriver tittelen fra en passiv effekt via en `debounce` på 1 ms, og den
+  kan lande *etter* avgjørelsen. Da så besøket ut som et filter, og fokus ble stående på lenken. En midlertidig
+  Playwright-sonde (8 besøk, logget tittel og `activeElement` i avgjørelsesøyeblikket) viste den gamle tittelen
+  i 2 av 8 besøk, og i begge sto fokus på lenken (`A`) i stedet for h1. Det forklarer hvorfor testen var
+  ustabil i samlede kjøringer (høyere last) og grønn isolert, og hvorfor ingen fase kunne knyttes til feilen.
+- *Rettelse:* et besøk som ser ut som en oppdatering av samme side (samme komponent og sti, annen spørrestreng)
+  observerer `<head>` til neste besøk starter eller i høyst 1,5 s. Endres tittelen, er det et sideskifte, og
+  fokus flyttes til h1 – men bare hvis fokus fortsatt er på `<body>` eller på kontrollen brukeren trykket.
+  Filtre som beholder tittelen, berøres ikke. Ingen timeout eller påstand i testen er endret.
+- *Verifisert:* samme sonde etter rettelsen, 30 besøk (15 med normal CPU, 15 med 6× CPU-struping): tittelen
+  kom for sent i 11 av 30, fokus endte på h1 i 30 av 30. Ny enhetstest for den sene tittelen, filteret uten
+  titteländring og brukeren som har gått videre. Sonden er slettet.
+- *Akseptansekriteriet i §17.12.9* (tre påfølgende samlede kjøringer) kan først vurderes i Fase 7C. OPPF-001
+  regnes som rettet med påvist årsak, men lukkes formelt etter 7C.
+
+**OPPF-002 – rettet (testen).** Testen klikket 25 px til venstre for den venstreste etikettpikselen og bommet
+når noden var liten. Den leser nå Sigmas egne kall til `fillText` på etikettlerretet
+(`fillText(label, x + size + 3, y + 16/3)`) og klikker 3 px innenfor nodens høyre kant på nodens senterlinje.
+Kartet nullstilles ved hver `clearRect`, så det gjelder rammen som vises, og testen venter til kameraet står
+stille. Påstandene (panelet åpnes, full tittel, ingen ellipse) er uendret; ingen produksjonskode er endret.
+10 av 10 gjentatte kjøringer bestått.
+
+**OPPF-003 – rettet (testen).** Wiki-fanene defineres ikke lenger i `CustomerAppLayout.jsx`, men i
+`areaNavigationItems()` i `Support/appNavigation.js`. Testen leser nå Wiki-grenen der, krever de fire fanene
+(`key: 'wiki-…'`) og at ingen `wiki-quality`/`tab: 'quality'` finnes – og at verken layouten eller
+navigasjonsfilen nevner `wiki-quality`. Ingen Wiki-funksjonalitet er endret. 11/11 i klassen.
+
+**OPPF-004 – rettet (foreldet forventning).** Basis gir `wiki`, `quality`, `improvements` og
+`management_review`; det er modulkatalogens bevisste regel, låst av `CustomerModuleEntitlementTest` og
+`NavigationEntitlementMatrixTest`. `CustomerCreatePageTest` forventet katalogen fra før Ledelsens gjennomgåelse.
+Forventningen er oppdatert; ingen tilgangs- eller administrasjonslogikk er endret.
+
+### 21.3 WCAG-funn rettet i 7A
+
+| ID | Rettelse |
+|---|---|
+| A11Y-153 | Grafens relasjonstooltip står der pekeren gikk inn på linjen (følger ikke lenger pekeren), kan pekes på (`pointer-events-none` fjernet, 300 ms frist før den skjules når pekeren forlater linjen) og lukkes med Escape. Escape lyttes bare på mens tooltipen vises. |
+| A11Y-156 | Wiki: opplastingsfeltet i Kildedokumenter, alle knappene i gjennomgangspanelet og dialogene (send til gjennomgang, kvalitetssikrer, send tilbake, godkjenn, gjenåpne, avbryt) og blokkredigeringens Lagre/Avbryt er `aria-disabled` + vakt i stedet for `disabled` mens forespørselen går. `disabled` er beholdt der en fast forutsetning mangler (ingen kontrollør valgt, for kort begrunnelse, ingen kontekst). Låsende kildetester er endret til å kreve det nye mønsteret – like strenge. |
+| A11Y-196 | Kravbibliotekets aktiveringsdialog og alle lagreknapper i Etterlevelse og revisjon (15 knapper i 11 filer). Ny felles hjelper i `focusManagement.js`: `submitWhenIdle(form, handler)` (avviser ny innsending mens den første går) og `BUSY_STYLE`. |
+| A11Y-184 | «Ferdigstill» i Ledelsens gjennomgåelse: grunnen står som synlig tekst under knappen og beskriver den (`aria-describedby`); `title` er fjernet. Bekreftelsesknappen i panelet beholder fokus mens den lagrer. |
+| A11Y-161 | «Legg artikkelen inn i Wiki»: feltfeil fra serveren vises ved Tittel/Artikkel med fokus dit; andre avvisninger (grensen per aktivitet) i en oppsummering ved knappen, som får fokus. Knappen er ikke lenger `disabled` mens den sender. |
+| A11Y-193 | En fjerning fra revisjonens omfang som avvises (`errors.audit`, «kravet har kontrollhandlinger») vises også ved knappen og beskriver den. `trackRowAction` har fått valget `errorKey`, slik at en avvisning som kommer som valideringsfeil, kan vises ved raden. Varselet øverst er fortsatt eneste `role="alert"`. De andre `errors.audit`-kildene oppstår bare når revisjonens status har endret seg under brukeren; de vises i varselet øverst som før. |
+| A11Y-195 | «Registrer funn» mens Nytt funn er åpent: fokus flyttes til første felt i det nystartede skjemaet. |
+| A11Y-172 | Risiko: alle datoer følger appens språk (`riskDates.js`; `en-GB` / `nb-NO`), også i Trenger oppmerksomhet. |
+| A11Y-105, -155 | Wiki: blokkredigeringens knapper og meldinger, «Oppdater», «I kø siden …», mobiletikettene i Kjøringer, «Fjern kildefilter», feilteksten i sletteforhåndsvisningen og tabellhodene i Wiki-sider. Admin: Varsler (inkl. stavefeilen «varseler»). 20 nye nøkler i begge språkfiler. |
+
+Ingen ruter, kontrollere, validering, tilganger, data, migrasjoner eller forretningsregler er endret.
+
+### 21.4 Systemisk restforhold: `disabled` under lagring
+
+Etter 7A står 126 kontroller i 35 filer (Kvalitet, Anbud/AI, Notices, Ledelsens gjennomgåelse, Mål, admin av
+brukere og avdelinger m.fl.) fortsatt `disabled` mens forespørselen går. Fokus faller da til `<body>` *under*
+forespørselen. Når besøket er ferdig, setter `routeFocus.js` (A11Y-134) fokus tilbake på samme kontroll, og
+skjema som avvises, flytter fokus til første feil. Virkningen er derfor forbigående (typisk under ett sekund):
+en Tab trykket akkurat da starter øverst. Vurdering: kategori 3 – mulig avvik fra 2.4.3 i et kort tidsrom, ikke
+en blokkerende barriere. Det er ikke rettet bredt i 7A for ikke å gjøre en generell omskriving; mønsteret
+(`aria-disabled` + `BUSY_STYLE` + `submitWhenIdle`) finnes nå og kan tas modul for modul. Bør verifiseres med
+skjermleser i 7B (hva leses når en lagreknapp trykkes).
+
+### 21.5 Fortsatt åpne funn
+
+| ID | Kategori | Status |
+|---|---|---|
+| A11Y-105, -155 (rest) | 1 for engelsk admin-UI, ellers 4 | Filament-driftssidene (`monitoring`, `ai-forbruk`, `ai-profitability`, `billing-overview`, `system-status`, høstingssidene, `csv-import`, `view-doffin-supplier`) har hardkodet norsk eller engelsk. Bare interne superadministratorer. De offentlige sidene og samtykketekstene er bare på norsk, og siden er `lang="no"`; det er innhold, ikke et 3.1.2-avvik. |
+| §21.4 | 3 | Se over. |
+| A11Y-160 | 6 | Tekst under 12 px i prosessdiagrammet; samme innhold i steglisten. |
+| A11Y-186 | 6 | KPI: feilteksten ved blur skyver «Lagre» ned mellom klikk og slipp. Krever synlig layoutendring. |
+| A11Y-127 | 6 | Delvis med vilje (Fase 6). |
+| A11Y-126 | 5 | PDF ikke tagget; HTML-alternativet er lenket. |
+| A11Y-145 | 5 | Se 21.7. |
+| A11Y-154 | 4 | Se 21.6. |
+| A11Y-162, -163, -194, -214, -215 | Informasjon | Uendret. |
+
+### 21.6 A11Y-154 – alternativ tekst fra kildeinnhold
+
+Fakta i koden: `DocumentTextExtractor` leser alternativ tekst fra Word (`wp:docPr` `descr`, ellers `title`).
+`EnterpriseWikiImageBlockBuilder` viser den som `alt`; bilder klassifisert som dekorative får `alt=""`. Mangler
+alternativ tekst i kilden, vises bildet med `alt=""` og figurteksten («Figur N» eller bildeteksten). Wiki har
+allerede funntypen `planned_figure_alt_text_missing` for planlagte figurer uten alternativ tekst.
+
+Rutine (innholdsarbeid, ingen kodeendring):
+
+1. *Finne:* funn av typen `planned_figure_alt_text_missing` under Wiki → Kjøringer, og – for en samlet oversikt –
+   bildeblokker der `image_data.alt_text` er tom og kategorien ikke er dekorativ.
+2. *Rette:* dokumenteieren legger inn alternativ tekst i Word-kilden (Høyreklikk bildet → «Rediger alternativ
+   tekst»), eller merker bildet som dekorativt, og laster opp dokumentet på nytt.
+3. *Ikke:* generere beskrivelser med AI eller skrive dem i Wiki uten kilde. En beskrivelse skal komme fra den som
+   kjenner bildet.
+4. Vurderes senere: en egen advarsel i kvalitetskontrollen for alle bildeblokker uten beskrivelse (krever
+   beslutning; endrer lint-reglene).
+
+### 21.7 Produktbeslutninger (ikke kodeoppgaver)
+
+- **A11Y-145 – «Velg ansvarlig» på AI-kravkortet.** Dialogen er tilgjengelig (`ActionDialog`), men kan ikke åpnes:
+  ingen knapp kaller `openResponsiblePicker`. Koden er beholdt uendret. Beslutningen er om funksjonen skal
+  tilbys (og hvor), eller fjernes. Det er ikke et WCAG-avvik så lenge den ikke vises.
+- **A11Y-126 – tagget PDF.** Krever en annen PDF-motor enn dompdf. HTML-rapporten er det tilgjengelige
+  alternativet og er lenket fra nedlastingen.
+- **A11Y-154 – advarsel for bilder uten beskrivelse** (21.6 punkt 4).
+- **§21.4 – bred overgang fra `disabled` til `aria-disabled`** i de øvrige modulene: om det skal tas nå eller
+  modul for modul.
+
+### 21.8 Tester i 7A
+
+| Test | Resultat |
+|---|---|
+| Enhetstester (node 22, hele suiten) | 2065 bestått, 0 feilet, 0 hoppet over |
+| `lint:a11y` | 0 feil, 0 advarsler |
+| `npm run build` | Bestått |
+| PHP, målrettet: hele `tests/Feature/Filament`, `WikiQualityTabRemovalTest`, fem oversettelsestester | 327 bestått, 0 feilet (OPPF-004 er grønn) |
+| `a11y-navigation.spec.js:155`, sonde før/etter rettelse | Før: 2 av 8 besøk feil. Etter: 30 av 30 riktige (11 med sen tittel) |
+| `wiki-graph-labels.spec.js:82`, `--repeat-each=10` | 10 bestått, 0 feilet |
+| E2E, målrettet (20 spesifikasjoner for de berørte flytene) | 125 bestått, 0 feilet, 0 hoppet over (13,4 min; `a11y-navigation` hele filen inkludert) |
+
+Full PHP- og E2E-suite er ikke kjørt (Fase 7C). Ingen tester er deaktivert, ingen påstand er svekket, og ingen
+timeout er økt. Tilpassede eksisterende tester: `wikiReviewPanel.test.js`, `wikiSourceUpload.test.js`,
+`complianceLibrary.test.js` (krever nå `aria-disabled` + vakt i stedet for `disabled` under lagring),
+`complianceAudit.test.js` (fjernknappen kan ligge i en omslutning med feilteksten), `WikiQualityTabRemovalTest`,
+`CustomerCreatePageTest`, `wiki-graph-labels.spec.js:82`. Ny: `Support/a11yPhase7.test.js`.
+
+### 21.9 Krever manuell testing (til 7B)
+
+1. Skjermleser (VoiceOver + Safari, NVDA hvis tilgjengelig): sideskifte Kunngjøringer → Saksliste leser ny h1
+   én gang; `aria-disabled`-knappene i Wiki-gjennomgangen og Etterlevelse leses som utilgjengelige mens de lagrer
+   og beholder fokus; «Ferdigstill» leser grunnen; feilen ved «Fjern fra omfanget» leses som beskrivelse når man
+   går tilbake til knappen; artikkelfeilen i Kvalitet leses én gang.
+2. Mus: grafens relasjonstooltip kan nås med pekeren og lukkes med Escape; den står stille.
+3. Engelsk UI: Risiko-datoer og Wiki-tekstene over.
+4. Det systemiske restforholdet i 21.4.
+5. Alt som står i §15.8.7, §16.8, §17.8, §18.9, §19.12 og §20.11.
+
+### 21.10 Git-status
+
+Branch `feature/wcag-accessibility`, HEAD `c7feb597` (uendret). 39 endrede filer (inkl. denne planen) og 2 nye, ikke
+committet og ikke pushet. Ingen filer i `database/`, `routes/`, `config/` eller `app/`.
+
+### 21.11 Vurdering
+
+OPPF-001–004 er rettet; OPPF-001 med påvist årsak i appen og en rettelse der, ikke i testen. Ni åpne WCAG-funn
+er rettet (A11Y-153, -156, -161, -172, -184, -193, -195, -196 og Wiki/Varsler-delen av -105/-155). Det som står
+igjen, er klassifisert: ett systemisk forbigående forhold som bør verifiseres manuelt, intern admin-tekst,
+forbedringer utover AA, innhold og fire produktbeslutninger. Fase 7A er ikke manuelt verifisert, full suite er
+ikke kjørt, og resultatet gir ikke grunnlag for å hevde WCAG 2.2 AA-etterlevelse. **Fase 7B er ikke startet.**
+
+---
+
+## 22. Fase 7B – praktisk tilgjengelighetstesting, første runde (2026-10-16)
+
+### 22.1 Formål og avgrensning
+
+Dokumentere den første manuelle testrunden, vurdere hva den faktisk verifiserer, og peke ut de kontrollene som
+fortsatt mangler før Fase 7C. Ingen kodeendringer, ingen nye automatiske testkjøringer, ingen ny kartlegging.
+Resultatene fra Fase 7A (§21) er uendret.
+
+Grunnlaget er **brukerens muntlige tilbakemeldinger**. Det finnes ikke detaljerte testlogger, videoopptak eller
+skjermlesertranskripsjoner, og det er ikke registrert nøyaktig hvilke sider og handlinger som ble prøvd utover
+det som står under. Dette er en praktisk stikkprøve, ikke en formell tilgjengelighetsrevisjon.
+
+### 22.2 Testmiljø
+
+| | |
+|---|---|
+| Kode | `feature/wcag-accessibility`, HEAD `c7feb597` + ucommittede Fase 7A-endringer (§21.10) |
+| Maskin og OS | Mac, macOS (versjon ikke registrert) |
+| Nettleser | Safari (versjon ikke registrert) |
+| Hjelpemiddel | VoiceOver (macOS, slått på under Systeminnstillinger → Tilgjengelighet → VoiceOver) |
+| Zoom | Safaris egen sidezoom, 200 % og 400 % |
+| Data | Utviklingsmiljøet (`localhost`), ikke produksjonsdata |
+
+### 22.3 Manuelt gjennomførte kontroller
+
+1. **Tastaturnavigasjon.** Tastaturet virket først ikke. Årsaken var Safaris egen innstilling: som standard
+   flytter Tab bare mellom skjemafelt, ikke lenker og knapper, før tastaturnavigasjon slås på i Safari
+   (Innstillinger → Avansert, «Trykk Tab for å utheve hvert objekt på en nettside», eventuelt sammen med
+   macOS-innstillingen for tastaturnavigasjon). Etter at innstillingen ble slått på, virket grunnleggende
+   betjening, navigasjon mellom sider og fokus ved sideskift så riktig ut. Startproblemet er nettleserens
+   standardoppførsel og **registreres ikke som en feil i Procynia**.
+2. **Dialog.** Hjelpedialogen fra PageHelp-knappen ble åpnet og brukt med tastatur uten problemer.
+3. **Zoom.** Etter veiledning om hvordan zoomnivået kontrolleres: 200 % og 400 %, uten rapporterte problemer.
+4. **VoiceOver.** VoiceOver med Safari i Enterprise Wiki: opplesing og navigasjon virket.
+
+### 22.4 Resultater
+
+| Kontroll | Miljø | Resultat | Grunnlag |
+|---|---|---|---|
+| Grunnleggende tastaturnavigasjon | Safari, macOS | Fungerer | Manuell, brukerens tilbakemelding |
+| Fokus ved sidenavigasjon | Safari, macOS | Ser riktig ut | Manuell, brukerens tilbakemelding |
+| PageHelp-dialog | Safari, macOS | Ingen problemer rapportert | Manuell, brukerens tilbakemelding |
+| Zoom 200 % | Safari, macOS | Ingen problemer rapportert | Manuell, brukerens tilbakemelding |
+| Zoom 400 % | Safari, macOS | Ingen problemer rapportert | Manuell, brukerens tilbakemelding |
+| Grunnleggende VoiceOver-navigasjon | VoiceOver + Safari | Fungerer | Manuell, brukerens tilbakemelding |
+
+**Ingen nye feil er avdekket.**
+
+Hva dette tilfører utover Fase 1–7A: det er første gang noe er prøvd i **ekte Safari**, med **nettleserens egen
+zoom** og med **skjermleser**. Tidligere var alt dette uttrykkelig «ikke kontrollert» (§19.11, §20.10). Det
+styrker særlig 2.1.1 (tastatur), 2.4.3 (fokusrekkefølge ved sideskift), 2.4.7 (synlig fokus i Safari),
+1.4.4/1.4.10 (zoom/reflow, overordnet) og 4.1.2 (navn og rolle, grunnleggende) – på de prøvde flatene.
+
+### 22.5 Kjente begrensninger
+
+- **Utvalg:** bare de prøvde navigasjonene, én dialog (PageHelp) og Wiki for VoiceOver. Fokusfelle og fokusretur
+  i dialogen er ikke kontrollert særskilt. Andre dialoger (`ActionDialog`), skjemaer, feilmeldinger og
+  statusmeldinger er ikke manuelt prøvd.
+- **Dokumentasjon:** ingen logg over sider, handlinger eller hva VoiceOver leste; versjoner er ikke registrert.
+- **Zoom:** en overordnet kontroll, ikke full reflow-verifisering av alle moduler, bredder og innholdstyper
+  (brede tabeller, prosessdiagrammet, grafen).
+- **Nettlesere og hjelpemidler:** bare Safari og VoiceOver på macOS. Ikke Firefox, ikke Windows/NVDA, ikke
+  forced-colors/høykontrast, ikke mobil (VoiceOver iOS, TalkBack).
+- **Engelsk grensesnitt** er ikke prøvd manuelt.
+
+### 22.6 Gjenstående testbehov
+
+Prioritert etter risiko. Fase 1–7A har automatisk dekning (E2E med axe og tastatur i Chromium) for alt under;
+det som mangler, er hvordan det faktisk oppleves i Safari og med skjermleser. Det kreves ikke en ny full manuell
+runde gjennom alle moduler.
+
+**Nødvendige før endelig WCAG-vurdering (7C)** – hver er en kort, konkret kontroll med VoiceOver + Safari:
+
+1. **Lagring og `aria-disabled`/`disabled`** (2.4.3, 4.1.2; §21.4, A11Y-156/-196). To representative tilfeller:
+   (a) en knapp som nå er `aria-disabled` – «Send til gjennomgang» i Wiki-gjennomgangen eller «Lagre» i et
+   Etterlevelse-skjema: fokus blir på knappen og VoiceOver sier at den er utilgjengelig/dimmet mens den lagrer;
+   (b) en av de 126 som fortsatt er `disabled` – f.eks. «Lagre» i et Kvalitet- eller Mål-skjema: hva skjer med
+   fokus og opplesing under og etter lagringen. Resultatet avgjør om §21.4 kan stå som forbigående, eller må
+   rettes før merge.
+2. **Skjemavalidering** (3.3.1, 3.3.2, 4.1.3). Send ett skjema med en tom påkrevd verdi (f.eks. ny risiko eller
+   nytt avvik): fokus går til feltet, og VoiceOver leser etiketten, «ugyldig» og feilteksten én gang.
+3. **Wiki-gjennomgang og publisering** (akseptansekriteriet i §8 Fase 5). Send en side til gjennomgang og send
+   den tilbake eller godkjenn den som kontrollør, med tastatur og VoiceOver: dialogens tittel og beskrivelse
+   leses, fokus er fanget i dialogen og kommer tilbake etterpå, og toasten leses.
+4. **AI-statusmeldinger** (4.1.3; §18.9). Start kravuttrekk eller «Lag svar» i et anbud: «arbeider» og «ferdig»
+   (eller feil) leses én gang hver, ikke ved hver polling, og fokus flyttes ikke. Kan bare gjøres der AI er
+   tilgjengelig i testmiljøet; ellers registreres den som ikke verifisert.
+
+**Anbefalte** (styrker grunnlaget, men er ikke blokkerende hver for seg):
+
+5. **Wiki-grafens listevisning** (1.1.1, 2.1.1; A11Y-050): «Graf | Liste», «Vis detaljer» og relasjoner med
+   VoiceOver. VoiceOver i Wiki er allerede prøvd generelt; listen spesielt er ikke det.
+6. **Firefox (macOS)**: fokusringen i prosessdiagrammet (A11Y-128) og at interne lenker flytter fokus (A11Y-015).
+7. **Engelsk UI**: én side i Risiko og Wiki (A11Y-172, -105).
+8. **Grafens relasjonstooltip med mus** (A11Y-153): kan nås med pekeren og lukkes med Escape.
+9. **NVDA + Firefox/Chrome på Windows**: anbefales før en påstand om *bred* skjermlesertilgjengelighet
+   (§9.3). Mangler miljøet, rapporteres den som **ikke gjennomført** i 7C, og påstanden avgrenses til
+   VoiceOver + Safari.
+10. **Forced-colors / Windows høykontrast og mobil (VoiceOver iOS)**: ikke gjennomført; rapporteres som
+    ikke verifisert dersom de ikke tas.
+
+### 22.7 Åpne WCAG-avvik (uendret av 7B)
+
+Ingen avvik lukkes på grunnlag av 7B. Fra §21.5:
+
+| ID | Status |
+|---|---|
+| §21.4 – 126 kontroller `disabled` under lagring | Åpent, mulig forbigående avvik fra 2.4.3. Skal undersøkes manuelt (22.6 punkt 1). Ikke massekonvertert. |
+| A11Y-126 – PDF ikke tagget | Åpent. Gjelder dersom PDF-en (Ledelsens gjennomgåelse) er omfattet av kravene; i så fall et registrert avvik med HTML-rapporten som tilgjengelig alternativ. |
+| A11Y-105/-155 (rest) | Åpent for admin-driftssidene (interne superadministratorer). |
+| A11Y-154 | Åpent innholdsforhold (rutine i §21.6). |
+| A11Y-160, -186, -127 | Forbedringer utover AA, åpne. |
+| OPPF-001 | Rettet med påvist årsak (§21.2), **ikke formelt lukket** før tre påfølgende grønne samlede regresjonskjøringer i 7C. |
+
+### 22.8 Beslutningspunkter (som før)
+
+- **A11Y-145 «Velg ansvarlig»:** ikke aktivert og ikke slettet. Produktbeslutningen er utsatt.
+- **A11Y-126:** dagens PDF-løsning beholdes. Manglende tagging står som åpent avvik dersom PDF-ene er omfattet.
+- **A11Y-154:** advarsel om manglende alternativ tekst planlegges som en egen forbedring. Dokumentimporten
+  endres ikke nå.
+- **§21.4:** ingen massekonvertering. Representative tilfeller undersøkes manuelt (22.6 punkt 1).
+
+### 22.9 Anbefaling om neste steg
+
+Første runde gir et reelt, positivt manuelt grunnlag for grunnleggende tastatur, fokus ved sideskift, zoom og
+VoiceOver i Safari, og avdekket ingen nye feil. Den dekker ikke de dynamiske delene der risikoen er størst.
+Anbefaling: gjennomfør **kontroll 1 (lagring/`aria-disabled`) og kontroll 2 (skjemavalidering)** i 22.6 før
+Fase 7C – de tar noen minutter hver og avgjør om §21.4 kan bli stående. Kontroll 3 og 4 kan gjøres parallelt
+med 7C. Det som ikke blir gjort, rapporteres som ikke verifisert i WCAG-matrisen i 7C. Prosjektet er **ikke**
+godkjent som WCAG 2.2 AA-samsvarende. Ingenting er committet; **Fase 7C er ikke startet.**
+
+---
+
+## 23. Avslutning av utviklingsarbeidet (2026-10-16)
+
+Prosjektbeslutning 2026-10-16: den aktive utviklingen av universell utforming avsluttes nå, og Fase 7C gjennomføres
+ikke. Fase 7A og 7B committes og branchen pushes. Merge til `main` besluttes separat.
+
+**Gjennomført**
+
+- Fase 1–6: implementert, automatisk verifisert, sluttkontrollert og committet (`4c594ebf` … `c7feb597`).
+- Fase 7A: OPPF-001–004 og ni WCAG-funn rettet, verifisert med målrettede tester (§21.8: enhet 2065/0, `lint:a11y`
+  0, bygg, målrettet PHP 327/0, målrettet E2E 125/0).
+- Fase 7B: første praktiske runde dokumentert – tastatur, fokus ved sideskift, PageHelp-dialog, zoom 200/400 % og
+  VoiceOver i Safari på macOS, uten rapporterte problemer (§22). Bygger på brukerens tilbakemeldinger, uten logger.
+
+**Ikke gjennomført**
+
+- Fase 7C (samlet regresjon, WCAG 2.2 A/AA-matrise og merge-vurdering) gjennomføres ikke.
+- Full PHP- og E2E-regresjon er **ikke** kjørt på den endelige Fase 7-koden. Siste samlede E2E-kjøring er fra
+  sluttkontrollen av Fase 6 (§20.16.2: 255/1/0, feilen var OPPF-001).
+- De manuelle kontrollene i §22.6 (lagring/`aria-disabled`, skjemavalidering, Wiki-gjennomgang, AI-status m.fl.),
+  Firefox, NVDA/Windows, forced-colors og mobil er ikke verifisert.
+
+**Står åpent**
+
+- **OPPF-001:** rettet med påvist årsak (§21.2), men **ikke formelt lukket** – kriteriet om tre påfølgende grønne
+  samlede regresjonskjøringer (§17.12.9) er ikke oppfylt.
+- **WCAG-funn:** alt i §21.5 og §22.7 står som åpent: §21.4 (126 kontroller `disabled` under lagring), A11Y-105/-155
+  (rest), A11Y-126, A11Y-154, A11Y-160, A11Y-186, A11Y-127 og informasjonspunktene.
+- **Beslutningspunkter:** A11Y-145, A11Y-126, A11Y-154 og §21.4 (§22.8).
+- **Ikke verifisert:** alt som står som manuell testing i §15.8.7, §16.8, §17.8, §18.9, §19.12, §20.11 og §22.6.
+
+**Vurdering.** Procynia har fått omfattende, automatisk verifiserte tilgjengelighetsforbedringer og en første
+praktisk kontroll med skjermleser. At utviklingsarbeidet avsluttes, innebærer **ikke** at full etterlevelse av
+WCAG 2.2 AA er dokumentert. Før en slik påstand (f.eks. i en tilgjengelighetserklæring) må full regresjon kjøres,
+OPPF-001 lukkes etter kriteriet, de nødvendige kontrollene i §22.6 gjennomføres og de åpne funnene rettes eller
+begrunnes.

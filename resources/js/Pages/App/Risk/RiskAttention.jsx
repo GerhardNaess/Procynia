@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from '@inertiajs/react';
+import { Link, usePage } from '@inertiajs/react';
 import { formatDay } from './RiskReviewSchedule';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
@@ -51,6 +51,7 @@ export default function RiskAttention({ attention, tr }) {
 }
 
 function AttentionCategory({ category, ta, tr }) {
+    const { locale } = usePage().props;
     const [open, setOpen] = useState(false);
     const listId = `risk-attention-${category.key}`;
 
@@ -80,7 +81,7 @@ function AttentionCategory({ category, ta, tr }) {
                                 {risk.title}
                             </Link>
                             {risk.area_name && <span className="ml-2 text-base text-slate-500">{risk.area_name}</span>}
-                            <p className="mt-0.5 text-base text-slate-600">{reason(category.key, risk.detail ?? {}, ta, tr)}</p>
+                            <p className="mt-0.5 text-base text-slate-600">{reason(category.key, risk.detail ?? {}, ta, tr, locale)}</p>
                         </li>
                     ))}
                 </ul>
@@ -90,7 +91,7 @@ function AttentionCategory({ category, ta, tr }) {
 }
 
 /** Why the risk is listed, in one sentence, from the facts the server sent. */
-function reason(key, detail, ta, tr) {
+function reason(key, detail, ta, tr, locale) {
     const reasons = ta.reasons ?? {};
     const fill = (text, values) => Object.entries(values)
         .reduce((result, [name, value]) => result.replace(`:${name}`, String(value ?? '')), text ?? '');
@@ -102,17 +103,17 @@ function reason(key, detail, ta, tr) {
                 score: detail.score,
             });
         case 'residual_not_assessed':
-            return fill(reasons.residual_not_assessed ?? 'Siste vurdering (:date) har ikke restrisiko.', { date: formatDay(detail.assessed_on) });
+            return fill(reasons.residual_not_assessed ?? 'Siste vurdering (:date) har ikke restrisiko.', { date: formatDay(detail.assessed_on, locale) });
         case 'review_overdue':
-            return fill(reasons.review_overdue ?? 'Ny vurdering skulle vært gjort innen :date.', { date: formatDay(detail.next_review_on) });
+            return fill(reasons.review_overdue ?? 'Ny vurdering skulle vært gjort innen :date.', { date: formatDay(detail.next_review_on, locale) });
         case 'acceptance_expired':
-            return fill(reasons.acceptance_expired ?? 'Aksepten av restrisikoen gjaldt til og med :date.', { date: formatDay(detail.valid_until) });
+            return fill(reasons.acceptance_expired ?? 'Aksepten av restrisikoen gjaldt til og med :date.', { date: formatDay(detail.valid_until, locale) });
         case 'actions_overdue':
             return detail.count === 1
-                ? fill(reasons.actions_overdue_one ?? 'Ett åpent tiltak har passert fristen :date.', { date: formatDay(detail.earliest_due_on) })
+                ? fill(reasons.actions_overdue_one ?? 'Ett åpent tiltak har passert fristen :date.', { date: formatDay(detail.earliest_due_on, locale) })
                 : fill(reasons.actions_overdue_many ?? ':count åpne tiltak har passert fristen, det eldste :date.', {
                     count: detail.count,
-                    date: formatDay(detail.earliest_due_on),
+                    date: formatDay(detail.earliest_due_on, locale),
                 });
         default:
             return reasons.not_assessed ?? 'Risikoen er aktiv, men er ikke vurdert.';

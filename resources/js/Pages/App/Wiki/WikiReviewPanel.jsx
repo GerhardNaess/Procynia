@@ -99,6 +99,11 @@ const FOCUS_AFTER_ERROR = {
     reject: ['wiki-change-reason', 'wiki-review-panel'],
 };
 
+// While a request runs the panel's buttons stay focusable (aria-disabled + a guard in each handler),
+// so focus is not dropped to <body> mid-request (2.4.3, A11Y-156). `disabled` is only for a fixed
+// precondition, such as no reviewer chosen yet.
+const BUSY = 'aria-disabled:cursor-not-allowed aria-disabled:opacity-50';
+
 const MIN_REASON = 10;
 const MAX_REASON = 2000;
 
@@ -260,10 +265,10 @@ function QaAssignmentBlock({ qaAssignment, tw, busy, triggerRef, onOpen }) {
                     <button
                         ref={triggerRef}
                         type="button"
-                        disabled={busy}
-                        onClick={onOpen}
+                        aria-disabled={busy || undefined}
+                        onClick={() => { if (! busy) onOpen(); }}
                         data-testid="wiki-qa-assign"
-                        className="inline-flex min-h-9 items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-700 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                        className={`inline-flex min-h-9 items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-700 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50 ${BUSY}`}
                     >
                         {assignee
                             ? (tw.qa_change_button ?? 'Endre kvalitetssikrer')
@@ -604,13 +609,15 @@ export default function WikiReviewPanel({
                         <button
                             ref={submitTriggerRef}
                             type="button"
-                            disabled={busy || eligibleReviewers.length === 0}
+                            disabled={eligibleReviewers.length === 0}
+                            aria-disabled={busy || undefined}
                             onClick={() => {
+                                if (busy) return;
                                 setActionError(null);
                                 setReviewerId(eligibleReviewers.length === 1 ? String(eligibleReviewers[0].id) : '');
                                 setIsSubmitOpen(true);
                             }}
-                            className={PRIMARY_ACTION}
+                            className={`${PRIMARY_ACTION} ${BUSY}`}
                         >
                             {tw.submit_button ?? 'Send til gjennomgang'}
                         </button>
@@ -644,9 +651,9 @@ export default function WikiReviewPanel({
                 {canReopen && (
                     <button
                         type="button"
-                        disabled={busy}
+                        aria-disabled={busy || undefined}
                         onClick={reopen}
-                        className={PRIMARY_ACTION}
+                        className={`${PRIMARY_ACTION} ${BUSY}`}
                     >
                         {tw.reopen_button ?? 'Gjenåpne for redigering'}
                     </button>
@@ -655,9 +662,9 @@ export default function WikiReviewPanel({
                 {canApproveFinal && (
                     <button
                         type="button"
-                        disabled={busy}
+                        aria-disabled={busy || undefined}
                         onClick={approve}
-                        className={PRIMARY_ACTION}
+                        className={`${PRIMARY_ACTION} ${BUSY}`}
                     >
                         {isSystemOwner && reviewAssignment.reviewer && currentUserId !== null
                             && reviewAssignment.reviewer.id !== currentUserId
@@ -672,9 +679,9 @@ export default function WikiReviewPanel({
                 {canSendBack && (
                     <button
                         type="button"
-                        disabled={busy}
-                        onClick={() => { setActionError(null); setChangesTarget('page'); setReason(''); }}
-                        className={WARNING_ACTION}
+                        aria-disabled={busy || undefined}
+                        onClick={() => { if (busy) return; setActionError(null); setChangesTarget('page'); setReason(''); }}
+                        className={`${WARNING_ACTION} ${BUSY}`}
                     >
                         {tw.review_send_back ?? 'Send tilbake'}
                     </button>
@@ -720,12 +727,12 @@ export default function WikiReviewPanel({
                 </label>
 
                 <div className="mt-6 flex flex-wrap gap-3">
-                    <button type="button" disabled={busy || qaUserId === ''} onClick={assignQa} className={PRIMARY_ACTION}>
+                    <button type="button" disabled={qaUserId === ''} aria-disabled={busy || undefined} onClick={assignQa} className={`${PRIMARY_ACTION} ${BUSY}`}>
                         {qaAssignment?.assignee
                             ? (tw.qa_update_button ?? 'Oppdater')
                             : (tw.qa_send_button ?? 'Tildel')}
                     </button>
-                    <button type="button" disabled={busy} onClick={() => setIsQaOpen(false)} className={SECONDARY_ACTION}>
+                    <button type="button" aria-disabled={busy || undefined} onClick={() => { if (! busy) setIsQaOpen(false); }} className={`${SECONDARY_ACTION} ${BUSY}`}>
                         {tw.cancel ?? 'Avbryt'}
                     </button>
                 </div>
@@ -771,12 +778,12 @@ export default function WikiReviewPanel({
                 )}
 
                 <div className="mt-6 flex flex-wrap gap-3">
-                    <button type="button" disabled={busy || reviewerId === ''} onClick={submit} className={PRIMARY_ACTION}>
+                    <button type="button" disabled={reviewerId === ''} aria-disabled={busy || undefined} onClick={submit} className={`${PRIMARY_ACTION} ${BUSY}`}>
                         {processing === 'submit'
                             ? (tw.review_sending ?? 'Sender …')
                             : (tw.submit_button ?? 'Send til gjennomgang')}
                     </button>
-                    <button type="button" disabled={busy} onClick={() => { setIsSubmitOpen(false); setActionError(null); }} className={SECONDARY_ACTION}>
+                    <button type="button" aria-disabled={busy || undefined} onClick={() => { if (busy) return; setIsSubmitOpen(false); setActionError(null); }} className={`${SECONDARY_ACTION} ${BUSY}`}>
                         {tw.cancel ?? 'Avbryt'}
                     </button>
                 </div>
@@ -831,10 +838,10 @@ export default function WikiReviewPanel({
                 )}
 
                 <div className="mt-6 flex flex-wrap gap-3">
-                    <button type="button" disabled={busy || reasonTooShort} onClick={requestChanges} className={WARNING_ACTION}>
+                    <button type="button" disabled={reasonTooShort} aria-disabled={busy || undefined} onClick={requestChanges} className={`${WARNING_ACTION} ${BUSY}`}>
                         {tw.review_send_back ?? 'Send tilbake'}
                     </button>
-                    <button type="button" disabled={busy} onClick={() => { setChangesTarget(null); setActionError(null); }} className={SECONDARY_ACTION}>
+                    <button type="button" aria-disabled={busy || undefined} onClick={() => { if (busy) return; setChangesTarget(null); setActionError(null); }} className={`${SECONDARY_ACTION} ${BUSY}`}>
                         {tw.cancel ?? 'Avbryt'}
                     </button>
                 </div>

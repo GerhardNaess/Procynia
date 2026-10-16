@@ -3,7 +3,7 @@ import { useForm } from '@inertiajs/react';
 import { RequiredFieldsNote } from '../../../../Components/App/FormField';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
-import { usePanelFocus } from '../../../../Support/focusManagement';
+import { BUSY_STYLE, submitWhenIdle, usePanelFocus } from '../../../../Support/focusManagement';
 import { INPUT, LABEL } from '../../../../Support/formStyles';
 import RequiredMark from '../RequiredMark';
 import FieldError from '../FieldError';
@@ -75,7 +75,7 @@ export default function RequirementApplicability({ requirementId, applicability,
             </div>
 
             {editing && (
-                <form ref={formRef} onSubmit={send} className="mt-4 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4" data-testid="compliance-applicability-form">
+                <form ref={formRef} onSubmit={submitWhenIdle(form, send)} className="mt-4 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4" data-testid="compliance-applicability-form">
                     <fieldset {...radioGroupProps('compliance-applicability', choiceError, { required: true })}>
                         <legend className={LABEL}>{ta.field ?? 'Relevans'}<RequiredMark /></legend>
                         <div className="mt-2 grid gap-2 sm:grid-cols-3">
@@ -116,7 +116,7 @@ export default function RequirementApplicability({ requirementId, applicability,
                     <RequiredFieldsNote text={tr.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
                     <div className="flex flex-wrap justify-end gap-3">
                         <button type="button" onClick={() => { setEditing(false); form.reset(); form.clearErrors(); }} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
-                        <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>{form.processing ? (tr.saving ?? 'Lagrer...') : (ta.submit ?? 'Lagre relevans')}</button>
+                        <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`}>{form.processing ? (tr.saving ?? 'Lagrer...') : (ta.submit ?? 'Lagre relevans')}</button>
                     </div>
                 </form>
             )}

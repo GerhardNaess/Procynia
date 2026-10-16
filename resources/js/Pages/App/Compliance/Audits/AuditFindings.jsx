@@ -3,7 +3,7 @@ import { Link, router, useForm } from '@inertiajs/react';
 import { RequiredFieldsNote } from '../../../../Components/App/FormField';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
-import { refocusIfLost } from '../../../../Support/focusManagement';
+import { BUSY_STYLE, focusableWithin, focusElement, refocusIfLost, submitWhenIdle } from '../../../../Support/focusManagement';
 import { ERROR, HINT, INPUT, LABEL } from '../../../../Support/formStyles';
 import { formatDay } from '../../Improvements/improvementStatus';
 import RequiredMark from '../RequiredMark';
@@ -88,7 +88,7 @@ function FindingForm({ auditId, finding = null, draft = null, options, types, on
     };
 
     return (
-        <form ref={formRef} onSubmit={submit} className="mt-4 space-y-4 rounded-2xl border border-slate-200 p-4" data-testid="compliance-finding-form" data-inline-panel={finding ? `edit-${finding.id}` : 'create'}>
+        <form ref={formRef} onSubmit={submitWhenIdle(form, submit)} className="mt-4 space-y-4 rounded-2xl border border-slate-200 p-4" data-testid="compliance-finding-form" data-inline-panel={finding ? `edit-${finding.id}` : 'create'}>
             <h3 className="text-lg font-semibold text-slate-950">{finding ? (tf.edit_heading ?? 'Rediger funn') : (tf.create_heading ?? 'Nytt funn')}</h3>
 
             <fieldset {...radioGroupProps(`${idPrefix}-type`, form.errors.finding_type, { required: true })}>
@@ -206,7 +206,7 @@ function FindingForm({ auditId, finding = null, draft = null, options, types, on
 
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={() => { form.reset(); form.clearErrors(); onDone(); }} className={SECONDARY_ACTION}>{tf.cancel ?? 'Avbryt'}</button>
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`}>
                     {form.processing ? (tf.saving ?? 'Lagrer...') : (tf.save ?? 'Lagre funn')}
                 </button>
             </div>
@@ -265,7 +265,7 @@ function HandoffForm({ auditId, finding, handoff, onDone, ta }) {
                     </div>
                 </>
             ) : (
-                <form ref={formRef} onSubmit={submit} className="space-y-4">
+                <form ref={formRef} onSubmit={submitWhenIdle(form, submit)} className="space-y-4">
                     <div>
                         <p className={LABEL}>{tf.handoff_type ?? 'Sakstype'}</p>
                         <p className="mt-1 text-base text-slate-900" data-testid="compliance-handoff-type">{improvementTypeLabel(finding.improvement_type, ta)}</p>
@@ -330,7 +330,7 @@ function HandoffForm({ auditId, finding, handoff, onDone, ta }) {
 
                     <div className="flex flex-wrap justify-end gap-3">
                         <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tf.cancel ?? 'Avbryt'}</button>
-                        <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                        <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`}>
                             {form.processing ? (tf.saving ?? 'Lagrer...') : (tf.handoff_submit ?? 'Opprett sak')}
                         </button>
                     </div>
@@ -485,13 +485,34 @@ export default function AuditFindings({ audit, findings = [], options = null, ty
         },
     });
 
+    // «Registrer funn» while Nytt funn is already open starts the form over for the other check. The
+    // panel does not change, so usePanelSwitchFocus does not move focus — it stayed on the button in
+    // Kontrollhandlinger while the view scrolled to the form (2.4.3, A11Y-195). Focus goes into the
+    // new form instead, once it has rendered.
+    const [refocusDraft, setRefocusDraft] = useState(0);
+
     useEffect(() => {
         if (draft && canRecord) {
             fromDraft.current = true;
+            if (panel === 'create') {
+                setRefocusDraft((count) => count + 1);
+            }
             setPanel('create');
             document.getElementById('compliance-audit-findings-heading')?.scrollIntoView({ block: 'start' });
         }
     }, [draft?.key]);
+
+    useEffect(() => {
+        if (refocusDraft === 0) {
+            return;
+        }
+
+        const form = sectionRef.current?.querySelector?.('[data-inline-panel="create"]');
+
+        if (form) {
+            focusElement(focusableWithin(form)[0] ?? form, { preventScroll: true });
+        }
+    }, [refocusDraft]);
 
     return (
         <section ref={sectionRef} className={CARD} aria-labelledby="compliance-audit-findings-heading" data-testid="compliance-audit-findings">

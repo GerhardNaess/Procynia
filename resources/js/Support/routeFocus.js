@@ -28,6 +28,9 @@ import { focusElement } from './focusManagement.js';
 
 export const MAIN_CONTENT_ID = 'main-content';
 
+/** How long a same-path visit waits for a title that <Head> writes late (see installRouteFocus). */
+export const TITLE_WAIT_MS = 1500;
+
 /** The path of an Inertia page URL, without query string or fragment. */
 export function pathOf(url) {
     return String(url ?? '').split(/[?#]/)[0];
@@ -169,7 +172,66 @@ export function installRouteFocus(router, { initialPage = null, doc = document, 
     // on the next frame. Callbacks run in the order they were scheduled.
     const afterRender = (callback) => win.requestAnimationFrame(() => win.setTimeout(callback, 0));
 
+    // The title is not always there by then: <Head> writes it from a passive effect through a
+    // debounced timer, which can land after `afterRender` (OPPF-001: Kunngjøringer → Saksliste, one
+    // component and one path, was taken for a filter in about one visit of four). So a visit that
+    // looked like an update of the same page — same component and path, another query string —
+    // watches <head> until the next visit starts or `TITLE_WAIT_MS` has passed. If the title then
+    // changes, it was a page change after all.
+    let stopTitleWatch = null;
+    const cancelTitleWatch = () => {
+        stopTitleWatch?.();
+        stopTitleWatch = null;
+    };
+
+    const focusNewPage = () => {
+        const main = doc.getElementById(MAIN_CONTENT_ID) ?? doc.querySelector('main');
+
+        if (pageOwnsFocus(doc.activeElement, main, doc.body)) {
+            return;
+        }
+
+        // preventScroll: Inertia has just reset or restored the scroll position (back/forward),
+        // and focusing must not undo that.
+        focusElement(routeFocusTarget(doc), { preventScroll: true });
+    };
+
+    const watchForLateTitle = (titleBefore, pressed) => {
+        const Observer = win.MutationObserver;
+
+        if (! Observer || ! doc.head) {
+            return;
+        }
+
+        const observer = new Observer(() => {
+            if (doc.title === titleBefore) {
+                return;
+            }
+
+            cancelTitleWatch();
+            previous = { ...previous, title: doc.title };
+            pageChanged = true;
+            const active = doc.activeElement;
+
+            // Only while focus is still where the visit left it — on <body>, or on the control the
+            // user pressed (or its twin, put back by the `finish` handler). If they have moved on, the
+            // late title does not pull them back.
+            if (! active || active === doc.body || matchesFocus(active, pressed)) {
+                focusNewPage();
+            }
+        });
+
+        observer.observe(doc.head, { childList: true, subtree: true, characterData: true });
+        const timer = win.setTimeout(cancelTitleWatch, TITLE_WAIT_MS);
+        stopTitleWatch = () => {
+            observer.disconnect();
+            win.clearTimeout?.(timer);
+        };
+    };
+
     const stopStart = router.on('start', () => {
+        cancelTitleWatch();
+
         if (previous) {
             previous = { ...previous, title: doc.title };
         }
@@ -190,26 +252,28 @@ export function installRouteFocus(router, { initialPage = null, doc = document, 
             return;
         }
 
+        const pressed = focusAtStart;
+
         afterRender(() => {
+            const before = previous;
             const next = { component: page.component, url: page.url, title: doc.title };
             // The initial load is no change: the browser has already done what a page load does.
-            const changed = isPageChange(previous, next);
+            const changed = isPageChange(before, next);
             previous = next;
 
             if (! changed) {
+                const queryOnly = before && before.title !== undefined
+                    && before.component === next.component && before.url !== next.url;
+
+                if (queryOnly) {
+                    watchForLateTitle(before.title, pressed);
+                }
+
                 return;
             }
 
             pageChanged = true;
-            const main = doc.getElementById(MAIN_CONTENT_ID) ?? doc.querySelector('main');
-
-            if (pageOwnsFocus(doc.activeElement, main, doc.body)) {
-                return;
-            }
-
-            // preventScroll: Inertia has just reset or restored the scroll position (back/forward),
-            // and focusing must not undo that.
-            focusElement(routeFocusTarget(doc), { preventScroll: true });
+            focusNewPage();
         });
     });
 
@@ -235,6 +299,7 @@ export function installRouteFocus(router, { initialPage = null, doc = document, 
     });
 
     return () => {
+        cancelTitleWatch();
         stopStart?.();
         stopNavigate?.();
         stopFinish?.();

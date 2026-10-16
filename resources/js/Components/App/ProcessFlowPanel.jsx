@@ -9,7 +9,7 @@ import ScrollRegion from './ScrollRegion';
 import SearchableMultiSelect from './SearchableMultiSelect';
 import StatusBadge from './StatusBadge';
 import { announce } from '../../Support/announcer';
-import { focusElement, refocusIfLost, useFocusFirstError, usePanelFocus } from '../../Support/focusManagement';
+import { BUSY_STYLE, focusElement, refocusIfLost, useFocusFirstError, usePanelFocus } from '../../Support/focusManagement';
 import { useTransitionAnnouncement } from '../../Support/statusAnnouncement';
 import {
     flowAiAnnouncement,
@@ -2596,6 +2596,15 @@ function ActivityArticlePanel({
 
     usePanelFocus(writing, { panelRef: writingRef, returnFocusRef: writeButtonRef, fallbackRef: panelHeadingRef });
 
+    // What the server turned down when the article was handed over (3.3.1, A11Y-161): a field error
+    // at its field, with focus there; anything else (the activity's article limit) in a summary by
+    // the button, which takes focus instead.
+    const [articleErrors, setArticleErrors] = useState({});
+    const focusFirstArticleError = useFocusFirstError(writingRef);
+    const articleFormError = articleErrors.title || articleErrors.markdown
+        ? null
+        : (Object.values(articleErrors).find(Boolean) ?? null);
+
     // A draft belongs to the activity it was asked for. One arriving for a different step must not
     // appear in this one's editor, which is what the key comparison is for.
     const mine = draft !== null && activity !== null && draft.activity_key === activity.key;
@@ -2631,6 +2640,7 @@ function ActivityArticlePanel({
         setTitle('');
         setMarkdown('');
         setBusy(false);
+        setArticleErrors({});
         onClose();
     }
 
@@ -2659,7 +2669,12 @@ function ActivityArticlePanel({
     }
 
     function create() {
+        if (busy) {
+            return;
+        }
+
         setBusy(true);
+        setArticleErrors({});
 
         router.post(`/app/quality/items/${itemId}/activities/articles`, {
             activity_key: activity.key,
@@ -2667,13 +2682,18 @@ function ActivityArticlePanel({
             markdown,
         }, {
             preserveScroll: true,
+            onError: (errors) => {
+                setArticleErrors(errors ?? {});
+                focusFirstArticleError();
+            },
             onFinish: () => setBusy(false),
         });
     }
 
     // Whether the form is submittable, which is a different question from whether this person
     // may create at all — that is the canCreate prop, and the dialog never offers the form without it.
-    const canSubmit = title.trim() !== '' && markdown.trim() !== '' && ! busy;
+    // A request in progress is not part of it: the button stays focusable meanwhile (aria-disabled).
+    const canSubmit = title.trim() !== '' && markdown.trim() !== '';
 
     return (
         <ActionDialog isOpen={activity !== null} onClose={close} titleId={titleId} fallbackFocusRef={fallbackFocusRef}>
@@ -2812,6 +2832,7 @@ function ActivityArticlePanel({
                                 className="mt-4"
                                 label={tb.articles_title ?? 'Tittel'}
                                 labelClassName="block text-base font-semibold uppercase tracking-wide text-slate-500"
+                                error={articleErrors.title}
                                 required
                             >
                                 {(field) => (
@@ -2831,6 +2852,7 @@ function ActivityArticlePanel({
                                 className="mt-4"
                                 label={tb.articles_body ?? 'Artikkel'}
                                 labelClassName="block text-base font-semibold uppercase tracking-wide text-slate-500"
+                                error={articleErrors.markdown}
                                 required
                             >
                                 {(field) => (
@@ -2844,11 +2866,31 @@ function ActivityArticlePanel({
                                 )}
                             </FormField>
 
+                            {articleFormError && (
+                                // Focus is the announcement (useFocusFirstError); a role="alert" as
+                                // well would read it twice.
+                                <p
+                                    id="activity-article-form-error"
+                                    tabIndex={-1}
+                                    data-form-error-summary
+                                    className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base text-rose-800"
+                                >
+                                    {articleFormError}
+                                </p>
+                            )}
+
                             <div className="mt-5 flex flex-wrap justify-end gap-3">
-                                <button type="button" className={SECONDARY_ACTION} onClick={() => setWriting(false)}>
+                                <button type="button" className={SECONDARY_ACTION} onClick={() => { setArticleErrors({}); setWriting(false); }}>
                                     {tb.articles_cancel ?? 'Avbryt'}
                                 </button>
-                                <button type="button" className={PRIMARY_ACTION} onClick={create} disabled={! canSubmit}>
+                                <button
+                                    type="button"
+                                    className={`${PRIMARY_ACTION} ${BUSY_STYLE}`}
+                                    onClick={create}
+                                    disabled={! canSubmit}
+                                    aria-disabled={busy || undefined}
+                                    aria-describedby={articleFormError ? 'activity-article-form-error' : undefined}
+                                >
                                     {tb.articles_create ?? 'Legg artikkelen inn i Wiki'}
                                 </button>
                             </div>

@@ -225,7 +225,8 @@ describe('The audit page', () => {
         assert.match(show, /canManage=\{Boolean\(permissions\.can_manage_requirements\)\}/);
         assert.match(show, /canManage=\{Boolean\(permissions\.can_manage_processes\)\}/);
         assert.equal((scope.match(/\{canManage && ! adding && \(/g) ?? []).length, 2);
-        assert.equal((scope.match(/\{canManage && \(\n\s+<button type="button" onClick=\{\(\) => remove/g) ?? []).length, 2);
+        // Directly, or in the wrapper that also holds a refused removal's message (A11Y-193).
+        assert.equal((scope.match(/\{canManage && \(\n\s+(?:<div[^>]*>\n\s+)?<button\s+type="button"\s+onClick=\{\(\) => remove/g) ?? []).length, 2);
     });
 
     test('a retired requirement in scope says so, in the list and in the picker', () => {

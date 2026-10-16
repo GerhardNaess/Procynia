@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react';
-import { Link, router, useForm } from '@inertiajs/react';
+import { Link, router, useForm, usePage } from '@inertiajs/react';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
-import { refocusIfLost, usePanelFocus } from '../../../../Support/focusManagement';
+import { BUSY_STYLE, refocusIfLost, submitWhenIdle, usePanelFocus } from '../../../../Support/focusManagement';
 import { HINT, INPUT, LABEL } from '../../../../Support/formStyles';
+import { rowErrorId, trackRowAction, useRowActionError } from '../../../../Support/rowActionError';
 import FieldError from '../FieldError';
 import { fieldStateProps, groupStateProps, optionInvalid, removalFocusCandidates } from '../complianceA11y';
 import { qualityItemLabel } from '../Requirements/complianceQuality';
@@ -184,7 +185,7 @@ function RequirementPicker({ auditId, options, onDone, ta }) {
             {(options.requirements ?? []).length === 0 ? (
                 <p className="text-base text-slate-700">{ta.requirements_no_options ?? 'Det finnes ingen flere krav å legge til.'}</p>
             ) : (
-                <form ref={pickRef} onSubmit={submitPick} className="space-y-3" data-testid="compliance-audit-requirement-form">
+                <form ref={pickRef} onSubmit={submitWhenIdle(pick, submitPick)} className="space-y-3" data-testid="compliance-audit-requirement-form">
                     <fieldset className="space-y-2" {...groupStateProps('compliance-audit-requirement', pick.errors.requirement_ids)}>
                         <legend className={LABEL}>{ta.requirements_choose ?? 'Velg krav'}</legend>
                         <RequirementChecklist id="compliance-audit-requirement" options={options.requirements ?? []} selected={selected} onToggle={toggle} ta={ta} error={pick.errors.requirement_ids} />
@@ -192,7 +193,7 @@ function RequirementPicker({ auditId, options, onDone, ta }) {
                     <FieldError field="compliance-audit-requirement" message={pick.errors.requirement_ids} />
                     <div className="flex flex-wrap items-center justify-end gap-3">
                         <span className="text-base text-slate-600">{(ta.requirements_selected ?? ':count valgt').replace(':count', String(selected.length))}</span>
-                        <button type="submit" disabled={pick.processing || selected.length === 0} className={PRIMARY_ACTION}>
+                        <button type="submit" disabled={selected.length === 0} aria-disabled={pick.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`}>
                             {ta.requirements_add_selected ?? 'Legg til valgte krav'}
                         </button>
                     </div>
@@ -200,7 +201,7 @@ function RequirementPicker({ auditId, options, onDone, ta }) {
             )}
 
             {(options.sources ?? []).length > 0 && (
-                <form ref={fromSourceRef} onSubmit={submitSource} className="space-y-3 border-t border-slate-100 pt-4" data-testid="compliance-audit-source-form">
+                <form ref={fromSourceRef} onSubmit={submitWhenIdle(fromSource, submitSource)} className="space-y-3 border-t border-slate-100 pt-4" data-testid="compliance-audit-source-form">
                     <div>
                         <label htmlFor="compliance-audit-source" className={LABEL}>{ta.requirements_from_source ?? 'Legg til fra kravkilde'}</label>
                         <p id="compliance-audit-source-hint" className={HINT}>
@@ -223,7 +224,7 @@ function RequirementPicker({ auditId, options, onDone, ta }) {
                         <FieldError field="compliance-audit-source" message={fromSource.errors.source_id} />
                     </div>
                     <div className="flex justify-end">
-                        <button type="submit" disabled={fromSource.processing || fromSource.data.source_id === ''} className={SECONDARY_ACTION}>
+                        <button type="submit" disabled={fromSource.data.source_id === ''} aria-disabled={fromSource.processing || undefined} className={`${SECONDARY_ACTION} ${BUSY_STYLE}`}>
                             {ta.requirements_from_source_submit ?? 'Legg til fra kilde'}
                         </button>
                     </div>
@@ -244,6 +245,11 @@ function RequirementPicker({ auditId, options, onDone, ta }) {
  */
 export function AuditRequirementScope({ audit, requirements = [], options = null, canManage = false, ta }) {
     const [adding, setAdding] = useState(false);
+    // A removal the audit refuses («Kravet har kontrollhandlinger») is shown by the button that was
+    // pressed as well as in the page's alert at the top, which a sighted user far down does not see
+    // (3.3.1, A11Y-193). Focus stays on the button.
+    const { errors = {} } = usePage().props;
+    const rowError = useRowActionError(errors.audit ?? null);
     // Legg til krav opens in place of its button: focus goes into the picker, and back (A11Y-014).
     const pickerRef = useRef(null);
     const addRef = useRef(null);
@@ -256,7 +262,10 @@ export function AuditRequirementScope({ audit, requirements = [], options = null
 
         // The next requirement's «Fjern fra omfanget», the previous one's, or the section (A11Y-014).
         const candidates = removalFocusCandidates(requirements.map((item) => item.id), requirement.id, [(id) => scopeRemoveId('requirement', id)], ['compliance-audit-requirements-add', 'compliance-audit-requirements-heading']);
-        router.delete(`/app/compliance/audits/${audit.id}/requirements/${requirement.id}`, { preserveScroll: true, onSuccess: () => refocusIfLost(candidates) });
+        router.delete(
+            `/app/compliance/audits/${audit.id}/requirements/${requirement.id}`,
+            trackRowAction(scopeRemoveId('requirement', requirement.id), { preserveScroll: true, onSuccess: () => refocusIfLost(candidates) }, { errorKey: 'audit' }),
+        );
     };
 
     return (
@@ -290,7 +299,24 @@ export function AuditRequirementScope({ audit, requirements = [], options = null
                                 <RequirementMarks requirement={requirement} ta={ta} />
                             </div>
                             {canManage && (
-                                <button type="button" onClick={() => remove(requirement)} id={scopeRemoveId('requirement', requirement.id)} aria-describedby={scopeNameId('requirement', requirement.id)} className={SECONDARY_ACTION}>{ta.remove ?? 'Fjern fra omfanget'}</button>
+                                <div className="flex flex-col items-end gap-1">
+                                    <button
+                                        type="button"
+                                        onClick={() => remove(requirement)}
+                                        id={scopeRemoveId('requirement', requirement.id)}
+                                        aria-describedby={rowError(scopeRemoveId('requirement', requirement.id))
+                                            ? `${scopeNameId('requirement', requirement.id)} ${rowErrorId(scopeRemoveId('requirement', requirement.id))}`
+                                            : scopeNameId('requirement', requirement.id)}
+                                        className={SECONDARY_ACTION}
+                                    >
+                                        {ta.remove ?? 'Fjern fra omfanget'}
+                                    </button>
+                                    {rowError(scopeRemoveId('requirement', requirement.id)) && (
+                                        <p id={rowErrorId(scopeRemoveId('requirement', requirement.id))} className="max-w-xs text-right text-base text-rose-700" data-testid="compliance-audit-requirement-remove-error">
+                                            {rowError(scopeRemoveId('requirement', requirement.id))}
+                                        </p>
+                                    )}
+                                </div>
                             )}
                         </li>
                     ))}
@@ -350,7 +376,7 @@ export function AuditProcessScope({ audit, processes, options = null, canManage 
                         <button type="button" onClick={() => setAdding(false)} className={SECONDARY_ACTION}>{ta.cancel ?? 'Avbryt'}</button>
                     </div>
                 ) : (
-                    <form ref={(element) => { panelRef.current = element; formRef.current = element; }} onSubmit={submit} className="mt-4 space-y-3 rounded-2xl border border-slate-200 p-4" data-testid="compliance-audit-process-form">
+                    <form ref={(element) => { panelRef.current = element; formRef.current = element; }} onSubmit={submitWhenIdle(form, submit)} className="mt-4 space-y-3 rounded-2xl border border-slate-200 p-4" data-testid="compliance-audit-process-form">
                         <div>
                             <label htmlFor="compliance-audit-process" className={LABEL}>{ta.processes_choose ?? 'Velg prosess'}</label>
                             <select
@@ -370,7 +396,7 @@ export function AuditProcessScope({ audit, processes, options = null, canManage 
                         </div>
                         <div className="flex flex-wrap justify-end gap-3">
                             <button type="button" onClick={() => { setAdding(false); form.reset(); form.clearErrors(); }} className={SECONDARY_ACTION}>{ta.cancel ?? 'Avbryt'}</button>
-                            <button type="submit" disabled={form.processing || form.data.quality_process_id === ''} className={PRIMARY_ACTION}>{ta.processes_add_submit ?? 'Legg til'}</button>
+                            <button type="submit" disabled={form.data.quality_process_id === ''} aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`}>{ta.processes_add_submit ?? 'Legg til'}</button>
                         </div>
                     </form>
                 )

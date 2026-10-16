@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { router, useForm } from '@inertiajs/react';
+import { router, useForm, usePage } from '@inertiajs/react';
 import { RequiredFieldsNote } from '../../../Components/App/FormField';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import RequiredMark from './RequiredMark';
@@ -8,12 +8,13 @@ import { refocusIfLost, useFocusFirstError } from '../../../Support/focusManagem
 import { fieldA11y } from '../../../Support/formFieldA11y';
 import { ERROR, HINT, INPUT, LABEL } from '../../../Support/formStyles';
 import useInlinePanelFocus from './useInlinePanelFocus';
+import { formatRiskDate as formatDateIn, formatRiskDay as formatDayIn } from './riskDates';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 
-const formatDate = (value) => (value ? new Date(value).toLocaleDateString('nb-NO') : '—');
+
 // valid_until is a calendar day (Y-m-d); parsed as local time so it never shifts a day across time zones.
-const formatDay = (value) => (value ? new Date(`${value}T00:00:00`).toLocaleDateString('nb-NO') : '—');
+
 
 /**
  * Aksept av restrisiko: whether the residual risk in the latest assessment has been accepted, by whom,
@@ -22,6 +23,9 @@ const formatDay = (value) => (value ? new Date(`${value}T00:00:00`).toLocaleDate
  * said this person holds risk.accept for the risk's area; earlier acceptances sit folded beneath.
  */
 export default function RiskAcceptancePanel({ riskId, decision, canAccept, tr }) {
+    const { locale } = usePage().props;
+    const formatDate = (value) => formatDateIn(value, locale);
+    const formatDay = (value) => formatDayIn(value, locale);
     const tx = tr.acceptance ?? {};
     const [accepting, setAccepting] = useState(false);
     const { latest_assessment_id: latestId, has_residual: hasResidual, current, history = [] } = decision ?? {};
@@ -118,6 +122,9 @@ export default function RiskAcceptancePanel({ riskId, decision, canAccept, tr })
 }
 
 function CurrentAcceptance({ acceptance, canRevoke, onRevoke, tx }) {
+    const { locale } = usePage().props;
+    const formatDate = (value) => formatDateIn(value, locale);
+    const formatDay = (value) => formatDayIn(value, locale);
     const expired = acceptance.is_expired;
 
     return (

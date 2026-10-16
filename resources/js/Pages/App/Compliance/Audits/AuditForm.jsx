@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
+import { BUSY_STYLE, submitWhenIdle } from '../../../../Support/focusManagement';
 import { HINT, INPUT, LABEL } from '../../../../Support/formStyles';
 import RequiredMark from '../RequiredMark';
 import FieldError from '../FieldError';
@@ -26,7 +27,7 @@ export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELD
     const dateHint = 'compliance-audit-dates-hint';
 
     return (
-        <form ref={formRef} onSubmit={onSubmit} className="space-y-5" data-testid="compliance-audit-form">
+        <form ref={formRef} onSubmit={submitWhenIdle(form, onSubmit)} className="space-y-5" data-testid="compliance-audit-form">
             {has('title') && (
                 <div>
                     <label htmlFor="compliance-audit-title" className={LABEL}>{ta.field_title ?? 'Tittel'}<RequiredMark /></label>
@@ -204,7 +205,7 @@ export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELD
                 {onCancel && (
                     <button type="button" onClick={onCancel} className={SECONDARY_ACTION}>{ta.cancel ?? 'Avbryt'}</button>
                 )}
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`}>
                     {form.processing ? (ta.saving ?? 'Lagrer...') : (ta.save ?? 'Lagre')}
                 </button>
             </div>

@@ -3,7 +3,7 @@ import { Link, router, useForm } from '@inertiajs/react';
 import { RequiredFieldsNote } from '../../../../Components/App/FormField';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
-import { refocusIfLost } from '../../../../Support/focusManagement';
+import { BUSY_STYLE, refocusIfLost, submitWhenIdle } from '../../../../Support/focusManagement';
 import { ERROR, HINT, INPUT, LABEL } from '../../../../Support/formStyles';
 import { formatDay } from '../../Improvements/improvementStatus';
 import RequiredMark from '../RequiredMark';
@@ -79,7 +79,7 @@ function CheckForm({ auditId, check = null, scopeRequirements, onDone, ta }) {
     };
 
     return (
-        <form ref={formRef} onSubmit={submit} className="mt-4 space-y-4 rounded-2xl border border-slate-200 p-4" data-testid="compliance-check-form" data-inline-panel={check ? `edit-${check.id}` : 'create'}>
+        <form ref={formRef} onSubmit={submitWhenIdle(form, submit)} className="mt-4 space-y-4 rounded-2xl border border-slate-200 p-4" data-testid="compliance-check-form" data-inline-panel={check ? `edit-${check.id}` : 'create'}>
             <h3 className="text-lg font-semibold text-slate-950">{check ? (tc.edit_heading ?? 'Rediger kontrollhandling') : (tc.create_heading ?? 'Ny kontrollhandling')}</h3>
 
             <div>
@@ -161,7 +161,7 @@ function CheckForm({ auditId, check = null, scopeRequirements, onDone, ta }) {
 
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={() => { form.reset(); form.clearErrors(); onDone(); }} className={SECONDARY_ACTION}>{tc.cancel ?? 'Avbryt'}</button>
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`}>
                     {form.processing ? (tc.saving ?? 'Lagrer...') : (tc.save ?? 'Lagre kontrollhandling')}
                 </button>
             </div>

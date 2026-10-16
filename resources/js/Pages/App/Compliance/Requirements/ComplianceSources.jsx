@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { router, useForm, usePage } from '@inertiajs/react';
 import { RequiredFieldsNote } from '../../../../Components/App/FormField';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
-import { refocusIfLost } from '../../../../Support/focusManagement';
+import { BUSY_STYLE, refocusIfLost, submitWhenIdle } from '../../../../Support/focusManagement';
 import { HINT, INPUT, LABEL } from '../../../../Support/formStyles';
 import { rowErrorId, trackRowAction, useRowActionError } from '../../../../Support/rowActionError';
 import RequiredMark from '../RequiredMark';
@@ -22,7 +22,7 @@ function SourceForm({ form, onSubmit, onCancel, kinds, heading, panelKey, ts, tr
     useFocusOnRejectedSubmit(form, formRef);
 
     return (
-        <form ref={formRef} onSubmit={onSubmit} className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-label={heading} data-inline-panel={panelKey}>
+        <form ref={formRef} onSubmit={submitWhenIdle(form, onSubmit)} className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-label={heading} data-inline-panel={panelKey}>
             <h3 className="text-lg font-semibold text-slate-950">{heading}</h3>
             <div className="grid gap-4 md:grid-cols-2">
                 <div>
@@ -89,7 +89,7 @@ function SourceForm({ form, onSubmit, onCancel, kinds, heading, panelKey, ts, tr
             <RequiredFieldsNote text={tr.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={onCancel} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`}>
                     {form.processing ? (tr.saving ?? 'Lagrer...') : (tr.save ?? 'Lagre')}
                 </button>
             </div>

@@ -16,6 +16,7 @@ import WikiKnowledgeHandoffPanel from '../../../Components/App/WikiKnowledgeHand
 import RiskDescription from './RiskDescription';
 import { RISK_LEVEL_TONES } from './riskLevel';
 import { RISK_STATUS_TONES } from './riskStatus';
+import { formatRiskMoment } from './riskDates';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 
@@ -49,6 +50,7 @@ export default function RiskShow() {
         permissions = {},
         area_options: areaOptions = [],
         owner_options: ownerOptions = [],
+        locale,
     } = usePage().props;
 
     const tr = translations?.risk ?? {};
@@ -207,7 +209,7 @@ export default function RiskShow() {
                                 <div>
                                     <dt className="text-base font-semibold text-slate-600">{tr.updated ?? 'Sist endret'}</dt>
                                     <dd className="mt-1 text-base text-slate-900">
-                                        {risk.updated_at ? new Date(risk.updated_at).toLocaleString('nb-NO') : '—'}
+                                        {formatRiskMoment(risk.updated_at, locale)}
                                     </dd>
                                 </div>
                             </dl>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useForm } from '@inertiajs/react';
+import { useForm, usePage } from '@inertiajs/react';
 import { RequiredFieldsNote } from '../../../Components/App/FormField';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
@@ -11,10 +11,11 @@ import RequiredMark from './RequiredMark';
 import { previewAnnouncement, previewKey } from './riskA11y';
 import { RISK_LEVEL_TONES, previewLevel } from './riskLevel';
 import useInlinePanelFocus from './useInlinePanelFocus';
+import { formatRiskMoment } from './riskDates';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 
-const formatDate = (iso) => (iso ? new Date(iso).toLocaleString('nb-NO') : '—');
+
 
 /**
  * The risk's assessment history: the latest one up top, the earlier ones below, newest first.
@@ -140,12 +141,13 @@ function Rating({ title, hint, result, ta, compact = false }) {
 }
 
 function AssessmentDetails({ assessment, ta, tr, compact = false }) {
+    const { locale } = usePage().props;
     const assessor = assessment.assessed_by_name ?? (ta.unknown_assessor ?? 'ukjent bruker');
 
     return (
         <div className={compact ? 'space-y-2 py-2' : 'mt-3 space-y-3'}>
             <p className="text-base text-slate-600">
-                {(ta.assessed_by ?? 'Vurdert av :name').replace(':name', assessor)} · {formatDate(assessment.assessed_at)}
+                {(ta.assessed_by ?? 'Vurdert av :name').replace(':name', assessor)} · {formatRiskMoment(assessment.assessed_at, locale)}
             </p>
             <div className="grid gap-3 md:grid-cols-2">
                 <Rating

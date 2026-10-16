@@ -40,12 +40,17 @@ const snapshot = () => current;
 
 /**
  * Visit options for a row action identified by `key`. Spread them into the router call; an
- * onSuccess of your own is still called.
+ * onSuccess or onError of your own is still called.
+ *
+ * Some refusals come back as a validation error on a key that belongs to no field — Revisjon answers
+ * a step its status does not allow on `audit` (A11Y-193). Name that key as `errorKey`, and pass the
+ * same error to useRowActionError instead of the flash.
  *
  * @param {string} key   Unique per row and action, e.g. `user-toggle-12`.
  * @param {object} [options] The visit's own options.
+ * @param {{ errorKey?: string }} [refusal] The validation key the refusal arrives on, if any.
  */
-export function trackRowAction(key, options = {}) {
+export function trackRowAction(key, options = {}, { errorKey = null } = {}) {
     current = null;
     emit();
 
@@ -57,6 +62,13 @@ export function trackRowAction(key, options = {}) {
             current = message ? { key, message } : null;
             emit();
             options.onSuccess?.(page);
+        },
+        onError: (errors) => {
+            const message = errorKey ? errors?.[errorKey] : null;
+
+            current = message ? { key, message } : null;
+            emit();
+            options.onError?.(errors);
         },
     };
 }
@@ -73,7 +85,8 @@ export function resetRowActionError() {
 }
 
 /**
- * @param {string|null} flashError The current page's `flash.error` (usePage().props.flash?.error).
+ * @param {string|null} flashError The current page's `flash.error` (usePage().props.flash?.error), or
+ *   the validation error named as `errorKey` in trackRowAction.
  * @returns {(key: string) => string|null} The refusal to show beside the row action `key`, or null.
  */
 export function useRowActionError(flashError) {

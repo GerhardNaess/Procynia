@@ -6,7 +6,7 @@ import FormField, { FieldsetField, RequiredFieldsNote } from '../../../Component
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
-import { focusElement, refocusIfLost, useFocusFirstError, usePanelFocus } from '../../../Support/focusManagement';
+import { BUSY_STYLE, focusElement, refocusIfLost, useFocusFirstError, usePanelFocus } from '../../../Support/focusManagement';
 import { INPUT as FIELD, LABEL, TEXTAREA } from '../../../Support/formStyles';
 import ReviewForm from './ReviewForm';
 import { paneHeadingId, readinessStateText, removalFocusCandidates } from './reviewA11y';
@@ -193,12 +193,19 @@ export default function ManagementReviewShow() {
                                     id="mr-action-finalize"
                                     onClick={() => openPanel('finalize')}
                                     disabled={! ready}
-                                    title={ready ? undefined : t.finalize?.not_ready}
+                                    aria-describedby={ready ? undefined : 'mr-finalize-not-ready'}
                                     className={PRIMARY_ACTION}
                                     data-testid="mr-finalize"
                                 >
                                     {t.finalize?.button ?? 'Ferdigstill'}
                                 </button>
+                            )}
+                            {/* Why «Ferdigstill» is unavailable is said in text, not only in a hover
+                                title that keyboard and touch users never see (A11Y-184). */}
+                            {permissions.can_finalize && panel === null && ! ready && (
+                                <p id="mr-finalize-not-ready" className="basis-full text-base text-slate-600" data-testid="mr-finalize-not-ready">
+                                    {t.finalize?.not_ready ?? 'Gjennomgangen er ikke klar for ferdigstilling ennå. Se sjekklisten på Oversikt.'}
+                                </p>
                             )}
                         </div>
                     </div>
@@ -838,6 +845,10 @@ function FinalizePanel({ review, readiness, t, onDone }) {
     const tf = t.finalize ?? {};
     const [processing, setProcessing] = useState(false);
     const confirm = () => {
+        if (processing) {
+            return;
+        }
+
         setProcessing(true);
         router.post(`/app/management-reviews/${review.id}/finalize`, {}, { preserveScroll: true, onFinish: () => setProcessing(false), onSuccess: onDone });
     };
@@ -852,7 +863,7 @@ function FinalizePanel({ review, readiness, t, onDone }) {
                 </p>
             )}
             <div className="mt-4 flex flex-wrap gap-2">
-                <button type="button" onClick={confirm} disabled={processing} className={PRIMARY_ACTION} data-testid="mr-finalize-confirm">{tf.confirm ?? 'Ferdigstill'}</button>
+                <button type="button" onClick={confirm} aria-disabled={processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`} data-testid="mr-finalize-confirm">{tf.confirm ?? 'Ferdigstill'}</button>
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{t.cancel ?? 'Avbryt'}</button>
             </div>
         </section>

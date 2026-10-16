@@ -144,8 +144,10 @@ export default function ComplianceLibraryIndex() {
                             </h2>
                             <p id="compliance-library-activate-description" className="mt-2 text-base leading-6 text-slate-600">{activationText(confirming, tl)}</p>
                             <div className="mt-6 flex flex-wrap justify-end gap-3">
-                                <button type="button" onClick={() => setConfirming(null)} disabled={activating} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
-                                <button ref={confirmRef} type="button" onClick={activate} disabled={activating} className={PRIMARY_ACTION}>
+                                {/* Unavailable while activating, but focusable: a disabled button inside the
+                                    dialog dropped focus out of it to <body> (2.4.3, A11Y-196). */}
+                                <button type="button" onClick={() => { if (! activating) setConfirming(null); }} aria-disabled={activating || undefined} className={`${SECONDARY_ACTION} aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}>{tr.cancel ?? 'Avbryt'}</button>
+                                <button ref={confirmRef} type="button" onClick={activate} aria-disabled={activating || undefined} className={`${PRIMARY_ACTION} aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}>
                                     {activating ? (tl.activating ?? 'Aktiverer...') : (tl.activate ?? 'Aktiver for virksomheten')}
                                 </button>
                             </div>

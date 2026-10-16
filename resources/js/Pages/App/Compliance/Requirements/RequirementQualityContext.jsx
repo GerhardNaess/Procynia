@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { router, useForm } from '@inertiajs/react';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
-import { refocusIfLost } from '../../../../Support/focusManagement';
+import { BUSY_STYLE, refocusIfLost, submitWhenIdle } from '../../../../Support/focusManagement';
 import { INPUT, LABEL } from '../../../../Support/formStyles';
 import FieldError from '../FieldError';
 import { fieldStateProps, removalFocusCandidates } from '../complianceA11y';
@@ -44,7 +44,7 @@ function LinkPicker({ kind, requirementId, options, onDone, tq }) {
     };
 
     return (
-        <form ref={formRef} onSubmit={submit} className="mt-3 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4" data-testid={`${id}-form`} data-inline-panel={kind}>
+        <form ref={formRef} onSubmit={submitWhenIdle(form, submit)} className="mt-3 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4" data-testid={`${id}-form`} data-inline-panel={kind}>
             {options.length === 0 ? (
                 <p className="text-base text-slate-700">{kind === 'process' ? (tq.no_process_options ?? 'Det finnes ingen flere prosesser i Kvalitet å koble til.') : (tq.no_control_options ?? 'Det finnes ingen flere kontroller i Kvalitet å koble til.')}</p>
             ) : (
@@ -76,7 +76,7 @@ function LinkPicker({ kind, requirementId, options, onDone, tq }) {
             {form.errors.requirement && <p className="text-base text-rose-700" data-form-error-summary="">{form.errors.requirement}</p>}
             <div className="flex flex-wrap gap-2">
                 {options.length > 0 && (
-                    <button type="submit" disabled={form.processing || form.data[field] === ''} className={PRIMARY_ACTION}>{tq.save ?? 'Koble'}</button>
+                    <button type="submit" disabled={form.data[field] === ''} aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`}>{tq.save ?? 'Koble'}</button>
                 )}
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tq.cancel ?? 'Avbryt'}</button>
             </div>

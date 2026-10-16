@@ -45,13 +45,24 @@ class WikiQualityTabRemovalTest extends TestCase
 
     public function test_the_wiki_navigation_no_longer_offers_a_quality_tab(): void
     {
-        $layout = (string) file_get_contents(base_path('resources/js/Layouts/CustomerAppLayout.jsx'));
+        // The header tabs are no longer written in the layout: CustomerAppLayout renders what
+        // appNavigation.js's areaNavigationItems() returns, and the Wiki's items are its 'wiki' branch.
+        $navigation = (string) file_get_contents(base_path('resources/js/Support/appNavigation.js'));
+        $start = strpos($navigation, "if (area === 'wiki')");
+        $this->assertNotFalse($start, 'appNavigation.js must still define the Wiki header tabs');
+        $end = strpos($navigation, 'if (area ===', $start + 1);
+        $wikiItems = substr($navigation, $start, $end === false ? null : $end - $start);
 
-        $this->assertStringNotContainsString('wiki-quality', $layout);
-        $this->assertStringNotContainsString("tab: 'quality'", $layout);
+        $this->assertStringNotContainsString('wiki-quality', $wikiItems);
+        $this->assertStringNotContainsString("tab: 'quality'", $wikiItems);
 
         foreach (['wiki-pages', 'wiki-sources', 'wiki-runs', 'wiki-graph'] as $keptTab) {
-            $this->assertStringContainsString($keptTab, $layout, "the {$keptTab} nav item must be kept");
+            $this->assertStringContainsString("key: '{$keptTab}'", $wikiItems, "the {$keptTab} nav item must be kept");
+        }
+
+        // Nor does the layout bring the tab back on its own.
+        foreach (['resources/js/Layouts/CustomerAppLayout.jsx', 'resources/js/Support/appNavigation.js'] as $file) {
+            $this->assertStringNotContainsString('wiki-quality', (string) file_get_contents(base_path($file)), $file);
         }
     }
 

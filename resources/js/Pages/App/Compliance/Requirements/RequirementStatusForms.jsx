@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { useForm } from '@inertiajs/react';
 import { RequiredFieldsNote } from '../../../../Components/App/FormField';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
+import { BUSY_STYLE, submitWhenIdle } from '../../../../Support/focusManagement';
 import { INPUT, LABEL } from '../../../../Support/formStyles';
 import RequiredMark from '../RequiredMark';
 import FieldError from '../FieldError';
@@ -29,7 +30,7 @@ function StatusReasonForm({ id, action, heading, intro, submit, panelKey, onDone
         <section className={CARD} aria-labelledby={`${id}-heading`} data-inline-panel={panelKey}>
             <h2 id={`${id}-heading`} className="text-xl font-semibold text-slate-950">{heading}</h2>
             <p className="mt-1 text-base text-slate-600">{intro}</p>
-            <form ref={formRef} onSubmit={send} className="mt-4 space-y-4">
+            <form ref={formRef} onSubmit={submitWhenIdle(form, send)} className="mt-4 space-y-4">
                 <div>
                     <label htmlFor={id} className={LABEL}>{tr.reason_label ?? 'Begrunnelse'}<RequiredMark /></label>
                     <textarea
@@ -47,7 +48,7 @@ function StatusReasonForm({ id, action, heading, intro, submit, panelKey, onDone
                 <RequiredFieldsNote text={tr.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
                 <div className="flex flex-wrap justify-end gap-3">
                     <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
-                    <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                    <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`}>
                         {form.processing ? (tr.saving ?? 'Lagrer...') : submit}
                     </button>
                 </div>

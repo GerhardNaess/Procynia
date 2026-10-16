@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { router, useForm } from '@inertiajs/react';
+import { router, useForm, usePage } from '@inertiajs/react';
 import { RequiredFieldsNote } from '../../../Components/App/FormField';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import RequiredMark from './RequiredMark';
@@ -9,12 +9,13 @@ import { fieldA11y } from '../../../Support/formFieldA11y';
 import { ERROR, HINT, INPUT, LABEL } from '../../../Support/formStyles';
 import { riskActionFocusCandidates } from './riskA11y';
 import useInlinePanelFocus from './useInlinePanelFocus';
+import { formatRiskDate, formatRiskDay } from './riskDates';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 
-const formatDate = (value) => (value ? new Date(value).toLocaleDateString('nb-NO') : '—');
+
 // A deadline is a calendar day (Y-m-d); parsed as local time so it never shifts a day across time zones.
-const formatDay = (value) => (value ? new Date(`${value}T00:00:00`).toLocaleDateString('nb-NO') : '—');
+
 
 /**
  * Tiltak on the risk: what is to be done, by whom, by when. Open actions come first and carry the
@@ -23,6 +24,7 @@ const formatDay = (value) => (value ? new Date(`${value}T00:00:00`).toLocaleDate
  * server's answer (is_overdue), not computed here.
  */
 export default function RiskTreatmentPanel({ riskId, actions, ownerOptions, canManage, tr }) {
+    const { locale } = usePage().props;
     const tt = tr.treatment ?? {};
     // null: nothing open; 'new': the create form; an id: that action's edit form.
     const [editing, setEditing] = useState(null);
@@ -85,7 +87,7 @@ export default function RiskTreatmentPanel({ riskId, actions, ownerOptions, canM
                             </StatusBadge>
                             {action.is_overdue && <StatusBadge tone="rose">{tt.overdue ?? 'Forfalt'}</StatusBadge>}
                             <span className={action.is_overdue ? 'font-semibold text-rose-700' : 'text-slate-600'}>
-                                {(tt.due ?? 'Frist :date').replace(':date', formatDay(action.due_at))}
+                                {(tt.due ?? 'Frist :date').replace(':date', formatRiskDay(action.due_at, locale))}
                             </span>
                             <span className="text-slate-600">
                                 {action.owner_name
@@ -94,7 +96,7 @@ export default function RiskTreatmentPanel({ riskId, actions, ownerOptions, canM
                             </span>
                             {! open && action.completed_at && (
                                 <span className="text-slate-600">
-                                    {(tt.completed_on ?? 'Fullført :date').replace(':date', formatDate(action.completed_at))}
+                                    {(tt.completed_on ?? 'Fullført :date').replace(':date', formatRiskDate(action.completed_at, locale))}
                                 </span>
                             )}
                         </div>

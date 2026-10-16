@@ -80,6 +80,8 @@ const SELECTED_NODE_BORDER = '#1e293b';
 // (not SVG/HTML) at a fixed screen-space font size (see labelSize below): it does not scale
 // with the camera zoom ratio, so this size is the actual on-screen size at every zoom level.
 const NODE_LABEL_SIZE = 16;
+// How long the relation tooltip stays after the pointer leaves the line, so it can be reached.
+const EDGE_TOOLTIP_GRACE_MS = 300;
 const NODE_LABEL_COLOR = '#1e293b'; // slate-800 — darker than the slate-700 contrast floor
 const NODE_LABEL_MAX_WIDTH_PX = 180;
 
@@ -489,17 +491,23 @@ function NodePanel({ node, tw, ta = {}, onClose, graphScope, onFocus, panelRef =
 /**
  * The hover tooltip: the node pair, and why they are connected. Two lines, both at the panel's
  * text size — a tooltip is read, not glanced at.
+ *
+ * Content on hover must be hoverable, dismissible and persistent (WCAG 1.4.13, A11Y-153): it stays
+ * where it appeared rather than running ahead of the pointer, the pointer can move onto it (leaving
+ * the line only hides it after `EDGE_TOOLTIP_GRACE_MS`), and Escape closes it.
  */
-function EdgeTooltip({ hover, position }) {
+function EdgeTooltip({ hover, position, onPointerEnter, onPointerLeave }) {
     if (!hover) {
         return null;
     }
 
     return (
         <div
-            className="pointer-events-none absolute z-20 max-w-sm -translate-y-full rounded-lg bg-slate-900/95 px-3 py-2 text-base leading-snug text-white shadow-lg"
+            className="absolute z-20 max-w-sm -translate-y-full rounded-lg bg-slate-900/95 px-3 py-2 text-base leading-snug text-white shadow-lg"
             style={{ left: Math.max(8, position.x + 12), top: Math.max(24, position.y - 8) }}
             role="tooltip"
+            onPointerEnter={onPointerEnter}
+            onPointerLeave={onPointerLeave}
         >
             <p className="font-semibold">{hover.headline}</p>
             <p className="mt-1 text-slate-300">{hover.detail}</p>
@@ -797,6 +805,17 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
     const [hoveredEdge, setHoveredEdge] = useState(null);
     const [hoveredPairKey, setHoveredPairKey] = useState(null);
     const [pointer, setPointer] = useState({ x: 0, y: 0 });
+    // Leaving the line hides the tooltip after a short grace, so the pointer can reach it (A11Y-153).
+    const edgeTooltipHideRef = useRef(null);
+    const cancelEdgeTooltipHide = () => {
+        window.clearTimeout(edgeTooltipHideRef.current);
+        edgeTooltipHideRef.current = null;
+    };
+    const hideEdgeTooltip = () => {
+        cancelEdgeTooltipHide();
+        setHoveredPairKey(null);
+        setHoveredEdge(null);
+    };
 
     // Highlight state is read by Sigma's reducers on every frame, so it lives in a ref: putting it
     // in the reducer's closure would freeze it at the values present when Sigma was constructed.
@@ -1059,6 +1078,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         });
 
         renderer.on('enterEdge', ({ edge, event }) => {
+            cancelEdgeTooltipHide();
             setPointer({ x: event.x, y: event.y });
 
             // The tooltip describes the RELATION between the two pages, not the single row that
@@ -1071,15 +1091,15 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         });
 
         renderer.on('leaveEdge', () => {
-            setHoveredPairKey(null);
-            setHoveredEdge(null);
+            cancelEdgeTooltipHide();
+            edgeTooltipHideRef.current = window.setTimeout(hideEdgeTooltip, EDGE_TOOLTIP_GRACE_MS);
         });
 
-        // Tooltip position follows the pointer. moveBody fires while the mouse moves over the
-        // canvas; it carries viewport coordinates, which is exactly the overlay's coordinate space.
-        renderer.on('moveBody', ({ event }) => setPointer({ x: event.x, y: event.y }));
+        // The tooltip stays where the pointer entered the line (the event carries the overlay's
+        // coordinate space). Following the pointer would keep it out of the pointer's reach.
 
         return () => {
+            cancelEdgeTooltipHide();
             renderer.kill();
             sigmaRef.current = null;
             graphRef.current = null;
@@ -1252,6 +1272,23 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
             }
         }
     }, [displayed]);
+
+    // Escape closes the hover tooltip without moving the pointer (1.4.13). Only while one is shown,
+    // so Escape keeps its other meanings everywhere else on the page.
+    useEffect(() => {
+        if (! hoveredEdge) {
+            return undefined;
+        }
+
+        const onKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                hideEdgeTooltip();
+            }
+        };
+        document.addEventListener('keydown', onKeyDown);
+
+        return () => document.removeEventListener('keydown', onKeyDown);
+    }, [hoveredEdge]);
 
     // The relation being examined — hover is transient, a click holds. Both feed the same reducers,
     // so a hovered line and a selected line look the same; only the panel distinguishes them.
@@ -1635,7 +1672,9 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
 
                         {/* Relation tooltip — positioned inside the canvas wrapper, which is the
                             coordinate space sigma reports pointer positions in. */}
-                        {mode === 'full' && view === 'graph' && <EdgeTooltip hover={hoveredEdge} position={pointer} />}
+                        {mode === 'full' && view === 'graph' && (
+                            <EdgeTooltip hover={hoveredEdge} position={pointer} onPointerEnter={cancelEdgeTooltipHide} onPointerLeave={hideEdgeTooltip} />
+                        )}
 
                         {/* Focus canvas. Mounted only in focus mode, so there is exactly one live
                             renderer at a time; the full graph's Sigma stays alive but hidden, which

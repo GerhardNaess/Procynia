@@ -1142,12 +1142,12 @@ export default function WikiShow({
         const updateUrl = manualBlockEditUrl(targetClaimId);
 
         if (!updateUrl || !runId || !current_version?.id || !targetClaimId) {
-            setWikiBlockEditError('Lagring mangler gyldig Wiki-kontekst. Last inn funnet på nytt fra Kjøringer.');
+            setWikiBlockEditError(tw.wiki_block_edit_missing_context ?? 'Lagring mangler gyldig Wiki-kontekst. Last inn funnet på nytt fra Kjøringer.');
             return;
         }
 
         if (!nextMarkdown) {
-            setWikiBlockEditError('Tekstblokken kan ikke være tom.');
+            setWikiBlockEditError(tw.wiki_block_edit_empty ?? 'Tekstblokken kan ikke være tom.');
             return;
         }
 
@@ -1175,7 +1175,7 @@ export default function WikiShow({
                         ?? firstBlockError
                         ?? formErrors.expected_page_version_id
                         ?? formErrors.run_id
-                        ?? 'Tekstendringen kunne ikke lagres. Kontroller teksten og prøv igjen.',
+                        ?? (tw.wiki_block_edit_failed ?? 'Tekstendringen kunne ikke lagres. Kontroller teksten og prøv igjen.'),
                     );
                 },
                 onSuccess: () => {
@@ -2931,13 +2931,16 @@ export default function WikiShow({
                                         const isEditingTargetBlock = wikiBlockEditingKey === block.block_key;
                                         const hasBestPracticeMetadataIssue = hasInvalidBestPracticeMetadata(block);
                                         const currentDraft = wikiBlockEditDrafts[block.block_key] ?? currentBlockRawMarkdown;
+                                        // A missing edit context is a fixed precondition (`disabled`); a save
+                                        // in progress is not, so the buttons stay focusable meanwhile
+                                        // (aria-disabled + the guards in the handlers, A11Y-156).
                                         const canSaveBlockEdit = Boolean(
                                             canEditWikiClaims
                                             && manualBlockEdit?.run_id
                                             && current_version?.id
-                                            && targetClaimId
-                                            && !wikiBlockSaveProcessingKey,
+                                            && targetClaimId,
                                         );
+                                        const isSavingBlockEdit = wikiBlockSaveProcessingKey !== null;
 
                                         return (
                                             <div
@@ -2982,18 +2985,25 @@ export default function WikiShow({
                                                             <button
                                                                 type="button"
                                                                 disabled={!canSaveBlockEdit}
+                                                                aria-disabled={isSavingBlockEdit || undefined}
                                                                 onClick={() => saveWikiBlockEdit(block.block_key)}
-                                                                className={`rounded-full px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
+                                                                className={`rounded-full px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 aria-disabled:cursor-not-allowed aria-disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                             >
-                                                                {wikiBlockSaveProcessingKey === block.block_key ? 'Lagrer...' : 'Lagre endring'}
+                                                                {wikiBlockSaveProcessingKey === block.block_key
+                                                                    ? (tw.wiki_block_edit_saving ?? 'Lagrer …')
+                                                                    : (tw.wiki_block_edit_save ?? 'Lagre endring')}
                                                             </button>
                                                             <button
                                                                 type="button"
-                                                                disabled={wikiBlockSaveProcessingKey === block.block_key}
-                                                                onClick={() => cancelWikiBlockEdit(block.block_key)}
-                                                                className="rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                aria-disabled={isSavingBlockEdit || undefined}
+                                                                onClick={() => {
+                                                                    if (! isSavingBlockEdit) {
+                                                                        cancelWikiBlockEdit(block.block_key);
+                                                                    }
+                                                                }}
+                                                                className="rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
                                                             >
-                                                                Avbryt
+                                                                {tw.wiki_block_edit_cancel ?? 'Avbryt'}
                                                             </button>
                                                         </div>
                                                         {wikiBlockValidationError && (
@@ -3003,7 +3013,7 @@ export default function WikiShow({
                                                         )}
                                                         {!manualBlockEdit?.run_id && (
                                                             <p className="text-base text-slate-600">
-                                                                Lagring krever gyldig kjøringskontekst. Åpne funnet fra Kjøringer og prøv igjen.
+                                                                {tw.wiki_block_edit_requires_run ?? 'Lagring krever gyldig kjøringskontekst. Åpne funnet fra Kjøringer og prøv igjen.'}
                                                             </p>
                                                         )}
                                                     </div>

@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { useForm } from '@inertiajs/react';
 import { RequiredFieldsNote } from '../../../../Components/App/FormField';
 import { PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../../Support/actionStyles';
+import { BUSY_STYLE, submitWhenIdle } from '../../../../Support/focusManagement';
 import { ERROR, HINT, INPUT, LABEL } from '../../../../Support/formStyles';
 import RequiredMark from '../RequiredMark';
 import FieldError from '../FieldError';
@@ -29,7 +30,7 @@ function ReasonForm({ id, action, heading, intro, submit, required, onDone, ta, 
         <section className={CARD} aria-labelledby={`${id}-heading`} data-testid={id}>
             <h2 id={`${id}-heading`} className="text-xl font-semibold text-slate-950">{heading}</h2>
             <p className="mt-1 text-base text-slate-600">{intro}</p>
-            <form ref={formRef} onSubmit={send} className="mt-4 space-y-4">
+            <form ref={formRef} onSubmit={submitWhenIdle(form, send)} className="mt-4 space-y-4">
                 <div>
                     <label htmlFor={`${id}-reason`} className={LABEL}>
                         {required ? (ta.reason_label ?? 'Begrunnelse') : (ta.reason_optional ?? 'Begrunnelse (valgfritt)')}
@@ -51,7 +52,7 @@ function ReasonForm({ id, action, heading, intro, submit, required, onDone, ta, 
                 {required && <RequiredFieldsNote text={ta.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />}
                 <div className="flex flex-wrap justify-end gap-3">
                     <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{ta.cancel ?? 'Avbryt'}</button>
-                    <button type="submit" disabled={form.processing} className={tone}>
+                    <button type="submit" aria-disabled={form.processing || undefined} className={`${tone} ${BUSY_STYLE}`}>
                         {form.processing ? (ta.saving ?? 'Lagrer...') : submit}
                     </button>
                 </div>
@@ -125,7 +126,7 @@ export function AuditCompleteForm({ audit, onDone, ta }) {
         <section className={CARD} aria-labelledby="compliance-audit-complete-heading" data-testid="compliance-audit-complete">
             <h2 id="compliance-audit-complete-heading" className="text-xl font-semibold text-slate-950">{ta.complete_heading ?? 'Fullfør revisjon'}</h2>
             <p className="mt-1 text-base text-slate-600">{ta.complete_intro ?? 'Revisjonen avsluttes med konklusjonen under og blir låst. En revisjon kan fullføres uten funn.'}</p>
-            <form ref={formRef} onSubmit={send} className="mt-4 space-y-4">
+            <form ref={formRef} onSubmit={submitWhenIdle(form, send)} className="mt-4 space-y-4">
                 <div>
                     <label htmlFor="compliance-audit-complete-conclusion" className={LABEL}>{ta.field_conclusion ?? 'Konklusjon'}<RequiredMark /></label>
                     <p id="compliance-audit-complete-conclusion-hint" className={HINT}>{ta.field_conclusion_hint ?? 'Revisjonens samlede vurdering.'}</p>
@@ -144,7 +145,7 @@ export function AuditCompleteForm({ audit, onDone, ta }) {
                 <RequiredFieldsNote text={ta.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
                 <div className="flex flex-wrap justify-end gap-3">
                     <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{ta.cancel ?? 'Avbryt'}</button>
-                    <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                    <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`}>
                         {form.processing ? (ta.saving ?? 'Lagrer...') : (ta.complete_submit ?? 'Fullfør revisjon')}
                     </button>
                 </div>
