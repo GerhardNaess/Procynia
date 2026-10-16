@@ -6,6 +6,9 @@ import { truncateLabelToWidth } from './graphLabelLogic';
 import { articleHrefFromGraph } from './wikiGraphNavigation';
 import { buildFocusUrl, focusErrorFromStatus, focusLayout } from './wikiGraphFocus';
 import { computeLabelAwareFit } from './wikiGraphFocusFit';
+import { useTransitionAnnouncement } from '../../../Support/statusAnnouncement';
+import { focusListGroups, focusViewAnnouncement, focusViewStateKey } from './wikiGraphFocusList';
+import { pageTypeText } from './WikiGraphListView';
 
 /**
  * The focus neighbourhood of a single Wiki page, drawn from /app/wiki/graph-focus.
@@ -184,16 +187,17 @@ function fitCameraToLabels(renderer, maxLabelWidthPx) {
 
 function Message({ tone = 'slate', title, hint, children }) {
     const palette = {
-        slate: 'border-slate-200 bg-white text-slate-600',
-        amber: 'border-amber-200 bg-amber-50 text-amber-800',
-        rose: 'border-rose-100 bg-rose-50 text-rose-700',
+        slate: 'border-slate-200 bg-white text-slate-700',
+        amber: 'border-amber-200 bg-amber-50 text-amber-900',
+        rose: 'border-rose-200 bg-rose-50 text-rose-800',
     }[tone];
 
     return (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-50 p-8">
             <div className={`max-w-sm rounded-2xl border p-6 text-center ${palette}`}>
                 <p className="text-sm font-semibold">{title}</p>
-                {hint && <p className="mt-1 text-xs opacity-80">{hint}</p>}
+                {/* No opacity: a faded hint dropped below 4.5:1 on every tone (A11Y-016). */}
+                {hint && <p className="mt-1 text-xs">{hint}</p>}
                 {children}
             </div>
         </div>
@@ -201,13 +205,8 @@ function Message({ tone = 'slate', title, hint, children }) {
 }
 
 /** The page the user clicked: what it is, how far out it sits, and the two things they can do next. */
-function FocusNodeCard({ node, tw, graphScope, onClose, onMakeFocus }) {
-    const typeLabel = {
-        article: tw.page_type_article ?? 'Artikkel',
-        summary: tw.page_type_summary ?? 'Sammendrag',
-        concept: tw.page_type_concept ?? 'Konsept',
-        entity: tw.page_type_entity ?? 'Entitet',
-    }[node.pageType] ?? node.pageType;
+function FocusNodeCard({ node, tw, ta = {}, graphScope, onClose, onMakeFocus }) {
+    const typeLabel = pageTypeText(node.pageType, tw);
 
     const depthLabel = node.depth === 0
         ? (tw.graph_focus_depth_centre ?? 'Fokusside')
@@ -216,7 +215,7 @@ function FocusNodeCard({ node, tw, graphScope, onClose, onMakeFocus }) {
     // Anchored to the TOP of the canvas, not the bottom: the graph area is taller than the window on
     // a laptop, so a card at the bottom edge would hold its main action below the fold.
     return (
-        <div className="absolute left-3 top-3 z-20 w-64 rounded-2xl border border-slate-200 bg-white p-4 shadow-lg">
+        <section aria-label={node.label} className="absolute left-3 top-3 z-20 w-64 max-w-[calc(100%-1.5rem)] rounded-2xl border border-slate-200 bg-white p-4 shadow-lg">
             <div className="mb-3 flex items-start justify-between gap-2">
                 <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-slate-950" title={node.label}>
@@ -224,19 +223,20 @@ function FocusNodeCard({ node, tw, graphScope, onClose, onMakeFocus }) {
                     </p>
                     <div className="mt-1 flex items-center gap-1.5">
                         <span
+                            aria-hidden="true"
                             className="inline-block h-2 w-2 rounded-full"
                             style={{ backgroundColor: PAGE_TYPE_COLORS[node.pageType] ?? '#6b7280' }}
                         />
-                        <span className="text-xs text-slate-500">{typeLabel}</span>
-                        <span className="h-3 w-px bg-slate-200" />
-                        <span className="text-xs text-slate-500">{depthLabel}</span>
+                        <span className="text-xs text-slate-600">{typeLabel}</span>
+                        <span aria-hidden="true" className="h-3 w-px bg-slate-200" />
+                        <span className="text-xs text-slate-600">{depthLabel}</span>
                     </div>
                 </div>
                 <button
                     type="button"
                     onClick={onClose}
-                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                    aria-label={tw.close ?? 'Lukk'}
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                    aria-label={ta.wiki_graph_close_node_panel ?? 'Lukk sidedetaljer'}
                 >
                     <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                         <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
@@ -249,7 +249,7 @@ function FocusNodeCard({ node, tw, graphScope, onClose, onMakeFocus }) {
                     <button
                         type="button"
                         onClick={() => onMakeFocus(node.pageId)}
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-950"
                     >
                         {tw.graph_focus_set_focus ?? 'Fokuser på denne siden'}
                     </button>
@@ -261,7 +261,73 @@ function FocusNodeCard({ node, tw, graphScope, onClose, onMakeFocus }) {
                     {tw.graph_node_open_page ?? 'Åpne side'}
                 </a>
             </div>
-        </div>
+        </section>
+    );
+}
+
+/**
+ * The focus neighbourhood as a list (A11Y-050): the focus page, then the pages one and two hops out,
+ * each with the two things the card above offers — open the page, or make it the next focus. Read
+ * from the same answer the canvas draws; nothing is fetched for it.
+ */
+function FocusList({ data, tw, ta, graphScope, onMakeFocus }) {
+    const groups = focusListGroups(data?.nodes ?? []);
+
+    return (
+        <section
+            aria-labelledby="wiki-graph-focus-list-title"
+            data-graph-list="focus"
+            className="absolute inset-0 overflow-y-auto bg-white p-4 sm:p-5"
+        >
+            <h2 id="wiki-graph-focus-list-title" className="text-lg font-semibold text-slate-950">
+                {ta.wiki_graph_focus_list_title ?? 'Sider i fokusvisningen'}
+            </h2>
+            <p className="mt-1 text-base text-slate-600">
+                {(tw.graph_focus_summary ?? ':nodes sider · :edges koblinger')
+                    .replace(':nodes', data?.summary?.node_count ?? 0)
+                    .replace(':edges', data?.summary?.edge_count ?? 0)}
+            </p>
+
+            {groups.map((group) => (
+                <div key={group.depth} className="mt-4">
+                    <h3 id={`wiki-graph-focus-depth-${group.depth}`} className="text-base font-semibold text-slate-800">
+                        {group.depth === 0
+                            ? (tw.graph_focus_depth_centre ?? 'Fokusside')
+                            : (tw.graph_focus_depth_hops ?? ':count hopp unna').replace(':count', group.depth)}
+                    </h3>
+                    <ul aria-labelledby={`wiki-graph-focus-depth-${group.depth}`} className="mt-1 divide-y divide-slate-200 border-y border-slate-200">
+                        {group.nodes.map((node) => {
+                            const titleId = `wiki-graph-focus-list-page-${node.id}`;
+
+                            return (
+                                <li key={node.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
+                                    <div className="min-w-0">
+                                        <a
+                                            id={titleId}
+                                            href={articleHrefFromGraph(node.url, graphScope)}
+                                            className="break-words text-base font-semibold text-violet-700 underline decoration-violet-300 underline-offset-2 hover:text-violet-900"
+                                        >
+                                            {node.title}
+                                        </a>
+                                        <p className="text-base text-slate-600">{pageTypeText(node.page_type, tw)}</p>
+                                    </div>
+                                    {Number(node.depth) !== 0 && (
+                                        <button
+                                            type="button"
+                                            aria-describedby={titleId}
+                                            onClick={() => onMakeFocus(node.page_id)}
+                                            className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-base font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-950"
+                                        >
+                                            {tw.graph_focus_set_focus ?? 'Fokuser på denne siden'}
+                                        </button>
+                                    )}
+                                </li>
+                            );
+                        })}
+                    </ul>
+                </div>
+            ))}
+        </section>
     );
 }
 
@@ -270,6 +336,8 @@ export default function WikiGraphFocusView({
     depth,
     direction,
     tw = {},
+    ta = {},
+    presentation = 'graph',
     graphScope,
     onMakeFocus,
 }) {
@@ -432,13 +500,33 @@ export default function WikiGraphFocusView({
 
     const nothingSelected = url === null;
     const isEmpty = data !== null && (data.nodes ?? []).length <= 1;
+    const asList = presentation === 'list';
+
+    // A neighbourhood loading, arriving or failing is said once (4.1.3): the canvas changes silently
+    // otherwise, and the error messages below mount with their text.
+    useTransitionAnnouncement(focusViewStateKey({ nothingSelected, loading, errorKind, data }), (previous, next) => {
+        const message = focusViewAnnouncement(previous, next, data, tw);
+
+        return message ? { message, politeness: next.startsWith('error') ? 'assertive' : 'polite' } : null;
+    });
 
     return (
         <div className="absolute inset-0">
             {/* In focus mode the full graph's canvases are still in the DOM (hidden, so its layout
                 and camera survive the trip). data-graph-view is what tells the two apart — to a
                 reader, and to any test that needs to address one of them. */}
-            <div ref={containerRef} data-graph-view="focus" className="absolute inset-0" />
+            <div
+                ref={containerRef}
+                data-graph-view="focus"
+                role="img"
+                aria-label={ta.wiki_graph_focus_canvas_label ?? 'Fokusvisning av kunnskapsgrafen. Velg Liste for å gå gjennom sidene med tastatur.'}
+                className="absolute inset-0"
+                style={asList ? { visibility: 'hidden' } : undefined}
+            />
+
+            {asList && !loading && !errorKind && data && !isEmpty && (
+                <FocusList data={data} tw={tw} ta={ta} graphScope={graphScope} onMakeFocus={onMakeFocus} />
+            )}
 
             {nothingSelected && (
                 <Message
@@ -454,7 +542,7 @@ export default function WikiGraphFocusView({
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4Z" />
                         </svg>
-                        <p className="text-sm text-slate-500">{tw.graph_focus_loading ?? 'Laster fokusvisning…'}</p>
+                        <p className="text-sm text-slate-600">{tw.graph_focus_loading ?? 'Laster fokusvisning…'}</p>
                     </div>
                 </div>
             )}
@@ -491,9 +579,9 @@ export default function WikiGraphFocusView({
                 />
             )}
 
-            {!loading && !errorKind && data && !isEmpty && (
+            {!asList && !loading && !errorKind && data && !isEmpty && (
                 <div className="pointer-events-none absolute right-3 top-3">
-                    <span className="inline-flex items-center rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-medium text-slate-500 shadow-sm ring-1 ring-slate-200 backdrop-blur-sm">
+                    <span className="inline-flex items-center rounded-full bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm ring-1 ring-slate-200 backdrop-blur-sm">
                         {(tw.graph_focus_summary ?? ':nodes sider · :edges koblinger')
                             .replace(':nodes', data.summary?.node_count ?? 0)
                             .replace(':edges', data.summary?.edge_count ?? 0)}
@@ -501,10 +589,11 @@ export default function WikiGraphFocusView({
                 </div>
             )}
 
-            {selectedNode && (
+            {selectedNode && !asList && (
                 <FocusNodeCard
                     node={selectedNode}
                     tw={tw}
+                    ta={ta}
                     graphScope={graphScope}
                     onClose={() => setSelectedNode(null)}
                     onMakeFocus={(id) => { setSelectedNode(null); onMakeFocus(id); }}

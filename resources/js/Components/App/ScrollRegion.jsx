@@ -24,13 +24,24 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * @param {string}  [className]  Spacing from the surroundings (mt-4 …), or the box's own look.
  * @param {boolean} [edgeRoom]   false for a box that draws its own border and padding, where the
  *                               negative margin would move the border.
- * @param {'x'|'y'} [axis]       Which way the box scrolls. 'x' (default) for tables.
+ * Fase 5 adds `axis="both"` for a box with a capped height around a table that can also be wider
+ * than the box (Kildedokumenter, Wiki-sider): it joins the Tab order when it overflows either way,
+ * and like `y` leaves the overflow classes to the caller.
+ *
+ * @param {'x'|'y'|'both'} [axis] Which way the box scrolls. 'x' (default) for tables.
  * @param {object}  [innerRef]   Receives the scroll box element, for callers that read its content.
  */
 export default function ScrollRegion({ label, className = '', edgeRoom = true, axis = 'x', innerRef = null, children, ...rest }) {
     const ownRef = useRef(null);
     const [scrollable, setScrollable] = useState(false);
     const vertical = axis === 'y';
+    const both = axis === 'both';
+    const overflows = (element) => {
+        const tall = element.scrollHeight > element.clientHeight + 1;
+        const wide = element.scrollWidth > element.clientWidth + 1;
+
+        return both ? tall || wide : (vertical ? tall : wide);
+    };
 
     const setRef = useCallback((element) => {
         ownRef.current = element;
@@ -47,9 +58,7 @@ export default function ScrollRegion({ label, className = '', edgeRoom = true, a
             return undefined;
         }
 
-        const measure = () => setScrollable(vertical
-            ? element.scrollHeight > element.clientHeight + 1
-            : element.scrollWidth > element.clientWidth + 1);
+        const measure = () => setScrollable(overflows(element));
         measure();
 
         if (typeof ResizeObserver === 'undefined') {
@@ -66,7 +75,8 @@ export default function ScrollRegion({ label, className = '', edgeRoom = true, a
         }
 
         return () => observer.disconnect();
-    }, [vertical]);
+        // `overflows` only reads `axis`, so `axis` is the whole dependency.
+    }, [axis]);
 
     // Content that changes without resizing the box or its first child — another requirement added to
     // a capped list — is caught here: the parent re-rendered, so measure again.
@@ -77,14 +87,12 @@ export default function ScrollRegion({ label, className = '', edgeRoom = true, a
             return;
         }
 
-        const next = vertical
-            ? element.scrollHeight > element.clientHeight + 1
-            : element.scrollWidth > element.clientWidth + 1;
+        const next = overflows(element);
 
         setScrollable((current) => (current === next ? current : next));
     });
 
-    const boxClasses = vertical
+    const boxClasses = vertical || both
         ? className
         : `relative overflow-x-auto ${edgeRoom ? '-mx-1 px-1' : ''} ${className}`;
 

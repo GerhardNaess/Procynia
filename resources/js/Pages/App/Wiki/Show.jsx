@@ -6,10 +6,13 @@ import {
     SECONDARY_ACTION,
 } from '../../../Support/actionStyles';
 import { useEffect, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import ActionDialog from '../../../Components/App/ActionDialog';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
+import { focusElement, refocusIfLost, useFocusFirstError } from '../../../Support/focusManagement';
+import WikiMarkdown from './WikiMarkdown';
+import { articleEditErrorBlockKey, claimActionFocusCandidates } from './wikiShowA11y';
 import WikiReviewPanel, { articleEditUnavailableText } from './WikiReviewPanel';
 import {
     getWikiQualityCheckCopy,
@@ -315,13 +318,13 @@ function ClaimSummary({ summary, tw }) {
                     </span>
                 )}
                 {summary.missing_source > 0 && (
-                    <span className="flex items-center gap-1 text-rose-600">
+                    <span className="flex items-center gap-1 text-rose-700">
                         <WarnIcon className="h-3.5 w-3.5" />
                         {summary.missing_source} {tw.quality_no_source ?? 'mangler kilde'}
                     </span>
                 )}
                 {summary.conflict > 0 && (
-                    <span className="flex items-center gap-1 text-rose-600">
+                    <span className="flex items-center gap-1 text-rose-700">
                         <WarnIcon className="h-3.5 w-3.5" />
                         {summary.conflict} {tw.conflict_detected ?? 'mulig konflikt'}
                     </span>
@@ -362,7 +365,7 @@ const WIKI_FINDING_BACK_BUTTON_CLASS =
     `inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full px-4 py-2 text-base font-semibold transition ${PRIMARY_COLOURS}`;
 
 const WIKI_SECONDARY_BACK_LINK_CLASS =
-    'inline-flex items-center gap-1.5 text-base text-slate-500 transition hover:text-slate-950';
+    'inline-flex items-center gap-1.5 text-base text-slate-600 transition hover:text-slate-950';
 
 /**
  * One label per return context resolveWikiBackLink() can report, so the link never says "Tilbake
@@ -398,31 +401,37 @@ function WikiArticleLink({ href, children, ...rest }) {
     );
 }
 
-function LinkedPageList({ pages, label }) {
+/**
+ * Linked pages as a named list. The coloured dot says the page type to a sighted reader; a screen
+ * reader gets the same in words (1.4.1, 1.3.1), when the caller can name the type.
+ */
+function LinkedPageList({ pages, label, typeLabel = null }) {
     if (!pages || pages.length === 0) return null;
 
     return (
         <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-            <span className="shrink-0 text-base font-semibold text-slate-500 mt-0.5">{label}:</span>
-            <div className="flex flex-wrap gap-2">
+            <span className="shrink-0 text-base font-semibold text-slate-600 mt-0.5">{label}:</span>
+            <ul aria-label={label} className="flex flex-wrap gap-2">
                 {pages.map((p) => (
-                    <Link
-                        key={p.id}
-                        href={`/app/wiki/${p.slug}`}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-base font-medium text-slate-700 shadow-sm transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800"
-                    >
-                        {p.page_type && (
-                            <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
-                                p.page_type === 'article' ? 'bg-violet-500' :
-                                p.page_type === 'summary' ? 'bg-sky-500' :
-                                p.page_type === 'concept' ? 'bg-teal-500' :
-                                'bg-orange-500'
-                            }`} />
-                        )}
-                        {p.title}
-                    </Link>
+                    <li key={p.id}>
+                        <Link
+                            href={`/app/wiki/${p.slug}`}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 py-1 text-base font-medium text-slate-700 shadow-sm transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800"
+                        >
+                            {p.page_type && (
+                                <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
+                                    p.page_type === 'article' ? 'bg-violet-500' :
+                                    p.page_type === 'summary' ? 'bg-sky-500' :
+                                    p.page_type === 'concept' ? 'bg-teal-500' :
+                                    'bg-orange-500'
+                                }`} />
+                            )}
+                            {p.title}
+                            {p.page_type && typeLabel && <span className="sr-only"> ({typeLabel(p.page_type)})</span>}
+                        </Link>
+                    </li>
                 ))}
-            </div>
+            </ul>
         </div>
     );
 }
@@ -635,7 +644,7 @@ function StructureFindingContextPanel({
                         <dt className="text-base font-semibold text-slate-700">
                             {tw.quality_check_technical_reference_label ?? 'Teknisk referanse'}
                         </dt>
-                        <dd className="font-mono text-base text-slate-500">{finding.code}</dd>
+                        <dd className="font-mono text-base text-slate-600">{finding.code}</dd>
                     </div>
                 </dl>
             </div>
@@ -661,10 +670,10 @@ function StructureFindingContextPanel({
                         {tw.structure_finding_existing_links_heading ?? 'Eksisterende Wiki-lenker'}
                     </h3>
                     <div className="mt-3 space-y-3">
-                        <LinkedPageList pages={outgoingLinks} label={tw.structure_finding_outgoing_links ?? 'Utgående lenker'} />
-                        <LinkedPageList pages={backlinks.length > 0 ? backlinks : incomingLinks} label={tw.structure_finding_incoming_links ?? 'Sider som lenker hit'} />
+                        <LinkedPageList pages={outgoingLinks} label={tw.structure_finding_outgoing_links ?? 'Utgående lenker'} typeLabel={pageTypeLabel} />
+                        <LinkedPageList pages={backlinks.length > 0 ? backlinks : incomingLinks} label={tw.structure_finding_incoming_links ?? 'Sider som lenker hit'} typeLabel={pageTypeLabel} />
                         {!hasDirectLinks && (
-                            <p className="text-base leading-7 text-slate-500">
+                            <p className="text-base leading-7 text-slate-600">
                                 {tw.structure_finding_no_direct_links ?? 'Ingen direkte Wiki-lenker er registrert for denne siden ennå.'}
                             </p>
                         )}
@@ -676,11 +685,11 @@ function StructureFindingContextPanel({
                         {tw.structure_finding_relevant_pages_heading ?? 'Relevante sider i eksisterende data'}
                     </h3>
                     <div className="mt-3 space-y-3">
-                        <LinkedPageList pages={relatedArticles} label={tw.traversal_related_articles ?? 'Relaterte artikler'} />
-                        <LinkedPageList pages={relatedConcepts} label={tw.traversal_related_concepts ?? 'Konsepter'} />
-                        <LinkedPageList pages={relatedEntities} label={tw.traversal_related_entities ?? 'Entiteter'} />
+                        <LinkedPageList pages={relatedArticles} label={tw.traversal_related_articles ?? 'Relaterte artikler'} typeLabel={pageTypeLabel} />
+                        <LinkedPageList pages={relatedConcepts} label={tw.traversal_related_concepts ?? 'Konsepter'} typeLabel={pageTypeLabel} />
+                        <LinkedPageList pages={relatedEntities} label={tw.traversal_related_entities ?? 'Entiteter'} typeLabel={pageTypeLabel} />
                         {!hasRelevantPages && (
-                            <p className="text-base leading-7 text-slate-500">
+                            <p className="text-base leading-7 text-slate-600">
                                 {tw.structure_finding_no_suggestions ?? 'Det finnes ingen sikre koblingsforslag i eksisterende Wiki-data. Legg heller til en relevant Wiki-lenke manuelt enn å bruke et svakt forslag.'}
                             </p>
                         )}
@@ -717,14 +726,19 @@ function WikiTableBlock({ block, tw, sourceDocuments }) {
     const rows = Array.isArray(tableData.rows) ? tableData.rows : [];
     const tableNumber = (Number(tableData.table_index) || 0) + 1;
     const sourceDocument = sourceDocuments.find((doc) => String(doc.id) === String(block.source_id)) ?? null;
+    const captionText = (tw.wiki_table_caption ?? 'Tabell :number').replace(':number', tableNumber);
+    const captionId = `wiki-table-${block.block_key ?? tableNumber}-caption`;
 
+    // The visible «Tabell N» names the table (A11Y-113): aria-labelledby rather than a <caption>, so
+    // the label keeps its place above the scroll box. Wider than the screen, the box scrolls on its
+    // own and can be reached with the keyboard (ScrollRegion), the page does not.
     return (
         <div className="not-prose my-4 space-y-2">
-            <p className="text-base font-semibold text-slate-700">
-                {(tw.wiki_table_caption ?? 'Tabell :number').replace(':number', tableNumber)}
+            <p id={captionId} className="text-base font-semibold text-slate-700">
+                {captionText}
             </p>
-            <div className="overflow-x-auto rounded-2xl border border-slate-200">
-                <table className="w-full min-w-[480px] border-collapse text-base text-slate-800">
+            <ScrollRegion label={captionText} edgeRoom={false} className="rounded-2xl border border-slate-200">
+                <table aria-labelledby={captionId} className="w-full min-w-[480px] border-collapse text-base text-slate-800">
                     <thead>
                         <tr className="bg-slate-50">
                             {tableData.headers.map((header, index) => (
@@ -757,8 +771,8 @@ function WikiTableBlock({ block, tw, sourceDocuments }) {
                         })}
                     </tbody>
                 </table>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-2 text-base text-slate-500">
+            </ScrollRegion>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-base text-slate-600">
                 <p>
                     {tw.source_page_reference ?? 'Plassering i kilden'}: {block.page_reference ?? '—'}
                 </p>
@@ -767,7 +781,7 @@ function WikiTableBlock({ block, tw, sourceDocuments }) {
                         href={sourceDocument.download_url}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-1 font-medium text-violet-600 hover:text-violet-800 hover:underline"
+                        className="inline-flex items-center gap-1 font-medium text-violet-700 underline hover:text-violet-900"
                     >
                         {tw.source_open_document ?? 'Åpne original kilde'}
                     </a>
@@ -808,7 +822,7 @@ function WikiImageBlock({ block, tw, sourceDocuments }) {
                     {caption}
                 </figcaption>
             </figure>
-            <div className="flex flex-wrap items-center justify-between gap-2 text-base text-slate-500">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-base text-slate-600">
                 <p>
                     {tw.source_page_reference ?? 'Plassering i kilden'}: {block.page_reference ?? '—'}
                 </p>
@@ -817,7 +831,7 @@ function WikiImageBlock({ block, tw, sourceDocuments }) {
                         href={sourceDocument.download_url}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-1 font-medium text-violet-600 hover:text-violet-800 hover:underline"
+                        className="inline-flex items-center gap-1 font-medium text-violet-700 underline hover:text-violet-900"
                     >
                         {tw.source_open_document ?? 'Åpne original kilde'}
                     </a>
@@ -878,12 +892,14 @@ function PageActionsMenu({ tw, page }) {
     return (
         <>
             <div ref={menuRef} className="relative">
+                {/* A disclosure, not role="menu": a menu promises arrow-key navigation it never had
+                    (A11Y-103). Tab reaches the one action; Escape closes and returns here. */}
                 <button
                     ref={triggerRef}
                     type="button"
                     className={DISCLOSURE_INLINE}
-                    aria-haspopup="menu"
                     aria-expanded={isMenuOpen}
+                    aria-controls="wiki-page-actions-panel"
                     data-testid="wiki-page-actions"
                     onClick={() => setIsMenuOpen((open) => ! open)}
                 >
@@ -895,12 +911,11 @@ function PageActionsMenu({ tw, page }) {
 
                 {isMenuOpen && (
                     <div
-                        role="menu"
-                        className="absolute right-0 z-20 mt-2 w-60 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-lg"
+                        id="wiki-page-actions-panel"
+                        className="absolute right-0 z-20 mt-2 w-60 max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white p-1.5 shadow-lg"
                     >
                         <button
                             type="button"
-                            role="menuitem"
                             data-testid="wiki-page-delete"
                             className="block w-full rounded-xl px-3 py-2 text-left text-base font-semibold text-rose-700 transition hover:bg-rose-50"
                             onClick={() => {
@@ -919,6 +934,7 @@ function PageActionsMenu({ tw, page }) {
                 onClose={() => setIsConfirmOpen(false)}
                 closeDisabled={deleting}
                 titleId="wiki-page-delete-title"
+                descriptionId="wiki-page-delete-description"
                 initialFocusRef={cancelRef}
                 returnFocusRef={triggerRef}
             >
@@ -927,7 +943,7 @@ function PageActionsMenu({ tw, page }) {
                 </h2>
                 <p className="mt-2 text-base leading-6 text-slate-600">{page.title}</p>
 
-                <dl className="mt-5 space-y-4">
+                <dl id="wiki-page-delete-description" className="mt-5 space-y-4">
                     <div>
                         <dt className="text-base font-semibold text-rose-700">
                             {tw.page_delete_dialog_removed_heading ?? 'Dette slettes'}
@@ -937,7 +953,7 @@ function PageActionsMenu({ tw, page }) {
                         </dd>
                     </div>
                     <div>
-                        <dt className="text-base font-semibold text-slate-500">
+                        <dt className="text-base font-semibold text-slate-600">
                             {tw.page_delete_dialog_kept_heading ?? 'Dette beholdes'}
                         </dt>
                         <dd className="mt-1 text-base leading-6 text-slate-700">
@@ -1014,6 +1030,7 @@ export default function WikiShow({
 }) {
     const { translations = {}, auth = {}, errors = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
+    const ta = translations?.a11y ?? {};
     // The best-practice assessment recorded for the current version: one entry per planned topic.
     // An audit trail, never a finding — "no improvement found" is a conclusion a reviewer can judge,
     // and its absence (a page generated before the contract) is deliberately different from an
@@ -1065,6 +1082,14 @@ export default function WikiShow({
     const [isEditingArticle, setIsEditingArticle] = useState(false);
     const [articleDrafts, setArticleDrafts] = useState({});
     const [isSavingArticle, setIsSavingArticle] = useState(false);
+    // A rejected save names its block by position in what was sent («blocks.0.markdown»), so the keys
+    // sent are remembered to tie the message to the right field (A11Y-049).
+    const submittedArticleKeysRef = useRef([]);
+    const articleEditRef = useRef(null);
+    const requestArticleErrorFocus = useFocusFirstError(articleEditRef);
+    const articleEditingWasOpenRef = useRef(false);
+    const blockEditTextareaRef = useRef(null);
+    const blockEditWasOpenRef = useRef(false);
     const claimAccessNotice = canHandleWikiClaims
         ? (tw.verification_basis_claim_handler_notice ?? 'Kontroller påstandene mot kildedokumentene. Koble kilde, godkjenn eller avvis påstanden.')
         : (tw.verification_basis_read_only_notice ?? 'Påstandene må behandles av en bruker med tilgang til det aktuelle kildegrunnlaget.');
@@ -1224,6 +1249,42 @@ export default function WikiShow({
         return () => window.cancelAnimationFrame(frame);
     }, [hasStructureFinding, structureFinding?.id, page.slug]);
 
+    // The claim-review block editor: into the text field when it opens (it used autoFocus, which also
+    // fired on a re-render), back to «Rediger teksten» when it closes.
+    useEffect(() => {
+        const isOpen = wikiBlockEditingKey !== null;
+
+        if (isOpen === blockEditWasOpenRef.current) {
+            return;
+        }
+
+        blockEditWasOpenRef.current = isOpen;
+
+        if (isOpen) {
+            focusElement(blockEditTextareaRef.current);
+        } else {
+            refocusIfLost(['wiki-block-edit-start']);
+        }
+    }, [wikiBlockEditingKey]);
+
+    // Article editing (A11Y-049): into the first paragraph on «Rediger artikkel», back to that button
+    // on Avbryt or after a save that landed.
+    useEffect(() => {
+        if (isEditingArticle === articleEditingWasOpenRef.current) {
+            return;
+        }
+
+        articleEditingWasOpenRef.current = isEditingArticle;
+
+        if (isEditingArticle) {
+            const first = editableArticleBlocks[0];
+
+            focusElement(first ? document.getElementById(`wiki-article-edit-${first.block_key}`) : null);
+        } else {
+            refocusIfLost(['wiki-article-edit-button']);
+        }
+    }, [isEditingArticle]);
+
     const { claimFindings: claimLintFindings, structuralFindings } = splitWikiVerificationFindings(lintFindings);
     const structuralFindingGroups = groupWikiFindingsByCode(structuralFindings);
     // A claim still needs a human decision. Unchanged predicate — only how it is applied changed.
@@ -1270,6 +1331,21 @@ export default function WikiShow({
         });
     };
 
+    /**
+     * Every claim decision keeps the reader where they are (A11Y-014): the page is not scrolled back
+     * to the top, and when the decided card leaves the work list, focus moves on to the next claim
+     * that still needs a decision — or to the claim's new place, or the section heading — but only
+     * if focus was actually lost. The result itself is the flash message the toast reads out.
+     */
+    const claimActionOptions = (claim) => ({
+        preserveScroll: true,
+        onSuccess: () => refocusIfLost(claimActionFocusCandidates(
+            claim.id,
+            reviewUnits.open.map((unit) => unit.claim.id),
+        )),
+        onFinish: () => setClaimProcessing(null),
+    });
+
     const approveClaim = (claim) => {
         if (claimProcessing) return;
         setClaimProcessing(claim.id);
@@ -1288,7 +1364,7 @@ export default function WikiShow({
                 // mid-workflow. Sent on every claim action for the same reason.
                 back_url: reviewReference?.back_url ?? undefined,
             },
-            { onFinish: () => setClaimProcessing(null) },
+            claimActionOptions(claim),
         );
     };
 
@@ -1443,7 +1519,7 @@ export default function WikiShow({
                 comment: approvalComments[claim.id] || undefined,
                 back_url: reviewReference?.back_url ?? undefined,
             },
-            { onFinish: () => setClaimProcessing(null) },
+            claimActionOptions(claim),
         );
     };
 
@@ -1453,7 +1529,7 @@ export default function WikiShow({
         router.patch(
             `/app/wiki/${page.slug}/claims/${claim.id}/unapprove`,
             { back_url: reviewReference?.back_url ?? undefined },
-            { onFinish: () => setClaimProcessing(null) },
+            claimActionOptions(claim),
         );
     };
 
@@ -1467,7 +1543,7 @@ export default function WikiShow({
                 comment: approvalComments[claim.id] || undefined,
                 back_url: reviewReference?.back_url ?? undefined,
             },
-            { onFinish: () => setClaimProcessing(null) },
+            claimActionOptions(claim),
         );
     };
 
@@ -1620,6 +1696,14 @@ export default function WikiShow({
             })
             : selectedSourceElements;
         const canLinkSource = canHandleClaim && !isBestPracticeClaim && claim.source_status === 'missing_source';
+        // Every card has the same «Behold teksten» / «Fjern teksten» / «Angre beslutning»; the card's
+        // own words tell them apart for a screen reader (2.4.6), and name the card when focus lands
+        // on it after a decision.
+        const claimLabelId = `claim-${claim.id}-label`;
+        const claimTextId = `claim-${claim.id}-text`;
+        const claimDescribedBy = [claimLabelId, showClaimText ? claimTextId : null].filter(Boolean).join(' ');
+        const isBusy = claimProcessing === claim.id;
+        const commentId = `claim-comment-${claim.id}${isInlineReview ? '-inline' : ''}`;
 
         if (isInlineReview) {
             return (
@@ -1627,6 +1711,7 @@ export default function WikiShow({
                     key={claim.id}
                     id={`claim-${claim.id}`}
                     tabIndex={-1}
+                    aria-labelledby={claimLabelId}
                     className="scroll-mt-24 border-l-4 border-violet-300 bg-violet-50/30 px-4 py-3"
                 >
                     <div className="space-y-3">
@@ -1634,7 +1719,7 @@ export default function WikiShow({
                             <p className="text-base font-semibold uppercase tracking-wide text-violet-700">
                                 {tw.review_reference_inline_heading ?? 'Vurdering for dette avsnittet'}
                             </p>
-                            <p className="text-lg font-semibold text-slate-900">
+                            <p id={claimLabelId} className="text-lg font-semibold text-slate-900">
                                 {claim.finding_category_label ?? (tw.claim_finding_category_possible_content_deviation ?? 'Mulig innholdsavvik')}
                             </p>
                             <p className="text-base leading-7 text-slate-700">
@@ -1671,6 +1756,7 @@ export default function WikiShow({
                         })() && (
                             <div className="flex flex-wrap items-center gap-2">
                                 <button
+                                    id="wiki-block-edit-start"
                                     type="button"
                                     onClick={() => startWikiBlockEdit(
                                         targetBlockKey,
@@ -1708,36 +1794,46 @@ export default function WikiShow({
                                                 ...prev,
                                                 [claim.id]: e.target.value,
                                             }))}
-                                            className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-base text-slate-700 focus:border-amber-400 focus:outline-none"
+                                            className="w-full rounded-lg border border-field-border bg-white px-3 py-2 text-base text-slate-700 focus:border-amber-400 focus:outline-none"
                                         />
                                     </label>
                                 )}
 
-                                <div className="flex flex-wrap gap-2">
+                                {/* A label, not only a placeholder (A11Y-047): the placeholder is gone
+                                    as soon as something is typed, and was never a name. */}
+                                <div className="space-y-1">
+                                    <label htmlFor={commentId} className="block text-base font-semibold text-slate-700">
+                                        {ta.wiki_claim_comment_label ?? 'Kommentar (valgfritt)'}
+                                    </label>
                                     <input
+                                        id={commentId}
                                         type="text"
                                         maxLength={1000}
                                         placeholder={tw.approval_comment_placeholder ?? 'Valgfri kommentar'}
                                         value={approvalComments[claim.id] ?? ''}
                                         onChange={(e) => setApprovalComments((prev) => ({ ...prev, [claim.id]: e.target.value }))}
-                                        className="min-w-50 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-base text-slate-700 focus:border-violet-300 focus:outline-none"
+                                        className="w-full min-w-0 rounded-lg border border-field-border px-3 py-2 text-base text-slate-700 focus:border-violet-300 focus:outline-none"
                                     />
                                 </div>
 
+                                {/* aria-disabled while the decision is saved: `disabled` would drop
+                                    focus to the page body the moment the key is pressed (A11Y-014). */}
                                 <div className="flex flex-wrap items-center gap-2">
                                     <button
                                         type="button"
-                                        disabled={claimProcessing === claim.id}
+                                        aria-disabled={isBusy || undefined}
+                                        aria-describedby={claimDescribedBy}
                                         onClick={() => approveClaim(claim)}
-                                        className="rounded-full bg-emerald-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                                        className="rounded-full bg-emerald-700 px-4 py-2 text-base font-semibold text-white transition hover:bg-emerald-800 aria-disabled:opacity-50"
                                     >
                                         {keepTextLabel}
                                     </button>
                                     <button
                                         type="button"
-                                        disabled={claimProcessing === claim.id}
+                                        aria-disabled={isBusy || undefined}
+                                        aria-describedby={claimDescribedBy}
                                         onClick={() => removeClaimText(claim)}
-                                        className="rounded-full border border-rose-200 bg-white px-4 py-2 text-base font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
+                                        className="rounded-full border border-rose-300 bg-white px-4 py-2 text-base font-semibold text-rose-700 transition hover:bg-rose-50 aria-disabled:opacity-50"
                                     >
                                         {tw.claim_card_remove_text ?? 'Fjern teksten'}
                                     </button>
@@ -1757,9 +1853,11 @@ export default function WikiShow({
                                 <div className="flex flex-wrap items-center gap-2">
                                     <button
                                         type="button"
-                                        disabled={claimProcessing === claim.id || claim.user_decision === 'blocking'}
-                                        onClick={() => updateClaimBlocking(claim, true)}
-                                        className={`rounded-full px-4 py-2 text-base font-semibold transition disabled:opacity-50 ${
+                                        aria-pressed={claim.user_decision === 'blocking'}
+                                        aria-disabled={isBusy || undefined}
+                                        aria-describedby={claimDescribedBy}
+                                        onClick={() => claim.user_decision !== 'blocking' && updateClaimBlocking(claim, true)}
+                                        className={`rounded-full px-4 py-2 text-base font-semibold transition aria-disabled:opacity-50 ${
                                             claim.user_decision === 'blocking'
                                                 ? 'bg-rose-600 text-white'
                                                 : 'border border-rose-300 bg-white text-rose-700 hover:bg-rose-50'
@@ -1769,9 +1867,11 @@ export default function WikiShow({
                                     </button>
                                     <button
                                         type="button"
-                                        disabled={claimProcessing === claim.id || claim.user_decision === 'not_blocking'}
-                                        onClick={() => updateClaimBlocking(claim, false)}
-                                        className={`rounded-full px-4 py-2 text-base font-semibold transition disabled:opacity-50 ${
+                                        aria-pressed={claim.user_decision === 'not_blocking'}
+                                        aria-disabled={isBusy || undefined}
+                                        aria-describedby={claimDescribedBy}
+                                        onClick={() => claim.user_decision !== 'not_blocking' && updateClaimBlocking(claim, false)}
+                                        className={`rounded-full px-4 py-2 text-base font-semibold transition aria-disabled:opacity-50 ${
                                             claim.user_decision === 'not_blocking'
                                                 ? 'border border-amber-400 bg-amber-100 text-amber-900'
                                                 : 'border border-amber-300 bg-white text-amber-800 hover:bg-amber-50'
@@ -1793,9 +1893,10 @@ export default function WikiShow({
                                 </span>
                                 <button
                                     type="button"
-                                    disabled={claimProcessing === claim.id}
+                                    aria-disabled={isBusy || undefined}
+                                    aria-describedby={claimDescribedBy}
                                     onClick={() => unapproveClaim(claim)}
-                                    className="rounded-full border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
+                                    className="rounded-full border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:bg-slate-100 aria-disabled:opacity-50"
                                 >
                                     {tw.undo_claim_decision_button ?? tw.unapprove_claim_button ?? 'Angre beslutning'}
                                 </button>
@@ -1809,7 +1910,7 @@ export default function WikiShow({
                         )}
 
                         {findingIdForClaim(claim) && (
-                            <p className="font-mono text-base text-slate-400">
+                            <p className="font-mono text-base text-slate-600">
                                 {(tw.claim_card_reference_label ?? 'Referanse #:id')
                                     .replace(':id', formatFindingUserId(findingIdForClaim(claim)))}
                             </p>
@@ -1824,22 +1925,23 @@ export default function WikiShow({
                 key={claim.id}
                 id={`claim-${claim.id}`}
                 tabIndex={-1}
+                aria-labelledby={claimLabelId}
                 className={`scroll-mt-24 rounded-[18px] border ${showClaimText ? 'border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]' : 'border-violet-100 bg-white/95 p-4 shadow-sm'}`}
             >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
-                        {isOpenGroup && (
-                            <p className="text-base font-semibold text-rose-600">
-                                {(tw.verification_worklist_position ?? 'Påstand :position av :total')
+                        <p id={claimLabelId} className={isOpenGroup ? 'text-base font-semibold text-rose-700' : 'sr-only'}>
+                            {isOpenGroup
+                                ? (tw.verification_worklist_position ?? 'Påstand :position av :total')
                                     .replace(':position', worklistPositionForCard(claim))
-                                    .replace(':total', openClaims.length)}
-                            </p>
-                        )}
+                                    .replace(':total', openClaims.length)
+                                : claimStatusLabel(claim.approval_status)}
+                        </p>
                         {showClaimText && (
-                            <p className="mt-1 text-base leading-7 text-slate-900">{claim.claim_text}</p>
+                            <p id={claimTextId} className="mt-1 text-base leading-7 text-slate-900">{claim.claim_text}</p>
                         )}
                         {showClaimText && resolveDistinctPageExcerpt(claim.claim_text, claim.page_excerpt) && (
-                            <p className="mt-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-base leading-6 text-slate-500">
+                            <p className="mt-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-base leading-6 text-slate-600">
                                 {tw.verification_basis_page_excerpt_label ?? 'Tekst i Wiki-siden'}: {resolveDistinctPageExcerpt(claim.claim_text, claim.page_excerpt)}
                             </p>
                         )}
@@ -1848,13 +1950,13 @@ export default function WikiShow({
                             {showDecisionBadge && (
                                 <Badge
                                     label={claimStatusLabel(claim.approval_status)}
-                                    cls={CLAIM_STATUS_STYLES[claim.approval_status] ?? 'bg-slate-200 text-slate-500'}
+                                    cls={CLAIM_STATUS_STYLES[claim.approval_status] ?? 'bg-slate-200 text-slate-600'}
                                 />
                             )}
                             {claim.confidence && claim.confidence !== 'uncertain' && claim.content_origin === 'source_based' && (
                                 <Badge
                                     label={confidenceLabel(claim.confidence)}
-                                    cls={CONFIDENCE_STYLES[claim.confidence] ?? 'bg-slate-200 text-slate-500'}
+                                    cls={CONFIDENCE_STYLES[claim.confidence] ?? 'bg-slate-200 text-slate-600'}
                                 />
                             )}
                             {isBestPracticeClaim && (
@@ -1890,13 +1992,13 @@ export default function WikiShow({
                                 />
                             )}
                             {claim.conflict_flag && (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-base font-semibold text-rose-600">
+                                <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-base font-semibold text-rose-700">
                                     <WarnIcon className="h-3 w-3" />
                                     {tw.conflict_detected ?? 'Mulig konflikt'}
                                 </span>
                             )}
                             {!isBestPracticeClaim && (
-                                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-base font-semibold ${CLAIM_SOURCE_STATUS_STYLES[claim.source_status] ?? 'bg-slate-200 text-slate-500'}`}>
+                                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-base font-semibold ${CLAIM_SOURCE_STATUS_STYLES[claim.source_status] ?? 'bg-slate-200 text-slate-600'}`}>
                                     {SOURCE_STATUS_WARNS.has(claim.source_status) ? (
                                         <WarnIcon className="h-3 w-3" />
                                     ) : (
@@ -1908,7 +2010,7 @@ export default function WikiShow({
                         </div>
 
                         {groupedClaimCount > 1 && (
-                            <p className="mt-2 text-base leading-6 text-slate-500">
+                            <p className="mt-2 text-base leading-6 text-slate-600">
                                 {(tw.claim_card_shared_decision ?? 'Én beslutning for :count påstander i samme avsnitt.')
                                     .replace(':count', groupedClaimCount)}
                             </p>
@@ -1922,7 +2024,7 @@ export default function WikiShow({
                     differs per suggestion. */}
                 {(problemLabel || isBestPracticeClaim) && (
                     <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                        <p className="text-base font-semibold text-slate-500">
+                        <p className="text-base font-semibold text-slate-600">
                             {tw.claim_card_why_label ?? 'Hvorfor må du vurdere dette?'}
                         </p>
                         <p className="mt-1 text-base leading-6 text-slate-700">
@@ -1932,7 +2034,7 @@ export default function WikiShow({
                                 : problemLabel}
                         </p>
                         {isBestPracticeClaim && claim.review_reason && (
-                            <p className="mt-1.5 text-base leading-6 text-slate-500">
+                            <p className="mt-1.5 text-base leading-6 text-slate-600">
                                 {claim.review_reason}
                             </p>
                         )}
@@ -1940,7 +2042,7 @@ export default function WikiShow({
                 )}
 
                 {claim.finding_recommended_action && !isBestPracticeClaim && (
-                    <p className="mt-2 text-base leading-6 text-slate-500">
+                    <p className="mt-2 text-base leading-6 text-slate-600">
                         {claim.finding_recommended_action}
                     </p>
                 )}
@@ -1948,7 +2050,7 @@ export default function WikiShow({
                 {hasUserDecision && (
                     <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
                         {claim.blocking_override_by_name && (
-                            <p className="text-base text-slate-500">
+                            <p className="text-base text-slate-600">
                                 {(tw.claim_blocking_reason_overridden ?? 'Overstyrt av :name den :date.')
                                     .replace(':name', claim.blocking_override_by_name ?? '—')
                                     .replace(':date', claim.blocking_override_at ? new Date(claim.blocking_override_at).toLocaleString(locale) : '')}
@@ -1959,9 +2061,11 @@ export default function WikiShow({
                                 <div className="flex flex-wrap items-center gap-2">
                                     <button
                                         type="button"
-                                        disabled={claimProcessing === claim.id || claim.user_decision === 'blocking'}
-                                        onClick={() => updateClaimBlocking(claim, true)}
-                                        className={`rounded-full px-3 py-1.5 text-base font-semibold transition disabled:opacity-50 ${
+                                        aria-pressed={claim.user_decision === 'blocking'}
+                                        aria-disabled={isBusy || undefined}
+                                        aria-describedby={claimDescribedBy}
+                                        onClick={() => claim.user_decision !== 'blocking' && updateClaimBlocking(claim, true)}
+                                        className={`rounded-full px-3 py-1.5 text-base font-semibold transition aria-disabled:opacity-50 ${
                                             claim.user_decision === 'blocking'
                                                 ? 'bg-rose-600 text-white'
                                                 : 'border border-rose-300 bg-white text-rose-700 hover:bg-rose-50'
@@ -1971,9 +2075,11 @@ export default function WikiShow({
                                     </button>
                                     <button
                                         type="button"
-                                        disabled={claimProcessing === claim.id || claim.user_decision === 'not_blocking'}
-                                        onClick={() => updateClaimBlocking(claim, false)}
-                                        className={`rounded-full px-3 py-1.5 text-base font-semibold transition disabled:opacity-50 ${
+                                        aria-pressed={claim.user_decision === 'not_blocking'}
+                                        aria-disabled={isBusy || undefined}
+                                        aria-describedby={claimDescribedBy}
+                                        onClick={() => claim.user_decision !== 'not_blocking' && updateClaimBlocking(claim, false)}
+                                        className={`rounded-full px-3 py-1.5 text-base font-semibold transition aria-disabled:opacity-50 ${
                                             claim.user_decision === 'not_blocking'
                                                 ? 'border border-amber-400 bg-amber-100 text-amber-900'
                                                 : 'border border-amber-300 bg-white text-amber-800 hover:bg-amber-50'
@@ -1982,7 +2088,7 @@ export default function WikiShow({
                                         {tw.remove_blocking_button ?? 'Godkjenn avvik / Ikke blokker'}
                                     </button>
                                 </div>
-                                <p className="text-base leading-5 text-slate-500">
+                                <p className="text-base leading-5 text-slate-600">
                                     <strong>{tw.keep_blocking_button ?? 'Blokker godkjenning'}:</strong>{' '}
                                     {tw.claim_blocking_consequence_block ?? 'Funnet hindrer endelig godkjenning til det er løst eller beslutningen endres.'}
                                     <br />
@@ -1997,14 +2103,14 @@ export default function WikiShow({
                 <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
                     <div className="space-y-1.5">
                         {hasSourceReferences && (
-                            <p className="text-base font-semibold text-slate-500">
+                            <p className="text-base font-semibold text-slate-600">
                                 {tw.verification_basis_claim_source_basis_heading ?? 'Kildegrunnlag'}
                             </p>
                         )}
                         {sourceReferences.length === 0 ? (
                             <div className="space-y-2">
                                 {isClaimDefect && (
-                                    <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-base italic text-slate-500">
+                                    <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-base italic text-slate-600">
                                         {tw.claim_finding_no_source_excerpt ?? 'Systemet fant ingen sikker kildetekst for denne påstanden.'}
                                     </p>
                                 )}
@@ -2028,7 +2134,7 @@ export default function WikiShow({
                                                     ...prev,
                                                     [claim.id]: e.target.value,
                                                 }))}
-                                                className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-base text-slate-700 focus:border-amber-400 focus:outline-none"
+                                                className="w-full rounded-lg border border-field-border bg-white px-3 py-2 text-base text-slate-700 focus:border-amber-400 focus:outline-none"
                                             />
                                         </label>
                                         <p className="text-base leading-6 text-amber-800">
@@ -2083,7 +2189,7 @@ export default function WikiShow({
                                                                 loadClaimSourceElements(claim, nextDocumentId);
                                                             }
                                                         }}
-                                                        className="w-full rounded-lg border border-sky-200 bg-white px-3 py-2 text-base text-slate-700 focus:border-sky-400 focus:outline-none"
+                                                        className="w-full rounded-lg border border-field-border bg-white px-3 py-2 text-base text-slate-700 focus:border-sky-400 focus:outline-none"
                                                     >
                                                         <option value="">{tw.claim_source_document_placeholder ?? 'Velg et kildedokument'}</option>
                                                         {sourceDocuments.map((doc) => (
@@ -2148,7 +2254,7 @@ export default function WikiShow({
                                                                         excerpt: e.target.value,
                                                                     },
                                                                 }))}
-                                                                className="w-full rounded-lg border border-sky-200 px-3 py-2 text-base text-slate-700 focus:border-sky-400 focus:outline-none"
+                                                                className="w-full rounded-lg border border-field-border px-3 py-2 text-base text-slate-700 focus:border-sky-400 focus:outline-none"
                                                                 placeholder={tw.claim_source_excerpt_placeholder ?? 'Lim inn teksten som dokumenterer påstanden.'}
                                                             />
                                                         </label>
@@ -2168,7 +2274,7 @@ export default function WikiShow({
                                                                         page_reference: e.target.value,
                                                                     },
                                                                 }))}
-                                                                className="w-full rounded-lg border border-sky-200 px-3 py-2 text-base text-slate-700 focus:border-sky-400 focus:outline-none"
+                                                                className="w-full rounded-lg border border-field-border px-3 py-2 text-base text-slate-700 focus:border-sky-400 focus:outline-none"
                                                                 placeholder={tw.claim_source_page_reference_placeholder ?? 'Valgfri plassering, for eksempel avsnitt, tabellrad eller sidetall'}
                                                             />
                                                         </label>
@@ -2189,7 +2295,7 @@ export default function WikiShow({
                                                                         source_element_search: e.target.value,
                                                                     },
                                                                 }))}
-                                                                className="w-full rounded-lg border border-sky-200 px-3 py-2 text-base text-slate-700 focus:border-sky-400 focus:outline-none"
+                                                                className="w-full rounded-lg border border-field-border px-3 py-2 text-base text-slate-700 focus:border-sky-400 focus:outline-none"
                                                                 placeholder={tw.claim_source_element_search_placeholder ?? 'Søk etter avsnitt, listepunkt eller tabellrad'}
                                                             />
                                                         </label>
@@ -2204,6 +2310,7 @@ export default function WikiShow({
                                                                     <button
                                                                         type="button"
                                                                         key={`${element.source_element_type}:${element.source_element_key}`}
+                                                                        aria-pressed={isSelected}
                                                                         onClick={() => selectClaimSourceElement(claim, selectedSourceDocument.id, element)}
                                                                         className={`w-full rounded-lg border px-3 py-2 text-left text-base transition ${isSelected ? 'border-sky-400 bg-sky-50' : 'border-slate-200 bg-white hover:border-sky-200 hover:bg-sky-50'}`}
                                                                     >
@@ -2211,7 +2318,7 @@ export default function WikiShow({
                                                                             <span className="font-semibold text-slate-700">
                                                                                 {sourceElementTypeLabel(element.source_element_type)}
                                                                             </span>
-                                                                            <span className="text-slate-500">
+                                                                            <span className="text-slate-600">
                                                                                 {element.page_reference ?? (tw.source_page_reference ?? 'Plassering i kilden')}
                                                                             </span>
                                                                         </div>
@@ -2221,7 +2328,7 @@ export default function WikiShow({
                                                                     </button>
                                                                 );
                                                             }) : (
-                                                                <p className="px-2 py-3 text-base italic text-slate-400">
+                                                                <p className="px-2 py-3 text-base italic text-slate-600">
                                                                     {tw.claim_source_no_element_match ?? 'Ingen kildeelementer matcher søket.'}
                                                                 </p>
                                                             )}
@@ -2261,7 +2368,7 @@ export default function WikiShow({
                                                             )
                                                         }
                                                         onClick={() => linkClaimSource(claim)}
-                                                        className="rounded-full bg-sky-600 px-3 py-1.5 text-base font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50"
+                                                        className="rounded-full bg-sky-700 px-3 py-1.5 text-base font-semibold text-white transition hover:bg-sky-800 disabled:opacity-50"
                                                     >
                                                         {claimSourceProcessing === claim.id ? (tw.action_confirming ?? 'Behandler...') : (tw.claim_source_link_submit ?? 'Koble kilde')}
                                                     </button>
@@ -2335,31 +2442,37 @@ export default function WikiShow({
 
                     {canHandleClaim && isPendingDecision && (
                         <div className="space-y-2">
-                            <p className="text-base font-semibold text-slate-500">
+                            <p className="text-base font-semibold text-slate-600">
                                 {tw.claim_card_what_label ?? 'Hva skal du gjøre?'}
                             </p>
+                            <label htmlFor={commentId} className="block text-base text-slate-700">
+                                {ta.wiki_claim_comment_label ?? 'Kommentar (valgfritt)'}
+                            </label>
                             <div className="flex flex-wrap items-center gap-2">
                                 <input
+                                    id={commentId}
                                     type="text"
                                     maxLength={1000}
                                     placeholder={tw.approval_comment_placeholder ?? 'Valgfri kommentar'}
                                     value={approvalComments[claim.id] ?? ''}
                                     onChange={(e) => setApprovalComments((prev) => ({ ...prev, [claim.id]: e.target.value }))}
-                                    className="min-w-50 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-base text-slate-700 focus:border-violet-300 focus:outline-none"
+                                    className="min-w-0 flex-1 basis-48 rounded-lg border border-field-border px-3 py-2 text-base text-slate-700 focus:border-violet-300 focus:outline-none"
                                 />
                                 <button
                                     type="button"
-                                    disabled={claimProcessing === claim.id}
+                                    aria-disabled={isBusy || undefined}
+                                    aria-describedby={claimDescribedBy}
                                     onClick={() => approveClaim(claim)}
-                                    className="rounded-full bg-emerald-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                                    className="rounded-full bg-emerald-700 px-4 py-2 text-base font-semibold text-white transition hover:bg-emerald-800 aria-disabled:opacity-50"
                                 >
                                     {keepTextLabel}
                                 </button>
                                 <button
                                     type="button"
-                                    disabled={claimProcessing === claim.id}
+                                    aria-disabled={isBusy || undefined}
+                                    aria-describedby={claimDescribedBy}
                                     onClick={() => removeClaimText(claim)}
-                                    className="rounded-full border border-rose-200 bg-white px-4 py-2 text-base font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
+                                    className="rounded-full border border-rose-300 bg-white px-4 py-2 text-base font-semibold text-rose-700 transition hover:bg-rose-50 aria-disabled:opacity-50"
                                 >
                                     {tw.claim_card_remove_text ?? 'Fjern teksten'}
                                 </button>
@@ -2377,9 +2490,10 @@ export default function WikiShow({
                             </span>
                             <button
                                 type="button"
-                                disabled={claimProcessing === claim.id}
+                                aria-disabled={isBusy || undefined}
+                                aria-describedby={claimDescribedBy}
                                 onClick={() => unapproveClaim(claim)}
-                                className="rounded-full border border-sky-300 bg-white px-3 py-2 text-base font-semibold text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
+                                className="rounded-full border border-sky-300 bg-white px-3 py-2 text-base font-semibold text-sky-700 transition hover:bg-sky-100 aria-disabled:opacity-50"
                             >
                                 {tw.undo_claim_decision_button ?? tw.unapprove_claim_button ?? 'Angre beslutning'}
                             </button>
@@ -2396,7 +2510,7 @@ export default function WikiShow({
                         so a support case can be matched — but no longer the reader's first clue to
                         what this card is about. */}
                     {findingIdForClaim(claim) && (
-                        <p className="font-mono text-base text-slate-400">
+                        <p className="font-mono text-base text-slate-600">
                             {(tw.claim_card_reference_label ?? 'Referanse #:id')
                                 .replace(':id', formatFindingUserId(findingIdForClaim(claim)))}
                         </p>
@@ -2459,7 +2573,15 @@ export default function WikiShow({
     };
 
     // Cancel writes nothing and creates nothing — it only drops the local drafts.
+    const closeArticleEditing = () => {
+        setArticleDrafts({});
+        setIsEditingArticle(false);
+    };
+
+    // aria-disabled while saving, so the guard is here rather than in `disabled`.
     const cancelArticleEditing = () => {
+        if (isSavingArticle) return;
+
         setArticleDrafts({});
         setIsEditingArticle(false);
     };
@@ -2472,6 +2594,12 @@ export default function WikiShow({
         ?? errors.expected_page_version_id
         ?? null;
 
+    // Which paragraph a refused save is about, so that field — not just a line at the bottom — says
+    // it is wrong and is where focus lands (3.3.1, A11Y-049).
+    const articleErrorBlockKey = isEditingArticle
+        ? articleEditErrorBlockKey(errors, submittedArticleKeysRef.current)
+        : null;
+
     const changedArticleBlocks = () => editableArticleBlocks
         .filter((block) => (articleDrafts[block.block_key] ?? getWikiBlockRawMarkdown(block)) !== getWikiBlockRawMarkdown(block))
         .map((block) => ({ block_key: block.block_key, markdown: articleDrafts[block.block_key] }));
@@ -2483,11 +2611,12 @@ export default function WikiShow({
 
         // Nothing changed: no request, no version, no AI work.
         if (blocks.length === 0) {
-            cancelArticleEditing();
+            closeArticleEditing();
             return;
         }
 
         setIsSavingArticle(true);
+        submittedArticleKeysRef.current = blocks.map((block) => block.block_key);
         router.patch(
             workingVersionEdit.update_url,
             {
@@ -2507,9 +2636,12 @@ export default function WikiShow({
                 // Validation errors (422) never reach onSuccess at all, so they keep the text too.
                 onSuccess: (page) => {
                     if (! page?.props?.flash?.error) {
-                        cancelArticleEditing();
+                        closeArticleEditing();
                     }
                 },
+                // A validation error (an emptied paragraph) puts focus on that paragraph, which now
+                // carries the message as its description.
+                onError: () => requestArticleErrorFocus(),
                 onFinish: () => setIsSavingArticle(false),
             },
         );
@@ -2594,7 +2726,9 @@ export default function WikiShow({
                 {/* Page header */}
                 <section className="space-y-3">
                     <div className="flex flex-wrap items-start gap-3">
-                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
+                        {/* A long one-word title («Leverandørsikkerhet») may break at 320 px (1.4.10)
+                            rather than widen the page. */}
+                        <h1 className="min-w-0 max-w-full text-4xl font-semibold tracking-tight text-slate-950 [overflow-wrap:anywhere] hyphens-auto">
                             {page.title}
                         </h1>
                         <div className="mt-1 flex flex-wrap gap-2">
@@ -2624,7 +2758,7 @@ export default function WikiShow({
                         </div>
                     </div>
                     {current_version && (
-                        <p className="text-base text-slate-400">
+                        <p className="text-base text-slate-600">
                             {tw.version ?? 'Versjon'} {current_version.version_number}
                         </p>
                     )}
@@ -2688,7 +2822,7 @@ export default function WikiShow({
                                     : (tw.review_reference_not_found ?? 'Teksten kunne ikke lokaliseres på Wiki-siden.')}
                             </p>
                             {isSystemOwner && reviewReference.technical_block_key && (
-                                <p className="mt-1 text-base text-amber-600">block_key: {reviewReference.technical_block_key}</p>
+                                <p className="mt-1 text-base text-amber-700">block_key: {reviewReference.technical_block_key}</p>
                             )}
                         </div>
                     </div>
@@ -2720,6 +2854,7 @@ export default function WikiShow({
 
                             {showsArticleEdit && !isEditingArticle && (
                                 <button
+                                    id="wiki-article-edit-button"
                                     type="button"
                                     onClick={startArticleEditing}
                                     disabled={!canEditArticle}
@@ -2734,11 +2869,18 @@ export default function WikiShow({
                     )}
 
                     {showsArticleEdit && !canEditArticle && articleEditUnavailable !== null && (
-                        <p className="text-base text-slate-500">{articleEditUnavailable}</p>
+                        <p className="text-base text-slate-600">{articleEditUnavailable}</p>
                     )}
 
                     {hasArticle ? (
-                        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
+                        <div ref={articleEditRef} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
+                            {/* How to write in the fields below, said once and tied to every field: the
+                                editor is plain Markdown, and nothing on screen said so (3.3.2). */}
+                            {isEditingArticle && (
+                                <p id="wiki-article-edit-hint" className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-700">
+                                    {ta.wiki_article_edit_hint ?? 'Teksten skrives i Markdown: ## gir en overskrift, - en punktliste og **tekst** fet skrift. Endringene lagres først når du velger Lagre.'}
+                                </p>
+                            )}
                             <div className="wiki-article">
                                 {(() => {
                                     // A single content block's own markup — table/image/editing/plain markdown.
@@ -2751,11 +2893,20 @@ export default function WikiShow({
                                         // page still reads as one article. Tables, images and
                                         // derived blocks keep their normal read-only rendering.
                                         if (isEditingArticle && isEditableArticleBlock(block)) {
+                                            const position = editableArticleBlocks.indexOf(block) + 1;
+                                            const isInvalid = articleErrorBlockKey === block.block_key;
+
+                                            // «Rediger avsnitt 2 av 5», not twelve fields all called
+                                            // «Rediger avsnitt» (2.4.6, A11Y-049).
                                             return (
                                                 <div key={block.block_key} className="space-y-1">
                                                     <label className="sr-only" htmlFor={`wiki-article-edit-${block.block_key}`}>
-                                                        {tw.article_edit_block_label ?? 'Rediger avsnitt'}
+                                                        {(ta.wiki_article_edit_block_label ?? 'Rediger avsnitt :number av :total')
+                                                            .replace(':number', String(position))
+                                                            .replace(':total', String(editableArticleBlocks.length))}
                                                     </label>
+                                                    {/* readOnly, not disabled, while saving: a disabled field
+                                                        loses keyboard focus mid-save. */}
                                                     <textarea
                                                         id={`wiki-article-edit-${block.block_key}`}
                                                         value={articleDrafts[block.block_key] ?? getWikiBlockRawMarkdown(block)}
@@ -2763,9 +2914,12 @@ export default function WikiShow({
                                                             ...prev,
                                                             [block.block_key]: event.target.value,
                                                         }))}
-                                                        disabled={isSavingArticle}
+                                                        readOnly={isSavingArticle}
+                                                        aria-disabled={isSavingArticle || undefined}
+                                                        aria-invalid={isInvalid || undefined}
+                                                        aria-describedby={['wiki-article-edit-hint', isInvalid ? 'wiki-article-edit-error' : null].filter(Boolean).join(' ')}
                                                         rows={Math.min(14, Math.max(3, (articleDrafts[block.block_key] ?? '').split('\n').length + 1))}
-                                                        className="w-full rounded-xl border border-sky-300 bg-white px-3 py-2 text-base leading-7 text-slate-800 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-200 disabled:cursor-not-allowed disabled:bg-slate-50"
+                                                        className={`w-full rounded-xl border border-field-border bg-white px-3 py-2 text-base leading-7 text-slate-800 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-200 ${isSavingArticle ? 'cursor-not-allowed bg-slate-50' : ''}`}
                                                     />
                                                 </div>
                                             );
@@ -2812,8 +2966,10 @@ export default function WikiShow({
                                                                 {tw.wiki_block_edit_label ?? 'Rediger teksten'}
                                                             </span>
                                                             <textarea
-                                                                autoFocus
+                                                                ref={blockEditTextareaRef}
                                                                 rows={10}
+                                                                aria-invalid={wikiBlockValidationError ? true : undefined}
+                                                                aria-describedby={wikiBlockValidationError ? `wiki-block-edit-error-${block.block_key}` : undefined}
                                                                 value={currentDraft}
                                                                 onChange={(e) => setWikiBlockEditDrafts((prev) => ({
                                                                     ...prev,
@@ -2841,12 +2997,12 @@ export default function WikiShow({
                                                             </button>
                                                         </div>
                                                         {wikiBlockValidationError && (
-                                                            <p className="text-base text-rose-600">
+                                                            <p id={`wiki-block-edit-error-${block.block_key}`} role="alert" className="text-base text-rose-700">
                                                                 {wikiBlockValidationError}
                                                             </p>
                                                         )}
                                                         {!manualBlockEdit?.run_id && (
-                                                            <p className="text-base text-slate-500">
+                                                            <p className="text-base text-slate-600">
                                                                 Lagring krever gyldig kjøringskontekst. Åpne funnet fra Kjøringer og prøv igjen.
                                                             </p>
                                                         )}
@@ -2858,7 +3014,7 @@ export default function WikiShow({
                                                                 {tw.wiki_best_practice_metadata_missing ?? 'Beste-praksis-metadata mangler. Blokken merkes ikke som beste praksis før lagret opprinnelse og begrunnelse er konsistente.'}
                                                             </div>
                                                         )}
-                                                        <ReactMarkdown components={{ a: WikiArticleLink }}>{currentBlockMarkdown}</ReactMarkdown>
+                                                        <WikiMarkdown components={{ a: WikiArticleLink }}>{currentBlockMarkdown}</WikiMarkdown>
                                                     </>
                                                 )}
                                                 {isTargetBlock && targetReviewSection === null && focusedReviewClaims.length > 0 && (
@@ -2885,7 +3041,7 @@ export default function WikiShow({
                                     };
 
                                     if (contentBlocks.length === 0) {
-                                        return <ReactMarkdown components={{ a: WikiArticleLink }}>{articleContent}</ReactMarkdown>;
+                                        return <WikiMarkdown components={{ a: WikiArticleLink }}>{articleContent}</WikiMarkdown>;
                                     }
 
                                     // Server-computed section_key (EnterpriseWikiBestPracticeSectionService, via
@@ -2939,8 +3095,15 @@ export default function WikiShow({
                                 })()}
                             </div>
 
+                            {/* Tied to the paragraph it is about, which receives focus; said there, not
+                                announced a second time. A refusal that names no paragraph takes focus
+                                itself (data-form-error-summary). */}
                             {isEditingArticle && articleEditError && (
-                                <p className="mt-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-base text-rose-700">
+                                <p
+                                    id="wiki-article-edit-error"
+                                    data-form-error-summary=""
+                                    className="mt-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-base text-rose-700"
+                                >
                                     {articleEditError}
                                 </p>
                             )}
@@ -2950,16 +3113,16 @@ export default function WikiShow({
                                     <button
                                         type="button"
                                         onClick={cancelArticleEditing}
-                                        disabled={isSavingArticle}
-                                        className="inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                                        aria-disabled={isSavingArticle || undefined}
+                                        className="inline-flex min-h-9 items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-600 shadow-sm transition hover:border-slate-400 hover:text-slate-900 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
                                     >
                                         {tw.article_edit_cancel ?? 'Avbryt'}
                                     </button>
                                     <button
                                         type="button"
                                         onClick={saveArticleEditing}
-                                        disabled={isSavingArticle}
-                                        className="inline-flex min-h-9 items-center rounded-lg bg-sky-600 px-3 py-2 text-base font-semibold text-white shadow-sm transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                        aria-disabled={isSavingArticle || undefined}
+                                        className="inline-flex min-h-9 items-center rounded-lg bg-sky-700 px-3 py-2 text-base font-semibold text-white shadow-sm transition hover:bg-sky-800 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
                                     >
                                         {isSavingArticle
                                             ? (tw.article_edit_saving ?? 'Lagrer...')
@@ -2969,7 +3132,7 @@ export default function WikiShow({
                             )}
                         </div>
                     ) : (
-                        <p className="text-base text-slate-400">
+                        <p className="text-base text-slate-600">
                             {tw.article_empty ?? 'Ingen artikkelinnhold generert ennå.'}
                         </p>
                     )}
@@ -2981,13 +3144,13 @@ export default function WikiShow({
                             <h2 className="text-base font-semibold text-slate-700">
                                 {tw.best_practice_review_heading ?? 'Beste praksis — vurdering'}
                             </h2>
-                            <p className="text-base text-slate-500">
+                            <p className="text-base text-slate-600">
                                 {(tw.best_practice_review_summary ?? ':reviewed vurdert · :gaps forbedring(er) foreslått')
                                     .replace(':reviewed', String(bestPracticeReview.length))
                                     .replace(':gaps', String(bestPracticeReview.filter((entry) => entry.gap_found).length))}
                             </p>
                         </div>
-                        <p className="text-base text-slate-500">
+                        <p className="text-base text-slate-600">
                             {tw.best_practice_review_intro
                                 ?? 'Hva vurderingen konkluderte for hvert tema på denne siden. «Ingen forbedring funnet» er et resultat, ikke et avvik.'}
                         </p>
@@ -3010,7 +3173,7 @@ export default function WikiShow({
                                                 : entry.planned_topic}
                                         </p>
                                         {entry.assessment && (
-                                            <p className="mt-0.5 text-base text-slate-500">{entry.assessment}</p>
+                                            <p className="mt-0.5 text-base text-slate-600">{entry.assessment}</p>
                                         )}
                                     </div>
                                 </li>
@@ -3027,9 +3190,9 @@ export default function WikiShow({
 
                     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                         {backlinks.length > 0 ? (
-                            <LinkedPageList pages={backlinks} label={tw.backlinks_label ?? 'Sider'} />
+                            <LinkedPageList pages={backlinks} label={tw.backlinks_label ?? 'Sider'} typeLabel={pageTypeLabel} />
                         ) : (
-                            <p className="text-base text-slate-400">
+                            <p className="text-base text-slate-600">
                                 {tw.backlinks_empty ?? 'Ingen andre sider lenker hit ennå.'}
                             </p>
                         )}
@@ -3046,28 +3209,33 @@ export default function WikiShow({
                         {hasAnyTraversal ? (
                             <div className="space-y-3">
                                 <LinkedPageList
+                                    typeLabel={pageTypeLabel}
                                     pages={summaryLinks}
                                     label={tw.traversal_summary_link ?? 'Sammendrag'}
                                 />
                                 <LinkedPageList
+                                    typeLabel={pageTypeLabel}
                                     pages={articleLinks}
                                     label={tw.traversal_article_link ?? 'Kildeartikkel'}
                                 />
                                 <LinkedPageList
+                                    typeLabel={pageTypeLabel}
                                     pages={relatedConcepts}
                                     label={tw.traversal_related_concepts ?? 'Konsepter'}
                                 />
                                 <LinkedPageList
+                                    typeLabel={pageTypeLabel}
                                     pages={relatedEntities}
                                     label={tw.traversal_related_entities ?? 'Entiteter'}
                                 />
                                 <LinkedPageList
+                                    typeLabel={pageTypeLabel}
                                     pages={relatedArticles}
                                     label={tw.traversal_related_articles ?? 'Relaterte artikler'}
                                 />
                             </div>
                         ) : (
-                            <p className="text-base text-slate-400">
+                            <p className="text-base text-slate-600">
                                 {tw.traversal_no_links ?? 'Ingen lenker registrert ennå.'}
                             </p>
                         )}
@@ -3075,33 +3243,40 @@ export default function WikiShow({
                 </section>
 
                 {/* Verification — secondary, collapsible */}
+                {/* Each collapsible part is a heading with a disclosure button inside (1.3.1, 4.1.2;
+                    A11Y-028): it shows up in the page's heading list, and says whether it is open. */}
                 <section className="space-y-3">
-                    <button
-                        type="button"
-                        onClick={() => setVerificationOpen((v) => !v)}
-                        className="flex flex-wrap items-center gap-2 text-left text-base font-semibold text-slate-500 transition-colors hover:text-slate-700"
-                    >
-                        <ChevronIcon open={verificationOpen} />
-                        {tw.verification_heading ?? 'Verifikasjonsgrunnlag'}
-                        {openClaims.length > 0 && (
-                            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-base font-normal text-rose-700">
-                                {openClaims.length} {tw.verification_basis_open_heading ?? 'Påstander som krever behandling'}
-                            </span>
-                        )}
-                        {verifiedClaims.length > 0 && (
-                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-base font-normal text-emerald-700">
-                                {verifiedClaims.length} {tw.verification_basis_verified_heading ?? 'Verifiserte påstander'}
-                            </span>
-                        )}
-                        {structuralFindings.length > 0 && (
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-base font-normal text-slate-500">
-                                {structuralFindings.length} {tw.verification_basis_structural_heading ?? 'Kvalitetsfunn på siden'}
-                            </span>
-                        )}
-                    </button>
+                    <h2 className="text-base font-semibold">
+                        <button
+                            id="wiki-verification-toggle"
+                            type="button"
+                            aria-expanded={verificationOpen}
+                            aria-controls="wiki-verification-content"
+                            onClick={() => setVerificationOpen((v) => !v)}
+                            className="flex flex-wrap items-center gap-2 text-left text-base font-semibold text-slate-600 transition-colors hover:text-slate-800"
+                        >
+                            <ChevronIcon open={verificationOpen} />
+                            {tw.verification_heading ?? 'Verifikasjonsgrunnlag'}
+                            {openClaims.length > 0 && (
+                                <span className="rounded-full bg-rose-100 px-2 py-0.5 text-base font-normal text-rose-700">
+                                    {openClaims.length} {tw.verification_basis_open_heading ?? 'Påstander som krever behandling'}
+                                </span>
+                            )}
+                            {verifiedClaims.length > 0 && (
+                                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-base font-normal text-emerald-800">
+                                    {verifiedClaims.length} {tw.verification_basis_verified_heading ?? 'Verifiserte påstander'}
+                                </span>
+                            )}
+                            {structuralFindings.length > 0 && (
+                                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-base font-normal text-slate-600">
+                                    {structuralFindings.length} {tw.verification_basis_structural_heading ?? 'Kvalitetsfunn på siden'}
+                                </span>
+                            )}
+                        </button>
+                    </h2>
 
                     {verificationOpen && (
-                        <div className="space-y-5">
+                        <div id="wiki-verification-content" className="space-y-5">
                             {/* The counts already sit on the collapsible header directly above; a
                                 second identical badge row only pushed the actual work list further
                                 down the page. */}
@@ -3110,7 +3285,7 @@ export default function WikiShow({
                                     {claimAccessNotice}
                                 </p>
                                 {claimLintFindings.length > 0 && (
-                                    <p className="mt-3 text-base text-slate-500">
+                                    <p className="mt-3 text-base text-slate-600">
                                         {tw.verification_basis_claim_findings_note ?? 'Påstandsrelaterte kontrollfunn vises direkte i påstandskortene nedenfor.'}
                                     </p>
                                 )}
@@ -3127,9 +3302,9 @@ export default function WikiShow({
                                 </h3>
 
                                 {!current_version ? (
-                                    <p className="text-base text-slate-400">{tw.no_version ?? 'Ingen aktiv versjon tilgjengelig.'}</p>
+                                    <p className="text-base text-slate-600">{tw.no_version ?? 'Ingen aktiv versjon tilgjengelig.'}</p>
                                 ) : openClaims.length === 0 ? (
-                                    <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-500">
+                                    <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-600">
                                         {tw.verification_basis_no_open_claims ?? 'Alle påstander som krever behandling, er ferdigbehandlet.'}
                                     </p>
                                 ) : (
@@ -3138,6 +3313,7 @@ export default function WikiShow({
                                             "3" is visibly the same three things the cards decide. */}
                                         <ol
                                             data-testid="open-claim-worklist"
+                                            aria-label={tw.verification_basis_open_heading ?? 'Påstander som krever behandling'}
                                             className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white"
                                         >
                                             {openClaimWorklist.map((entry) => (
@@ -3157,7 +3333,7 @@ export default function WikiShow({
                                                             <span className="block text-base leading-6 text-slate-900">
                                                                 {entry.title || (tw.verification_worklist_untitled ?? 'Påstand uten tekst')}
                                                             </span>
-                                                            <span className="mt-0.5 block text-base text-slate-500">
+                                                            <span className="mt-0.5 block text-base text-slate-600">
                                                                 {tw[`verification_worklist_reason_${entry.reasonKey}`]
                                                                     ?? tw.verification_worklist_reason_other
                                                                     ?? 'Krever en vurdering'}
@@ -3175,7 +3351,7 @@ export default function WikiShow({
                                             ))}
                                         </ol>
 
-                                        <p className="text-base font-semibold text-slate-500">
+                                        <p className="text-base font-semibold text-slate-600">
                                             {tw.verification_worklist_intro ?? 'Slik behandler du dem:'}
                                         </p>
 
@@ -3185,22 +3361,26 @@ export default function WikiShow({
                             </section>
 
                             <section className="space-y-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setVerifiedClaimsOpen((v) => !v)}
-                                    className="flex items-center gap-2 text-base font-semibold text-slate-500 transition-colors hover:text-slate-700"
-                                >
-                                    <ChevronIcon open={verifiedClaimsOpen} />
-                                    {tw.verification_basis_verified_heading ?? 'Verifiserte påstander'}
-                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-base font-normal text-slate-500">
-                                        {verifiedClaims.length}
-                                    </span>
-                                </button>
+                                <h3 className="text-base font-semibold">
+                                    <button
+                                        type="button"
+                                        aria-expanded={verifiedClaimsOpen}
+                                        aria-controls="wiki-verified-claims"
+                                        onClick={() => setVerifiedClaimsOpen((v) => !v)}
+                                        className="flex items-center gap-2 text-base font-semibold text-slate-600 transition-colors hover:text-slate-800"
+                                    >
+                                        <ChevronIcon open={verifiedClaimsOpen} />
+                                        {tw.verification_basis_verified_heading ?? 'Verifiserte påstander'}
+                                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-base font-normal text-slate-600">
+                                            {verifiedClaims.length}
+                                        </span>
+                                    </button>
+                                </h3>
 
                                 {verifiedClaimsOpen && (
-                                    <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
+                                    <div id="wiki-verified-claims" className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                                         {verifiedClaims.length === 0 ? (
-                                            <p className="text-base text-slate-400">
+                                            <p className="text-base text-slate-600">
                                                 {tw.verification_basis_no_verified_claims ?? 'Ingen verifiserte påstander ennå.'}
                                             </p>
                                         ) : (
@@ -3213,26 +3393,30 @@ export default function WikiShow({
                             </section>
 
                             <section className="space-y-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setStructuralFindingsOpen((v) => !v)}
-                                    className="flex items-center gap-2 text-base font-semibold text-slate-500 transition-colors hover:text-slate-700"
-                                >
-                                    <ChevronIcon open={structuralFindingsOpen} />
-                                    {tw.verification_basis_structural_heading ?? 'Kvalitetsfunn på siden'}
-                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-base font-normal text-slate-500">
-                                        {structuralFindings.length}
-                                    </span>
-                                </button>
+                                <h3 className="text-base font-semibold">
+                                    <button
+                                        type="button"
+                                        aria-expanded={structuralFindingsOpen}
+                                        aria-controls="wiki-structural-findings"
+                                        onClick={() => setStructuralFindingsOpen((v) => !v)}
+                                        className="flex items-center gap-2 text-base font-semibold text-slate-600 transition-colors hover:text-slate-800"
+                                    >
+                                        <ChevronIcon open={structuralFindingsOpen} />
+                                        {tw.verification_basis_structural_heading ?? 'Kvalitetsfunn på siden'}
+                                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-base font-normal text-slate-600">
+                                            {structuralFindings.length}
+                                        </span>
+                                    </button>
+                                </h3>
 
                                 {structuralFindingsOpen && (
-                                    <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
-                                        <p className="text-base text-slate-500">
+                                    <div id="wiki-structural-findings" className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
+                                        <p className="text-base text-slate-600">
                                             {tw.verification_basis_structural_intro ?? 'Disse funnene gjelder struktur og lenker på Wiki-siden, ikke den enkelte påstanden.'}
                                         </p>
 
                                         {structuralFindingGroups.length === 0 ? (
-                                            <p className="text-base text-slate-400">
+                                            <p className="text-base text-slate-600">
                                                 {tw.verification_basis_no_structural_findings ?? 'Ingen strukturelle funn på denne siden.'}
                                             </p>
                                         ) : (
@@ -3261,7 +3445,7 @@ export default function WikiShow({
                                                                         <p className="text-base font-semibold text-slate-700">
                                                                             {checkCopy.label}
                                                                         </p>
-                                                                        <span className="rounded-full bg-white px-2 py-0.5 text-base font-medium text-slate-500 ring-1 ring-slate-200">
+                                                                        <span className="rounded-full bg-white px-2 py-0.5 text-base font-medium text-slate-600 ring-1 ring-slate-200">
                                                                             ×{group.findings.length}
                                                                         </span>
                                                                     </div>
@@ -3275,11 +3459,11 @@ export default function WikiShow({
                                                                         {checkCopy.action}
                                                                     </p>
                                                                     {first.message && first.message !== checkCopy.description && (
-                                                                        <p className="mt-2 text-base leading-6 text-slate-500">
+                                                                        <p className="mt-2 text-base leading-6 text-slate-600">
                                                                             {first.message}
                                                                         </p>
                                                                     )}
-                                                                    <p className="mt-2 text-base text-slate-400">
+                                                                    <p className="mt-2 text-base text-slate-600">
                                                                         {tw.quality_check_technical_reference_label ?? 'Teknisk referanse'}:{' '}
                                                                         <span className="font-mono">{first.code}</span>
                                                                     </p>

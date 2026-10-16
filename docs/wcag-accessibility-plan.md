@@ -1,9 +1,9 @@
 # Plan: Universell utforming (WCAG 2.2 AA)
 
-**Status: Fase 0 er ferdig. Fase 1 er committet (`4c594ebf`) og Fase 2 er committet (`683246a7`); manuell verifisering med skjermleser, Firefox og Safari gjenstår for begge (§15.8, §16.8). Fase 3 er implementert, automatisk verifisert, teknisk sluttkontrollert (§17.12) og committet (`5559fcb9`); manuell verifisering gjenstår, og OPPF-001 (én eksisterende E2E-feil) må lukkes før merge. Fase 4 er implementert, automatisk verifisert og teknisk sluttkontrollert (§18.14), men ikke committet. Fase 5–7 er ikke startet.**
+**Status: Fase 0 er ferdig. Fase 1 er committet (`4c594ebf`) og Fase 2 er committet (`683246a7`); manuell verifisering med skjermleser, Firefox og Safari gjenstår for begge (§15.8, §16.8). Fase 3 er implementert, automatisk verifisert, teknisk sluttkontrollert (§17.12) og committet (`5559fcb9`); manuell verifisering gjenstår, og OPPF-001 (én eksisterende E2E-feil) må lukkes før merge. Fase 4 er implementert, automatisk verifisert, teknisk sluttkontrollert (§18.14) og committet (`8240951e`). Fase 5 er implementert, automatisk verifisert, sluttkontrollert (§19.17) og committet; manuell verifisering gjenstår. OPPF-001 er lukket; OPPF-002 og OPPF-003 er åpne og må løses før merge. Fase 6–7 er ikke startet.**
 Branch: `feature/wcag-accessibility`
 Utgangspunkt: `bc9070c2` (2026-10-14)
-Sist oppdatert: **2026-10-15**
+Sist oppdatert: **2026-10-16**
 
 Dette dokumentet er den styrende planen for tilgjengelighetsarbeidet. Det oppdateres når en fase
 startes, fullføres eller endres. Funn-ID-ene (`A11Y-…`) er stabile og brukes i commits, tester og
@@ -55,8 +55,8 @@ Dette er også rammer for arbeidet:
 | 1 | Felles komponenter og designregler | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-14. Manuell verifisering gjenstår (§15.8). | `4c594ebf` |
 | 2 | Navigasjon, layout og standardvisninger | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-14 (§16.12). Manuell verifisering gjenstår (§16.8). | `683246a7` |
 | 3 | Skjema, tabeller, dialoger og varsler | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-15 (§17.12). Manuell verifisering gjenstår (§17.8). Åpen før merge: OPPF-001. | `5559fcb9` |
-| 4 | Anbud, dokumenter og AI-arbeidsflyter | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-15 (§18.14). Manuell verifisering gjenstår (§18.9). Ikke committet. | — |
-| 5 | Enterprise Wiki og editor | Ikke startet | — |
+| 4 | Anbud, dokumenter og AI-arbeidsflyter | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-15 (§18.14). Manuell verifisering gjenstår (§18.9). | `8240951e` |
+| 5 | Enterprise Wiki og editor | Implementert, automatisk verifisert og sluttkontrollert 2026-10-16 (§19.17). Manuell verifisering gjenstår (§19.12). Åpne før merge: OPPF-002, OPPF-003. | `feat(a11y): improve enterprise wiki accessibility` |
 | 6 | Kvalitet/GRC, administrasjon og resterende flater | Ikke startet | — |
 | 7 | Samlet testing, regresjon og dokumentasjon | Ikke startet | — |
 
@@ -716,7 +716,7 @@ Følgende kunne ikke avgjøres statisk og verifiseres i den fasen som berører d
   Saksvisningen og AI-arbeidsflaten er kontrollert i Fase 4 (§18.8); Kunngjøringer/Saksliste ved 320 px er
   ikke E2E-testet.
 - Om andre Wiki-generatorer enn ingest også starter med `# tittel`, og om GFM-tabeller forekommer i
-  artikler (A11Y-046, -114).
+  artikler (A11Y-046, -114). (Fase 5: 44 av 51 versjoner starter med `# tittel`, håndteres ved rendering; tabeller kommer som strukturerte blokker, §19.5.)
 - Trykkflater med avstandsunntak (A11Y-106).
 - Hvordan `wire:poll` i Filament påvirker fokus og skjermleser.
 - Tagging av PDF (forventet: ikke tagget).
@@ -724,7 +724,7 @@ Følgende kunne ikke avgjøres statisk og verifiseres i den fasen som berører d
   (Fase 4: AI-uttrekkets polling flytter ikke fokus i E2E; skriving under polling er ikke testet.)
 - Om skjermlesere faktisk leser kunngjøringene fra AI-arbeidsflaten én gang (§18.9).
 
-**Åpne oppfølgingsoppgaver:** OPPF-001 (E2E `a11y-navigation` i samlet regresjon, må lukkes før merge til `main`, §17.12.9). Fra Fase 4: A11Y-145 (utsatt produktbeslutning om ansvarlig-velgeren, §18.14).
+**Åpne oppfølgingsoppgaver:** OPPF-002 (ustabil `wiki-graph-labels.spec.js:82`, også på baseline) og OPPF-003 (eksisterende PHP-feil i `WikiQualityTabRemovalTest`), begge må løses før merge (§19.17.3). OPPF-001 er lukket (§19.17.3). Fra Fase 4: A11Y-145 (utsatt produktbeslutning om ansvarlig-velgeren, §18.14). Fra Fase 5: A11Y-153, -154, -156 (§19.9).
 
 **Beslutninger som trengs før eller i fasene:**
 
@@ -740,6 +740,8 @@ Følgende kunne ikke avgjøres statisk og verifiseres i den fasen som berører d
 
 | Dato | Endring |
 |---|---|
+| 2026-10-16 | Sluttkontroll av Fase 5 (§19.17): ingen regresjoner; OPPF-001 lukket (kriteriet oppfylt, årsak ikke endelig funnet); OPPF-002 og ny OPPF-003 åpne før merge. Committet. |
+| 2026-10-16 | Fase 5 implementert og automatisk verifisert (§19): grafens listevisning på samme data (graf ↔ liste, detaljer, relasjoner, fokusliste), artikkelens Markdown-overskrifter ett nivå ned (én h1), navngitte redigeringsfelt med feil på riktig avsnitt, påstandsbeslutninger uten fokustap, gjennomgangspanel med navn og fokusretur, fire Wiki-dialoger til `ActionDialog`, filtre og søk navngitt, kjøringsstatus som overganger, Spør Wiki og kunnskapsoverføringen. Nye funn A11Y-148 til A11Y-156, OPPF-002. OPPF-001-kriteriet oppfylt. Ikke committet. |
 | 2026-10-15 | Teknisk sluttkontroll av Fase 4 (§18.14): A11Y-146 og ny A11Y-147 (tom «Legg til BR») rettet, dobbel opplesing av opplastingsfeil rettet, A11Y-145 utsatt som produktbeslutning, samlet regresjon 196/196. |
 | 2026-10-15 | Fase 4 implementert og automatisk verifisert (§18): Go/No-go med gruppe og `aria-pressed`, saksforløp med tekstlig status, alle skjemaer i Notices/AI via `FormField` med fokus til første feil, kravkortet uten `role="button"`, statusoverganger for kravuttrekk og generering via `announce()`, `FilePickerField` for AI-opplasting, «Velg ansvarlig» som `ActionDialog`, vertikal `ScrollRegion`, CPV-listeboks, reflow ved 320 px. Nye funn A11Y-139 til A11Y-146. Ikke committet. |
 | 2026-10-15 | Fase 3 godkjent for commit med én kjent E2E-feil (OPPF-001, eksisterende på `683246a7`, må rettes før merge). |
@@ -1739,3 +1741,277 @@ Vurderingsregler, filbehandling og parsing er ikke endret.
 #### 18.14.9 Vurdering
 
 Sluttkontrollen rettet to funn (A11Y-146 og den nye A11Y-147, en tom knapp som eksisterte før Fase 4) og én dobbel opplesing av opplastingsfeil. A11Y-145 er dokumentert som utsatt produktbeslutning. Ingen ruter, tilganger, validering, data, AI-logikk, polling eller filbehandling er endret. Enhetstester, lint, bygg, målrettet PHP og den nye E2E-specen er grønne, og den siste samlede regresjonen er grønn (196/196). Feilen i kjøring 3 er undersøkt og knyttet til bygg under kjørende dev-server. Fase 4 er teknisk klar for commit. Fasen er ikke manuelt verifisert og gir ikke grunnlag for å hevde at Procynia oppfyller WCAG 2.2 AA. OPPF-001 er åpen og må lukkes før merge til `main`.
+
+---
+
+## 19. Fase 5 – gjennomføringsrapport (2026-10-16)
+
+Branch `feature/wcag-accessibility`, utgangspunkt `8240951e` (Fase 4), rent arbeidstre ved start. Begrepene er de samme som i §17 og §18: **Kode** = implementert, **Auto** = automatisk test i repoet, **Agent** = kontrollert av agenten i ekte nettleser (Playwright, Chromium), **Manuell** = kontrollert av en person. Ingen manuell verifisering er gjort. Fase 5 er ikke committet.
+
+### 19.1 Omfang og arbeidsmåte
+
+Kartlagt før endringene (alle filer lest i sin helhet):
+
+| Område | Filer | Hva som finnes |
+|---|---|---|
+| Wiki-sider (oversikt, søk, filtre) | `Wiki/Index.jsx` (`PagesTab`) | Publiseringsoppsummering, søk, fem filtre (type, status, dokumenteier, kvalitetsfunn, sortering), tabell (desktop) og kort (mobil), paginering, polling hvert 5. s mens en kjøring pågår |
+| Kildedokumenter | `Wiki/Index.jsx` (`SourcesTab`) | Opplasting ved filvalg + dialog «Kildedokumentet er lastet opp», dokumenteier, filtre, tabell med eier-velger, Last ned / Lag Wiki / Slett, sletteforhåndsvisning, «Vis beslutning» (sideplan) |
+| Kjøringer | `Wiki/Index.jsx` (`RunsTab`, `RunListItem`, `RunTimeline`, paneler) | Statusfilter, kjøringsrader med aktivitet og tidslinje, «Avbryt kjøring», «Prøv sideplanleggingen på nytt», paneler for berørte sider og kvalitetsfunn (lokale filtre, detaljrader, dyplenke «Tilbake til funn») |
+| Artikkelvisning | `Wiki/Show.jsx` | Tittel, type/status, handlingsmeny (Slett side), artikkel per innholdsblokk (Markdown, tabell- og bildeblokker, beste praksis-seksjoner), Lenket fra, Navigasjon |
+| Redigering | `Wiki/Show.jsx` | «Rediger artikkel»: ett Markdown-felt per redigerbart avsnitt (ingen rikteksteditor, ingen forhåndsvisning – den rendrede artikkelen *er* visningen etter lagring); i tillegg blokkredigering fra et funn |
+| Kvalitetssikring og lint | `Wiki/Show.jsx`, `Wiki/Index.jsx` | Verifikasjonsgrunnlag: arbeidsliste over påstander som krever behandling, påstandskort (Behold/Fjern teksten, kommentar, kildekobling, blokkering), verifiserte påstander, strukturelle kvalitetsfunn; funn per kjøring under Kjøringer |
+| Gjennomgang og publisering | `Wiki/WikiReviewPanel.jsx` | Publiseringsstatus og neste steg, kvalitetssikrer (tildeling), Send til gjennomgang (velg kontrollør), Gjenåpne, Godkjenn og publiser, Send tilbake (begrunnelse min. 10 tegn), historikk over tilbakemeldinger |
+| Kunnskapsgraf | `Wiki/Graph.jsx`, `Wiki/WikiGraphFocusView.jsx`, `Components/App/MultiSelectFilterDropdown.jsx` | Sigma-lerret (fullgraf og fokus), søk og filtre, nodepanel, relasjonspanel, hover-tooltip, Tilpass visning |
+| Spør Wiki (AI) | `Wiki/Ask.jsx` | Ett spørsmål, svar med kildehenvisninger |
+| Kunnskapsoverføring til Wiki (AI-kilde) | `Components/App/WikiKnowledgeHandoffPanel.jsx` | «Lag kunnskapsartikkel» fra Avvik, Risiko, Mål, Leverandør, Revisjon og Ledelsens gjennomgåelse |
+
+Det finnes ingen egen kategoriside, ingen arkiveringshandling i Wiki-UI (statusen `archived` vises bare som merke), ingen egen revisjonshistorikkvisning (versjonsnummer og publisert/arbeidsversjon vises i gjennomgangspanelet) og ingen AI-genererte forslag som godtas eller avvises i Wiki-UI utover beste praksis-påstandene. Den eldre kvalitetsfanen er fjernet fra før og er ikke gjeninnført.
+
+Endringene er gjort på presentasjonsnivå. Ingen statusmodell, lint-regler, kvalitetskriterier, kontrollørtildeling, godkjennings- eller publiseringsregler, versjonering, AI-prompter, modeller, grafdata, relasjonsberegning, layoutalgoritme, ruter, kontrollere, validering, tilganger, data eller migrasjoner er endret. Ingen nye statusverdier eller prosesstrinn. De store filene er ikke refaktorert.
+
+### 19.2 Implementert
+
+| Del | Hva | Filer | Funn | Status |
+|---|---|---|---|---|
+| A. Graf: listevisning | «Graf \| Liste» (navngitt gruppe, veksleknapper med `aria-pressed`, fokus blir på knappen). Listen viser de samme sidene og koblingene som lerretet (se 19.3). Fokusmodus har sin egen liste. | `Wiki/Graph.jsx`, `Wiki/WikiGraphListView.jsx` (ny), `Wiki/wikiGraphList.js` (ny), `Wiki/WikiGraphFocusView.jsx`, `Wiki/wikiGraphFocusList.js` (ny) | A11Y-050 | Kode + auto (enhet + E2E) |
+| B. Graf: lerret og sidepanel | Lerretet er `role="img"` med navn («Kunnskapsgraf: N sider og M koblinger … velg Liste»). Sidepanelene har overskrifter (h2) og navn, nodepanelet viser status i ord («Status: OK»), lukkeknappene heter «Lukk sidedetaljer» / «Lukk relasjonen». Sidetyper og Status er `fieldset`-grupper. Tekst 11 px `slate-400` → 12 px `slate-600`; tall i oversikten `-700`. Avkrysningsrader minst 24 px høye (2.5.8). | `Wiki/Graph.jsx`, `Wiki/WikiGraphFocusView.jsx` | A11Y-016, -120, -150 | Kode + auto |
+| C. Graf: resultat kunngjøres | Etter søk eller filter: «Viser 2 av 16 sider.» én gang, når skrivingen har stoppet (0,7 s), aldri ved første lasting. Null treff: «Ingen Wiki-sider matcher filtrene.» Tomtilstanden beholder `role="status"` (eksisterende test), men er `aria-live="off"`, så den ikke leses i tillegg. Fokusvisningen kunngjør resultat og feil. | `Wiki/Graph.jsx`, `Wiki/wikiGraphList.js`, `Wiki/wikiGraphFocusList.js` | A11Y-111, -152 | Kode + auto (enhet + E2E) |
+| D. Filtervelger | Panelet er portalt til `<body>`: åpning flytter nå fokus inn (søkefeltet eller «Alle …»), Tab forbi siste og Shift+Tab før første lukker panelet og fortsetter fra utløseren. Etikett 12 px `slate-600`, feltkant `field-border`. | `Components/App/MultiSelectFilterDropdown.jsx` | A11Y-026, -016, -019 | Kode + auto (eksisterende E2E) |
+| E. Artikkel: overskrifter | Markdown-overskrifter rendres ett nivå ned: `#` → h2, `##` → h3 … (h6 er gulvet). Sidens tittel er eneste h1. Typografien følger Markdown-nivået (`data-md-level`), så artikkelen ser ut som før. Lagret innhold og parser (react-markdown uten plugins) er uendret. | `Wiki/WikiMarkdown.jsx` (ny), `Wiki/wikiMarkdownHeadings.js` (ny), `Wiki/Show.jsx`, `resources/css/app.css` | A11Y-046 | Kode + auto (enhet + E2E) |
+| F. Artikkel: øvrig | Kildetabeller navngis av «Tabell N» (`aria-labelledby`) og ruller i egen `ScrollRegion`. Lenkede sider er lister med sidetype i ord (`sr-only`). Lange ord og URL-er brytes, kodeblokker og bilder holdes innenfor artikkelen; lang tittel brytes ved 320 px. Sammenleggbare deler (Verifikasjonsgrunnlag, Verifiserte påstander, Kvalitetsfunn) er overskrifter med `aria-expanded`/`aria-controls`. Handlingsmenyen er en disclosure (ikke `role="menu"`). Tilbake-lenken og grå tekst på sidebakgrunnen `slate-600`. | `Wiki/Show.jsx`, `resources/css/app.css` | A11Y-113, -028, -103, -016, -148, -149 | Kode + auto |
+| G. Redigering | Feltene heter «Rediger avsnitt N av M» og beskrives av en Markdown-hjelpetekst. «Rediger artikkel» flytter fokus til første felt; Avbryt og vellykket lagring gir fokus tilbake. Avvist lagring (f.eks. tomt avsnitt) markerer *det* feltet (`aria-invalid`), kobler feilen til det og flytter fokus dit (`useFocusFirstError`); en feil uten felt får fokus selv. Under lagring er feltene `readOnly` og knappene `aria-disabled`, så fokus beholdes. Kant `field-border`, «Lagre» `sky-700`. Blokkredigeringen fra et funn: `autoFocus` erstattet med fokus ved åpning/lukking, feilen er `role="alert"` og koblet til feltet. | `Wiki/Show.jsx`, `Wiki/wikiShowA11y.js` (ny) | A11Y-049, -013, -019, -017 | Kode + auto (enhet + E2E) |
+| H. Påstander | `preserveScroll` på alle påstandsbeslutninger; når kortet forsvinner fra arbeidslisten, går fokus til neste påstand som krever behandling (så selve påstanden, så overskriften) – bare hvis fokus faktisk gikk tapt. Kortet er navngitt («Påstand 1 av 2»), knappene beskrives av påstanden og er `aria-disabled` mens de lagres. Kommentarfeltet har etikett. Blokkeringsvalget og valgt kildeelement er `aria-pressed`. `emerald/sky-600` → `-700`. | `Wiki/Show.jsx`, `Wiki/wikiShowA11y.js` | A11Y-014, -047, -117, -017 | Kode + auto (enhet + E2E) |
+| I. Gjennomgang og publisering | Panelet er en navngitt, fokuserbar seksjon med egen h2 («Gjennomgang og publisering») over h3-blokkene. Dialogene har beskrivelse og faller tilbake til panelet når utløseren er borte (etter innsending/publisering). Etter en handling går fokus til panelet; etter en avvisning til feltet i dialogen. Minstelengden for «Send tilbake» står i hjelpeteksten («Minst 10 tegn.»), feltet er `aria-required`. Regler og betingelser er uendret. | `Wiki/WikiReviewPanel.jsx` | A11Y-002, -014, -118 | Kode + auto (enhet + E2E) |
+| J. Wiki-sider | Søk med etikett (søkelandemerke), alle fem filtre navngitt, antall sider kunngjøres når filtrene endres (ikke ved polling), tabell med `caption` og `scope`, «Åpne» heter «Åpne <tittel>», rullebokser som navngitte regioner (`ScrollRegion axis="y"/"both"`), paginering som navngitt `nav`. | `Wiki/Index.jsx`, `Components/App/ScrollRegion.jsx` | A11Y-048, -108, -109, -110, -111 | Kode + auto (E2E) |
+| K. Kildedokumenter | Opplastingsfeltets fokusring er gjenopprettet (de tomme `peer-`-klassene), feltet beskrives av valgt fil, formater og feil; feilen er `role="alert"`; fokus tilbake til feltet etter avvist opplasting og etter dialogen. Søk og filtre navngitt, søkeknappen har navn. Radhandlingene beskrives av filnavnet, eier-velgeren heter «Dokumenteier for <fil>», første celle er `th scope="row"`. Sletting og sideplan er `ActionDialog` (tittel, beskrivelse, Avbryt får fokus, Escape, felle, fokusretur). | `Wiki/Index.jsx` | A11Y-002, -011, -048, -109 | Kode + auto |
+| L. Kjøringer | Radene er ikke lenger live-regioner (de leste opp ved hver polling); en statusendring kunngjøres én gang («Kjøring for Rutiner.docx: Genererer sider.», feil assertive). Tidslinjen er en `ol` der hvert steg sier «fullført/pågår/venter/stoppet/gjenstår» og nåværende steg er `aria-current="step"`; den ruller i en navngitt region. Avbryt og Prøv på nytt er `ActionDialog`. Filtre navngitt; «Vis N berørte Wiki-sider»; funnfiltrene er `aria-pressed` i en navngitt gruppe; detaljknappen nevner funnet; dyplenke til et funn flytter fokus dit. | `Wiki/Index.jsx`, `Wiki/wikiRunAnnouncements.js` (ny) | A11Y-002, -024, -112, -117, -015, -151 | Kode + auto |
+| M. Spør Wiki | Én h1 (layoutens tittel av). Spørsmålet via `FormField`, avvist innsending → fokus på feltet. «Søker i Wiki-en …» og svartypen («Svaret er klart.») kunngjøres; svarteksten leses ikke opp og fokus flyttes ikke. Knappen er `aria-disabled` mens det søkes. | `Wiki/Ask.jsx`, `Wiki/wikiAskStatus.js` (ny) | A11Y-042, -013 | Kode + auto |
+| N. Kunnskapsoverføring | Tittel og læringspunkter via `FormField` (påkrevd), seksjonene som `FieldsetField` (hver avkrysning navngitt av overskriften og beskrevet av linjene), «Felt merket med * …», fokus til første feil, `aria-disabled` under innsending. | `Components/App/WikiKnowledgeHandoffPanel.jsx` | A11Y-013, -121 | Kode + auto (eksisterende E2E) |
+| i18n | 51 nye nøkler i `procynia.a11y.*` (`wiki_*`), no + en. | `lang/{no,en}/procynia.php` | — | Auto |
+| Lint | `lint:a11y` dekker 10 nye filer (66 totalt). Ingen regel er slått av. De 6 opprinnelige funnene (overlegg med klikk uten tastatur, `autoFocus`, etikett uten tekst, to ukjente `eslint-disable`-direktiver) er rettet. | `eslint.config.js` | — | Auto |
+
+### 19.3 Grafens tilgjengelige alternativ
+
+Listevisningen er ikke en beskrivelse av grafen, men grafen i lesbar rekkefølge:
+
+- **Data:** radene bygges av `displayed` – det samme utvalget lerretet tegner etter søk og alle filtre (`buildGraphListRows(displayed.nodes, displayed.edges)`). Ingen ny forespørsel (`Graph.jsx` gjør fortsatt bare `fetch(fetchUrl)`), ingen egen filtrering, ingen ny datamodell. En relasjon er et par viste sider med minst én vist kobling, med samme nøkkel som en klikket linje (`relationPairKey`).
+- **Per side:** tittel som lenke (åpner siden med grafen som returkontekst, `articleHrefFromGraph`), sidetype og lint-status i ord, antall påstander og funn, «Vis detaljer» (samme nodepanel som et klikk på en prikk, fokus flyttes inn, lukking gir fokus tilbake), «Fokuser på denne siden» (samme overgang til fokusmodus), og koblingene: «Lenker til / Lenkes fra / Gjensidig lenket med <side>» med lenke til den relaterte siden og «Hvorfor er de koblet?» (samme relasjonspanel som et klikk på linjen).
+- **Fokusmodus:** samme svar fra `/graph-focus`, gruppert som «Fokusside», «1 hopp unna», «2 hopp unna», med «Åpne» (tittelen) og «Fokuser på denne siden».
+- **Bytte:** «Graf | Liste» virker i begge moduser; fokus blir på knappen, og Sigma-lerretet beholdes skjult (layout og kamera er der når man bytter tilbake).
+
+Lerretet er ikke gjort til en skjermleserbasert grafeditor; det er et navngitt bilde som peker til listen.
+
+### 19.4 Funksjonell sammenligning: graf og liste
+
+| Oppgave | Graf (peker) | Liste (tastatur/skjermleser) | Verifisert |
+|---|---|---|---|
+| Finne sider | Søk og filtre | De samme kontrollene; listen følger | E2E (søk, status, sidetyper) |
+| Se hvor mange som vises | Grafoversikt | Oppsummering + kunngjøring | E2E (antall i liste = Grafoversikt = lerretets navn) |
+| Velge side og se detaljer | Klikk på prikk → nodepanel | «Vis detaljer» → samme panel, fokus inn/ut | E2E |
+| Åpne side | «Åpne side» i panelet | Tittellenken (eller panelet) | E2E (relatert side åpnet med «Tilbake til Grafvisning») |
+| Se relasjoner | Linjer, hover-tooltip | «Koblinger (N)» med retning i ord | Enhet (samme par som lerretet) + E2E |
+| Hvorfor er de koblet | Klikk på linje → relasjonspanel | «Hvorfor er de koblet?» → samme panel | E2E |
+| Gå til relatert side | Klikk i relasjonspanelet | Lenke i koblingslisten | E2E |
+| Fokusere på en side | «Fokuser på denne siden» | Samme knapp i raden | E2E (fokuslisten) |
+| Fokusvisning | Lerret | Liste gruppert på hopp | E2E (med projisert fixture) |
+| Tilpass visning | Kamera | Ikke relevant (ingen kamera i listen) | — |
+
+Konklusjon: alle oppgaver grafen tilbyr, kan gjøres i listen, på samme datagrunnlag. Hover-tooltipen er det eneste som bare finnes for peker; innholdet står i relasjonspanelet (se A11Y-153).
+
+### 19.5 Artikkelvisning og Markdown
+
+- **Dobbel h1 (A11Y-046):** bekreftet i data – 44 av 51 sideversjoner med blokker starter med `# {tittel}` (ingest skriver det). Rettet ved rendering, ikke i innholdet.
+- **GFM-tabeller (A11Y-114):** de tre versjonene med tabellsyntaks rendres som strukturerte tabellblokker (`WikiTableBlock`), ikke som Markdown. Det finnes altså ikke et dokumentert behov for `remark-gfm`; parseren er uendret.
+- **Bilder:** alternativ tekst kommer fra Word-kildens egen beskrivelse; uten den blir bildet `alt=""` med figurtekst. Innholdsspørsmål, ikke komponentfeil (A11Y-154). Ingen bildeblokker i utviklingsdataene.
+- **Lister, lenker, sitater:** rendres som semantisk HTML av react-markdown; interne lenker går via Inertia. Ingen endring.
+
+### 19.6 Tester og resultater
+
+Resultatene er fra kjøringer på endelig kode.
+
+| Test | Resultat |
+|---|---|
+| `npm run test:unit` (Node 22, Docker) | **1826 bestått, 0 feilet, 0 hoppet over.** Ny: `resources/js/Support/a11yPhase5.test.js` (57 tester: listevisningens rader og relasjoner = lerretets par, retninger, filtrert side tar koblingene med seg, ingen ekstra forespørsel, samme paneler, fokus inn/ut av panelene, navngitte grupper og lerret, kunngjøring av resultat og tomt resultat, fokuslisten og kunngjøringene, overskriftsforskyvning, `WikiMarkdown` overalt, typografi per nivå, ingen parser-endring, reflow-CSS, tabellnavn, fokusmål etter påstandsbeslutning, `preserveScroll`, `aria-disabled`/`aria-pressed`, kommentaretikett, redigeringsfeltenes navn, feil koblet til riktig avsnitt, ingen `autoFocus`, disclosure i stedet for meny, gjennomgangspanelets navn/beskrivelser/fokusretur/minstelengde, ingen egne modaler i Index, navngitte filtre, statusoverganger for kjøringer, tidslinje i ord, opplastingsfeltet, Spør Wiki, filtervelgeren, `ScrollRegion axis="both"`, kunnskapsoverføringen, alle nye nøkler i begge språk). |
+| `npm run lint:a11y` (Node 22) | **0 feil, 0 advarsler** (66 filer). |
+| `npm run build` | Bestått. |
+| PHP, målrettet (filter på `WikiSourceRowLayoutTest`, `WikiSourcesDocumentOwnerFilterTest`, `WikiQualityTabRemovalTest`, `WikiRunsTabPollingRefreshTest`, `WikiPageHelpTest`, `WikiAskControllerTest`, `WikiGraphControllerTest`, `A11yTranslationsTest`, `SharedTranslationsLocaleTest`, `WikiFindingDeepLinkTest`, `WikiClaimDefectReviewReferenceNavigationTest`, `WikiControllerTest`, `WikiReviewAssignmentTest`, `WikiClaimControllerTest`, `WikiWorkingVersionEditTest`, `KnowledgeHandoff*`; de navnene som finnes) | **457 bestått, 1 feilet** (2192 påstander). Feilen er eksisterende, se 19.7. |
+| Pint (fixture, språkfilene) | Bestått. |
+| E2E `a11y-wiki.spec.js` (ny, 12 tester, egen fixture `Tests\Support\A11yWikiE2EFixture` med egen kunde) | **12 bestått, 0 feilet.** Wiki-sider (navngitte filtre, søk, kunngjort antall, fokus beholdes), graf → liste (veksleknapp, fokus, søk kunngjort, detaljer med fokus inn/ut, relasjon, åpne relatert side), likhet graf/liste under filtre, fokusliste (projisert), artikkel (én h1, h2/h3 fra Markdown), to påstander besluttet med tastatur (fokus til neste påstand, så overskriften; rulleposisjon beholdt), redigering (navn, hjelpetekst, avvist tomt avsnitt → fokus/`aria-invalid`/beskrivelse, Avbryt → fokus tilbake), send til gjennomgang med tastatur (dialog, beskrivelse, toast, fokus på panelet, status), send tilbake som kontrollør (minstelengde, deaktivert til den er nådd, toast, fokus, «Endringer kreves»), kilder og kjøringer, Spør Wiki, reflow 320/640 px. axe uten brudd på alle disse flatene og i begge dialogene. Ingen AI-kall. |
+| E2E Wiki-relatert (16 spesifikasjoner, 124 tester) | Første kjøring: 123 bestått, 1 feilet, 0 ikke kjørt (`knowledge-handoff`: den nye «Felt merket med * …» var 14 px – rettet til 16 px; specen besto deretter). |
+| E2E samlet, 41 spesifikasjoner (256 tester) | Tre kjøringer: 255/1/0, 255/1/0 og 256/0/0 (bestått/feilet/ikke kjørt), se 19.7. |
+| Full PHP- og E2E-suite | Ikke kjørt (merge gate). |
+
+### 19.7 Regresjon og eksisterende feil
+
+Utvalget er de 29 spesifikasjonene fra §18.5 pluss `a11y-wiki` og de 11 øvrige Wiki-relaterte (`wiki-best-practice`, `wiki-graph-focus`, `wiki-graph-labels`, `wiki-runs-readability`, `wiki-runs-stalled-indicator`, `wiki-source-upload-readability`, `wiki-tab-preservation`, `wiki-word-image`, `wiki-word-image-includepicture`, `wiki-word-table`, `supplier-wiki-guidance`): 41 spesifikasjoner, 256 tester, Chromium, endelig kode, Vite dev-server i gang, ingen kildeendringer under kjøringene.
+
+| Kjøring | Resultat | Merknad |
+|---|---|---|
+| 1 | **255 bestått, 1 feilet, 0 ikke kjørt** av 256 (20,7 min) | Feilen: `wiki-graph-labels.spec.js:82`, eksisterende ustabil test (under). |
+| 2 | **255 bestått, 1 feilet, 0 ikke kjørt** av 256 (18,8 min) | Samme test. |
+| 3 | **256 bestått, 0 feilet, 0 ikke kjørt** av 256 (20,3 min) | Ingen feil i denne kjøringen. |
+
+Mellom kjøring 1 og 2 ble to filer midlertidig byttet til HEAD-versjonen for baseline-kontrollen under og deretter gjenopprettet byte for byte (kontrollsum verifisert); koden var identisk i alle tre kjøringene.
+
+- **`wiki-graph-labels.spec.js:82` (eksisterende, ustabil):** testen klikker 25 px til venstre for den venstreste tegnede etikettpikselen på et lerret med tilfeldig startlayout (`Math.random()`), og treffer derfor ikke alltid en node. Isolert med Fase 5-koden: 1 av 6 feilet. Med HEAD-versjonen av `Graph.jsx` og `MultiSelectFilterDropdown.jsx` lagt inn midlertidig: **2 av 6 feilet** (filene ble deretter gjenopprettet, kontrollsum verifisert). Feilen skyldes testen, ikke Fase 5. Registrert som OPPF-002; ikke endret her (ingen svekking).
+- **`WikiQualityTabRemovalTest::test_the_wiki_navigation_no_longer_offers_a_quality_tab` (eksisterende):** leser `CustomerAppLayout.jsx` og forventer `wiki-pages`/`wiki-sources`/… som ikke finnes der på HEAD (`git show HEAD:… | grep` = 0; Wiki-navigasjonen ligger i dag et annet sted). Fase 5 har ikke rørt filen. Bekreftet feilende i en ren HEAD-worktree.
+- **Én eksisterende test er tilpasset:** `wikiBackLinkStyle.test.js` låste fargen på «Tilbake til Wiki» til `text-slate-500`, som er 4,45:1 mot sidebakgrunnen `#f6f7fb` (under 4,5:1). Lenken er nå `slate-600` (7,08:1), og testen krever `text-slate-600` med samme styrke (A11Y-148). Ingen andre tester er endret; øvrige kildetester som låser markup (`wikiReviewPanel`, `wikiSourceUpload`, `WikiSourceRowLayoutTest`, `wikiGraph*`, `wikiListLayout` m.fl.) er oppfylt ved å tilpasse koden.
+
+- **OPPF-001:** `a11y-navigation.spec.js:155` besto i alle tre samlede kjøringer på rad, på uendret kode, uten endret ventetid eller svekkede påstander. Akseptansekriteriet i §17.12.9 er dermed oppfylt. Årsaken til de tidligere feilene er fortsatt ikke funnet (sannsynligvis testmiljø, jf. §18.14.6.1). Anbefaling: lukk OPPF-001 i sluttkontrollen av Fase 5; koden er ikke committet ennå, så en ny serie på commit-koden kan kreves hvis man ønsker det.
+
+### 19.8 Funnstatus etter Fase 5
+
+Lukket betyr: utbedret og verifisert automatisk innenfor testomfanget i 19.6, på Wiki-flatene. Ingen er manuelt verifisert.
+
+| ID | Status |
+|---|---|
+| A11Y-002 | Lukket for Wiki: sideplan, sletting av kilde, avbryt kjøring og prøv på nytt er `ActionDialog` (auto). Med Fase 3–4 er alle 11 dialogene fra Fase 0 migrert; `fixed inset-0` finnes ikke lenger i Wiki. |
+| A11Y-011 | Delvis for Wiki: fokusring, beskrivelse, `aria-invalid`, alert og fokusretur er på plass (auto). Feltet er fortsatt `disabled` under opplasting (låst av eksisterende test `wikiSourceUpload`), så fokus faller midlertidig; det settes tilbake når opplastingen er ferdig eller avvist (A11Y-156). Gjenstår: `SupplierManagement/Import.jsx` (Fase 6). |
+| A11Y-013 | Lukket for Wiki-skjemaene (redigering, Spør Wiki, kunnskapsoverføring, gjennomgangsdialogene). GRC gjenstår (Fase 6). |
+| A11Y-014 | Lukket for påstandsbeslutninger, redigering, gjennomgang og graf-paneler (auto). Se A11Y-156 for de gjenværende `disabled`-knappene. |
+| A11Y-015 | Lukket for dyplenken til et funn under Kjøringer (fokus til raden). Gjenstår: `SupplierManagement/Show.jsx`, `Compliance/Audits/Show.jsx` (Fase 6). |
+| A11Y-016, -019 | Lukket i Wiki-filene (axe på alle testede flater). |
+| A11Y-017 | Lukket i Wiki (`emerald/sky/amber/rose-600` med hvit tekst → `-700`). `GoNoGo`-delene ble rettet tidligere. |
+| A11Y-024 | Lukket for Wiki-tidslinjen (auto). Ledelsens gjennomgåelse gjenstår (Fase 6). |
+| A11Y-026 | Lukket (auto via eksisterende E2E for filtervelgeren + enhet). |
+| A11Y-028 | Lukket for Wiki (verifikasjonsseksjonene, tekniske detaljer, funndetaljer, handlingsmenyen). |
+| A11Y-042 | Lukket for `Wiki/Ask.jsx` (auto). |
+| A11Y-046 | Lukket (auto). |
+| A11Y-047, -048, -049 | Lukket (auto). |
+| A11Y-050 | Lukket med listevisning som funksjonelt likeverdig alternativ (19.3, 19.4). Lerretet selv er fortsatt bare for peker, med vilje. |
+| A11Y-103 | Lukket for Wiki-sidens handlingsmeny. |
+| A11Y-108 – -110 | Lukket for Wiki-tabellene og -rulleboksene. |
+| A11Y-111 | Lukket for Wiki-sider, grafen og fokusvisningen. |
+| A11Y-112 | Lukket for Wiki-kjøringene (auto). |
+| A11Y-113 | Lukket for Wiki-tabellene. `ManagementReview/Report.jsx` gjenstår (Fase 6). |
+| A11Y-114 | Avsluttet uten endring: ingen GFM-tabeller når Markdown-rendereren i dagens data (19.5). Tas opp igjen hvis en generator begynner å skrive dem. |
+| A11Y-117 | Lukket (funnfiltre, blokkeringsvalg, kildeelement). |
+| A11Y-118 | Lukket (auto). |
+| A11Y-120 | Lukket for grafens filtergrupper. GRC gjenstår (Fase 6). |
+| A11Y-121 | Delvis: kunnskapsoverføringen og «Send tilbake» merket. GRC (Fase 6). |
+| A11Y-105 | Uendret delvis: hardkodet norsk står igjen i deler av Wiki (blokkredigeringens knapper og meldinger, «Oppdater», «I kø siden …», mobiletikettene i Kjøringer, «Fjern kildefilter», feilteksten i sletteforhåndsvisningen, tabellhodene i Wiki-sider). Etter prosjektregelen oversettes eksisterende tekst når det bestilles. |
+
+### 19.9 Nye funn
+
+| ID | Funn | WCAG | Status |
+|---|---|---|---|
+| A11Y-148 | «Tilbake til Wiki» `slate-500` på sidebakgrunnen: 4,45:1. | 1.4.3 | Rettet (`slate-600`, 7,08:1). |
+| A11Y-149 | Lang ettordstittel («Leverandørsikkerhet», 36 px) presset artikkelsiden 12 px for bred ved 320 px. | 1.4.10 | Rettet (tittelen kan brytes). |
+| A11Y-150 | Grafens avkrysningsbokser (14 px) for tett (axe `target-size`). | 2.5.8 | Rettet (rader minst 24 px). |
+| A11Y-151 | Kjøringens tidslinje rullet sideveis uten å kunne nås med tastatur (axe `scrollable-region-focusable`). | 2.1.1 | Rettet (`ScrollRegion`). |
+| A11Y-152 | Grafens resultat ble aldri kunngjort; tomtilstanden var en live-region som monteres med teksten. | 4.1.3 | Rettet. |
+| A11Y-153 | Grafens hover-tooltip kan ikke lukkes med Escape eller holdes ved å peke på den (`pointer-events-none`). Innholdet finnes i relasjonspanelet og i listen. | 1.4.13 | Åpen, P2. Forslag: Escape skjuler tooltipen; lav risiko, berører bare `EdgeTooltip`/`leaveEdge`. |
+| A11Y-154 | Bilder uten alternativ tekst i Word-kilden vises med `alt=""` og figurtekst. | 1.1.1 | Innhold, ikke komponent. Oppfølging: vurdere advarsel i kvalitetskontrollen for bildeblokker uten beskrivelse. |
+| A11Y-155 | Wiki-tabellens kolonnehoder «Tittel», «Type», «Status» og flere tekster er hardkodet norsk (se A11Y-105). | 3.1.2 | Informasjon. |
+| A11Y-156 | Tre knapper/felt er fortsatt `disabled` mens en forespørsel går (opplastingsfeltet, dialogknappene i gjennomgangspanelet, blokkredigeringens Lagre), fordi eksisterende kildetester låser `disabled`. Fokus faller under forespørselen og settes tilbake etterpå (`refocusIfLost`, `fallbackFocusRef`). | 2.4.3 | Delvis. Forslag: endre til `aria-disabled` + vakt sammen med de låsende testene, som en egen, avtalt endring. |
+
+### 19.10 Synlige endringer
+
+- **Graf:** ny «Graf \| Liste»-bryter ved modusbryteren; listevisningen er ny. Etikettene i sidepanelet er 12 px og mørkere grå (var 11 px lys grå); tellerne for feil/advarsler er en nyanse mørkere; avkrysningsradene litt høyere. Nodepanelet viser «Status: OK» i stedet for «ok».
+- **Artikkel:** overskriftene ser like ut. Tilbake-lenken og grå hjelpetekster er en nyanse mørkere. Kommentarfeltet ved en påstand har en synlig etikett «Kommentar (valgfritt)». Grønne/blå knapper er én nyanse mørkere. Det valgte blokkeringsvalget vises i full farge (var nedtonet som deaktivert). Lang tittel brytes på smal skjerm.
+- **Redigering:** hjelpetekst om Markdown øverst i redigeringsmodus; feltkantene tydeligere.
+- **Gjennomgang:** «Minst 10 tegn.» i hjelpeteksten for «Send tilbake».
+- **Kildedokumenter og Kjøringer:** dialogene for sletting, sideplan, avbryt og prøv på nytt har standard dialogutforming (sideplanen med tittellinje og lukkeknapp); røde/oransje knapper én nyanse mørkere; gråtekster mørkere.
+- **Kunnskapsoverføring:** «Felt merket med * må fylles ut.» over feltene.
+- **Uendret:** ruter, handlinger, rekkefølge, statuser, polling, grafdata og layout, AI-svar og alle data.
+
+### 19.11 Nettleserkontroll (agent)
+
+Kontrollert i Chromium (Playwright) på `localhost:8080` med Vite dev-server:
+
+- **Bredder:** 320 px og 640 px (E2E) for Wiki-sider, Kildedokumenter, Kjøringer, artikkel, Spør Wiki og grafens liste; 1440 px i alle testene. Ingen sidelengs rulling av siden; tidslinje og brede tabeller ruller i egne, navngitte regioner. 320 px dekker 400 % av 1280 px, 640 px dekker 200 %.
+- **Tastatur:** filtervelgeren (inn/ut av panelet), graf ↔ liste, listens detaljer og relasjoner, påstandsbeslutninger, redigering, gjennomgangsdialogene – fokus synlig og aldri tapt i de testede flytene.
+- **axe:** ingen brudd på Wiki-sider, Kildedokumenter, Kjøringer, artikkel (lesing, redigering, redigering med feil), graf, liste med sidepanel, fokusliste, begge gjennomgangsdialogene og Spør Wiki.
+- **Ikke kontrollert:** nettleserens egen zoom, Firefox, Safari, forced-colors, skjermleser.
+
+### 19.12 Manuell testing som gjenstår
+
+I tillegg til §15.8.7, §16.8, §17.8 og §18.9:
+
+1. **NVDA + Firefox/Chrome og VoiceOver + Safari:**
+   1. Grafens liste: «Graf/Liste» leses som veksleknapper; listen kan gjennomgås med overskriftsnavigasjon (h3 per side); «Vis detaljer» flytter til panelet og leser sidens navn; antall kunngjøres én gang etter søk.
+   2. Artikkel: overskriftslisten viser én h1 og artikkelens egne seksjoner under.
+   3. Påstander: kortet leses med «Påstand N av M», knappene med påstandens tekst; etter «Behold teksten» står man på neste påstand, og toasten leses.
+   4. Redigering: «Rediger avsnitt 2 av 5» og Markdown-hjelpen leses; avvist lagring leser feilen ved feltet én gang.
+   5. Gjennomgang: dialogene leser tittel og beskrivelse; etter innsending leses panelet («Gjennomgang og publisering») og toasten.
+   6. Kjøringer: en kjøring som går til et nytt steg leses én gang, ikke hvert 5. sekund.
+2. **Ekte Safari:** at filtervelgerens panel tar fokus og Tab ut fortsetter riktig; at `aria-disabled`-knappene beholder fokus.
+3. **Zoom 200/400 %** med nettleserens egen zoom på grafen og artikkelen.
+4. **Visuelt:** listevisningen i grafen og den endrede blokkeringsknappen (19.10).
+5. **Akseptansekriteriet i §8 Fase 5:** en QA-bruker (ikke System Owner) godkjenner alle påstander med bare tastatur – E2E er kjørt som System Owner.
+
+### 19.13 Kjente risikoer og begrensninger
+
+- Fokusmålene etter påstandsbeslutninger og i redigering bygger på element-id-er (`claim-<id>`, `wiki-article-edit-<blokk>`, `wiki-verification-toggle`, `wiki-review-panel`); enhetstestene låser de viktigste.
+- Feilen ved avvist lagring kobles til avsnittet via rekkefølgen i forespørselen (`blocks.N.markdown`); endrer serveren navngivingen, faller koblingen tilbake til oppsummeringen (som da får fokus).
+- Fokusvisningens liste krever at grafprojeksjonen er på; uten den vises og kunngjøres «ikke tilgjengelig», som før.
+- `wiki-graph-labels.spec.js:82` er ustabil uavhengig av Fase 5 (OPPF-002).
+- E2E kjører bare i Chromium; påstandsflyten er testet som System Owner, ikke som QA-bruker.
+
+### 19.14 Oppfølgingsoppgaver
+
+- **OPPF-001:** lukket i sluttkontrollen (19.17).
+- **OPPF-002 (ny):** `wiki-graph-labels.spec.js:82` treffer ikke alltid en node fordi grafens startlayout er tilfeldig (2 av 6 feilet på HEAD). Forslag: finn nodeposisjonen via Sigma (`getNodeDisplayData`) i stedet for etikettpiksler, eller bruk listevisningens «Vis detaljer» for panelkontrollen.
+- **A11Y-153, -154, -156:** se 19.9.
+- **A11Y-105:** oversettelse av eksisterende hardkodet norsk i Wiki når det bestilles.
+- **OPPF-003 (ny):** eksisterende PHP-feil `WikiQualityTabRemovalTest::test_the_wiki_navigation_no_longer_offers_a_quality_tab` (19.17).
+
+### 19.15 Anbefalinger for Fase 6
+
+1. Prosessdiagrammet (A11Y-004) kan følge samme mønster som grafen: en steglisteversjon av de samme dataene, med de samme handlingene, i stedet for å gjøre SVG-en til en full tastaturflate.
+2. Gjenbruk `useRunStatusAnnouncements`-mønsteret (én overgang, én kunngjøring) for GRC-flater som oppdateres.
+3. Sjekk sidebakgrunnen (`#f6f7fb`) for all grå tekst: `slate-500` holder ikke der (A11Y-148).
+4. Avklar de låste `disabled`-knappene (A11Y-156) før lignende mønstre kopieres til GRC.
+5. Kontroller lange ettordstitler ved 320 px tidlig (A11Y-149).
+
+### 19.16 Vurdering
+
+Alle Fase 5-funnene fra planen er rettet eller dokumentert med begrunnelse: A11Y-002, -026, -042, -046, -047, -048, -049, -050, -112, -117, -118 og Wiki-delene av -011 (delvis), -013, -014, -015, -016, -017, -019, -024, -028, -103, -108–-111, -113, -120, -121; A11Y-114 er avsluttet uten endring. Ni nye funn er registrert (A11Y-148 til -156): fem rettet, ett åpent (A11Y-153), ett innholdsfunn, én informasjon og én delvis. Kunnskapsgrafen har en funksjonelt likeverdig listevisning på samme data, verifisert med enhetstester og E2E. Ingen forretningslogikk, review- eller publiseringsregler, lint-motor, AI, grafdata, ruter, tilganger, data eller migrasjoner er endret. Enhetstester, lint, bygg og den nye E2E-specen er grønne; målrettet PHP og samlet E2E har bare eksisterende feil (19.7). Fase 5 er etter agentens vurdering teknisk klar for sluttkontroll, men er **ikke** sluttkontrollert, ikke manuelt verifisert med skjermleser, ekte Safari/Firefox, nettleserzoom eller Windows-høykontrast, og gir ikke grunnlag for å hevde at Procynia oppfyller WCAG 2.2 AA. Full E2E- og PHP-suite er merge gate og er ikke kjørt.
+
+### 19.17 Sluttkontroll av Fase 5 (2026-10-16)
+
+Kontroll på Fase 5-koden før commit. Branch `feature/wcag-accessibility`, HEAD `8240951e`. Ingen kodeendringer er gjort i sluttkontrollen; resultatene i 19.6–19.7 er fra siste kodeversjon, og testene er derfor ikke kjørt på nytt.
+
+#### 19.17.1 Git
+
+- 26 filer, alle Fase 5: 15 endrede (de seks Wiki-sidene, tre felleskomponenter, `app.css`, språkfilene, `eslint.config.js`, denne planen og `wikiBackLinkStyle.test.js`) og 11 nye (`WikiGraphListView.jsx`, `WikiMarkdown.jsx`, sju hjelpemoduler, `a11yPhase5.test.js`, `A11yWikiE2EFixture.php`, `a11y-wiki.spec.js`).
+- Ingen PHP-kode i `app/`, ingen ruter, kontrollere, migrasjoner eller konfigurasjon. Ignorerte lokale artefakter (`public/hot`, `public/build`, `test-results/`) er ikke med. `git diff --check` uten funn.
+
+#### 19.17.2 Wiki-funksjonaliteten
+
+| Kontroll | Resultat |
+|---|---|
+| Listealternativet bygger på samme data og tilgang som grafen | Ja. Radene bygges av grafens eget `displayed` (samme svar fra `/app/wiki/graph-data`, som allerede er avgrenset til det brukeren får se); ingen ny forespørsel, filtrering eller datamodell (enhet + E2E, 19.3–19.4). |
+| Finne, åpne og navigere mellom relaterte artikler med tastatur | Ja (E2E: søk, «Vis detaljer», «Hvorfor er de koblet?», lenke til relatert side med «Tilbake til Grafvisning»). |
+| Overskriftsstruktur i artikkelen | Én h1 (sidens tittel); Markdown `#` → h2, `##` → h3 (E2E). |
+| Redigering og kvalitetssikring | Fungerer: lagring/avvisning/Avbryt og påstandsbeslutninger (E2E). |
+| Review, kontrollørtildeling, godkjenning og publisering | Uendret. Diffen inneholder ingen endring i betingelser (`can_submit`, `can_send_back`, `can_approve_final`, `MIN_REASON`) eller i forespørslene (`/submit`, `/approve`, `/reject`, `/qa-assignment`); bare navn, beskrivelser, fokus og hjelpetekst. Send til gjennomgang og Send tilbake kjørt i E2E. |
+| Dialogene | Alle bruker `ActionDialog` (felle, Escape, `inert`, fokusretur, `descriptionId`, `fallbackFocusRef`). |
+| Ingen gammel Wiki-prosess gjeninnført | Bekreftet: ingen kvalitetsfane, ingen direkte publisering av utkast, ingen nye statuser eller trinn. |
+
+#### 19.17.3 Oppfølgingsoppgaver
+
+- **OPPF-001 – lukket.** `a11y-navigation.spec.js:155` besto i tre påfølgende samlede regresjonskjøringer (19.7) på uendret kode, uten endret ventetid og uten svekkede påstander. Akseptansekriteriet i §17.12.9 er oppfylt. Den opprinnelige årsaken til feilene i Fase 3 er ikke endelig identifisert (sannsynligvis testmiljø, jf. §18.14.6.1). Dukker feilen opp igjen, gjenåpnes oppgaven.
+- **OPPF-002 – åpen, må løses før merge til `main`.** `wiki-graph-labels.spec.js:82` («long node titles are handled …») feilet i samlet kjøring 1 og 2, men ikke i 3. Isolert, 6 gjentakelser: Fase 5-koden 1 av 6 feilet; med HEAD-versjonen av `Graph.jsx` og `MultiSelectFilterDropdown.jsx` midlertidig innlagt (deretter gjenopprettet, kontrollsum verifisert) 2 av 6 feilet. Testen klikker 25 px til venstre for den venstreste tegnede etikettpikselen på et lerret med tilfeldig startlayout og treffer derfor ikke alltid en node. Påstandene og testens hensikt (fullstendig tittel i nodepanelet) skal beholdes; det er måten noden finnes på som må gjøres deterministisk (forslag i 19.14).
+- **OPPF-003 – åpen (ny).** `WikiQualityTabRemovalTest::test_the_wiki_navigation_no_longer_offers_a_quality_tab` feiler. Testen leser `resources/js/Layouts/CustomerAppLayout.jsx` og forventer `wiki-pages`, `wiki-sources`, `wiki-runs` og `wiki-graph`; ingen av dem finnes i filen på HEAD (`git show HEAD:… | grep -c` = 0), og Fase 5 har ikke endret filen. Baseline: i en ren HEAD-worktree (egen `vendor`-kopi, klassen verifisert lastet fra worktreen) feilet testklassen også – den aktuelle testen sammen med sju HTTP-tester som feilet der fordi worktreen mangler bygde ressurser. I hovedtreet feiler bare denne ene. Skal rettes mot dagens navigasjonsdefinisjon; ingen Wiki-funksjonslogikk endres for å gjøre den grønn.
+
+#### 19.17.4 Testgrunnlag (kontrollert mot 19.6–19.7)
+
+| Test | Resultat |
+|---|---|
+| Enhetstester | 1826 bestått, 0 feilet, 0 hoppet over |
+| `lint:a11y` | 0 feil, 0 advarsler (66 filer) |
+| `npm run build` | Bestått |
+| Ny E2E `a11y-wiki.spec.js` | 12 bestått, 0 feilet |
+| Samlet E2E (41 spesifikasjoner, 256 tester) | Kjøring 1: 255 bestått, 1 feilet, 0 ikke kjørt. Kjøring 2: 255 bestått, 1 feilet, 0 ikke kjørt. Kjøring 3: 256 bestått, 0 feilet, 0 ikke kjørt. Feilen i 1 og 2 er OPPF-002. |
+| PHP, målrettet | 457 bestått, 1 feilet (OPPF-003) |
+
+#### 19.17.5 Åpne funn, manuell verifisering og risiko før Fase 6
+
+- **Åpne WCAG-funn fra Fase 5:** A11Y-153 (hover-tooltip i grafen kan ikke lukkes med Escape), A11Y-154 (bilder uten alternativ tekst i kilden – innhold), A11Y-156 (tre `disabled`-kontroller låst av eksisterende tester). Delvise: A11Y-011, A11Y-105/-155 (hardkodet norsk), A11Y-121. Fra tidligere faser: A11Y-145 (produktbeslutning).
+- **Manuell verifisering:** hele 19.12 gjenstår, i tillegg til §15.8.7, §16.8, §17.8 og §18.9; påstandsflyten bør også prøves som QA-bruker.
+- **Risiko før Fase 6:** fokusreglene i Wiki bygger på element-id-er (låst av enhetstester); `slate-500` holder ikke på sidebakgrunnen `#f6f7fb` og bør kontrolleres i GRC; mønsteret med `disabled` under forespørsler (A11Y-156) bør ikke kopieres; E2E kjører bare i Chromium; OPPF-002 og OPPF-003 må løses før merge. Ingen av disse hindrer oppstart av Fase 6.
+
+#### 19.17.6 Vurdering
+
+Sluttkontrollen fant ingen uavklarte regresjoner. Fase 5 er klar for commit. OPPF-001 er lukket; OPPF-002 og OPPF-003 er åpne og må løses før merge til `main`. Fasen er ikke manuelt verifisert og gir ikke grunnlag for å hevde at Procynia oppfyller WCAG 2.2 AA.

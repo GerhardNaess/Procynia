@@ -2,9 +2,13 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
-import ActionDialog from '../../../Components/App/ActionDialog';
+import ActionDialog, { DialogTitleBar } from '../../../Components/App/ActionDialog';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
+import { focusElement, refocusIfLost } from '../../../Support/focusManagement';
+import { useTransitionAnnouncement } from '../../../Support/statusAnnouncement';
+import { useRunStatusAnnouncements } from './wikiRunAnnouncements';
 import { resolveWikiFindingSecondaryText } from './wikiQualityChecks';
 import { validateSourceFile } from './wikiSourceUpload';
 import {
@@ -252,28 +256,45 @@ function getTimelineToneClasses(state) {
     }
 
     return {
-        icon: 'border-slate-200 bg-slate-50 text-slate-400',
-        text: 'text-slate-500',
+        icon: 'border-slate-300 bg-slate-50 text-slate-500',
+        text: 'text-slate-600',
         line: 'bg-slate-200',
     };
 }
 
-function RunTimeline({ run, tw }) {
+/**
+ * The words for a step's state (A11Y-024): the icon and the colour said it to a sighted user only.
+ * Read after the step's name, «Sider, pågår».
+ */
+function timelineStateText(state, ta) {
+    return {
+        done: ta.step_completed ?? 'fullført',
+        active: ta.wiki_step_active ?? 'pågår',
+        waiting: ta.wiki_step_waiting ?? 'venter',
+        error: ta.wiki_step_failed ?? 'stoppet',
+    }[state] ?? (ta.step_upcoming ?? 'gjenstår');
+}
+
+function RunTimeline({ run, tw, ta = {} }) {
     if (!run || run.status === 'decision_only') {
         return null;
     }
 
     return (
-        <div className="min-w-0 max-w-full overflow-x-auto md:overflow-visible">
-            <div className="flex min-w-max items-center gap-0 md:min-w-0 md:flex-nowrap">
+        <div className="min-w-0 max-w-full">
+            <ol
+                aria-label={(ta.wiki_run_progress_label ?? 'Fremdrift for kjøring :id').replace(':id', String(run.id))}
+                className="flex min-w-max items-center gap-0 md:min-w-0 md:flex-nowrap"
+            >
             {RUN_TIMELINE_STEPS.map((step, index) => {
                 const state = getRunTimelineState(run, index);
                 const tone = getTimelineToneClasses(state);
                 const isLast = index === RUN_TIMELINE_STEPS.length - 1;
                 const label = RUN_TIMELINE_DISPLAY_LABELS[step.key] ?? tw[step.labelKey] ?? step.fallback;
+                const isCurrent = state === 'active' || state === 'waiting' || state === 'error';
 
                 return (
-                    <div key={step.key} className="flex min-w-0 items-center">
+                    <li key={step.key} aria-current={isCurrent ? 'step' : undefined} className="flex min-w-0 items-center">
                         <div
                             data-progress-step
                             data-progress-state={state}
@@ -286,6 +307,7 @@ function RunTimeline({ run, tw }) {
                                 <TimelineStatusIcon state={state} />
                             </span>
                             <span className="whitespace-nowrap">{label}</span>
+                            <span className="sr-only">, {timelineStateText(state, ta)}</span>
                         </div>
                         {!isLast && (
                             <span
@@ -294,24 +316,29 @@ function RunTimeline({ run, tw }) {
                                 className={`mx-3 h-0.5 w-10 flex-none rounded-full ${tone.line} md:w-12`}
                             />
                         )}
-                    </div>
+                    </li>
                 );
             })}
-            </div>
+            </ol>
         </div>
     );
 }
 
-function RunProgressRow({ run, tw }) {
+function RunProgressRow({ run, tw, ta }) {
     if (!run || run.status === 'decision_only') {
         return null;
     }
 
     return (
         <div data-run-progress-row className="border-t border-slate-100 bg-slate-50/40 px-4 py-4 lg:px-6">
-            <div data-progress-scroll-area className="min-w-0 max-w-full overflow-x-auto">
-                <RunTimeline run={run} tw={tw} />
-            </div>
+            {/* Scrolls sideways on a narrow screen; reachable from the keyboard while it does. */}
+            <ScrollRegion
+                data-progress-scroll-area=""
+                label={(ta.wiki_run_progress_label ?? 'Fremdrift for kjøring :id').replace(':id', String(run.id))}
+                className="min-w-0 max-w-full"
+            >
+                <RunTimeline run={run} tw={tw} ta={ta} />
+            </ScrollRegion>
         </div>
     );
 }
@@ -319,6 +346,7 @@ function RunProgressRow({ run, tw }) {
 function RunListItem({
     run,
     tw,
+    ta = {},
     locale,
     activePanel,
     panelId,
@@ -352,7 +380,7 @@ function RunListItem({
             );
         }
 
-        return <span className="text-slate-400">—</span>;
+        return <span className="text-slate-500">—</span>;
     };
 
     const renderPagesCell = (compact = false) => {
@@ -363,6 +391,7 @@ function RunListItem({
                     onClick={() => onTogglePanel(run, 'pages', true)}
                     aria-expanded={activePanel === 'pages'}
                     aria-controls={panelId}
+                    aria-label={(ta.wiki_run_pages_toggle ?? 'Vis :count berørte Wiki-sider').replace(':count', String(run.pages_count))}
                     className={`inline-flex min-w-[2.75rem] items-center justify-center gap-1 rounded-md px-2 py-1 font-semibold text-violet-700 transition hover:bg-violet-50 hover:text-violet-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${compact ? 'text-sm' : ''}`}
                 >
                     {run.pages_count}
@@ -378,7 +407,7 @@ function RunListItem({
             );
         }
 
-        return <span className="text-slate-400" title={tw.runs_pages_none ?? 'Ingen Wiki-sider'}>0</span>;
+        return <span className="text-slate-600" title={tw.runs_pages_none ?? 'Ingen Wiki-sider'}>0</span>;
     };
 
     const renderFindingsCell = (compact = false) => {
@@ -414,7 +443,7 @@ function RunListItem({
             );
         }
 
-        return <span className="text-slate-400" title={tw.runs_findings_none ?? 'Ingen funn'}>0</span>;
+        return <span className="text-slate-600" title={tw.runs_findings_none ?? 'Ingen funn'}>0</span>;
     };
 
     const renderActionCell = (compact = false) => {
@@ -422,7 +451,8 @@ function RunListItem({
             return (
                 <button
                     type="button"
-                    onClick={() => onCancelClick(run)}
+                    onClick={(event) => onCancelClick(run, event.currentTarget)}
+                    aria-describedby={`run-${run.id}-document`}
                     className={`${ACTION_BUTTON_DESTRUCTIVE_WRAP} ${compact ? 'text-sm' : 'text-sm'} leading-5`}
                 >
                     {tw.run_cancel_button ?? 'Avbryt kjøring'}
@@ -430,7 +460,7 @@ function RunListItem({
             );
         }
 
-        return <span className="text-slate-300">—</span>;
+        return <span aria-hidden="true" className="text-slate-500">—</span>;
     };
 
     const documentName = run.source_document_filename ?? '—';
@@ -442,10 +472,11 @@ function RunListItem({
                 className="hidden items-center gap-x-4 px-6 py-5 lg:grid"
                 style={{ gridTemplateColumns: RUNS_GRID_TEMPLATE }}
             >
-                <div className="min-w-0 text-right text-sm text-slate-400 tabular-nums">{run.id}</div>
+                <div className="min-w-0 text-right text-sm text-slate-600 tabular-nums">{run.id}</div>
                 <div className="min-w-0">
                     {run.source_id ? (
                         <Link
+                            id={`run-${run.id}-document`}
                             href="/app/wiki?tab=sources"
                             className="block truncate text-sm font-medium text-slate-900 hover:text-violet-700 hover:underline"
                             title={documentName}
@@ -453,10 +484,10 @@ function RunListItem({
                             {documentName}
                         </Link>
                     ) : (
-                        <span className="text-slate-400">—</span>
+                        <span className="text-slate-500">—</span>
                     )}
                     {run.status === 'failed' && runError && !(run.failed_phase === 'maintainer_decision' && run.transient_failure) && (
-                        <p className="mt-1 break-words text-sm leading-5 text-rose-500" title={runError}>
+                        <p className="mt-1 break-words text-sm leading-5 text-rose-700" title={runError}>
                             {runError}
                         </p>
                     )}
@@ -490,19 +521,19 @@ function RunListItem({
                             {tw.run_decision_pending ?? 'Venter'}
                         </span>
                     ) : (
-                        <span className="text-slate-400">—</span>
+                        <span className="text-slate-500">—</span>
                     )}
                 </div>
-                <div className="text-center text-sm font-semibold tabular-nums text-violet-600">
+                <div className="text-center text-sm font-semibold tabular-nums text-violet-700">
                     {renderPagesCell()}
                 </div>
-                <div className="text-center text-sm font-semibold tabular-nums text-amber-600">
+                <div className="text-center text-sm font-semibold tabular-nums text-amber-700">
                     {renderFindingsCell()}
                 </div>
-                <div className="text-sm leading-5 text-slate-500">
+                <div className="text-sm leading-5 text-slate-600">
                     {formatDate(run.created_at, locale)}
                 </div>
-                <div className="text-sm text-slate-400">
+                <div className="text-sm text-slate-600">
                     {run.finished_at ? formatDate(run.finished_at, locale) : '—'}
                 </div>
                 <div className="flex justify-end">
@@ -515,7 +546,7 @@ function RunListItem({
                     <div className="min-w-0 flex-1 space-y-1">
                         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
                             <span>ID</span>
-                            <span className="font-mono text-sm text-slate-400 tabular-nums">{run.id}</span>
+                            <span className="font-mono text-sm text-slate-600 tabular-nums">{run.id}</span>
                         </div>
                         {run.source_id ? (
                             <Link
@@ -526,7 +557,7 @@ function RunListItem({
                                 {documentName}
                             </Link>
                         ) : (
-                            <span className="text-sm text-slate-400">—</span>
+                            <span className="text-sm text-slate-500">—</span>
                         )}
                     </div>
                     <div className="shrink-0">
@@ -578,7 +609,7 @@ function RunListItem({
                 </div>
             </div>
 
-            <RunProgressRow run={run} tw={tw} />
+            <RunProgressRow run={run} tw={tw} ta={ta} />
 
             {activePanel !== null && (
                 <div data-run-detail-panel className="border-t border-slate-100 bg-slate-50/70 px-4 py-4 lg:px-6">
@@ -595,6 +626,7 @@ function RunListItem({
                             state={runFindingsState[run.id]}
                             onRetry={() => onFetchRunFindings(run.id)}
                             tw={tw}
+                            ta={ta}
                             locale={locale}
                             focusFindingId={focusFindingId}
                         />
@@ -635,7 +667,9 @@ function RunActivityBlock({ run, tw, locale, onOpenFindings = null, onRetryMaint
     const transientFailure = isTransientMaintainerFailure ? getTransientFailureCopy(run, tw) : null;
 
     return (
-        <div className="mt-1 min-w-0 max-w-full space-y-0.5" aria-live={isActive ? 'polite' : 'off'}>
+        // Not a live region (A11Y-112): it was re-rendered on every 5 s poll. A status change is said
+        // once by useRunStatusAnnouncements in the list; the text here is there to be read.
+        <div className="mt-1 min-w-0 max-w-full space-y-0.5" data-run-active={isActive || undefined}>
             {seemsStalled && (
                 <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold leading-5 text-amber-700">
                     {tw.ingest_activity_stalled ?? 'Ser ut til å stå stille'}
@@ -674,11 +708,11 @@ function RunActivityBlock({ run, tw, locale, onOpenFindings = null, onRetryMaint
                         {transientFailure.failedInPhase}
                     </p>
                     {transientFailure.attemptSummary && (
-                        <p className="break-words text-base leading-6 text-slate-500">
+                        <p className="break-words text-base leading-6 text-slate-600">
                             {transientFailure.attemptSummary}
                         </p>
                     )}
-                    <p className="break-words text-base leading-6 text-slate-500">
+                    <p className="break-words text-base leading-6 text-slate-600">
                         {transientFailure.documentPreservedNote}
                     </p>
                     {transientFailure.technicalDetails && (
@@ -686,12 +720,13 @@ function RunActivityBlock({ run, tw, locale, onOpenFindings = null, onRetryMaint
                             <button
                                 type="button"
                                 onClick={() => setShowTechnicalDetails((current) => !current)}
-                                className="text-base font-semibold leading-6 text-slate-500 underline decoration-dotted hover:text-slate-700 focus:outline-none"
+                                aria-expanded={showTechnicalDetails}
+                                className="text-base font-semibold leading-6 text-slate-600 underline decoration-dotted hover:text-slate-800 focus:outline-none"
                             >
                                 {tw.run_technical_details_toggle ?? 'Vis tekniske detaljer'}
                             </button>
                             {showTechnicalDetails && (
-                                <p className="mt-1 break-all text-base leading-6 text-slate-400">
+                                <p className="mt-1 break-all text-base leading-6 text-slate-600">
                                     {transientFailure.technicalDetails}
                                 </p>
                             )}
@@ -700,7 +735,7 @@ function RunActivityBlock({ run, tw, locale, onOpenFindings = null, onRetryMaint
                     {run.can_retry_maintainer_decision && onRetryMaintainerDecision && (
                         <button
                             type="button"
-                            onClick={() => onRetryMaintainerDecision(run)}
+                            onClick={(event) => onRetryMaintainerDecision(run, event.currentTarget)}
                             className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-base font-semibold leading-6 text-violet-700 transition hover:border-violet-400 hover:bg-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
                         >
                             {tw.run_retry_maintainer_decision_button ?? 'Prøv sideplanleggingen på nytt'}
@@ -717,7 +752,7 @@ function RunActivityBlock({ run, tw, locale, onOpenFindings = null, onRetryMaint
             )}
 
             {statusSetAt && (
-                <p className="text-base leading-6 text-slate-500">
+                <p className="text-base leading-6 text-slate-600">
                     {(tw.ingest_activity_last_progress ?? 'Siste fremdrift')} {formatRelativeProgress(progressAt, locale)}
                 </p>
             )}
@@ -1200,7 +1235,7 @@ function ingestStatusLabel(status, qaStatus = null, tw = {}) {
 
 function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, onViewDecision }) {
     if (!run) {
-        return <span className={`${BADGE} bg-slate-100 text-slate-500`}>{notStartedLabel}</span>;
+        return <span className={`${BADGE} bg-slate-100 text-slate-600`}>{notStartedLabel}</span>;
     }
 
     if (run.status === 'decision_only') {
@@ -1211,14 +1246,14 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
             <div className="space-y-1.5">
                 <span className={`${BADGE} bg-violet-100 text-violet-700`}>{label}</span>
                 {generatedAt && (
-                    <p className="text-base leading-6 text-slate-400">
+                    <p className="text-base leading-6 text-slate-600">
                         {(tw ?? {}).decision_panel_generated ?? 'Generert'} {generatedAt}
                     </p>
                 )}
                 {run.maintainer_decision_json && onViewDecision && (
                     <button
                         type="button"
-                        onClick={() => onViewDecision(run)}
+                        onClick={(event) => onViewDecision(run, event.currentTarget)}
                         className="inline-flex h-9 items-center rounded-full border border-violet-200 bg-violet-50 px-3.5 text-base font-semibold leading-6 text-violet-700 transition hover:bg-violet-100"
                     >
                         {(tw ?? {}).decision_panel_view_button ?? 'Vis beslutning'}
@@ -1241,14 +1276,14 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
                     <button
                         type="button"
                         onClick={onReload}
-                        className="text-base leading-6 text-slate-400 underline hover:text-slate-600"
+                        className="text-base leading-6 text-slate-600 underline hover:text-slate-800"
                     >
                         Oppdater
                     </button>
                 )}
             </div>
             {run.status === 'queued' && (
-                <p className="text-base leading-6 text-slate-400">
+                <p className="text-base leading-6 text-slate-600">
                     {queuedSince ? `I kø siden ${queuedSince} · ` : ''}
                     {tw.ingest_activity_queued_note ?? 'Behandlingen er ikke startet ennå.'}
                 </p>
@@ -1256,7 +1291,7 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
             <RunActivityBlock run={run} tw={tw} locale={locale} />
             {run.status === 'failed' && errorMessage && !(run.failed_phase === 'maintainer_decision' && run.transient_failure) && (
                 <p
-                    className="line-clamp-2 wrap-break-word text-base leading-6 text-rose-500"
+                    className="line-clamp-2 wrap-break-word text-base leading-6 text-rose-700"
                     title={errorMessage}
                 >
                     {errorMessage}
@@ -1267,142 +1302,32 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
 }
 
 function DecisionPageEntry({ entry, tw }) {
-    if (!entry) return <span className="text-[11px] text-slate-400">{tw.decision_no_items ?? 'Ingen'}</span>;
+    if (!entry) return <span className="text-sm text-slate-600">{tw.decision_no_items ?? 'Ingen'}</span>;
     return (
-        <dl className="space-y-0.5 text-[11px]">
-            <div className="flex gap-1.5">
-                <dt className="text-slate-400">{tw.decision_action_label ?? 'Handling'}:</dt>
+        <dl className="space-y-0.5 text-sm">
+            <div className="flex flex-wrap gap-1.5">
+                <dt className="text-slate-600">{tw.decision_action_label ?? 'Handling'}:</dt>
                 <dd className="font-mono font-semibold text-violet-700">{entry.action}</dd>
             </div>
             {entry.title && (
-                <div className="flex gap-1.5">
-                    <dt className="text-slate-400">{tw.decision_title_label ?? 'Tittel'}:</dt>
+                <div className="flex flex-wrap gap-1.5">
+                    <dt className="text-slate-600">{tw.decision_title_label ?? 'Tittel'}:</dt>
                     <dd className="text-slate-800">{entry.title}</dd>
                 </div>
             )}
             {entry.proposed_slug && (
-                <div className="flex gap-1.5">
-                    <dt className="text-slate-400">{tw.decision_slug_label ?? 'Slug'}:</dt>
-                    <dd className="font-mono text-slate-600">{entry.proposed_slug}</dd>
+                <div className="flex flex-wrap gap-1.5">
+                    <dt className="text-slate-600">{tw.decision_slug_label ?? 'Slug'}:</dt>
+                    <dd className="break-all font-mono text-slate-700">{entry.proposed_slug}</dd>
                 </div>
             )}
             {entry.reason && (
-                <div className="flex gap-1.5">
-                    <dt className="shrink-0 text-slate-400">{tw.decision_reason_label ?? 'Begrunnelse'}:</dt>
+                <div className="flex flex-wrap gap-1.5">
+                    <dt className="shrink-0 text-slate-600">{tw.decision_reason_label ?? 'Begrunnelse'}:</dt>
                     <dd className="text-slate-700">{entry.reason}</dd>
                 </div>
             )}
         </dl>
-    );
-}
-
-function DecisionModal({ run, tw, onClose }) {
-    const d = run.maintainer_decision_json ?? {};
-    return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-            onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-        >
-            <div className="relative w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl">
-                <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-                    <h2 className="text-base font-semibold text-slate-950">
-                        {tw.decision_panel_heading ?? 'Sideplanlegging'}
-                    </h2>
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                        aria-label={tw.decision_modal_close ?? 'Lukk'}
-                    >
-                        <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                            <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-                        </svg>
-                    </button>
-                </div>
-
-                <div className="max-h-[70vh] overflow-y-auto px-6 py-5 space-y-5">
-                    <section className="space-y-2">
-                        <h3 className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
-                            {tw.decision_source_article ?? 'Kildeartikkel'}
-                        </h3>
-                        <DecisionPageEntry entry={d.source_article} tw={tw} />
-                    </section>
-
-                    <section className="space-y-2">
-                        <h3 className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
-                            {tw.decision_source_summary ?? 'Sammendrag'}
-                        </h3>
-                        <DecisionPageEntry entry={d.source_summary} tw={tw} />
-                    </section>
-
-                    <section className="space-y-2">
-                        <h3 className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
-                            {tw.decision_concept_pages ?? 'Konseptsider'}
-                        </h3>
-                        {(d.concept_pages ?? []).length === 0 ? (
-                            <span className="text-[11px] text-slate-400">{tw.decision_no_items ?? 'Ingen'}</span>
-                        ) : (
-                            <ul className="space-y-3">
-                                {d.concept_pages.map((p, i) => (
-                                    <li key={i} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                                        <DecisionPageEntry entry={p} tw={tw} />
-                                    </li>
-                                ))}
-                            </ul>
-                        )}
-                    </section>
-
-                    <section className="space-y-2">
-                        <h3 className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
-                            {tw.decision_entity_pages ?? 'Entitetssider'}
-                        </h3>
-                        {(d.entity_pages ?? []).length === 0 ? (
-                            <span className="text-[11px] text-slate-400">{tw.decision_no_items ?? 'Ingen'}</span>
-                        ) : (
-                            <ul className="space-y-3">
-                                {d.entity_pages.map((p, i) => (
-                                    <li key={i} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                                        <DecisionPageEntry entry={p} tw={tw} />
-                                    </li>
-                                ))}
-                            </ul>
-                        )}
-                    </section>
-
-                    {(d.warnings ?? []).length > 0 && (
-                        <section className="space-y-2">
-                            <h3 className="text-[11px] font-semibold uppercase tracking-widest text-amber-500">
-                                {tw.decision_warnings ?? 'Advarsler'}
-                            </h3>
-                            <ul className="space-y-1">
-                                {d.warnings.map((w, i) => (
-                                    <li key={i} className="text-[11px] text-amber-700">{w}</li>
-                                ))}
-                            </ul>
-                        </section>
-                    )}
-
-                    {d.no_action_reason && (
-                        <section className="space-y-1">
-                            <h3 className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
-                                {tw.decision_no_action_reason ?? 'Ingen handling – begrunnelse'}
-                            </h3>
-                            <p className="text-[11px] text-slate-700">{d.no_action_reason}</p>
-                        </section>
-                    )}
-                </div>
-
-                <div className="border-t border-slate-100 px-6 py-4 text-right">
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className="inline-flex min-h-9 items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                    >
-                        {tw.decision_modal_close ?? 'Lukk'}
-                    </button>
-                </div>
-            </div>
-        </div>
     );
 }
 
@@ -1496,9 +1421,21 @@ function PageNextStep({ publication, tw }) {
     );
 }
 
-function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = [], publicationSummary = null, tw, locale }) {
+function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = [], publicationSummary = null, tw, ta = {}, locale }) {
     const filters = pagesFilters ?? {};
     const meta = pagesMeta ?? { current_page: 1, last_page: 1, total: 0, per_page: 25 };
+
+    // The number of pages a search or filter left, said once when the filters change (4.1.3). Keyed on
+    // the filters, not the result: the 5 s poll while a run works reloads the list with the same
+    // filters and stays quiet, and focus stays in the control the user changed.
+    useTransitionAnnouncement(JSON.stringify([
+        filters.search ?? '', filters.page_type ?? '', filters.status ?? '', filters.lint ?? '',
+        filters.document_owner ?? '', filters.sort ?? '', meta.current_page ?? 1,
+    ]), () => ({
+        message: meta.total > 0
+            ? (ta.wiki_pages_result ?? ':count sider.').replace(':count', String(meta.total))
+            : (tw.empty_title ?? 'Ingen wiki-sider ennå'),
+    }));
 
     const [searchInput, setSearchInput] = useState(filters.search ?? '');
 
@@ -1540,14 +1477,17 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
 
     return (
         <div className="space-y-4">
+            <h2 className="sr-only">{ta.wiki_pages_list_label ?? 'Wiki-sider'}</h2>
             <PublicationSummary summary={publicationSummary} tw={tw} />
 
             {/* One toolbar rather than a row of loose controls: search leads, the filters sit
                 beside it as the secondary things they are, and the count stays out of the way on
                 the right. Everything on one height so the row reads as a single surface. */}
             <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-3">
-                <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
+                <form role="search" aria-label={ta.wiki_pages_search_label ?? 'Søk i Wiki-sider'} onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
+                    <label htmlFor="wiki-pages-search" className="sr-only">{ta.wiki_pages_search_label ?? 'Søk i Wiki-sider'}</label>
                     <input
+                        id="wiki-pages-search"
                         type="search"
                         value={searchInput}
                         onChange={(e) => setSearchInput(e.target.value)}
@@ -1565,7 +1505,10 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                     </button>
                 </form>
 
+                {/* Each filter is named by what it filters (A11Y-048); its first option alone («Alle»)
+                    said nothing about which list it narrowed. */}
                 <select
+                    aria-label={ta.wiki_filter_page_type ?? 'Sidetype'}
                     value={filters.page_type ?? ''}
                     onChange={(e) => navigate({ page_type: e.target.value, page: 1 })}
                     className={PAGES_CONTROL_CLS}
@@ -1578,6 +1521,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                 </select>
 
                 <select
+                    aria-label={ta.wiki_filter_status ?? 'Status'}
                     value={filters.status ?? ''}
                     onChange={(e) => navigate({ status: e.target.value, page: 1 })}
                     className={PAGES_CONTROL_CLS}
@@ -1591,6 +1535,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
 
                 {pagesDocumentOwnerOptions.length > 0 && (
                     <select
+                        aria-label={ta.wiki_filter_document_owner ?? 'Dokumenteier'}
                         value={filters.document_owner ?? ''}
                         onChange={(e) => navigate({ document_owner: e.target.value, page: 1 })}
                         className={PAGES_CONTROL_CLS}
@@ -1603,6 +1548,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                 )}
 
                 <select
+                    aria-label={ta.wiki_filter_lint ?? 'Kvalitetsfunn'}
                     value={filters.lint ?? ''}
                     onChange={(e) => navigate({ lint: e.target.value, page: 1 })}
                     className={PAGES_CONTROL_CLS}
@@ -1614,6 +1560,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                 </select>
 
                 <select
+                    aria-label={ta.wiki_filter_sort ?? 'Sortering'}
                     value={filters.sort ?? 'updated_at_desc'}
                     onChange={(e) => navigate({ sort: e.target.value, page: 1 })}
                     className={PAGES_CONTROL_CLS}
@@ -1627,7 +1574,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                     <button
                         type="button"
                         onClick={() => { setSearchInput(''); navigate({ search: '', page_type: '', status: '', lint: '', document_owner: '', sort: 'updated_at_desc', page: 1 }); }}
-                        className="inline-flex h-11 items-center gap-1.5 rounded-lg px-3 text-base font-medium text-slate-500 transition hover:text-slate-800"
+                        className="inline-flex h-11 items-center gap-1.5 rounded-lg px-3 text-base font-medium text-slate-600 transition hover:text-slate-800"
                     >
                         <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                             <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
@@ -1650,17 +1597,23 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                 />
             ) : (
                 <>
-                    {/* Mobile cards */}
-                    <section className="grid max-h-[min(60vh,44rem)] gap-3 overflow-y-auto pr-1 md:hidden">
+                    {/* Mobile cards. The capped box scrolls on its own; it is a named, focusable region
+                        while it does, so it can be scrolled from the keyboard too (ScrollRegion). */}
+                    <ScrollRegion
+                        axis="y"
+                        label={ta.wiki_pages_list_label ?? 'Wiki-sider'}
+                        className="grid max-h-[min(60vh,44rem)] gap-3 overflow-y-auto pr-1 md:hidden"
+                    >
                         {pages.map((page) => (
                             <article
                                 key={page.id}
+                                aria-labelledby={`wiki-page-card-${page.id}`}
                                 className="rounded-2xl border border-slate-200 bg-white p-5"
                             >
                                 <div className="space-y-3">
                                     <div>
-                                        <div className="text-base font-semibold text-slate-950">{page.title}</div>
-                                        <div className="mt-1 text-sm text-slate-500">
+                                        <h3 id={`wiki-page-card-${page.id}`} className="text-base font-semibold text-slate-950">{page.title}</h3>
+                                        <div className="mt-1 text-sm text-slate-600">
                                             {tw.updated ?? 'Oppdatert'} {formatDate(page.updated_at, locale)}
                                         </div>
                                     </div>
@@ -1673,7 +1626,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                                             summary={page.document_owner_summary}
                                             fallbackLabel={tw.document_owner_sync_pending ?? 'Avventer synkronisering'}
                                         />
-                                        <span className="text-sm text-slate-500">
+                                        <span className="text-sm text-slate-600">
                                             {page.claims_count} {tw.claims ?? 'påstander'}
                                         </span>
                                     </div>
@@ -1683,28 +1636,30 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                                         className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950"
                                     >
                                         {tw.open ?? 'Åpne'}
+                                        <span className="sr-only"> {page.title}</span>
                                     </Link>
                                 </div>
                             </article>
                         ))}
-                    </section>
+                    </ScrollRegion>
 
                     {/* Desktop table */}
                     <section className="hidden overflow-hidden rounded-2xl border border-slate-200 bg-white md:block">
-                        <div className="max-h-[min(60vh,44rem)] overflow-auto">
+                        <ScrollRegion axis="both" label={ta.wiki_pages_list_label ?? 'Wiki-sider'} className="max-h-[min(60vh,44rem)] overflow-auto">
                             <table className="min-w-full divide-y divide-slate-200">
+                                <caption className="sr-only">{ta.wiki_pages_list_label ?? 'Wiki-sider'}</caption>
                                 {/* Column names stay in small caps — that is what a column head is
                                     — but at 14px rather than 12px, which is below this app's floor
                                     for anything a person actually reads. */}
                                 <thead className="sticky top-0 z-10 bg-slate-50 shadow-[0_1px_0_rgba(226,232,240,1)]">
                                     <tr className="text-left text-sm font-semibold uppercase tracking-[0.08em] text-slate-500">
-                                        <th className="px-6 py-3.5">Tittel</th>
-                                        <th className="px-6 py-3.5">Type</th>
-                                        <th className="px-6 py-3.5">Status</th>
-                                        <th className="px-6 py-3.5">{tw.document_owner_column ?? 'Dokumenteier'}</th>
-                                        <th className="px-6 py-3.5">{tw.claims_approved_column ?? 'Påstander kvalitetssikret'}</th>
-                                        <th className="px-6 py-3.5">{tw.updated ?? 'Oppdatert'}</th>
-                                        <th className="px-6 py-3.5"></th>
+                                        <th scope="col" className="px-6 py-3.5">Tittel</th>
+                                        <th scope="col" className="px-6 py-3.5">Type</th>
+                                        <th scope="col" className="px-6 py-3.5">Status</th>
+                                        <th scope="col" className="px-6 py-3.5">{tw.document_owner_column ?? 'Dokumenteier'}</th>
+                                        <th scope="col" className="px-6 py-3.5">{tw.claims_approved_column ?? 'Påstander kvalitetssikret'}</th>
+                                        <th scope="col" className="px-6 py-3.5">{tw.updated ?? 'Oppdatert'}</th>
+                                        <th scope="col" className="px-6 py-3.5"><span className="sr-only">{ta.wiki_actions_column ?? 'Handlinger'}</span></th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
@@ -1729,32 +1684,33 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                                             {/* Approved out of total, both counted from the same
                                                 (current) version — a bare total said nothing about
                                                 how much of it anyone had actually checked. */}
-                                            <td className="px-6 py-5 text-slate-500">
+                                            <td className="px-6 py-5 text-slate-600">
                                                 {(tw.claims_approved_of_total ?? ':approved av :total')
                                                     .replace(':approved', page.claims_approved_count ?? 0)
                                                     .replace(':total', page.claims_count ?? 0)}
                                             </td>
-                                            <td className="px-6 py-5 text-slate-500">{formatDate(page.updated_at, locale)}</td>
+                                            <td className="px-6 py-5 text-slate-600">{formatDate(page.updated_at, locale)}</td>
                                             <td className="px-6 py-5">
                                                 <Link
                                                     href={`/app/wiki/${page.slug}`}
                                                     className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950"
                                                 >
                                                     {tw.open ?? 'Åpne'}
+                                                    <span className="sr-only"> {page.title}</span>
                                                 </Link>
                                             </td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
-                        </div>
+                        </ScrollRegion>
                     </section>
                 </>
             )}
 
             {/* Pagination */}
             {meta.last_page > 1 && (
-                <div className="flex items-center justify-between">
+                <nav aria-label={ta.pagination ?? 'Sidevalg'} className="flex items-center justify-between">
                     <button
                         type="button"
                         disabled={meta.current_page <= 1}
@@ -1763,7 +1719,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                     >
                         {tw.pagination_prev ?? 'Forrige'}
                     </button>
-                    <span className="text-sm text-slate-500">
+                    <span className="text-sm text-slate-600">
                         {meta.current_page} {tw.pagination_of ?? 'av'} {meta.last_page}
                     </span>
                     <button
@@ -1774,7 +1730,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                     >
                         {tw.pagination_next ?? 'Neste'}
                     </button>
-                </div>
+                </nav>
             )}
         </div>
     );
@@ -1790,6 +1746,7 @@ function SourcesTab({
     wikiGenerationAvailable,
     canManageSources = false,
     tw,
+    ta = {},
     locale,
 }) {
     const srcFilters = sourcesFilters ?? {};
@@ -1843,12 +1800,34 @@ function SourcesTab({
      */
     const [isUploadedDialogOpen, setIsUploadedDialogOpen] = useState(false);
     const uploadedDialogConfirmRef = useRef(null);
+    const fileInputRef = useRef(null);
+    const sourcesHeadingRef = useRef(null);
+    const decisionTriggerRef = useRef(null);
+    const deleteCancelRef = useRef(null);
     const [ingestingIds, setIngestingIds] = useState(new Set());
     const [decisionView, setDecisionView] = useState(null);
     const [ownerDrafts, setOwnerDrafts] = useState({});
     const [savingOwnerIds, setSavingOwnerIds] = useState(new Set());
 
     const handleSourceReload = () => router.reload({ only: ['sources'] });
+
+    // A document's run moving to another status is said once, not on every 5 s poll (A11Y-112).
+    useRunStatusAnnouncements(
+        sources
+            .filter((source) => source.latest_ingest_run)
+            .map((source) => ({
+                id: `source-${source.id}`,
+                statusKey: `${source.latest_ingest_run.id}:${source.latest_ingest_run.status}:${source.latest_ingest_run.qa_status ?? ''}`,
+                name: source.original_filename,
+                statusLabel: ingestStatusLabel(source.latest_ingest_run.status, source.latest_ingest_run.qa_status, tw),
+            })),
+        ta.wiki_run_status_changed ?? 'Kjøring for :name: :status.',
+    );
+
+    // «Laster opp …» is on screen next to the field; heard too, once, when the upload starts.
+    useTransitionAnnouncement(uploadForm.processing ? 'uploading' : 'idle', (previous, next) => (
+        next === 'uploading' ? { message: tw.sources_uploading ?? 'Laster opp...' } : null
+    ));
 
     const handleOwnerChange = (sourceId, value) => {
         setOwnerDrafts((prev) => ({
@@ -1911,7 +1890,12 @@ function SourcesTab({
         if (!deletePreview?.source) return;
         const sourceId = deletePreview.source.id;
         setDeletePreview(null);
-        router.delete(`/app/wiki/sources/${sourceId}`, { preserveScroll: true, data: tabReturnParams() });
+        // The row — and its «Slett» — is gone afterwards; continue from the section heading.
+        router.delete(`/app/wiki/sources/${sourceId}`, {
+            preserveScroll: true,
+            data: tabReturnParams(),
+            onSuccess: () => refocusIfLost(['wiki-sources-heading']),
+        });
     };
 
     const handleDeleteCancel = () => setDeletePreview(null);
@@ -1925,7 +1909,10 @@ function SourcesTab({
         if (!deletePreview?.source) return;
         const sourceId = deletePreview.source.id;
         setDeletePreview(null);
-        router.patch(`/app/wiki/sources/${sourceId}/cancel-blocking-runs`, tabReturnParams(), { preserveScroll: true });
+        router.patch(`/app/wiki/sources/${sourceId}/cancel-blocking-runs`, tabReturnParams(), {
+            preserveScroll: true,
+            onSuccess: () => refocusIfLost(['wiki-sources-heading']),
+        });
     };
 
     /**
@@ -1948,6 +1935,9 @@ function SourcesTab({
                 uploadForm.reset();
                 uploadForm.setData('owner_user_id', String(currentUser.id ?? ''));
             },
+            // The field was disabled while the file went up, which drops keyboard focus; a refused
+            // upload puts it back on the field, whose error is now its description (and an alert).
+            onError: () => refocusIfLost(['wiki-source-file']),
         });
     };
 
@@ -1997,10 +1987,10 @@ function SourcesTab({
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                 <div className="space-y-5">
                     <div className="space-y-1">
-                        <h2 className="text-base font-semibold text-slate-950">
+                        <h2 ref={sourcesHeadingRef} id="wiki-sources-heading" tabIndex={-1} className="text-base font-semibold text-slate-950">
                             {tw.sources_title ?? 'Kildedokumenter'}
                         </h2>
-                        <p className="max-w-2xl text-base leading-6 text-slate-500">
+                        <p className="max-w-2xl text-base leading-6 text-slate-600">
                             {canManageSources
                                 ? (tw.sources_description ?? 'Last opp kildedokumenter direkte til Enterprise Wiki. Dokumentet lagres og tekst ekstraheres før det kan brukes til å generere wiki-innhold.')
                                 : (tw.sources_description_read_only ?? 'Kildedokumentene Enterprise Wiki er bygget på. Du har lesetilgang til listen, men ikke tilgang til å administrere kilder.')}
@@ -2017,46 +2007,57 @@ function SourcesTab({
                         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,20rem)] lg:items-end">
                             <div className="space-y-1.5">
                                 <div className="flex flex-wrap items-center gap-3">
+                                    {/* The input is visually hidden and the label is what is seen, so the
+                                        label draws the focus ring (the peer-focus-visible classes had been
+                                        lost, A11Y-011). The chosen file, the allowed formats and an error are
+                                        the field's description. */}
                                     <input
+                                        ref={fileInputRef}
                                         id="wiki-source-file"
                                         type="file"
                                         accept=".pdf,.docx"
                                         disabled={uploadForm.processing}
                                         onChange={handleFileSelected}
+                                        aria-invalid={uploadForm.errors.file ? true : undefined}
+                                        aria-describedby={['wiki-source-file-name', 'wiki-source-file-hint', uploadForm.errors.file ? 'wiki-source-file-error' : null].filter(Boolean).join(' ')}
                                         className="peer sr-only"
                                     />
                                     <label
                                         htmlFor="wiki-source-file"
-                                        className={`inline-flex h-11 shrink-0 cursor-pointer items-center justify-center rounded-full px-5 text-base font-semibold shadow-sm transition peer-disabled:cursor-not-allowed peer-disabled:opacity-50 peer- peer- peer- peer- ${PRIMARY_COLOURS}`}
+                                        className={`inline-flex h-11 shrink-0 cursor-pointer items-center justify-center rounded-full px-5 text-base font-semibold shadow-sm transition peer-disabled:cursor-not-allowed peer-disabled:opacity-50 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-violet-600 ${PRIMARY_COLOURS}`}
                                     >
                                         {tw.sources_file_label ?? 'Velg fil'}
                                     </label>
-                                    <span className="min-w-0 break-all text-base text-slate-700">
+                                    <span id="wiki-source-file-name" className="min-w-0 break-all text-base text-slate-700">
                                         {uploadForm.data.file?.name ?? (tw.sources_no_file_selected ?? 'Ingen fil valgt')}
                                     </span>
                                     {uploadForm.processing ? (
-                                        <span className="text-base font-semibold text-slate-500">
+                                        <span className="text-base font-semibold text-slate-600">
                                             {tw.sources_uploading ?? 'Laster opp...'}
                                         </span>
                                     ) : null}
                                 </div>
-                                <p className="text-base text-slate-500">
+                                <p id="wiki-source-file-hint" className="text-base text-slate-600">
                                     {tw.sources_file_hint ?? 'PDF eller DOCX · Maks 20 MB'}
                                 </p>
+                                {/* An alert: the upload starts on choosing the file, so a refusal comes
+                                    while the person is still on the field, with nothing else to tell them. */}
                                 {uploadForm.errors.file ? (
-                                    <p className="text-base text-rose-600">{uploadForm.errors.file}</p>
+                                    <p id="wiki-source-file-error" role="alert" className="text-base text-rose-700">{uploadForm.errors.file}</p>
                                 ) : null}
                             </div>
 
                             {canAssignDocumentOwner ? (
                                 <div className="space-y-1.5">
-                                    <label className="block text-base font-semibold uppercase tracking-wide text-slate-500" htmlFor="wiki-source-owner">
+                                    <label className="block text-base font-semibold uppercase tracking-wide text-slate-600" htmlFor="wiki-source-owner">
                                         {tw.document_owner_label ?? 'Dokumenteier'}
                                     </label>
                                     <select
                                         id="wiki-source-owner"
                                         value={uploadForm.data.owner_user_id}
                                         onChange={(event) => uploadForm.setData('owner_user_id', event.target.value)}
+                                        aria-invalid={uploadForm.errors.owner_user_id ? true : undefined}
+                                        aria-describedby={uploadForm.errors.owner_user_id ? 'wiki-source-owner-error' : undefined}
                                         className={`${RUNS_SELECT_CLS} w-full`}
                                     >
                                         <option value="">{tw.document_owner_choose ?? 'Velg dokumenteier'}</option>
@@ -2067,12 +2068,12 @@ function SourcesTab({
                                         ))}
                                     </select>
                                     {uploadForm.errors.owner_user_id ? (
-                                        <p className="text-base text-rose-600">{uploadForm.errors.owner_user_id}</p>
+                                        <p id="wiki-source-owner-error" className="text-base text-rose-700">{uploadForm.errors.owner_user_id}</p>
                                     ) : null}
                                 </div>
                             ) : (
                                 <div className="space-y-1.5">
-                                    <span className="block text-base font-semibold uppercase tracking-wide text-slate-500">
+                                    <span className="block text-base font-semibold uppercase tracking-wide text-slate-600">
                                         {tw.document_owner_label ?? 'Dokumenteier'}
                                     </span>
                                     <p className="flex h-9 items-center text-base text-slate-700">
@@ -2097,6 +2098,8 @@ function SourcesTab({
                         closeDisabled
                         titleId="wiki-source-uploaded-title"
                         initialFocusRef={uploadedDialogConfirmRef}
+                        returnFocusRef={fileInputRef}
+                        fallbackFocusRef={sourcesHeadingRef}
                     >
                         <h2 id="wiki-source-uploaded-title" className="text-xl font-semibold tracking-tight text-slate-950">
                             {tw.sources_uploaded_title ?? 'Kildedokumentet er lastet opp'}
@@ -2130,16 +2133,20 @@ function SourcesTab({
 
                     {/* Filter bar */}
                     <div className="flex flex-wrap items-end gap-2">
-                        <form onSubmit={handleSrcSearchSubmit} className="flex items-center gap-1.5">
+                        <form role="search" aria-label={ta.wiki_sources_search_label ?? 'Søk i kildedokumenter'} onSubmit={handleSrcSearchSubmit} className="flex max-w-full items-center gap-1.5">
+                            <label htmlFor="wiki-sources-search" className="sr-only">{ta.wiki_sources_search_label ?? 'Søk i kildedokumenter'}</label>
                             <input
+                                id="wiki-sources-search"
                                 type="search"
                                 value={srcSearchInput}
                                 onChange={(e) => setSrcSearchInput(e.target.value)}
                                 placeholder={tw.sources_search_placeholder ?? 'Søk i filnavn...'}
-                                className={SELECT_CLS + ' w-52'}
+                                className={SELECT_CLS + ' w-52 min-w-0'}
                             />
+                            {/* An icon-only button needs a name of its own (4.1.2); it had none. */}
                             <button
                                 type="submit"
+                                aria-label={ta.wiki_search_button ?? 'Søk'}
                                 className="inline-flex h-11 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-base font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
                             >
                                 <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -2149,6 +2156,7 @@ function SourcesTab({
                         </form>
 
                         <select
+                            aria-label={ta.wiki_filter_status ?? 'Status'}
                             value={srcFilters.status ?? ''}
                             onChange={(e) => navigateSources({ src_status: e.target.value })}
                             className={SELECT_CLS}
@@ -2167,7 +2175,7 @@ function SourcesTab({
                                 value={srcFilters.document_owner ?? ''}
                                 onChange={(e) => navigateSources({ src_owner: e.target.value })}
                                 className={SELECT_CLS}
-                                aria-label={tw.filter_document_owner_all ?? 'Alle dokumenteiere'}
+                                aria-label={ta.wiki_filter_document_owner ?? 'Dokumenteier'}
                             >
                                 <option value="">{tw.filter_document_owner_all ?? 'Alle dokumenteiere'}</option>
                                 {ownerOptions.map((owner) => (
@@ -2180,7 +2188,7 @@ function SourcesTab({
                             <button
                                 type="button"
                                 onClick={() => { setSrcSearchInput(''); navigateSources({ src_q: '', src_status: '', src_owner: '' }); }}
-                                className="inline-flex h-11 items-center gap-1 rounded-lg px-3 text-base font-medium leading-6 text-slate-500 transition hover:text-slate-800"
+                                className="inline-flex h-11 items-center gap-1 rounded-lg px-3 text-base font-medium leading-6 text-slate-600 transition hover:text-slate-800"
                             >
                                 <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                     <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
@@ -2191,12 +2199,17 @@ function SourcesTab({
                     </div>
 
                     {sources.length === 0 ? (
-                        <p className="text-base text-slate-500">
+                        <p className="text-base text-slate-600">
                             {tw.sources_list_empty ?? 'Ingen kildedokumenter lastet opp ennå.'}
                         </p>
                     ) : (
-                        <div className="max-h-[min(56vh,42rem)] overflow-auto rounded-2xl border border-slate-100">
+                        <ScrollRegion
+                            axis="both"
+                            label={tw.sources_title ?? 'Kildedokumenter'}
+                            className="max-h-[min(56vh,42rem)] overflow-auto rounded-2xl border border-slate-100"
+                        >
                             <table className="min-w-full table-fixed divide-y divide-slate-100">
+                                <caption className="sr-only">{tw.sources_title ?? 'Kildedokumenter'}</caption>
                                 <colgroup>
                                     <col />
                                     <col style={{ width: '110px' }} />
@@ -2207,12 +2220,12 @@ function SourcesTab({
                                 </colgroup>
                                 <thead className="sticky top-0 z-10 bg-slate-50 shadow-[0_1px_0_rgba(226,232,240,1)]">
                                     <tr className="text-left text-base font-semibold uppercase tracking-wide leading-6 text-slate-500">
-                                        <th className="px-4 py-3">{tw.source_col_filename ?? 'Filnavn'}</th>
-                                        <th className="px-4 py-3">{tw.source_col_status ?? 'Status'}</th>
-                                        <th className="px-4 py-3">{tw.source_col_uploaded ?? 'Lastet opp'}</th>
-                                        <th className="px-4 py-3">{tw.ingest_col_wiki_status ?? 'Wiki-status'}</th>
-                                        <th className="px-4 py-3">{tw.source_col_owner ?? 'Dokumenteier'}</th>
-                                        <th className="px-4 py-3">{tw.source_col_actions ?? 'Handlinger'}</th>
+                                        <th scope="col" className="px-4 py-3">{tw.source_col_filename ?? 'Filnavn'}</th>
+                                        <th scope="col" className="px-4 py-3">{tw.source_col_status ?? 'Status'}</th>
+                                        <th scope="col" className="px-4 py-3">{tw.source_col_uploaded ?? 'Lastet opp'}</th>
+                                        <th scope="col" className="px-4 py-3">{tw.ingest_col_wiki_status ?? 'Wiki-status'}</th>
+                                        <th scope="col" className="px-4 py-3">{tw.source_col_owner ?? 'Dokumenteier'}</th>
+                                        <th scope="col" className="px-4 py-3">{tw.source_col_actions ?? 'Handlinger'}</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-50 bg-white">
@@ -2237,20 +2250,23 @@ function SourcesTab({
                                                 ? (tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring')
                                                 : undefined);
                                         const sourceOwnerLabel = source.owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier');
+                                        // The row's name, for the buttons that act on it: «Slett» in a list of
+                                        // twenty rows says nothing about which document goes (2.4.6).
+                                        const sourceNameId = `wiki-source-${source.id}-name`;
                                         return (
                                         <tr key={source.id} className="text-base leading-6 text-slate-700">
-                                            <td className="overflow-hidden px-4 py-3 align-top">
-                                                <span className="block truncate font-medium text-slate-900" title={source.original_filename}>
+                                            <th scope="row" className="overflow-hidden px-4 py-3 text-left align-top font-normal">
+                                                <span id={sourceNameId} className="block truncate font-medium text-slate-900" title={source.original_filename}>
                                                     {source.original_filename}
                                                 </span>
-                                            </td>
+                                            </th>
                                             <td className="px-4 py-3 align-top">
                                                 <SourceStatusBadge
                                                     status={source.document_status}
                                                     label={sourceStatusLabel(source.document_status)}
                                                 />
                                             </td>
-                                            <td className="whitespace-nowrap px-4 py-3 align-top text-base text-slate-500">
+                                            <td className="whitespace-nowrap px-4 py-3 align-top text-base text-slate-600">
                                                 {formatDate(source.created_at, locale)}
                                             </td>
                                             <td className="px-4 py-3 align-top">
@@ -2261,7 +2277,10 @@ function SourcesTab({
                                                     locale={locale}
                                                     onReload={handleSourceReload}
                                                     tw={tw}
-                                                    onViewDecision={setDecisionView}
+                                                    onViewDecision={(run, trigger) => {
+                                                        decisionTriggerRef.current = trigger;
+                                                        setDecisionView(run);
+                                                    }}
                                                 />
                                                 {source.generated_pages.length > 0 && (
                                                     <ul className="mt-2 space-y-0.5">
@@ -2269,7 +2288,7 @@ function SourcesTab({
                                                             <li key={p.id}>
                                                                 <Link
                                                                     href={`/app/wiki/${p.slug}`}
-                                                                    className="block truncate text-base text-violet-600 hover:text-violet-800 hover:underline"
+                                                                    className="block truncate text-base text-violet-700 hover:text-violet-900 hover:underline"
                                                                     title={p.title}
                                                                 >
                                                                     {p.title}
@@ -2286,6 +2305,7 @@ function SourcesTab({
                                                        Saving stays EXPLICIT — the select never submits on change. */
                                                     <div className="flex items-center gap-1.5">
                                                         <select
+                                                            aria-label={(ta.wiki_source_owner_for ?? 'Dokumenteier for :file').replace(':file', source.original_filename)}
                                                             value={ownerDrafts[source.id] ?? String(source.owner_user_id ?? '')}
                                                             onChange={(event) => handleOwnerChange(source.id, event.target.value)}
                                                             /* w-0 + flex-1: a <select>'s intrinsic width is its longest
@@ -2305,6 +2325,7 @@ function SourcesTab({
                                                         <button
                                                             type="button"
                                                             disabled={savingOwnerIds.has(source.id)}
+                                                            aria-describedby={sourceNameId}
                                                             onClick={() => handleOwnerSave(source)}
                                                             aria-label={savingOwnerIds.has(source.id)
                                                                 ? (tw.document_owner_saving ?? 'Lagrer eier...')
@@ -2334,6 +2355,7 @@ function SourcesTab({
                                                             href={`/app/wiki/sources/${source.id}/download`}
                                                             target="_blank"
                                                             rel="noreferrer"
+                                                            aria-describedby={sourceNameId}
                                                             className={ACTION_BUTTON_SECONDARY}
                                                         >
                                                             <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -2347,6 +2369,7 @@ function SourcesTab({
                                                                 type="button"
                                                                 disabled={ingestingIds.has(source.id) || isInProgress || !wikiGenerationAvailable}
                                                                 title={ingestDisabledTitle}
+                                                                aria-describedby={sourceNameId}
                                                                 onClick={() => {
                                                                     if (ingestingIds.has(source.id)) return;
                                                                     setIngestingIds((prev) => new Set(prev).add(source.id));
@@ -2378,6 +2401,7 @@ function SourcesTab({
                                                                 type="button"
                                                                 disabled={hasBlockingRun}
                                                                 title={hasBlockingRun ? (tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring') : undefined}
+                                                                aria-describedby={sourceNameId}
                                                                 onClick={() => handleDeleteClick(source)}
                                                                 className={ACTION_BUTTON_DESTRUCTIVE}
                                                             >
@@ -2389,7 +2413,7 @@ function SourcesTab({
                                                         )}
                                                     </div>
                                                     {canManageSources && source.document_status === 'extracted' && !wikiGenerationAvailable && (
-                                                        <span className="text-base text-slate-500">
+                                                        <span className="text-base text-slate-600">
                                                             {tw.source_ingest_not_available ?? 'Wiki-generering er ikke aktivert ennå.'}
                                                         </span>
                                                     )}
@@ -2400,116 +2424,131 @@ function SourcesTab({
                                     })}
                                 </tbody>
                             </table>
-                        </div>
+                        </ScrollRegion>
                     )}
 
                 </div>
             </section>
-            {decisionView && (
-                <DecisionModal
-                    run={decisionView}
-                    tw={tw}
-                    onClose={() => setDecisionView(null)}
-                />
-            )}
-            {deletePreview && (
-                // Above the sticky app header (z-[60]); at 16 px the preview can outgrow a phone
-                // screen, so the panel scrolls within it.
-                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4" role="dialog" aria-modal="true">
-                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl">
-                        <h2 className="mb-4 text-base font-semibold text-slate-900">
+            <DecisionModal
+                run={decisionView}
+                tw={tw}
+                ta={ta}
+                isOpen={decisionView !== null}
+                onClose={() => setDecisionView(null)}
+                returnFocusRef={decisionTriggerRef}
+            />
+
+            {/* Deleting a source document (A11Y-002): a modal dialog with a title and a description,
+                focus on «Avbryt» (the safe choice), Escape, a trapped Tab and focus back on «Slett».
+                The preview loads inside it; a failure to load is an alert there. */}
+            <ActionDialog
+                isOpen={deletePreview !== null}
+                onClose={handleDeleteCancel}
+                titleId="wiki-source-delete-title"
+                descriptionId="wiki-source-delete-description"
+                initialFocusRef={deleteCancelRef}
+                fallbackFocusRef={sourcesHeadingRef}
+                size="xs"
+            >
+                {deletePreview && (
+                    <>
+                        <h2 id="wiki-source-delete-title" className="mb-4 text-base font-semibold text-slate-900">
                             {tw.delete_preview_title ?? 'Bekreft sletting av kildedokument'}
                         </h2>
 
-                        {deletePreview.loading && (
-                            <p className="text-base text-slate-500">{tw.delete_preview_loading ?? 'Laster forhåndsvisning...'}</p>
-                        )}
+                        <div id="wiki-source-delete-description" aria-busy={deletePreview.loading || undefined}>
+                            <p className="mb-3 break-all text-base font-medium text-slate-800">
+                                {deletePreview.source?.original_filename}
+                            </p>
 
-                        {!deletePreview.loading && deletePreview.error && (
-                            <p className="text-base text-rose-600">Kunne ikke laste forhåndsvisning. Prøv igjen.</p>
-                        )}
+                            {deletePreview.loading && (
+                                <p className="text-base text-slate-600">{tw.delete_preview_loading ?? 'Laster forhåndsvisning...'}</p>
+                            )}
 
-                        {!deletePreview.loading && !deletePreview.error && deletePreview.blocked && (
-                            <div className="space-y-2">
-                                <p className="text-base text-rose-600">
-                                    {tw.delete_preview_blocked_in_progress ?? 'Dokumentet kan ikke slettes mens en Wiki-kjøring pågår. Vent til kjøringen er ferdig eller stopp den først.'}
-                                </p>
-                                <p className="text-base text-slate-500">
-                                    {tw.cancel_blocking_runs_confirm_body ?? 'Dette avbryter kjøringen(e) som blokkerer sletting av dette dokumentet, slik at dokumentet kan slettes. Wiki-innhold som allerede er generert blir beholdt. Handlingen kan ikke angres.'}
-                                </p>
-                            </div>
-                        )}
+                            {!deletePreview.loading && deletePreview.error && (
+                                <p role="alert" className="text-base text-rose-700">Kunne ikke laste forhåndsvisning. Prøv igjen.</p>
+                            )}
 
-                        {!deletePreview.loading && !deletePreview.error && !deletePreview.blocked && deletePreview.data && (
-                            <div className="space-y-3">
-                                <p className="text-base font-medium text-slate-800 break-all">
-                                    {deletePreview.data.document_name}
-                                </p>
-                                <p className="text-base text-slate-600">
-                                    {tw.delete_preview_intro ?? 'Dette sletter kildedokumentet og Enterprise Wiki-innhold som kun er generert fra dette dokumentet. Handlingen kan ikke angres.'}
-                                </p>
-                                {deletePreview.data.pending_approval_run_count > 0 && (
-                                    <p className="text-base font-medium text-amber-700">
-                                        {tw.delete_preview_pending_approval ?? 'Dokumentet har en åpen godkjenningsflyt som venter på dokumenteiergodkjenning. Denne avsluttes automatisk dersom du sletter dokumentet nå.'}
+                            {!deletePreview.loading && !deletePreview.error && deletePreview.blocked && (
+                                <div className="space-y-2">
+                                    <p className="text-base text-rose-700">
+                                        {tw.delete_preview_blocked_in_progress ?? 'Dokumentet kan ikke slettes mens en Wiki-kjøring pågår. Vent til kjøringen er ferdig eller stopp den først.'}
                                     </p>
-                                )}
-                                <dl className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-base space-y-1.5">
-                                    <div className="flex justify-between gap-4">
-                                        <dt className="text-slate-500">{tw.document_owner_label ?? 'Dokumenteier'}</dt>
-                                        <dd className="font-semibold text-slate-800">
-                                            {deletePreview.data.document_owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier')}
-                                        </dd>
-                                    </div>
-                                    <div className="flex justify-between gap-4">
-                                        <dt className="text-slate-500">{tw.delete_preview_runs ?? 'Kjøringer som slettes'}</dt>
-                                        <dd className="font-semibold text-slate-800">{deletePreview.data.run_count}</dd>
-                                    </div>
-                                    <div className="flex justify-between gap-4">
-                                        <dt className="text-slate-500">{tw.delete_preview_sole_source_pages ?? 'Sider som bare tilhører dokumentet'}</dt>
-                                        <dd className="font-semibold text-rose-600">{deletePreview.data.sole_source_page_count}</dd>
-                                    </div>
-                                    <div className="flex justify-between gap-4">
-                                        <dt className="text-slate-500">{tw.delete_preview_page_versions ?? 'Sideversjoner som slettes'}</dt>
-                                        <dd className="font-semibold text-slate-800">{deletePreview.data.page_version_count}</dd>
-                                    </div>
-                                    <div className="flex justify-between gap-4">
-                                        <dt className="text-slate-500">{tw.delete_preview_claims ?? 'Claims som slettes'}</dt>
-                                        <dd className="font-semibold text-slate-800">{deletePreview.data.claim_count}</dd>
-                                    </div>
-                                    <div className="flex justify-between gap-4">
-                                        <dt className="text-slate-500">{tw.delete_preview_findings ?? 'Funn som slettes'}</dt>
-                                        <dd className="font-semibold text-slate-800">{deletePreview.data.finding_count}</dd>
-                                    </div>
-                                    <div className="flex justify-between gap-4">
-                                        <dt className="text-slate-500">{tw.delete_preview_shared_pages ?? 'Delte sider som beholdes'}</dt>
-                                        <dd className="font-semibold text-emerald-600">{deletePreview.data.shared_page_count}</dd>
-                                    </div>
-                                </dl>
-                                {deletePreview.data.sole_source_page_count === 0 && (
-                                    <p className="text-base text-slate-500">{tw.delete_preview_no_pages ?? 'Ingen wiki-sider vil bli slettet.'}</p>
-                                )}
-                                {deletePreview.data.shared_page_count > 0 && (
-                                    <p className="text-base text-emerald-600">
-                                        {(tw.delete_preview_shared_pages_note ?? '{count} sider beholdes fordi de også bygger på andre kildedokumenter.')
-                                            .replace('{count}', deletePreview.data.shared_page_count)}
+                                    <p className="text-base text-slate-600">
+                                        {tw.cancel_blocking_runs_confirm_body ?? 'Dette avbryter kjøringen(e) som blokkerer sletting av dette dokumentet, slik at dokumentet kan slettes. Wiki-innhold som allerede er generert blir beholdt. Handlingen kan ikke angres.'}
                                     </p>
-                                )}
-                                {!deletePreview.data.storage_file_exists && (
-                                    <p className="text-base text-amber-600">
-                                        {tw.delete_preview_storage_missing ?? 'Dokumentfilen finnes ikke lenger i lagring.'}
+                                </div>
+                            )}
+
+                            {!deletePreview.loading && !deletePreview.error && !deletePreview.blocked && deletePreview.data && (
+                                <div className="space-y-3">
+                                    <p className="text-base text-slate-600">
+                                        {tw.delete_preview_intro ?? 'Dette sletter kildedokumentet og Enterprise Wiki-innhold som kun er generert fra dette dokumentet. Handlingen kan ikke angres.'}
                                     </p>
-                                )}
-                                <p className="text-base font-semibold text-rose-600">
-                                    {tw.delete_preview_irreversible ?? 'Handlingen kan ikke angres.'}
-                                </p>
-                            </div>
-                        )}
+                                    {deletePreview.data.pending_approval_run_count > 0 && (
+                                        <p className="text-base font-medium text-amber-800">
+                                            {tw.delete_preview_pending_approval ?? 'Dokumentet har en åpen godkjenningsflyt som venter på dokumenteiergodkjenning. Denne avsluttes automatisk dersom du sletter dokumentet nå.'}
+                                        </p>
+                                    )}
+                                    <dl className="space-y-1.5 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-base">
+                                        <div className="flex justify-between gap-4">
+                                            <dt className="text-slate-600">{tw.document_owner_label ?? 'Dokumenteier'}</dt>
+                                            <dd className="font-semibold text-slate-800">
+                                                {deletePreview.data.document_owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier')}
+                                            </dd>
+                                        </div>
+                                        <div className="flex justify-between gap-4">
+                                            <dt className="text-slate-600">{tw.delete_preview_runs ?? 'Kjøringer som slettes'}</dt>
+                                            <dd className="font-semibold text-slate-800">{deletePreview.data.run_count}</dd>
+                                        </div>
+                                        <div className="flex justify-between gap-4">
+                                            <dt className="text-slate-600">{tw.delete_preview_sole_source_pages ?? 'Sider som bare tilhører dokumentet'}</dt>
+                                            <dd className="font-semibold text-rose-700">{deletePreview.data.sole_source_page_count}</dd>
+                                        </div>
+                                        <div className="flex justify-between gap-4">
+                                            <dt className="text-slate-600">{tw.delete_preview_page_versions ?? 'Sideversjoner som slettes'}</dt>
+                                            <dd className="font-semibold text-slate-800">{deletePreview.data.page_version_count}</dd>
+                                        </div>
+                                        <div className="flex justify-between gap-4">
+                                            <dt className="text-slate-600">{tw.delete_preview_claims ?? 'Claims som slettes'}</dt>
+                                            <dd className="font-semibold text-slate-800">{deletePreview.data.claim_count}</dd>
+                                        </div>
+                                        <div className="flex justify-between gap-4">
+                                            <dt className="text-slate-600">{tw.delete_preview_findings ?? 'Funn som slettes'}</dt>
+                                            <dd className="font-semibold text-slate-800">{deletePreview.data.finding_count}</dd>
+                                        </div>
+                                        <div className="flex justify-between gap-4">
+                                            <dt className="text-slate-600">{tw.delete_preview_shared_pages ?? 'Delte sider som beholdes'}</dt>
+                                            <dd className="font-semibold text-emerald-700">{deletePreview.data.shared_page_count}</dd>
+                                        </div>
+                                    </dl>
+                                    {deletePreview.data.sole_source_page_count === 0 && (
+                                        <p className="text-base text-slate-600">{tw.delete_preview_no_pages ?? 'Ingen wiki-sider vil bli slettet.'}</p>
+                                    )}
+                                    {deletePreview.data.shared_page_count > 0 && (
+                                        <p className="text-base text-emerald-700">
+                                            {(tw.delete_preview_shared_pages_note ?? '{count} sider beholdes fordi de også bygger på andre kildedokumenter.')
+                                                .replace('{count}', deletePreview.data.shared_page_count)}
+                                        </p>
+                                    )}
+                                    {!deletePreview.data.storage_file_exists && (
+                                        <p className="text-base text-amber-800">
+                                            {tw.delete_preview_storage_missing ?? 'Dokumentfilen finnes ikke lenger i lagring.'}
+                                        </p>
+                                    )}
+                                    <p className="text-base font-semibold text-rose-700">
+                                        {tw.delete_preview_irreversible ?? 'Handlingen kan ikke angres.'}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
 
                         <div className="mt-5 flex flex-wrap justify-end gap-3">
                             <button
+                                ref={deleteCancelRef}
                                 type="button"
                                 onClick={handleDeleteCancel}
-                                className="inline-flex min-h-11 items-center rounded-full py-2 text-left border border-slate-200 px-4 text-base font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+                                className="inline-flex min-h-11 items-center rounded-full border border-slate-300 px-4 py-2 text-left text-base font-semibold text-slate-600 transition hover:border-slate-400 hover:text-slate-900"
                             >
                                 {tw.delete_cancel_button ?? 'Avbryt'}
                             </button>
@@ -2517,7 +2556,7 @@ function SourcesTab({
                                 <button
                                     type="button"
                                     onClick={handleDeleteConfirm}
-                                    className="inline-flex min-h-11 items-center rounded-full py-2 text-left bg-rose-600 px-4 text-base font-semibold text-white transition hover:bg-rose-700"
+                                    className="inline-flex min-h-11 items-center rounded-full bg-rose-700 px-4 py-2 text-left text-base font-semibold text-white transition hover:bg-rose-800"
                                 >
                                     {deletePreview.data?.pending_approval_run_count > 0
                                         ? (tw.delete_confirm_button_pending_approval ?? 'Avbryt godkjenningsflyt og slett dokument')
@@ -2528,15 +2567,15 @@ function SourcesTab({
                                 <button
                                     type="button"
                                     onClick={handleCancelBlockingRunsForDeletion}
-                                    className="inline-flex min-h-11 items-center rounded-full py-2 text-left bg-amber-600 px-4 text-base font-semibold text-white transition hover:bg-amber-700"
+                                    className="inline-flex min-h-11 items-center rounded-full bg-amber-700 px-4 py-2 text-left text-base font-semibold text-white transition hover:bg-amber-800"
                                 >
                                     {tw.cancel_blocking_runs_button ?? 'Avbryt kjøring og fortsett sletting'}
                                 </button>
                             )}
                         </div>
-                    </div>
-                </div>
-            )}
+                    </>
+                )}
+            </ActionDialog>
         </>
     );
 }
@@ -2549,21 +2588,146 @@ function findingsCountToneClass(run) {
     // signals never block the Wiki and share the neutral amber "worth a look" tone with ordinary
     // non-blocking findings.
     if ((run.findings_open_blocking_count ?? 0) > 0) {
-        return 'text-rose-600 hover:bg-rose-50 focus-visible:ring-rose-400';
+        return 'text-rose-700 hover:bg-rose-50 focus-visible:ring-rose-400';
     }
 
     if ((run.findings_open_non_blocking_count ?? 0) > 0 || (run.findings_open_qa_review_count ?? 0) > 0) {
-        return 'text-amber-600 hover:bg-amber-50 focus-visible:ring-amber-400';
+        return 'text-amber-700 hover:bg-amber-50 focus-visible:ring-amber-400';
     }
 
-    return 'text-slate-500 hover:bg-slate-100 focus-visible:ring-slate-400';
+    return 'text-slate-600 hover:bg-slate-100 focus-visible:ring-slate-400';
 }
 
 // The Kjøringer tab's select style; same size as SELECT_CLS, without its max-w-full.
 const RUNS_SELECT_CLS = 'h-11 rounded-lg border border-slate-200 bg-white px-3 text-base text-slate-700 shadow-sm transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
 
-function RunsTab({ runs, runsFilters, tw, locale }) {
+/**
+ * «Vis beslutning» — the maintainer's page plan for a run, read-only. A modal dialog (A11Y-002): it
+ * has a title and a named close button, keeps focus while open, closes on Escape and gives focus back
+ * to the button that opened it. Was a bare overlay with none of that.
+ */
+function DecisionModal({ run, tw, ta = {}, isOpen, onClose, returnFocusRef }) {
+    const d = run?.maintainer_decision_json ?? {};
+    const sectionHeading = 'text-sm font-semibold uppercase tracking-widest text-slate-600';
+
+    return (
+        <ActionDialog
+            isOpen={isOpen}
+            onClose={onClose}
+            titleId="wiki-decision-title"
+            size="lg"
+            padded={false}
+            returnFocusRef={returnFocusRef}
+        >
+            <DialogTitleBar
+                titleId="wiki-decision-title"
+                title={tw.decision_panel_heading ?? 'Sideplanlegging'}
+                onClose={onClose}
+                closeLabel={ta.wiki_decision_close ?? 'Lukk sideplanleggingen'}
+            />
+
+            <div className="space-y-5 px-6 py-5">
+                <section className="space-y-2">
+                    <h3 className={sectionHeading}>
+                        {tw.decision_source_article ?? 'Kildeartikkel'}
+                    </h3>
+                    <DecisionPageEntry entry={d.source_article} tw={tw} />
+                </section>
+
+                <section className="space-y-2">
+                    <h3 className={sectionHeading}>
+                        {tw.decision_source_summary ?? 'Sammendrag'}
+                    </h3>
+                    <DecisionPageEntry entry={d.source_summary} tw={tw} />
+                </section>
+
+                <section className="space-y-2">
+                    <h3 className={sectionHeading}>
+                        {tw.decision_concept_pages ?? 'Konseptsider'}
+                    </h3>
+                    {(d.concept_pages ?? []).length === 0 ? (
+                        <span className="text-sm text-slate-600">{tw.decision_no_items ?? 'Ingen'}</span>
+                    ) : (
+                        <ul className="space-y-3">
+                            {d.concept_pages.map((p, i) => (
+                                <li key={i} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                                    <DecisionPageEntry entry={p} tw={tw} />
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </section>
+
+                <section className="space-y-2">
+                    <h3 className={sectionHeading}>
+                        {tw.decision_entity_pages ?? 'Entitetssider'}
+                    </h3>
+                    {(d.entity_pages ?? []).length === 0 ? (
+                        <span className="text-sm text-slate-600">{tw.decision_no_items ?? 'Ingen'}</span>
+                    ) : (
+                        <ul className="space-y-3">
+                            {d.entity_pages.map((p, i) => (
+                                <li key={i} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                                    <DecisionPageEntry entry={p} tw={tw} />
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </section>
+
+                {(d.warnings ?? []).length > 0 && (
+                    <section className="space-y-2">
+                        <h3 className="text-sm font-semibold uppercase tracking-widest text-amber-800">
+                            {tw.decision_warnings ?? 'Advarsler'}
+                        </h3>
+                        <ul className="space-y-1">
+                            {d.warnings.map((w, i) => (
+                                <li key={i} className="text-sm text-amber-800">{w}</li>
+                            ))}
+                        </ul>
+                    </section>
+                )}
+
+                {d.no_action_reason && (
+                    <section className="space-y-1">
+                        <h3 className={sectionHeading}>
+                            {tw.decision_no_action_reason ?? 'Ingen handling – begrunnelse'}
+                        </h3>
+                        <p className="text-sm text-slate-700">{d.no_action_reason}</p>
+                    </section>
+                )}
+            </div>
+
+            <div className="border-t border-slate-100 px-6 py-4 text-right">
+                <button
+                    type="button"
+                    onClick={onClose}
+                    className="inline-flex min-h-9 items-center justify-center rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-950"
+                >
+                    {tw.decision_modal_close ?? 'Lukk'}
+                </button>
+            </div>
+        </ActionDialog>
+    );
+}
+
+function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
     const filters = runsFilters ?? {};
+    const cancelTriggerRef = useRef(null);
+    const retryTriggerRef = useRef(null);
+    const cancelDismissRef = useRef(null);
+    const retryDismissRef = useRef(null);
+
+    // A run moving to another status is said once, not on every 5 s poll (A11Y-112).
+    useRunStatusAnnouncements(
+        runs.map((run) => ({
+            id: run.id,
+            statusKey: `${run.status}:${run.qa_status ?? ''}`,
+            name: run.source_document_filename ?? `#${run.id}`,
+            statusLabel: ingestStatusLabel(run.status, run.qa_status, tw),
+        })),
+        ta.wiki_run_status_changed ?? 'Kjøring for :name: :status.',
+    );
     // expandedRuns[runId] is null (closed) | 'pages' | 'findings' — only one panel is ever shown
     // per row, so switching panels never stacks two overlapping detail areas under the same row.
     const [expandedRuns, setExpandedRuns] = useState({});
@@ -2571,7 +2735,10 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
     const [runFindingsState, setRunFindingsState] = useState({});
     const [cancelTarget, setCancelTarget] = useState(null);
 
-    const handleCancelClick = (run) => setCancelTarget(run);
+    const handleCancelClick = (run, trigger = null) => {
+        cancelTriggerRef.current = trigger;
+        setCancelTarget(run);
+    };
     const handleCancelDismiss = () => setCancelTarget(null);
     const handleCancelConfirm = () => {
         if (!cancelTarget) return;
@@ -2585,7 +2752,11 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
             run_status: filters.status ?? '',
             run_decision: filters.decision ?? '',
             run_src: filters.src_id ?? '',
-        }, { preserveScroll: true });
+        }, {
+            preserveScroll: true,
+            // «Avbryt kjøring» is gone once the run is cancelled; continue from the list heading.
+            onSuccess: () => refocusIfLost(['wiki-runs-heading']),
+        });
     };
 
     // Wiki run-592: mirrors cancelTarget above exactly (same confirm-then-router.patch shape) —
@@ -2594,8 +2765,14 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
     const [retryTarget, setRetryTarget] = useState(null);
     const [retryInFlight, setRetryInFlight] = useState(false);
 
-    const handleRetryClick = (run) => setRetryTarget(run);
-    const handleRetryDismiss = () => setRetryTarget(null);
+    const handleRetryClick = (run, trigger = null) => {
+        retryTriggerRef.current = trigger;
+        setRetryTarget(run);
+    };
+    const handleRetryDismiss = () => {
+        if (retryInFlight) return;
+        setRetryTarget(null);
+    };
     const handleRetryConfirm = () => {
         if (!retryTarget || retryInFlight) return;
         const runId = retryTarget.id;
@@ -2610,6 +2787,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
             onFinish: () => {
                 setRetryInFlight(false);
                 setRetryTarget(null);
+                refocusIfLost(['wiki-runs-heading']);
             },
         });
     };
@@ -2708,7 +2886,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
         if (runFindingsState[run.id]?.fetchedForLintCount !== run.lint_count) {
             fetchRunFindings(run.id, run.lint_count);
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        // Deliberately not depending on the fetch helpers or panel state: see appliedFocusRef above.
     }, [focusRunId, focusFindingId, runs]);
 
     // Keeps an OPEN findings panel live: the runs poll refreshes run.lint_count every 5s while a
@@ -2722,17 +2900,19 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                 fetchRunFindings(run.id, run.lint_count);
             }
         });
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        // Deliberately keyed on `runs` alone: the poll is what should trigger a refetch.
     }, [runs]);
 
     return (
         <div className="space-y-4">
+            <h2 id="wiki-runs-heading" tabIndex={-1} className="sr-only">{ta.wiki_runs_heading ?? 'Kjøringer'}</h2>
             {/* Filter bar */}
             <div className="flex flex-wrap items-center gap-2">
                 <select
+                    aria-label={ta.wiki_filter_status ?? 'Status'}
                     value={filters.status ?? ''}
                     onChange={(e) => navigate({ run_status: e.target.value })}
-                    className={RUNS_SELECT_CLS}
+                    className={`${RUNS_SELECT_CLS} max-w-full`}
                 >
                     <option value="">{tw.runs_filter_status_all ?? 'Alle statuser'}</option>
                     {[
@@ -2754,9 +2934,10 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                 </select>
 
                 <select
+                    aria-label={ta.wiki_filter_decision ?? 'Beslutning'}
                     value={filters.decision ?? ''}
                     onChange={(e) => navigate({ run_decision: e.target.value })}
-                    className={RUNS_SELECT_CLS}
+                    className={`${RUNS_SELECT_CLS} max-w-full`}
                 >
                     <option value="">{tw.runs_filter_decision_all ?? 'Alle beslutninger'}</option>
                     <option value="pending">{tw.run_decision_pending ?? 'Venter'}</option>
@@ -2770,7 +2951,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                         <button
                             type="button"
                             onClick={() => navigate({ run_src: '' })}
-                            className="ml-0.5 text-violet-400 hover:text-violet-700"
+                            className="ml-0.5 text-violet-700 hover:text-violet-900"
                             aria-label="Fjern kildefilter"
                         >
                             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -2784,7 +2965,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                     <button
                         type="button"
                         onClick={() => navigate({ run_status: '', run_decision: '', run_src: '' })}
-                        className="inline-flex h-11 items-center gap-1 rounded-lg px-3 text-base font-medium leading-6 text-slate-500 transition hover:text-slate-800"
+                        className="inline-flex h-11 items-center gap-1 rounded-lg px-3 text-base font-medium leading-6 text-slate-600 transition hover:text-slate-800"
                     >
                         <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                             <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
@@ -2801,7 +2982,9 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                 />
             ) : (
                 <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <div data-run-header className="hidden items-center gap-x-4 border-b border-slate-200 bg-slate-50/70 px-6 py-4 text-xs font-semibold uppercase tracking-wide text-slate-500 lg:grid" style={{ gridTemplateColumns: RUNS_GRID_TEMPLATE }}>
+                    {/* Column heads for the eye; each row also states its own labels on small
+                        screens. Hidden from assistive technology, which reads the rows as they are. */}
+                    <div data-run-header aria-hidden="true" className="hidden items-center gap-x-4 border-b border-slate-200 bg-slate-50/70 px-6 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600 lg:grid" style={{ gridTemplateColumns: RUNS_GRID_TEMPLATE }}>
                         <div className="text-right">{tw.runs_col_id ?? 'ID'}</div>
                         <div>{tw.runs_col_document ?? 'Dokument'}</div>
                         <div>{tw.runs_col_status ?? 'Status'}</div>
@@ -2822,6 +3005,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                     key={run.id}
                                     run={run}
                                     tw={tw}
+                                    ta={ta}
                                     locale={locale}
                                     activePanel={activePanel}
                                     panelId={panelId}
@@ -2840,71 +3024,96 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                 </section>
             )}
 
-            {cancelTarget && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" role="dialog" aria-modal="true">
-                    <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
-                        <h2 className="mb-4 text-base font-semibold text-slate-900">
+            {/* Cancelling and retrying a run (A11Y-002): modal dialogs with a title and a description,
+                focus on the harmless choice, Escape, a trapped Tab and focus back on the button. */}
+            <ActionDialog
+                isOpen={cancelTarget !== null}
+                onClose={handleCancelDismiss}
+                titleId="wiki-run-cancel-title"
+                descriptionId="wiki-run-cancel-description"
+                initialFocusRef={cancelDismissRef}
+                returnFocusRef={cancelTriggerRef}
+                size="xs"
+            >
+                {cancelTarget && (
+                    <>
+                        <h2 id="wiki-run-cancel-title" className="mb-4 text-base font-semibold text-slate-900">
                             {tw.run_cancel_confirm_title ?? 'Bekreft avbrutt kjøring'}
                         </h2>
-                        <p className="text-base font-medium leading-6 text-slate-800 break-all">
-                            {cancelTarget.source_document_filename}
-                        </p>
-                        <p className="mt-2 text-base leading-6 text-slate-600">
-                            {tw.run_cancel_confirm_body ?? 'Dette stopper kjøringen. Wiki-innhold som allerede er generert blir beholdt, men kjøringen kan ikke fortsette eller fullføres etterpå. Handlingen kan ikke angres.'}
-                        </p>
-                        <div className="mt-5 flex justify-end gap-3">
+                        <div id="wiki-run-cancel-description">
+                            <p className="break-all text-base font-medium leading-6 text-slate-800">
+                                {cancelTarget.source_document_filename}
+                            </p>
+                            <p className="mt-2 text-base leading-6 text-slate-600">
+                                {tw.run_cancel_confirm_body ?? 'Dette stopper kjøringen. Wiki-innhold som allerede er generert blir beholdt, men kjøringen kan ikke fortsette eller fullføres etterpå. Handlingen kan ikke angres.'}
+                            </p>
+                        </div>
+                        <div className="mt-5 flex flex-wrap justify-end gap-3">
                             <button
+                                ref={cancelDismissRef}
                                 type="button"
                                 onClick={handleCancelDismiss}
-                                className="inline-flex h-11 items-center rounded-full border border-slate-200 px-4 text-base font-semibold leading-6 text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+                                className="inline-flex h-11 items-center rounded-full border border-slate-300 px-4 text-base font-semibold leading-6 text-slate-600 transition hover:border-slate-400 hover:text-slate-900"
                             >
                                 {tw.run_cancel_dismiss_button ?? 'Lukk'}
                             </button>
                             <button
                                 type="button"
                                 onClick={handleCancelConfirm}
-                                className="inline-flex h-11 items-center rounded-full bg-rose-600 px-4 text-base font-semibold leading-6 text-white transition hover:bg-rose-700"
+                                className="inline-flex h-11 items-center rounded-full bg-rose-700 px-4 text-base font-semibold leading-6 text-white transition hover:bg-rose-800"
                             >
                                 {tw.run_cancel_confirm_button ?? 'Avbryt kjøringen'}
                             </button>
                         </div>
-                    </div>
-                </div>
-            )}
+                    </>
+                )}
+            </ActionDialog>
 
-            {retryTarget && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" role="dialog" aria-modal="true">
-                    <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
-                        <h2 className="mb-4 text-base font-semibold text-slate-900">
+            <ActionDialog
+                isOpen={retryTarget !== null}
+                onClose={handleRetryDismiss}
+                closeDisabled={retryInFlight}
+                titleId="wiki-run-retry-title"
+                descriptionId="wiki-run-retry-description"
+                initialFocusRef={retryDismissRef}
+                returnFocusRef={retryTriggerRef}
+                size="xs"
+            >
+                {retryTarget && (
+                    <>
+                        <h2 id="wiki-run-retry-title" className="mb-4 text-base font-semibold text-slate-900">
                             {tw.run_retry_maintainer_decision_confirm_title ?? 'Prøv sideplanleggingen på nytt?'}
                         </h2>
-                        <p className="text-base font-medium leading-6 text-slate-800 break-all">
-                            {retryTarget.source_document_filename}
-                        </p>
-                        <p className="mt-2 text-base leading-6 text-slate-600">
-                            {tw.run_retry_maintainer_decision_confirm_body ?? 'Dokumentet og kildegrunnlaget er bevart. Sideplanleggingen startes på nytt med samme kjøring — du trenger ikke laste opp dokumentet igjen.'}
-                        </p>
-                        <div className="mt-5 flex justify-end gap-3">
+                        <div id="wiki-run-retry-description">
+                            <p className="break-all text-base font-medium leading-6 text-slate-800">
+                                {retryTarget.source_document_filename}
+                            </p>
+                            <p className="mt-2 text-base leading-6 text-slate-600">
+                                {tw.run_retry_maintainer_decision_confirm_body ?? 'Dokumentet og kildegrunnlaget er bevart. Sideplanleggingen startes på nytt med samme kjøring — du trenger ikke laste opp dokumentet igjen.'}
+                            </p>
+                        </div>
+                        <div className="mt-5 flex flex-wrap justify-end gap-3">
                             <button
+                                ref={retryDismissRef}
                                 type="button"
                                 onClick={handleRetryDismiss}
-                                disabled={retryInFlight}
-                                className="inline-flex h-11 items-center rounded-full border border-slate-200 px-4 text-base font-semibold leading-6 text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                                aria-disabled={retryInFlight || undefined}
+                                className="inline-flex h-11 items-center rounded-full border border-slate-300 px-4 text-base font-semibold leading-6 text-slate-600 transition hover:border-slate-400 hover:text-slate-900 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
                             >
                                 {tw.run_retry_maintainer_decision_dismiss_button ?? 'Lukk'}
                             </button>
                             <button
                                 type="button"
                                 onClick={handleRetryConfirm}
-                                disabled={retryInFlight}
-                                className={`inline-flex h-11 items-center rounded-full px-4 text-base font-semibold leading-6 transition disabled:cursor-not-allowed disabled:opacity-50 ${PRIMARY_COLOURS}`}
+                                aria-disabled={retryInFlight || undefined}
+                                className={`inline-flex h-11 items-center rounded-full px-4 text-base font-semibold leading-6 transition aria-disabled:cursor-not-allowed aria-disabled:opacity-50 ${PRIMARY_COLOURS}`}
                             >
                                 {tw.run_retry_maintainer_decision_confirm_button ?? 'Prøv på nytt'}
                             </button>
                         </div>
-                    </div>
-                </div>
-            )}
+                    </>
+                )}
+            </ActionDialog>
         </div>
     );
 }
@@ -2932,7 +3141,7 @@ const OWNER_STATUS_STYLES = {
 function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
     if (!state || state.status === 'loading') {
         return (
-            <div id={panelId} className="flex items-center gap-2 py-2 text-base leading-6 text-slate-500">
+            <div id={panelId} className="flex items-center gap-2 py-2 text-base leading-6 text-slate-600">
                 <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-violet-500" aria-hidden="true" />
                 {tw.runs_pages_loading ?? 'Henter berørte Wiki-sider …'}
             </div>
@@ -2941,8 +3150,8 @@ function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
 
     if (state.status === 'error') {
         return (
-            <div id={panelId} className="flex items-center justify-between gap-3 py-2 text-base leading-6 text-rose-600">
-                <span>{tw.runs_pages_error ?? 'Kunne ikke hente Wiki-sidene. Prøv igjen.'}</span>
+            <div id={panelId} className="flex items-center justify-between gap-3 py-2 text-base leading-6 text-rose-700">
+                <span role="alert">{tw.runs_pages_error ?? 'Kunne ikke hente Wiki-sidene. Prøv igjen.'}</span>
                 <button
                     type="button"
                     onClick={onRetry}
@@ -2979,22 +3188,23 @@ function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
     return (
         <div id={panelId} className="space-y-3">
             <div>
-                <h4 className="text-lg font-semibold text-slate-800">{tw.runs_pages_heading ?? 'Berørte Wiki-sider'}</h4>
-                <p className="mt-1 text-base leading-6 text-slate-500">{summaryParts.join(' · ')}</p>
+                <h3 className="text-lg font-semibold text-slate-800">{tw.runs_pages_heading ?? 'Berørte Wiki-sider'}</h3>
+                <p className="mt-1 text-base leading-6 text-slate-600">{summaryParts.join(' · ')}</p>
                 {stallExplanation && (
                     <p className="mt-1 text-base font-medium leading-6 text-amber-700">{stallExplanation}</p>
                 )}
             </div>
 
-            <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+            <ScrollRegion label={tw.runs_pages_heading ?? 'Berørte Wiki-sider'} edgeRoom={false} className="rounded-xl border border-slate-200 bg-white">
                 <table className="min-w-full divide-y divide-slate-100 text-base leading-6">
-                    <thead className="bg-slate-50 text-base font-semibold uppercase tracking-wide text-slate-500">
+                    <caption className="sr-only">{tw.runs_pages_heading ?? 'Berørte Wiki-sider'}</caption>
+                    <thead className="bg-slate-50 text-base font-semibold uppercase tracking-wide text-slate-600">
                         <tr className="text-left">
-                            <th className="px-3 py-2.5">{tw.runs_pages_col_page ?? 'Wiki-side'}</th>
-                            <th className="px-3 py-2.5">{tw.runs_pages_col_result ?? 'Resultat'}</th>
-                            <th className="px-3 py-2.5">{tw.runs_pages_col_version ?? 'Sideversjon'}</th>
-                            <th className="px-3 py-2.5">{tw.runs_pages_col_owner_status ?? 'Dokumenteierstatus'}</th>
-                            <th className="px-3 py-2.5 text-right">{tw.runs_pages_col_action ?? 'Handling'}</th>
+                            <th scope="col" className="px-3 py-2.5">{tw.runs_pages_col_page ?? 'Wiki-side'}</th>
+                            <th scope="col" className="px-3 py-2.5">{tw.runs_pages_col_result ?? 'Resultat'}</th>
+                            <th scope="col" className="px-3 py-2.5">{tw.runs_pages_col_version ?? 'Sideversjon'}</th>
+                            <th scope="col" className="px-3 py-2.5">{tw.runs_pages_col_owner_status ?? 'Dokumenteierstatus'}</th>
+                            <th scope="col" className="px-3 py-2.5 text-right">{tw.runs_pages_col_action ?? 'Handling'}</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -3012,13 +3222,13 @@ function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
                                             : (tw.runs_pages_result_updated ?? 'Oppdatert')}
                                     </span>
                                 </td>
-                                <td className="px-3 py-2.5 whitespace-nowrap text-slate-500">
+                                <td className="px-3 py-2.5 whitespace-nowrap text-slate-600">
                                     {page.version_number
                                         ? (tw.runs_pages_version_label ?? 'Versjon :number').replace(':number', page.version_number)
                                         : '—'}
                                 </td>
                                 <td className="px-3 py-2.5">
-                                    <span className={`${BADGE} ${OWNER_STATUS_STYLES[page.document_owner_status?.state] ?? 'bg-slate-100 text-slate-500'}`}>
+                                    <span className={`${BADGE} ${OWNER_STATUS_STYLES[page.document_owner_status?.state] ?? 'bg-slate-100 text-slate-600'}`}>
                                         {page.document_owner_status?.label ?? '—'}
                                     </span>
                                 </td>
@@ -3027,13 +3237,14 @@ function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
                                         {page.can_handle
                                             ? (tw.runs_pages_action_open_and_handle ?? 'Åpne og behandle')
                                             : (tw.runs_pages_action_open ?? 'Åpne side')}
+                                        <span className="sr-only"> {page.title}</span>
                                     </Link>
                                 </td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
-            </div>
+            </ScrollRegion>
         </div>
     );
 }
@@ -3116,7 +3327,7 @@ function findingsLocalFilterLabel(filterKey, tw) {
  * it rather than stacking a second independent panel. Local status/blocking filters apply only
  * within this open panel and never touch the Kjøringer tab's own filter bar.
  */
-function RunFindingsPanel({ panelId, state, onRetry, tw, locale, focusFindingId = null }) {
+function RunFindingsPanel({ panelId, state, onRetry, tw, ta = {}, locale, focusFindingId = null }) {
     // Defaults to 'open' so a run with many historically-resolved findings doesn't bury the
     // ones that still need attention — 'resolved' (Løst) remains one click away via the filter
     // chips below, unchanged.
@@ -3161,6 +3372,9 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale, focusFindingId 
         }
 
         focusRowRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // The deep link lands focus on the finding too (A11Y-015), not only the scroll position:
+        // a keyboard or screen-reader user continues from there.
+        focusElement(focusRowRef.current, { preventScroll: true });
 
         const timer = setTimeout(() => setFocusedRowId(null), 2600);
 
@@ -3192,7 +3406,7 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale, focusFindingId 
     if (state.status === 'error') {
         return (
             <div id={panelId} className="flex items-center justify-between gap-3 py-2 text-base leading-6 text-rose-700">
-                <span>{tw.runs_findings_error ?? 'Kunne ikke hente kvalitetsfunnene. Prøv igjen.'}</span>
+                <span role="alert">{tw.runs_findings_error ?? 'Kunne ikke hente kvalitetsfunnene. Prøv igjen.'}</span>
                 <button
                     type="button"
                     onClick={onRetry}
@@ -3211,7 +3425,7 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale, focusFindingId 
     return (
         <div id={panelId} className="space-y-4">
             <div className="space-y-1.5">
-                <h4 className="text-lg font-semibold text-slate-800">{tw.runs_findings_heading ?? 'Kvalitetsfunn'}</h4>
+                <h3 className="text-lg font-semibold text-slate-800">{tw.runs_findings_heading ?? 'Kvalitetsfunn'}</h3>
                 <p className="text-base leading-6 text-slate-700">
                     {(tw.runs_findings_total_label ?? ':count funn totalt').replace(':count', summary.total ?? 0)}
                     {' · '}
@@ -3228,12 +3442,15 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale, focusFindingId 
                 )}
             </div>
 
+            {/* Filter chips are toggle buttons in a named group; the pressed one is said, not only
+                shown by its dark fill (A11Y-117). */}
             {findings.length > 0 && (
-                <div className="flex flex-wrap gap-2">
+                <div role="group" aria-label={ta.wiki_findings_filter_label ?? 'Vis funn'} className="flex flex-wrap gap-2">
                     {FINDINGS_LOCAL_FILTERS.map((filterKey) => (
                         <button
                             key={filterKey}
                             type="button"
+                            aria-pressed={localFilter === filterKey}
                             onClick={() => setLocalFilter(filterKey)}
                             className={`rounded-full px-4 py-2.5 text-base font-semibold leading-6 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500 ${
                                 localFilter === filterKey
@@ -3247,15 +3464,16 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale, focusFindingId 
                 </div>
             )}
 
-            <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+            <ScrollRegion label={tw.runs_findings_heading ?? 'Kvalitetsfunn'} edgeRoom={false} className="rounded-xl border border-slate-200 bg-white">
                 <table className="min-w-full divide-y divide-slate-100 text-base leading-6">
+                    <caption className="sr-only">{tw.runs_findings_heading ?? 'Kvalitetsfunn'}</caption>
                     <thead className="bg-slate-50 text-base font-semibold uppercase tracking-wide text-slate-600">
                         <tr className="text-left">
-                            <th className="px-4 py-3">{tw.runs_findings_col_finding ?? 'Funn'}</th>
-                            <th className="px-4 py-3">{tw.runs_pages_col_page ?? 'Wiki-side'}</th>
-                            <th className="px-4 py-3">{tw.quality_col_severity ?? 'Alvorlighet'}</th>
-                            <th className="px-4 py-3">{tw.runs_findings_col_status ?? 'Status'}</th>
-                            <th className="px-4 py-3 text-right">{tw.runs_pages_col_action ?? 'Handling'}</th>
+                            <th scope="col" className="px-4 py-3">{tw.runs_findings_col_finding ?? 'Funn'}</th>
+                            <th scope="col" className="px-4 py-3">{tw.runs_pages_col_page ?? 'Wiki-side'}</th>
+                            <th scope="col" className="px-4 py-3">{tw.quality_col_severity ?? 'Alvorlighet'}</th>
+                            <th scope="col" className="px-4 py-3">{tw.runs_findings_col_status ?? 'Status'}</th>
+                            <th scope="col" className="px-4 py-3 text-right">{tw.runs_pages_col_action ?? 'Handling'}</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -3279,12 +3497,13 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale, focusFindingId 
                                                         type="button"
                                                         onClick={() => toggleFindingExpanded(finding.id)}
                                                         aria-expanded={isExpanded}
-                                                        aria-label={isExpanded
+                                                        aria-label={`${isExpanded
                                                             ? (tw.claim_finding_collapse_details ?? 'Skjul detaljer')
-                                                            : (tw.claim_finding_expand_details ?? 'Vis detaljer')}
-                                                        className="mt-0.5 shrink-0 select-none rounded p-2 text-base leading-6 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
+                                                            : (tw.claim_finding_expand_details ?? 'Vis detaljer')}: ${(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', formatFindingUserId(finding.id))}`}
+                                                        aria-controls={`finding-${finding.id}-detail`}
+                                                        className="mt-0.5 shrink-0 select-none rounded p-2 text-base leading-6 text-slate-600 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
                                                     >
-                                                        {isExpanded ? '▾' : '▸'}
+                                                        <span aria-hidden="true">{isExpanded ? '▾' : '▸'}</span>
                                                     </button>
                                                 )}
                                                 <div className="min-w-0 flex-1 space-y-1">
@@ -3363,12 +3582,12 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale, focusFindingId 
                                                     {finding.action_label}
                                                 </Link>
                                             ) : (
-                                                <span className="text-base leading-6 text-slate-500">—</span>
+                                                <span className="text-base leading-6 text-slate-600">—</span>
                                             )}
                                         </td>
                                     </tr>
                                     {isExpanded && (
-                                        <tr key={`${finding.id}-detail`} className="bg-slate-50/60 text-slate-700">
+                                        <tr key={`${finding.id}-detail`} id={`finding-${finding.id}-detail`} className="bg-slate-50/60 text-slate-700">
                                             <td colSpan={5} className="px-4 py-4">
                                                 <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 text-base leading-6">
                                                     <div className="font-mono text-sm font-semibold text-slate-600">
@@ -3410,7 +3629,7 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale, focusFindingId 
                         })}
                     </tbody>
                 </table>
-            </div>
+            </ScrollRegion>
         </div>
     );
 }
@@ -3449,6 +3668,7 @@ export default function WikiIndex({
 }) {
     const { translations = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
+    const ta = translations?.a11y ?? {};
     const locale = document.documentElement.lang || 'no';
     // Wiki run-4: hasActiveWikiRunForTab() (runFindingsLogic.js) picks the right run-like objects
     // per tab — a source object has no top-level `status` of its own (it has `document_status`, a
@@ -3531,6 +3751,7 @@ export default function WikiIndex({
                         pagesDocumentOwnerOptions={pagesDocumentOwnerOptions}
                         publicationSummary={publicationSummary}
                         tw={tw}
+                        ta={ta}
                         locale={locale}
                     />
                 )}
@@ -3543,11 +3764,12 @@ export default function WikiIndex({
                         wikiGenerationAvailable={wikiGenerationAvailable}
                         canManageSources={permissions.can_manage_sources ?? false}
                         tw={tw}
+                        ta={ta}
                         locale={locale}
                     />
                 )}
                 {activeTab === 'runs' && (
-                    <RunsTab runs={runs} runsFilters={runsFilters} tw={tw} locale={locale} />
+                    <RunsTab runs={runs} runsFilters={runsFilters} tw={tw} ta={ta} locale={locale} />
                 )}
             </div>
         </CustomerAppLayout>

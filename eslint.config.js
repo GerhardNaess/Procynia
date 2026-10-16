@@ -73,6 +73,18 @@ const A11Y_CHECKED_FILES = [
     'resources/js/Pages/App/Notices/Index.jsx',
     'resources/js/Pages/App/Notices/SavedShow.jsx',
     'resources/js/Pages/App/Notices/Show.jsx',
+    // Fase 5 — Enterprise Wiki: oversikt, kilder, kjøringer, artikkel, redigering, gjennomgang, graf
+    // (med listevisning), Spør Wiki og kunnskapsoverføringen fra de andre modulene.
+    'resources/js/Components/App/MultiSelectFilterDropdown.jsx',
+    'resources/js/Components/App/WikiKnowledgeHandoffPanel.jsx',
+    'resources/js/Pages/App/Wiki/Ask.jsx',
+    'resources/js/Pages/App/Wiki/Graph.jsx',
+    'resources/js/Pages/App/Wiki/Index.jsx',
+    'resources/js/Pages/App/Wiki/Show.jsx',
+    'resources/js/Pages/App/Wiki/WikiGraphFocusView.jsx',
+    'resources/js/Pages/App/Wiki/WikiGraphListView.jsx',
+    'resources/js/Pages/App/Wiki/WikiMarkdown.jsx',
+    'resources/js/Pages/App/Wiki/WikiReviewPanel.jsx',
 ];
 
 export default [
