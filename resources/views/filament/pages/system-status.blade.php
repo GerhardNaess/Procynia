@@ -21,6 +21,9 @@
             'unavailable' => __('procynia.system_status.scheduler.unavailable'),
         ];
 
+        $severityCritical = \App\Filament\Support\AdminText::get('admin_a11y.severity_critical', 'Kritisk');
+        $severityWarning  = \App\Filament\Support\AdminText::get('admin_a11y.severity_warning', 'Advarsel');
+
         $dbOk         = (bool) ($db['available'] ?? false);
         $redisOk      = (bool) ($redis['available'] ?? false);
         $failedCount  = (int) ($snapshot['failed_jobs_count'] ?? 0);
@@ -37,12 +40,12 @@
         $overallStatus  = $criticalIssues ? 'error' : ($failedCount > 0 || ! $backupOk ? 'warning' : 'ok');
         $hasIssues      = $overallStatus !== 'ok';
 
-        $okBadge   = 'bg-success-50 text-success-700 ring-1 ring-inset ring-success-200';
-        $errBadge  = 'bg-danger-50 text-danger-700 ring-1 ring-inset ring-danger-200';
-        $warnBadge = 'bg-warning-50 text-warning-800 ring-1 ring-inset ring-warning-200';
+        $okBadge   = 'bg-success-50 dark:bg-success-500/10 text-success-700 dark:text-success-400 ring-1 ring-inset ring-success-200 dark:ring-success-500/30';
+        $errBadge  = 'bg-danger-50 dark:bg-danger-500/10 text-danger-700 dark:text-danger-400 ring-1 ring-inset ring-danger-200 dark:ring-danger-500/30';
+        $warnBadge = 'bg-warning-50 dark:bg-warning-500/10 text-warning-800 dark:text-warning-300 ring-1 ring-inset ring-warning-200 dark:ring-warning-500/30';
 
-        $systemStatusBg    = match($overallStatus) { 'ok' => 'bg-success-50', 'warning' => 'bg-warning-50', 'error' => 'bg-danger-50' };
-        $systemStatusText  = match($overallStatus) { 'ok' => 'text-success-700', 'warning' => 'text-warning-800', 'error' => 'text-danger-700' };
+        $systemStatusBg    = match($overallStatus) { 'ok' => 'bg-success-50 dark:bg-success-500/10', 'warning' => 'bg-warning-50 dark:bg-warning-500/10', 'error' => 'bg-danger-50 dark:bg-danger-500/10' };
+        $systemStatusText  = match($overallStatus) { 'ok' => 'text-success-700 dark:text-success-400', 'warning' => 'text-warning-800 dark:text-warning-300', 'error' => 'text-danger-700 dark:text-danger-400' };
         $systemStatusBadge = match($overallStatus) { 'ok' => $okBadge, 'warning' => $warnBadge, 'error' => $errBadge };
         $systemStatusLabel = match($overallStatus) {
             'ok'      => __('procynia.system_status.statuses.ok'),
@@ -54,15 +57,15 @@
     <div class="space-y-4">
 
         {{-- ① Driftstatus cockpit --}}
-        <section class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <div class="mb-3 text-base font-semibold uppercase tracking-[0.16em] text-gray-600">
+        <section class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 p-4 shadow-sm">
+            <h2 class="mb-3 text-base font-semibold uppercase tracking-[0.16em] text-gray-600 dark:text-gray-400">
                 {{ __('procynia.system_status.sections.operational_status') }}
-            </div>
+            </h2>
             <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
 
                 {{-- Systemstatus --}}
-                <div class="rounded-xl {{ $systemStatusBg }} px-4 py-3">
-                    <div class="text-base font-semibold uppercase tracking-[0.12em] {{ $systemStatusText }}">
+                <div class="min-w-0 rounded-xl {{ $systemStatusBg }} px-4 py-3">
+                    <div class="text-base font-semibold uppercase tracking-[0.12em] [overflow-wrap:anywhere] {{ $systemStatusText }}">
                         {{ __('procynia.system_status.fields.system_status') }}
                     </div>
                     <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-1 text-base font-medium leading-6 {{ $systemStatusBadge }}">
@@ -71,8 +74,8 @@
                 </div>
 
                 {{-- Database --}}
-                <div class="rounded-xl bg-gray-50 px-4 py-3">
-                    <div class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">
+                <div class="min-w-0 rounded-xl bg-gray-50 dark:bg-white/5 px-4 py-3">
+                    <div class="text-base font-semibold uppercase tracking-[0.12em] [overflow-wrap:anywhere] text-gray-600 dark:text-gray-400">
                         {{ __('procynia.system_status.fields.database') }}
                     </div>
                     <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-1 text-base font-medium leading-6 {{ $dbOk ? $okBadge : $errBadge }}">
@@ -81,8 +84,8 @@
                 </div>
 
                 {{-- Redis --}}
-                <div class="rounded-xl bg-gray-50 px-4 py-3">
-                    <div class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">
+                <div class="min-w-0 rounded-xl bg-gray-50 dark:bg-white/5 px-4 py-3">
+                    <div class="text-base font-semibold uppercase tracking-[0.12em] [overflow-wrap:anywhere] text-gray-600 dark:text-gray-400">
                         {{ __('procynia.system_status.fields.redis') }}
                     </div>
                     <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-1 text-base font-medium leading-6 {{ $redisOk ? $okBadge : $errBadge }}">
@@ -91,8 +94,8 @@
                 </div>
 
                 {{-- Queue/Scheduler --}}
-                <div class="rounded-xl bg-gray-50 px-4 py-3">
-                    <div class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">
+                <div class="min-w-0 rounded-xl bg-gray-50 dark:bg-white/5 px-4 py-3">
+                    <div class="text-base font-semibold uppercase tracking-[0.12em] [overflow-wrap:anywhere] text-gray-600 dark:text-gray-400">
                         {{ __('procynia.system_status.fields.queue_scheduler') }}
                     </div>
                     <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-1 text-base font-medium leading-6 {{ $qsOk ? $okBadge : $errBadge }}">
@@ -101,8 +104,8 @@
                 </div>
 
                 {{-- Failed jobs --}}
-                <div class="rounded-xl bg-gray-50 px-4 py-3">
-                    <div class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">
+                <div class="min-w-0 rounded-xl bg-gray-50 dark:bg-white/5 px-4 py-3">
+                    <div class="text-base font-semibold uppercase tracking-[0.12em] [overflow-wrap:anywhere] text-gray-600 dark:text-gray-400">
                         {{ __('procynia.system_status.fields.failed_jobs') }}
                     </div>
                     @if ($failedCount > 0)
@@ -120,14 +123,14 @@
         </section>
 
         {{-- ② Avvik og oppfølging (always visible) --}}
-        <section class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm" x-data="{ showFailedJobs: false }">
-            <div class="mb-3 text-base font-semibold uppercase tracking-[0.16em] text-gray-600">
+        <section class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 p-4 shadow-sm" x-data="{ showFailedJobs: false }">
+            <h2 id="system-status-table-heading-1" class="mb-3 text-base font-semibold uppercase tracking-[0.16em] text-gray-600 dark:text-gray-400">
                 {{ __('procynia.system_status.sections.issues') }}
-            </div>
+            </h2>
 
             @if (! $hasIssues)
                 {{-- All clear --}}
-                <div class="flex items-center gap-2 text-base text-success-700">
+                <div class="flex items-center gap-2 text-base text-success-700 dark:text-success-400">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4 shrink-0" aria-hidden="true">
                         <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd"/>
                     </svg>
@@ -138,15 +141,16 @@
 
                     {{-- Database issue (critical) --}}
                     @if (! $dbOk)
-                        <div class="rounded-xl border border-danger-200 bg-danger-50 p-3">
+                        <div class="rounded-xl border border-danger-200 dark:border-danger-500/30 bg-danger-50 dark:bg-danger-500/10 p-3">
                             <div class="flex items-start gap-2.5">
-                                <span class="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-danger-500"></span>
+                                <span class="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-danger-500" aria-hidden="true"></span>
                                 <div class="min-w-0 flex-1">
-                                    <p class="text-base font-semibold text-danger-900">
+                                    <p class="text-base font-semibold text-danger-900 dark:text-danger-300">
+                                        <span data-system-issue-severity="critical">{{ $severityCritical }}:</span>
                                         {{ __('procynia.system_status.fields.database') }}: {{ __('procynia.system_status.statuses.not_connected') }}
                                     </p>
-                                    <p class="mt-1 text-base leading-6 text-danger-700">{{ __('procynia.system_status.issues.database.reason') }}</p>
-                                    <p class="mt-1.5 text-base leading-6 text-danger-700">→ {{ __('procynia.system_status.issues.database.next_step') }}</p>
+                                    <p class="mt-1 text-base leading-6 text-danger-700 dark:text-danger-400">{{ __('procynia.system_status.issues.database.reason') }}</p>
+                                    <p class="mt-1.5 text-base leading-6 text-danger-700 dark:text-danger-400">→ {{ __('procynia.system_status.issues.database.next_step') }}</p>
                                 </div>
                             </div>
                         </div>
@@ -154,15 +158,16 @@
 
                     {{-- Redis issue (critical) --}}
                     @if (! $redisOk)
-                        <div class="rounded-xl border border-danger-200 bg-danger-50 p-3">
+                        <div class="rounded-xl border border-danger-200 dark:border-danger-500/30 bg-danger-50 dark:bg-danger-500/10 p-3">
                             <div class="flex items-start gap-2.5">
-                                <span class="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-danger-500"></span>
+                                <span class="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-danger-500" aria-hidden="true"></span>
                                 <div class="min-w-0 flex-1">
-                                    <p class="text-base font-semibold text-danger-900">
+                                    <p class="text-base font-semibold text-danger-900 dark:text-danger-300">
+                                        <span data-system-issue-severity="critical">{{ $severityCritical }}:</span>
                                         {{ __('procynia.system_status.fields.redis') }}: {{ __('procynia.system_status.statuses.not_connected') }}
                                     </p>
-                                    <p class="mt-1 text-base leading-6 text-danger-700">{{ __('procynia.system_status.issues.redis.reason') }}</p>
-                                    <p class="mt-1.5 text-base leading-6 text-danger-700">→ {{ __('procynia.system_status.issues.redis.next_step') }}</p>
+                                    <p class="mt-1 text-base leading-6 text-danger-700 dark:text-danger-400">{{ __('procynia.system_status.issues.redis.reason') }}</p>
+                                    <p class="mt-1.5 text-base leading-6 text-danger-700 dark:text-danger-400">→ {{ __('procynia.system_status.issues.redis.next_step') }}</p>
                                 </div>
                             </div>
                         </div>
@@ -170,11 +175,12 @@
 
                     {{-- Queue/Scheduler issue (critical) --}}
                     @if (! $schedulerHb || ! $queueHb)
-                        <div class="rounded-xl border border-danger-200 bg-danger-50 p-3">
+                        <div class="rounded-xl border border-danger-200 dark:border-danger-500/30 bg-danger-50 dark:bg-danger-500/10 p-3">
                             <div class="flex items-start gap-2.5">
-                                <span class="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-danger-500"></span>
+                                <span class="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-danger-500" aria-hidden="true"></span>
                                 <div class="min-w-0 flex-1">
-                                    <p class="text-base font-semibold text-danger-900">
+                                    <p class="text-base font-semibold text-danger-900 dark:text-danger-300">
+                                        <span data-system-issue-severity="critical">{{ $severityCritical }}:</span>
                                         {{ __('procynia.system_status.fields.queue_scheduler') }}: {{ __('procynia.system_status.statuses.error') }}
                                         @if (! $schedulerHb && $queueHb)
                                             ({{ __('procynia.system_status.fields.scheduler_status') }})
@@ -182,8 +188,8 @@
                                             (Queue)
                                         @endif
                                     </p>
-                                    <p class="mt-1 text-base leading-6 text-danger-700">{{ __('procynia.system_status.issues.queue_scheduler.reason') }}</p>
-                                    <p class="mt-1.5 text-base leading-6 text-danger-700">→ {{ __('procynia.system_status.issues.queue_scheduler.next_step') }}</p>
+                                    <p class="mt-1 text-base leading-6 text-danger-700 dark:text-danger-400">{{ __('procynia.system_status.issues.queue_scheduler.reason') }}</p>
+                                    <p class="mt-1.5 text-base leading-6 text-danger-700 dark:text-danger-400">→ {{ __('procynia.system_status.issues.queue_scheduler.next_step') }}</p>
                                 </div>
                             </div>
                         </div>
@@ -191,21 +197,25 @@
 
                     {{-- Failed jobs (warning, expandable detail table) --}}
                     @if ($failedCount > 0)
-                        <div class="rounded-xl border border-warning-200 bg-warning-50 p-3">
+                        <div class="rounded-xl border border-warning-200 dark:border-warning-500/30 bg-warning-50 dark:bg-warning-500/10 p-3">
                             <div class="flex items-start gap-2.5">
-                                <span class="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-warning-500"></span>
+                                <span class="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-warning-500" aria-hidden="true"></span>
                                 <div class="min-w-0 flex-1">
                                     <div class="flex flex-wrap items-start justify-between gap-2">
                                         <div>
-                                            <p class="text-base font-semibold text-warning-900">
+                                            <p class="text-base font-semibold text-warning-900 dark:text-warning-300">
+                                                <span data-system-issue-severity="warning">{{ $severityWarning }}:</span>
                                                 {{ __('procynia.system_status.issues.failed_jobs.title') }}: {{ number_format($failedCount) }}
                                                 &mdash; {{ __('procynia.system_status.statuses.requires_follow_up') }}
                                             </p>
-                                            <p class="mt-1 text-base leading-6 text-warning-800">{{ __('procynia.system_status.issues.failed_jobs.reason') }}</p>
+                                            <p class="mt-1 text-base leading-6 text-warning-800 dark:text-warning-300">{{ __('procynia.system_status.issues.failed_jobs.reason') }}</p>
                                         </div>
                                         <button
                                             @click="showFailedJobs = !showFailedJobs"
-                                            class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-warning-300 bg-white px-2.5 py-1.5 text-base font-medium leading-6 text-warning-800 transition-colors hover:bg-warning-100"
+                                            aria-controls="system-status-failed-jobs"
+                                            aria-expanded="false"
+                                            :aria-expanded="showFailedJobs.toString()"
+                                            class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-warning-300 dark:border-warning-500/30 bg-white dark:bg-gray-900 px-2.5 py-1.5 text-base font-medium leading-6 text-warning-800 dark:text-warning-300 transition-colors hover:bg-warning-100 dark:hover:bg-warning-500/20"
                                             type="button"
                                         >
                                             <span x-show="!showFailedJobs">{{ __('procynia.system_status.fields.show_details') }}</span>
@@ -219,30 +229,30 @@
                                     </div>
 
                                     {{-- Expandable failed jobs table --}}
-                                    <div x-show="showFailedJobs" x-cloak class="mt-3 overflow-hidden rounded-lg border border-warning-200">
+                                    <div id="system-status-failed-jobs" x-show="showFailedJobs" x-cloak class="mt-3 overflow-hidden rounded-lg border border-warning-200 dark:border-warning-500/30">
                                         @if (empty($failedJobs))
-                                            <div class="px-4 py-3 text-base text-warning-800">—</div>
+                                            <div class="px-4 py-3 text-base text-warning-800 dark:text-warning-300">—</div>
                                         @else
-                                            <div class="overflow-x-auto">
-                                            <table class="min-w-full divide-y divide-warning-100 text-base">
-                                                <thead class="bg-warning-100">
+                                            <div class="relative overflow-x-auto" @include('filament.components.scroll-region-attrs', ['labelledby' => 'system-status-table-heading-1'])>
+                                            <table class="min-w-full divide-y divide-warning-100 dark:divide-warning-500/20 text-base">
+                                                <thead class="bg-warning-100 dark:bg-warning-500/20">
                                                     <tr>
-                                                        <th class="px-3 py-2 text-left font-semibold uppercase tracking-[0.12em] text-warning-800">{{ __('procynia.system_status.fields.job_type') }}</th>
-                                                        <th class="hidden px-3 py-2 text-left font-semibold uppercase tracking-[0.12em] text-warning-800 whitespace-nowrap sm:table-cell">Queue</th>
-                                                        <th class="hidden px-3 py-2 text-left font-semibold uppercase tracking-[0.12em] text-warning-800 whitespace-nowrap sm:table-cell">{{ __('procynia.system_status.fields.connection') }}</th>
-                                                        <th class="px-3 py-2 text-left font-semibold uppercase tracking-[0.12em] text-warning-800 whitespace-nowrap">{{ __('procynia.system_status.fields.failed_at') }}</th>
-                                                        <th class="px-3 py-2 text-left font-semibold uppercase tracking-[0.12em] text-warning-800">{{ __('procynia.system_status.fields.error_reason') }}</th>
-                                                        <th class="px-3 py-2 text-left font-semibold uppercase tracking-[0.12em] text-warning-800 whitespace-nowrap">{{ __('procynia.system_status.fields.actions') }}</th>
+                                                        <th scope="col" class="px-3 py-2 text-left font-semibold uppercase tracking-[0.12em] text-warning-800 dark:text-warning-300">{{ __('procynia.system_status.fields.job_type') }}</th>
+                                                        <th scope="col" class="hidden px-3 py-2 text-left font-semibold uppercase tracking-[0.12em] text-warning-800 dark:text-warning-300 whitespace-nowrap sm:table-cell">Queue</th>
+                                                        <th scope="col" class="hidden px-3 py-2 text-left font-semibold uppercase tracking-[0.12em] text-warning-800 dark:text-warning-300 whitespace-nowrap sm:table-cell">{{ __('procynia.system_status.fields.connection') }}</th>
+                                                        <th scope="col" class="px-3 py-2 text-left font-semibold uppercase tracking-[0.12em] text-warning-800 dark:text-warning-300 whitespace-nowrap">{{ __('procynia.system_status.fields.failed_at') }}</th>
+                                                        <th scope="col" class="px-3 py-2 text-left font-semibold uppercase tracking-[0.12em] text-warning-800 dark:text-warning-300">{{ __('procynia.system_status.fields.error_reason') }}</th>
+                                                        <th scope="col" class="px-3 py-2 text-left font-semibold uppercase tracking-[0.12em] text-warning-800 dark:text-warning-300 whitespace-nowrap">{{ __('procynia.system_status.fields.actions') }}</th>
                                                     </tr>
                                                 </thead>
-                                                <tbody class="divide-y divide-warning-100 bg-white">
+                                                <tbody class="divide-y divide-warning-100 dark:divide-warning-500/20 bg-white dark:bg-gray-900">
                                                     @foreach ($failedJobs as $job)
-                                                        <tr class="transition-colors hover:bg-warning-50">
-                                                            <td class="px-3 py-2 font-mono text-gray-800" title="{{ $job['display_name'] }}">{{ \Illuminate\Support\Str::afterLast($job['display_name'], '\\') }}</td>
-                                                            <td class="hidden px-3 py-2 text-gray-600 whitespace-nowrap sm:table-cell">{{ $job['queue'] }}</td>
-                                                            <td class="hidden px-3 py-2 text-gray-600 whitespace-nowrap sm:table-cell">{{ $job['connection'] }}</td>
-                                                            <td class="px-3 py-2 text-gray-600 whitespace-nowrap" title="{{ $job['failed_at'] }}">{{ $job['failed_at_human'] }}</td>
-                                                            <td class="px-3 py-2 text-gray-700 max-w-xs break-words" title="{{ $job['error_first_line'] }}">{{ $job['error_first_line'] }}</td>
+                                                        <tr class="transition-colors hover:bg-warning-50 dark:hover:bg-warning-500/10">
+                                                            <td class="px-3 py-2 font-mono text-gray-800 dark:text-gray-100" title="{{ $job['display_name'] }}">{{ \Illuminate\Support\Str::afterLast($job['display_name'], '\\') }}</td>
+                                                            <td class="hidden px-3 py-2 text-gray-600 dark:text-gray-400 whitespace-nowrap sm:table-cell">{{ $job['queue'] }}</td>
+                                                            <td class="hidden px-3 py-2 text-gray-600 dark:text-gray-400 whitespace-nowrap sm:table-cell">{{ $job['connection'] }}</td>
+                                                            <td class="px-3 py-2 text-gray-600 dark:text-gray-400 whitespace-nowrap" title="{{ $job['failed_at'] }}">{{ $job['failed_at_human'] }}</td>
+                                                            <td class="px-3 py-2 text-gray-700 dark:text-gray-200 max-w-xs break-words" title="{{ $job['error_first_line'] }}">{{ $job['error_first_line'] }}</td>
                                                             <td class="px-3 py-2 whitespace-nowrap">
                                                                 <x-filament::button
                                                                     color="danger"
@@ -261,7 +271,7 @@
                                         @endif
                                     </div>
 
-                                    <p class="mt-2 text-base leading-6 text-warning-800">→ {{ __('procynia.system_status.issues.failed_jobs.next_step') }}</p>
+                                    <p class="mt-2 text-base leading-6 text-warning-800 dark:text-warning-300">→ {{ __('procynia.system_status.issues.failed_jobs.next_step') }}</p>
                                 </div>
                             </div>
                         </div>
@@ -272,14 +282,15 @@
                         @php
                             $isCriticalBackup = in_array($backupWarnKey, ['directory_missing', 'backup_overdue', 'no_scheduler_heartbeat'], true);
                         @endphp
-                        <div class="rounded-xl border {{ $isCriticalBackup ? 'border-danger-200 bg-danger-50' : 'border-warning-200 bg-warning-50' }} p-3">
+                        <div class="rounded-xl border {{ $isCriticalBackup ? 'border-danger-200 dark:border-danger-500/30 bg-danger-50 dark:bg-danger-500/10' : 'border-warning-200 dark:border-warning-500/30 bg-warning-50 dark:bg-warning-500/10' }} p-3">
                             <div class="flex items-start gap-2.5">
-                                <span class="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full {{ $isCriticalBackup ? 'bg-danger-500' : 'bg-warning-500' }}"></span>
+                                <span class="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full {{ $isCriticalBackup ? 'bg-danger-500' : 'bg-warning-500' }}" aria-hidden="true"></span>
                                 <div class="min-w-0 flex-1">
-                                    <p class="text-base font-semibold {{ $isCriticalBackup ? 'text-danger-900' : 'text-warning-900' }}">
+                                    <p class="text-base font-semibold {{ $isCriticalBackup ? 'text-danger-900 dark:text-danger-300' : 'text-warning-900 dark:text-warning-300' }}">
+                                        <span data-system-issue-severity="{{ $isCriticalBackup ? 'critical' : 'warning' }}">{{ $isCriticalBackup ? $severityCritical : $severityWarning }}:</span>
                                         {{ __('procynia.backup_recovery.warnings.'.$backupWarnKey) }}
                                     </p>
-                                    <p class="mt-1.5 text-base leading-6 {{ $isCriticalBackup ? 'text-danger-700' : 'text-warning-800' }}">
+                                    <p class="mt-1.5 text-base leading-6 {{ $isCriticalBackup ? 'text-danger-700 dark:text-danger-400' : 'text-warning-800 dark:text-warning-300' }}">
                                         → {{ __('procynia.backup_recovery.warnings.'.$backupWarnKey.'_step') }}
                                     </p>
                                 </div>
@@ -292,54 +303,90 @@
         </section>
 
         {{-- ③ Scheduler og planlagte oppgaver --}}
-        <section class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm" wire:poll.60s="refreshRuntimeState">
+        {{--
+            WCAG 2.2.2 (A11Y-125): the countdown and progress update every second and the section reloads
+            every 60 s. «Pause» stops both until «Fortsett»; the reload is the same refreshRuntimeState call
+            wire:poll.60s made, skipped while paused or while the tab is hidden (as wire:poll does).
+        --}}
+        <section
+            class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 p-4 shadow-sm"
+            x-data="{
+                paused: false,
+                timer: null,
+                init() {
+                    window.__procyniaSchedulerPaused = false;
+                    this.timer = setInterval(() => {
+                        if (! this.paused && document.visibilityState === 'visible') {
+                            this.$wire.refreshRuntimeState();
+                        }
+                    }, 60000);
+                },
+                destroy() {
+                    clearInterval(this.timer);
+                },
+                toggle() {
+                    this.paused = ! this.paused;
+                    window.__procyniaSchedulerPaused = this.paused;
+                },
+            }"
+            data-scheduler-live-section
+        >
             <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div class="text-base font-semibold uppercase tracking-[0.16em] text-gray-600">
+                <h2 class="text-base font-semibold uppercase tracking-[0.16em] text-gray-600 dark:text-gray-400">
                     {{ __('procynia.system_status.sections.scheduler') }}
-                </div>
+                </h2>
                 <div class="flex flex-wrap items-center gap-3 text-base">
-                    <span class="font-medium text-gray-600">{{ __('procynia.system_status.fields.scheduler_status') }}:</span>
+                    <button
+                        type="button"
+                        x-on:click="toggle()"
+                        data-scheduler-live-toggle
+                        class="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-white/20 bg-white dark:bg-gray-900 px-2.5 py-1 text-base font-medium leading-6 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-white/5"
+                    >
+                        <span x-show="! paused">{{ \App\Filament\Support\AdminText::get('admin_a11y.live_pause', 'Pause automatisk oppdatering') }}</span>
+                        <span x-show="paused" x-cloak>{{ \App\Filament\Support\AdminText::get('admin_a11y.live_resume', 'Fortsett automatisk oppdatering') }}</span>
+                    </button>
+                    <span class="font-medium text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.scheduler_status') }}:</span>
                     <span class="inline-flex items-center rounded-full px-2 py-1 text-base font-medium leading-6 {{ $schedulerHb ? $okBadge : $errBadge }}">
                         {{ $schedulerHb ? __('procynia.system_status.statuses.ok') : __('procynia.system_status.statuses.error') }}
                     </span>
-                    <span class="font-medium text-gray-600">Queue:</span>
+                    <span class="font-medium text-gray-600 dark:text-gray-400">Queue:</span>
                     <span class="inline-flex items-center rounded-full px-2 py-1 text-base font-medium leading-6 {{ $queueHb ? $okBadge : $errBadge }}">
                         {{ $queueHb ? __('procynia.system_status.statuses.ok') : __('procynia.system_status.statuses.error') }}
                     </span>
                 </div>
             </div>
 
-            <div class="mb-2 text-base font-semibold uppercase tracking-[0.12em] text-gray-600">
+            <h3 class="mb-2 text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400">
                 {{ __('procynia.system_status.sections.scheduled_tasks') }}
-            </div>
+            </h3>
 
             @if (empty($scheduler['tasks']))
-                <div class="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-5 py-4 text-base text-gray-600">
+                <div class="rounded-xl border border-dashed border-gray-300 dark:border-white/20 bg-gray-50 dark:bg-white/5 px-5 py-4 text-base text-gray-600 dark:text-gray-400">
                     {{ __('procynia.system_status.statuses.no_tasks') }}
                 </div>
             @else
-                <div class="overflow-hidden rounded-xl border border-gray-200">
-                    <table class="min-w-full divide-y divide-gray-200 text-base">
-                        <thead class="bg-gray-50">
+                <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-white/10">
+                    <table class="min-w-full divide-y divide-gray-200 dark:divide-white/10 text-base">
+                        <thead class="bg-gray-50 dark:bg-white/5">
                             <tr>
-                                <th class="px-3 py-2 text-left text-base font-semibold uppercase tracking-[0.12em] text-gray-600">{{ __('procynia.system_status.fields.task') }}</th>
-                                <th class="px-3 py-2 text-left text-base font-semibold uppercase tracking-[0.12em] text-gray-600 whitespace-nowrap">{{ __('procynia.system_status.fields.frequency') }}</th>
-                                <th class="hidden px-3 py-2 text-left text-base font-semibold uppercase tracking-[0.12em] text-gray-600 whitespace-nowrap sm:table-cell">{{ __('procynia.system_status.fields.timezone') }}</th>
-                                <th class="hidden px-3 py-2 text-left text-base font-semibold uppercase tracking-[0.12em] text-gray-600 whitespace-nowrap sm:table-cell">{{ __('procynia.system_status.fields.mutex') }}</th>
-                                <th class="px-3 py-2 text-left text-base font-semibold uppercase tracking-[0.12em] text-gray-600 whitespace-nowrap">{{ __('procynia.system_status.fields.next_run') }}</th>
-                                <th class="px-3 py-2 text-right text-base font-semibold uppercase tracking-[0.12em] text-gray-600 whitespace-nowrap">{{ __('procynia.system_status.scheduler.progress') }}</th>
+                                <th scope="col" class="px-3 py-2 text-left text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.task') }}</th>
+                                <th scope="col" class="px-3 py-2 text-left text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ __('procynia.system_status.fields.frequency') }}</th>
+                                <th scope="col" class="hidden px-3 py-2 text-left text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400 whitespace-nowrap sm:table-cell">{{ __('procynia.system_status.fields.timezone') }}</th>
+                                <th scope="col" class="hidden px-3 py-2 text-left text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400 whitespace-nowrap sm:table-cell">{{ __('procynia.system_status.fields.mutex') }}</th>
+                                <th scope="col" class="px-3 py-2 text-left text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ __('procynia.system_status.fields.next_run') }}</th>
+                                <th scope="col" class="px-3 py-2 text-right text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ __('procynia.system_status.scheduler.progress') }}</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-gray-100 bg-white">
+                        <tbody class="divide-y divide-gray-100 dark:divide-white/10 bg-white dark:bg-gray-900">
                             @foreach ($scheduler['tasks'] as $task)
                                 @php
                                     $progressRatio = isset($task['progress_ratio']) && $task['progress_ratio'] !== null ? (float) $task['progress_ratio'] : null;
                                     $progressAvailable = $progressRatio !== null && (int) ($task['cycle_duration_seconds'] ?? 0) > 0 && filled($task['previous_run_at_iso'] ?? null) && filled($task['next_run_at_iso'] ?? null);
                                     $strokeOffset = $progressAvailable ? number_format((1 - $progressRatio) * 87.96, 2, '.', '') : '87.96';
-                                    $progressStrokeClass = $progressAvailable ? 'stroke-emerald-500' : 'stroke-gray-300';
+                                    $progressStrokeClass = $progressAvailable ? 'stroke-emerald-500' : 'stroke-gray-300 dark:stroke-gray-700';
                                 @endphp
                                 <tr
-                                    class="transition-colors hover:bg-gray-50"
+                                    class="transition-colors hover:bg-gray-50 dark:hover:bg-white/5"
                                     data-scheduler-task-row
                                     data-scheduler-previous-run-at="{{ $task['previous_run_at_iso'] ?? '' }}"
                                     data-scheduler-next-run-at="{{ $task['next_run_at_iso'] ?? '' }}"
@@ -347,29 +394,37 @@
                                     data-scheduler-progress-ratio="{{ $task['progress_ratio'] ?? '' }}"
                                 >
                                     <td class="px-3 py-2 text-base">
-                                        <div class="font-medium text-gray-900">{{ $task['task_name'] ?: $task['command'] }}</div>
+                                        <div class="font-medium text-gray-900 dark:text-white">{{ $task['task_name'] ?: $task['command'] }}</div>
                                         @if (($task['task_name'] ?? '') !== ($task['command'] ?? ''))
-                                            <code class="mt-1 block rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-600">{{ $task['command'] }}</code>
+                                            <code class="mt-1 block rounded bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 font-mono text-xs text-gray-600 dark:text-gray-400">{{ $task['command'] }}</code>
                                         @endif
                                     </td>
                                     <td class="px-3 py-2 whitespace-nowrap">
-                                        <code class="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-700">{{ $task['expression'] }}</code>
+                                        <code class="rounded bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 font-mono text-xs text-gray-700 dark:text-gray-200">{{ $task['expression'] }}</code>
                                     </td>
-                                    <td class="hidden px-3 py-2 text-base text-gray-600 whitespace-nowrap sm:table-cell">{{ $task['timezone'] }}</td>
-                                    <td class="hidden px-3 py-2 text-base text-gray-600 whitespace-nowrap sm:table-cell">
+                                    <td class="hidden px-3 py-2 text-base text-gray-600 dark:text-gray-400 whitespace-nowrap sm:table-cell">{{ $task['timezone'] }}</td>
+                                    <td class="hidden px-3 py-2 text-base text-gray-600 dark:text-gray-400 whitespace-nowrap sm:table-cell">
                                         {{ $task['has_mutex'] ? __('procynia.system_status.statuses.yes') : __('procynia.system_status.statuses.no') }}
                                     </td>
-                                    <td class="px-3 py-2 text-base text-gray-600 whitespace-nowrap">
+                                    <td class="px-3 py-2 text-base text-gray-600 dark:text-gray-400 whitespace-nowrap">
                                         <span data-scheduler-countdown>{{ $task['next_run_at_human'] !== '' ? $task['next_run_at_human'] : '—' }}</span>
                                     </td>
                                     <td class="px-3 py-2 whitespace-nowrap text-right">
                                         <div class="inline-flex items-center justify-end">
+                                            {{-- A11Y-125: a real progress bar (role, value, name with the task) instead of an unnamed SVG. --}}
                                             <div
                                                 class="relative h-8 w-8"
                                                 title="{{ __('procynia.system_status.scheduler.progress') }}"
+                                                role="progressbar"
+                                                aria-valuemin="0"
+                                                aria-valuemax="100"
+                                                @if ($progressAvailable) aria-valuenow="{{ (int) round($progressRatio * 100) }}" @endif
+                                                aria-valuetext="{{ $progressAvailable ? number_format($progressRatio * 100, 0) . '%' : __('procynia.system_status.scheduler.unavailable') }}"
+                                                aria-label="{{ __('procynia.system_status.scheduler.progress') }}: {{ $task['task_name'] ?: $task['command'] }}"
+                                                data-scheduler-progress
                                             >
-                                                <svg viewBox="0 0 36 36" class="h-8 w-8 -rotate-90">
-                                                    <circle cx="18" cy="18" r="14" fill="none" class="stroke-gray-200" stroke-width="3"></circle>
+                                                <svg viewBox="0 0 36 36" class="h-8 w-8 -rotate-90" aria-hidden="true" focusable="false">
+                                                    <circle cx="18" cy="18" r="14" fill="none" class="stroke-gray-200 dark:stroke-gray-700" stroke-width="3"></circle>
                                                     <circle
                                                         data-scheduler-progress-ring
                                                         cx="18"
@@ -382,9 +437,6 @@
                                                         style="stroke-dasharray: 87.96; stroke-dashoffset: {{ $strokeOffset }};"
                                                     ></circle>
                                                 </svg>
-                                                <span class="sr-only" data-scheduler-progress-label>
-                                                    {{ $progressAvailable ? number_format($progressRatio * 100, 0) . '%' : __('procynia.system_status.scheduler.unavailable') }}
-                                                </span>
                                             </div>
                                         </div>
                                     </td>
@@ -397,67 +449,67 @@
         </section>
 
         {{-- ④ Infrastruktur --}}
-        <section class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <div class="mb-3 text-base font-semibold uppercase tracking-[0.16em] text-gray-600">
+        <section class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 p-4 shadow-sm">
+            <h2 class="mb-3 text-base font-semibold uppercase tracking-[0.16em] text-gray-600 dark:text-gray-400">
                 {{ __('procynia.system_status.sections.infrastructure') }}
-            </div>
+            </h2>
             <div class="grid gap-4 sm:grid-cols-2">
 
                 {{-- Database --}}
-                <div class="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <div class="rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-3">
                     <div class="mb-2 flex items-center justify-between">
-                        <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">{{ __('procynia.system_status.fields.database_connection') }}</dt>
-                        <dd>
+                        <h3 class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.database_connection') }}</h3>
+                        <div>
                             <span class="inline-flex items-center rounded-full px-2 py-1 text-base font-medium leading-6 {{ $dbOk ? $okBadge : $errBadge }}">
                                 {{ $dbOk ? __('procynia.system_status.statuses.connected') : __('procynia.system_status.statuses.not_connected') }}
                             </span>
-                        </dd>
+                        </div>
                     </div>
-                    <dl class="space-y-1 text-base leading-6 text-gray-700">
+                    <dl class="space-y-1 text-base leading-6 text-gray-700 dark:text-gray-200">
                         <div class="flex items-center justify-between gap-4">
-                            <dt class="font-medium text-gray-600">{{ __('procynia.system_status.fields.connection') }}</dt>
-                            <dd class="text-gray-900">{{ $db['connection'] ?? 'n/a' }}</dd>
+                            <dt class="font-medium text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.connection') }}</dt>
+                            <dd class="text-gray-900 dark:text-white">{{ $db['connection'] ?? 'n/a' }}</dd>
                         </div>
                         <div class="flex items-center justify-between gap-4">
-                            <dt class="font-medium text-gray-600">{{ __('procynia.system_status.fields.driver') }}</dt>
-                            <dd class="text-gray-900">{{ $db['driver'] ?? 'n/a' }}</dd>
+                            <dt class="font-medium text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.driver') }}</dt>
+                            <dd class="text-gray-900 dark:text-white">{{ $db['driver'] ?? 'n/a' }}</dd>
                         </div>
                         <div class="flex items-center justify-between gap-4">
-                            <dt class="font-medium text-gray-600">{{ __('procynia.system_status.fields.database') }}</dt>
-                            <dd class="text-gray-900">{{ $db['database'] ?? 'n/a' }}</dd>
+                            <dt class="font-medium text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.database') }}</dt>
+                            <dd class="text-gray-900 dark:text-white">{{ $db['database'] ?? 'n/a' }}</dd>
                         </div>
                     </dl>
                     @if (! empty($db['error_message']))
-                        <p class="mt-2 text-base leading-6 text-danger-700">{{ $db['error_message'] }}</p>
+                        <p class="mt-2 text-base leading-6 text-danger-700 dark:text-danger-400">{{ $db['error_message'] }}</p>
                     @endif
                 </div>
 
                 {{-- Redis --}}
-                <div class="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <div class="rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-3">
                     <div class="mb-2 flex items-center justify-between">
-                        <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">{{ __('procynia.system_status.fields.redis_connection') }}</dt>
-                        <dd>
+                        <h3 class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.redis_connection') }}</h3>
+                        <div>
                             <span class="inline-flex items-center rounded-full px-2 py-1 text-base font-medium leading-6 {{ $redisOk ? $okBadge : $errBadge }}">
                                 {{ $redisOk ? __('procynia.system_status.statuses.connected') : __('procynia.system_status.statuses.not_connected') }}
                             </span>
-                        </dd>
+                        </div>
                     </div>
-                    <dl class="space-y-1 text-base leading-6 text-gray-700">
+                    <dl class="space-y-1 text-base leading-6 text-gray-700 dark:text-gray-200">
                         <div class="flex items-center justify-between gap-4">
-                            <dt class="font-medium text-gray-600">{{ __('procynia.system_status.fields.connection') }}</dt>
-                            <dd class="text-gray-900">{{ $redis['connection'] ?? 'n/a' }}</dd>
+                            <dt class="font-medium text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.connection') }}</dt>
+                            <dd class="text-gray-900 dark:text-white">{{ $redis['connection'] ?? 'n/a' }}</dd>
                         </div>
                         <div class="flex items-center justify-between gap-4">
-                            <dt class="font-medium text-gray-600">{{ __('procynia.system_status.fields.host') }}</dt>
-                            <dd class="text-gray-900">{{ $redis['host'] ?? 'n/a' }}</dd>
+                            <dt class="font-medium text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.host') }}</dt>
+                            <dd class="text-gray-900 dark:text-white">{{ $redis['host'] ?? 'n/a' }}</dd>
                         </div>
                         <div class="flex items-center justify-between gap-4">
-                            <dt class="font-medium text-gray-600">{{ __('procynia.system_status.fields.database') }}</dt>
-                            <dd class="text-gray-900">{{ $redis['database'] ?? 'n/a' }}</dd>
+                            <dt class="font-medium text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.database') }}</dt>
+                            <dd class="text-gray-900 dark:text-white">{{ $redis['database'] ?? 'n/a' }}</dd>
                         </div>
                     </dl>
                     @if (! empty($redis['error_message']))
-                        <p class="mt-2 text-base leading-6 text-danger-700">{{ $redis['error_message'] }}</p>
+                        <p class="mt-2 text-base leading-6 text-danger-700 dark:text-danger-400">{{ $redis['error_message'] }}</p>
                     @endif
                 </div>
 
@@ -517,7 +569,7 @@
                     const cycleSeconds = Number(row.dataset.schedulerCycleDurationSeconds || 0);
                     const countdownEl = row.querySelector('[data-scheduler-countdown]');
                     const progressRing = row.querySelector('[data-scheduler-progress-ring]');
-                    const progressLabel = row.querySelector('[data-scheduler-progress-label]');
+                    const progressBar = row.querySelector('[data-scheduler-progress]');
 
                     const nextRunAt = parseDate(nextRunAttr);
                     let previousRunAt = parseDate(previousRunAttr);
@@ -531,11 +583,12 @@
                         if (progressRing) {
                             progressRing.style.strokeDashoffset = String(circumference);
                             progressRing.classList.remove('stroke-emerald-500');
-                            progressRing.classList.add('stroke-gray-300');
+                            progressRing.classList.add('stroke-gray-300', 'dark:stroke-gray-700');
                         }
 
-                        if (progressLabel) {
-                            progressLabel.textContent = schedulerConfig.unavailable;
+                        if (progressBar) {
+                            progressBar.removeAttribute('aria-valuenow');
+                            progressBar.setAttribute('aria-valuetext', schedulerConfig.unavailable);
                         }
 
                         return;
@@ -569,28 +622,30 @@
                         progressRing.style.strokeDasharray = String(circumference);
                         progressRing.style.strokeDashoffset = String(offset);
                         if (hasProgressData) {
-                            progressRing.classList.remove('stroke-gray-300');
+                            progressRing.classList.remove('stroke-gray-300', 'dark:stroke-gray-700');
                             progressRing.classList.add('stroke-emerald-500');
                         } else {
                             progressRing.classList.remove('stroke-emerald-500');
-                            progressRing.classList.add('stroke-gray-300');
+                            progressRing.classList.add('stroke-gray-300', 'dark:stroke-gray-700');
                         }
-                        progressRing.setAttribute(
-                            'aria-label',
-                            hasProgressData
-                                ? `${schedulerConfig.progress}: ${Math.round(progressRatio * 100)}%`
-                                : schedulerConfig.unavailable,
-                        );
-
-                        if (progressLabel) {
-                            progressLabel.textContent = hasProgressData
-                                ? `${schedulerConfig.progress}: ${Math.round(progressRatio * 100)}%`
-                                : schedulerConfig.unavailable;
+                        if (progressBar) {
+                            if (hasProgressData) {
+                                progressBar.setAttribute('aria-valuenow', String(Math.round(progressRatio * 100)));
+                                progressBar.setAttribute('aria-valuetext', `${Math.round(progressRatio * 100)}%`);
+                            } else {
+                                progressBar.removeAttribute('aria-valuenow');
+                                progressBar.setAttribute('aria-valuetext', schedulerConfig.unavailable);
+                            }
                         }
                     }
                 };
 
                 const tick = () => {
+                    // WCAG 2.2.2: the «Pause» button in the scheduler section stops the countdown and progress.
+                    if (window.__procyniaSchedulerPaused) {
+                        return;
+                    }
+
                     document.querySelectorAll(rowSelector).forEach(updateRow);
                 };
 
@@ -613,54 +668,54 @@
         </script>
 
         {{-- ⑤ Teknisk miljø --}}
-        <section class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <div class="mb-3 text-base font-semibold uppercase tracking-[0.16em] text-gray-600">
+        <section class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 p-4 shadow-sm">
+            <h2 class="mb-3 text-base font-semibold uppercase tracking-[0.16em] text-gray-600 dark:text-gray-400">
                 {{ __('procynia.system_status.sections.technical_environment') }}
-            </div>
-            <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                <div class="rounded-lg bg-gray-50 px-3 py-2">
-                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">{{ __('procynia.system_status.fields.app_env') }}</dt>
-                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900">{{ $snapshot['app_env'] ?? 'n/a' }}</dd>
+            </h2>
+            <dl class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <div class="rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-2">
+                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.app_env') }}</dt>
+                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900 dark:text-white">{{ $snapshot['app_env'] ?? 'n/a' }}</dd>
                 </div>
-                <div class="rounded-lg bg-gray-50 px-3 py-2">
-                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">{{ __('procynia.system_status.fields.app_debug') }}</dt>
-                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900">{{ ($snapshot['app_debug'] ?? false) ? 'Enabled' : 'Disabled' }}</dd>
+                <div class="rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-2">
+                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.app_debug') }}</dt>
+                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900 dark:text-white">{{ ($snapshot['app_debug'] ?? false) ? 'Enabled' : 'Disabled' }}</dd>
                 </div>
-                <div class="rounded-lg bg-gray-50 px-3 py-2">
-                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">{{ __('procynia.system_status.fields.laravel_version') }}</dt>
-                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900">{{ $snapshot['laravel_version'] ?? 'n/a' }}</dd>
+                <div class="rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-2">
+                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.laravel_version') }}</dt>
+                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900 dark:text-white">{{ $snapshot['laravel_version'] ?? 'n/a' }}</dd>
                 </div>
-                <div class="rounded-lg bg-gray-50 px-3 py-2">
-                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">{{ __('procynia.system_status.fields.php_version') }}</dt>
-                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900">{{ $snapshot['php_version'] ?? 'n/a' }}</dd>
+                <div class="rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-2">
+                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.php_version') }}</dt>
+                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900 dark:text-white">{{ $snapshot['php_version'] ?? 'n/a' }}</dd>
                 </div>
-                <div class="rounded-lg bg-gray-50 px-3 py-2">
-                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">{{ __('procynia.system_status.fields.queue_driver') }}</dt>
-                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900">{{ $queue['driver'] ?? 'n/a' }}</dd>
+                <div class="rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-2">
+                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.queue_driver') }}</dt>
+                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900 dark:text-white">{{ $queue['driver'] ?? 'n/a' }}</dd>
                 </div>
-                <div class="rounded-lg bg-gray-50 px-3 py-2">
-                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">{{ __('procynia.system_status.fields.queue_connection') }}</dt>
-                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900">{{ $queue['connection'] ?? 'n/a' }}</dd>
+                <div class="rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-2">
+                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.queue_connection') }}</dt>
+                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900 dark:text-white">{{ $queue['connection'] ?? 'n/a' }}</dd>
                 </div>
-                <div class="rounded-lg bg-gray-50 px-3 py-2">
-                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">{{ __('procynia.system_status.fields.cache_driver') }}</dt>
-                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900">{{ $snapshot['cache_driver'] ?? 'n/a' }}</dd>
+                <div class="rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-2">
+                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.cache_driver') }}</dt>
+                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900 dark:text-white">{{ $snapshot['cache_driver'] ?? 'n/a' }}</dd>
                 </div>
-                <div class="rounded-lg bg-gray-50 px-3 py-2">
-                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">{{ __('procynia.system_status.fields.session_driver') }}</dt>
-                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900">{{ $snapshot['session_driver'] ?? 'n/a' }}</dd>
+                <div class="rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-2">
+                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.session_driver') }}</dt>
+                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900 dark:text-white">{{ $snapshot['session_driver'] ?? 'n/a' }}</dd>
                 </div>
-                <div class="rounded-lg bg-gray-50 px-3 py-2 sm:col-span-2">
-                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">{{ __('procynia.system_status.fields.app_url') }}</dt>
-                    <dd class="mt-0.5 break-all text-base leading-6 font-medium text-gray-900">{{ $snapshot['app_url'] ?? 'n/a' }}</dd>
+                <div class="rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-2 sm:col-span-2">
+                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.app_url') }}</dt>
+                    <dd class="mt-0.5 break-all text-base leading-6 font-medium text-gray-900 dark:text-white">{{ $snapshot['app_url'] ?? 'n/a' }}</dd>
                 </div>
-                <div class="rounded-lg bg-gray-50 px-3 py-2 sm:col-span-2">
-                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">{{ __('procynia.system_status.fields.system_uptime') }}</dt>
-                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900">
+                <div class="rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-2 sm:col-span-2">
+                    <dt class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600 dark:text-gray-400">{{ __('procynia.system_status.fields.system_uptime') }}</dt>
+                    <dd class="mt-0.5 text-base leading-6 font-medium text-gray-900 dark:text-white">
                         {{ ($uptime['available'] ?? false) ? ($uptime['label'] ?? '') : __('procynia.system_status.statuses.not_available') }}
                     </dd>
                 </div>
-            </div>
+            </dl>
         </section>
 
     </div>

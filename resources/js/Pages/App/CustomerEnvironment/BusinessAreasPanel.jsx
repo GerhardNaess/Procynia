@@ -1,6 +1,10 @@
-import { router, useForm } from '@inertiajs/react';
-import { useState } from 'react';
+import { router, useForm, usePage } from '@inertiajs/react';
+import { useRef, useState } from 'react';
 import { PRIMARY_COLOURS, SECONDARY_COLOURS, WARNING_COLOURS } from '../../../Support/actionStyles';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
+import { fieldA11y } from '../../../Support/formFieldA11y';
+import { useFocusFirstError } from '../../../Support/focusManagement';
+import { rowErrorId, trackRowAction, useRowActionError } from '../../../Support/rowActionError';
 
 /**
  * The customer's fagområder, beside their own roles in Kundemiljø → Tilganger.
@@ -12,8 +16,14 @@ import { PRIMARY_COLOURS, SECONDARY_COLOURS, WARNING_COLOURS } from '../../../Su
  */
 export default function BusinessAreasPanel({ areas = [], roles = [], storeUrl, modal: Modal, t = {}, tAll = 'Alle' }) {
     const [areaModal, setAreaModal] = useState({ mode: null, area: null });
+    const { flash = {} } = usePage().props;
+    const rowError = useRowActionError(flash?.error ?? null);
 
     const form = useForm({ name: '', description: '' });
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+    const nameField = fieldA11y({ id: 'business-area-name', hasError: Boolean(form.errors.name) });
+    const descriptionField = fieldA11y({ id: 'business-area-description', hasError: Boolean(form.errors.description) });
 
     const rolesReaching = (area) => roles
         .filter((role) => role.all_business_areas || (role.business_area_ids ?? []).includes(area.id))
@@ -39,7 +49,7 @@ export default function BusinessAreasPanel({ areas = [], roles = [], storeUrl, m
     const submit = (event) => {
         event.preventDefault();
 
-        const options = { preserveScroll: true, onSuccess: () => close() };
+        const options = { preserveScroll: true, onSuccess: () => close(), onError: focusFirstError };
 
         if (areaModal.mode === 'edit' && areaModal.area) {
             form.patch(areaModal.area.update_url, options);
@@ -55,7 +65,8 @@ export default function BusinessAreasPanel({ areas = [], roles = [], storeUrl, m
             return;
         }
 
-        router.delete(area.delete_url, { preserveScroll: true, preserveState: false });
+        // An area still in use is refused; the reason is shown beside its Slett button (A11Y-137).
+        router.delete(area.delete_url, trackRowAction(`area-delete-${area.id}`, { preserveScroll: true, preserveState: false }));
     };
 
     return (
@@ -67,7 +78,7 @@ export default function BusinessAreasPanel({ areas = [], roles = [], storeUrl, m
                         <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">
                             {t.subtitle ?? 'Fagområder brukes til å bestemme hvilke deler av virksomheten en rolle kan se og arbeide med.'}
                         </p>
-                        <p className="mt-2 max-w-3xl text-base leading-6 text-slate-500">
+                        <p className="mt-2 max-w-3xl text-base leading-6 text-slate-600">
                             {t.system_owner_note ?? 'System Owner leser ikke risikoer automatisk.'}
                         </p>
                     </div>
@@ -85,30 +96,34 @@ export default function BusinessAreasPanel({ areas = [], roles = [], storeUrl, m
                         {t.empty ?? 'Ingen fagområder ennå.'}
                     </p>
                 ) : (
-                    <div className="mt-6 overflow-x-auto">
+                    <ScrollRegion label={t.heading ?? 'Fagområder'} className="mt-6">
                         <table className="w-full text-base">
+                            <caption className="sr-only">{t.heading ?? 'Fagområder'}</caption>
                             <thead>
                                 <tr className="border-b border-slate-200">
-                                    <th className="pb-3 pr-6 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                    <th scope="col" className="pb-3 pr-6 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                         {t.col_area ?? 'Fagområde'}
                                     </th>
-                                    <th className="px-4 pb-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                    <th scope="col" className="px-4 pb-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                         {t.col_roles ?? 'Roller'}
                                     </th>
-                                    <th className="pb-3 pl-4" />
+                                    {/* Was an empty <th> (A11Y-108): a column a screen reader announced without a name. */}
+                                    <th scope="col" className="pb-3 pl-4">
+                                        <span className="sr-only">{t.col_actions ?? 'Handlinger'}</span>
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {areas.map((area) => (
                                     <tr key={area.id}>
-                                        <td className="py-4 pr-6 text-slate-900">
+                                        <th scope="row" className="py-4 pr-6 text-left font-normal text-slate-900">
                                             <span className="font-medium">{area.name}</span>
                                             {area.description ? (
-                                                <span className="mt-0.5 block max-w-md text-base font-normal leading-6 text-slate-500">
+                                                <span className="mt-0.5 block max-w-md text-base font-normal leading-6 text-slate-600">
                                                     {area.description}
                                                 </span>
                                             ) : null}
-                                        </td>
+                                        </th>
                                         <td className="px-4 py-4 text-slate-600">
                                             {rolesReaching(area).length > 0 ? rolesReaching(area).join(', ') : '—'}
                                         </td>
@@ -117,6 +132,7 @@ export default function BusinessAreasPanel({ areas = [], roles = [], storeUrl, m
                                                 <button
                                                     type="button"
                                                     onClick={() => openEdit(area)}
+                                                    aria-label={`${t.edit ?? 'Rediger'} ${area.name}`}
                                                     className={`inline-flex min-h-11 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition ${SECONDARY_COLOURS}`}
                                                 >
                                                     {t.edit ?? 'Rediger'}
@@ -124,17 +140,24 @@ export default function BusinessAreasPanel({ areas = [], roles = [], storeUrl, m
                                                 <button
                                                     type="button"
                                                     onClick={() => destroy(area)}
+                                                    aria-label={`${t.delete ?? 'Slett'} ${area.name}`}
+                                                    aria-describedby={rowError(`area-delete-${area.id}`) ? rowErrorId(`area-delete-${area.id}`) : undefined}
                                                     className={`inline-flex min-h-11 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition ${WARNING_COLOURS}`}
                                                 >
                                                     {t.delete ?? 'Slett'}
                                                 </button>
                                             </div>
+                                            {rowError(`area-delete-${area.id}`) ? (
+                                                <p id={rowErrorId(`area-delete-${area.id}`)} className="mt-2 ml-auto max-w-xs text-left text-base text-rose-700">
+                                                    {rowError(`area-delete-${area.id}`)}
+                                                </p>
+                                            ) : null}
                                         </td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
-                    </div>
+                    </ScrollRegion>
                 )}
             </div>
 
@@ -143,33 +166,33 @@ export default function BusinessAreasPanel({ areas = [], roles = [], storeUrl, m
                 title={areaModal.mode === 'edit' ? (t.modal_edit_title ?? 'Rediger fagområde') : (t.modal_create_title ?? 'Nytt fagområde')}
                 onClose={close}
             >
-                <form onSubmit={submit} className="space-y-5">
+                <form ref={formRef} onSubmit={submit} className="space-y-5">
                     <div>
                         <label htmlFor="business-area-name" className="block text-base font-semibold text-slate-900">
                             {t.field_name ?? 'Navn'}
                         </label>
                         <input
-                            id="business-area-name"
+                            {...nameField.controlProps}
                             type="text"
                             value={form.data.name}
                             onChange={(event) => form.setData('name', event.target.value)}
                             placeholder={t.field_name_placeholder ?? ''}
-                            className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-base text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                            className="mt-2 w-full rounded-xl border border-field-border px-4 py-2.5 text-base text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-200"
                         />
-                        {form.errors.name ? <p className="mt-1.5 text-base text-rose-600">{form.errors.name}</p> : null}
+                        {form.errors.name ? <p id={nameField.errorId} className="mt-1.5 text-base text-rose-700">{form.errors.name}</p> : null}
                     </div>
                     <div>
                         <label htmlFor="business-area-description" className="block text-base font-semibold text-slate-900">
                             {t.field_description ?? 'Beskrivelse'}
                         </label>
                         <textarea
-                            id="business-area-description"
+                            {...descriptionField.controlProps}
                             rows={3}
                             value={form.data.description}
                             onChange={(event) => form.setData('description', event.target.value)}
-                            className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-base text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                            className="mt-2 w-full rounded-xl border border-field-border px-4 py-2.5 text-base text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-200"
                         />
-                        {form.errors.description ? <p className="mt-1.5 text-base text-rose-600">{form.errors.description}</p> : null}
+                        {form.errors.description ? <p id={descriptionField.errorId} className="mt-1.5 text-base text-rose-700">{form.errors.description}</p> : null}
                     </div>
                     <div className="flex flex-wrap justify-end gap-3">
                         <button

@@ -106,7 +106,11 @@ describe('the library pages', () => {
         assert.match(index, /framework\.activated \? \(/, 'an activated card offers the register, not activation');
         assert.match(index, /permissions\.can_activate && \(/);
         assert.match(index, /router\.post\(confirming\.activate_url/);
-        assert.match(index, /disabled=\{activating\}/, 'the confirm button is disabled while the request runs');
+        // Unavailable while the request runs, but focusable, so focus stays in the dialog (A11Y-196):
+        // the confirm button says so and its handler refuses a second activation.
+        assert.match(index, /ref=\{confirmRef\} type="button" onClick=\{activate\} aria-disabled=\{activating \|\| undefined\}/, 'the confirm button is unavailable while the request runs');
+        assert.match(index, /if \(! confirming \|\| activating\) \{\s*return;/, 'a second activation is refused while one runs');
+        assert.doesNotMatch(index, /[^-]disabled=\{activating\}/);
         assert.doesNotMatch(index, /window\.confirm/);
     });
 

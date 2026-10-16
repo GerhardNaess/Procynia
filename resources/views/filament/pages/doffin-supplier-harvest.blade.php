@@ -1,11 +1,11 @@
 <x-filament-panels::page>
     <div class="mx-auto max-w-3xl space-y-6">
-        <section class="rounded-3xl border border-gray-200 bg-white p-8 shadow-sm">
+        <section class="rounded-3xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 p-8 shadow-sm">
             <div class="space-y-3">
-                <p class="text-base font-medium text-gray-600">Doffin supplier harvest</p>
+                <p class="text-base font-medium text-gray-600 dark:text-gray-400">Doffin supplier harvest</p>
                 <div class="space-y-2">
-                    <h2 class="text-3xl font-semibold tracking-tight text-gray-950">Start a supplier harvest</h2>
-                    <p class="max-w-2xl text-base leading-6 text-gray-600">
+                    <h2 class="text-3xl font-semibold tracking-tight text-gray-950 dark:text-white">Start a supplier harvest</h2>
+                    <p class="max-w-2xl text-base leading-6 text-gray-600 dark:text-gray-400">
                         Start a supplier harvest and follow progress on the run page.
                     </p>
                 </div>
@@ -33,7 +33,7 @@
                         </span>
                     </x-filament::button>
 
-                    <p class="text-base leading-6 text-gray-600">
+                    <p class="text-base leading-6 text-gray-600 dark:text-gray-400">
                         The run page opens immediately after the harvest is queued.
                     </p>
                 </div>
@@ -41,7 +41,7 @@
         </section>
 
         @if ($lastError)
-            <div class="rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-base leading-6 text-danger-700">
+            <div class="rounded-2xl border border-danger-200 dark:border-danger-500/30 bg-danger-50 dark:bg-danger-500/10 px-4 py-3 text-base leading-6 text-danger-700 dark:text-danger-400">
                 {{ $lastError }}
             </div>
         @endif

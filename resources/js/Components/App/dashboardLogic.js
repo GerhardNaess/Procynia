@@ -123,3 +123,24 @@ export function winRateMetric(bidQuality = {}) {
 
     return metric;
 }
+
+/**
+ * What a calendar day is called to assistive technology: the full date, the number of deadlines and
+ * whether it is today. The cell itself only shows «14» and a count badge (A11Y-023).
+ */
+export function calendarDayLabel(day, count, locale, texts = {}) {
+    const date = new Intl.DateTimeFormat(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(day.date);
+    const parts = [date];
+
+    if (count > 0) {
+        parts.push(count === 1
+            ? (texts.deadline_count_one ?? '1 frist')
+            : (texts.deadline_count_many ?? ':count frister').replace(':count', String(count)));
+    }
+
+    if (day.isToday) {
+        parts.push(texts.today ?? 'i dag');
+    }
+
+    return parts.join(', ');
+}

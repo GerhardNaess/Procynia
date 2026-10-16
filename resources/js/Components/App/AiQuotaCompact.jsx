@@ -21,7 +21,8 @@ export default function AiQuotaCompact({ quota, texts = {}, billingUrl = null, c
         >
             <StatusBadge tone={statusTone(quota)}>{statusLabel(quota, texts)}</StatusBadge>
             <span>{compactLabel(quota, texts)}</span>
-            {showRemaining && <span className="text-slate-500">{remainingLabel(quota, texts)}</span>}
+            {/* slate-600: the caller decides the background, and on a tinted one slate-500 is under 4.5:1 (A11Y-016). */}
+            {showRemaining && <span className="text-slate-600">{remainingLabel(quota, texts)}</span>}
             {billingUrl && (
                 <a href={billingUrl} className="font-medium text-blue-700 underline hover:text-blue-800">
                     {texts.notifications?.action_billing ?? 'Se Abonnement'}

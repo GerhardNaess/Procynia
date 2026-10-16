@@ -39,15 +39,16 @@ test('a new intern ansvarlig is told in the bell and finds the supplier under Mi
     const supplierPath = new URL(page.url()).pathname;
 
     // The manager made the choice and is told nothing.
-    await expect(page.getByRole('button', { name: 'Åpne varsler' })).not.toContainText('1');
+    await expect(page.getByRole('button', { name: /^Varsler/ })).not.toContainText('1');
 
     await page.context().clearCookies();
     await loginAs(page, colleagueEmail, SUPPLIER_E2E_PASSWORD);
 
     // The bell: one unread message, from Leverandører, naming the supplier.
     await page.goto('/app/info-center');
-    await page.getByRole('button', { name: 'Åpne varsler' }).click();
-    const message = page.getByRole('button', { name: 'Åpne varsel: Ansvar for leverandør' });
+    // WCAG Fase 2 (A11Y-021): «Varsler, N uleste», and the card is named by its own content.
+    await page.getByRole('button', { name: /^Varsler/ }).click();
+    const message = page.getByRole('region', { name: 'Varsler' }).getByRole('button', { name: /^Ansvar for leverandør/ });
     await expect(message).toBeVisible();
     await expect(message).toContainText(`Du er tildelt ansvar for leverandøren ${name}.`);
     await expect(message).toContainText('Leverandører');

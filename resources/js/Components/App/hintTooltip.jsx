@@ -4,6 +4,11 @@ function classNames(...values) {
     return values.filter(Boolean).join(' ');
 }
 
+// A press that lands within this long after the hint opened is the same gesture that opened it.
+// On a touch screen one tap fires mouseenter (open) and then click (toggle): without this the tap
+// opened and closed the hint in one go, and it could never be read (A11Y-106, 1.4.13).
+export const OPENED_BY_SAME_PRESS_MS = 400;
+
 const ALIGN_BASE_TRANSFORM = {
     left: '',
     right: '',
@@ -30,10 +35,19 @@ export function useHintTooltip(align = 'right') {
     const containerRef = useRef(null);
     const tooltipRef = useRef(null);
     const triggerRef = useRef(null);
+    const openedAtRef = useRef(0);
 
     const close = useCallback(() => setIsOpen(false), []);
-    const open = useCallback(() => setIsOpen(true), []);
-    const toggle = useCallback(() => setIsOpen((current) => ! current), []);
+    const open = useCallback(() => setIsOpen((current) => {
+        if (! current) {
+            openedAtRef.current = Date.now();
+        }
+
+        return true;
+    }), []);
+    const toggle = useCallback(() => setIsOpen((current) => (
+        current && Date.now() - openedAtRef.current < OPENED_BY_SAME_PRESS_MS ? true : ! current
+    )), []);
 
     // Escape closes and hands focus back, so a keyboard user is never left inside a hint.
     useEffect(() => {
@@ -118,15 +132,22 @@ export function useHintTooltip(align = 'right') {
  * The panel itself. 16px at leading-7 in slate-700 is the readable-text standard this app holds
  * tooltips to, and an e2e test measures it — it is the one place a short explanation is easy to
  * set too small.
+ *
+ * A <span> shown as a block, not a <div>: hints sit inside headings, paragraphs and labels, where
+ * only phrasing content is valid HTML, and a <div> there is repaired unpredictably by parsers and
+ * assistive technology. Rich content passed as children must be phrasing content too.
+ *
+ * The ::before strip covers the 8 px gap between the trigger and the panel, so moving the pointer
+ * from the «i» onto the text never leaves the hint and closes it on the way (1.4.13, A11Y-025).
  */
 export function HintTooltipPanel({ id, panelRef, size = 'md', variant = 'light', align = 'right', children }) {
     return (
-        <div
+        <span
             ref={panelRef}
             id={id}
             role="tooltip"
             className={classNames(
-                'absolute top-full z-30 mt-2 max-w-[calc(100vw-2rem)] rounded-2xl border p-4 font-sans text-base font-normal leading-7 tracking-normal normal-case shadow-[0_20px_40px_rgba(15,23,42,0.12)]',
+                "absolute top-full z-30 mt-2 block max-w-[calc(100vw-2rem)] rounded-2xl border p-4 text-left font-sans text-base font-normal leading-7 tracking-normal normal-case shadow-[0_20px_40px_rgba(15,23,42,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-['']",
                 size === 'sm' ? 'w-64' : 'w-72',
                 variant === 'dark'
                     ? 'border-slate-800 bg-slate-950 text-white'
@@ -135,6 +156,6 @@ export function HintTooltipPanel({ id, panelRef, size = 'md', variant = 'light',
             )}
         >
             {children}
-        </div>
+        </span>
     );
 }

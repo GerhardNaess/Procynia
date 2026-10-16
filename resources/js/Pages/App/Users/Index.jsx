@@ -2,6 +2,8 @@ import { Link, router, usePage } from '@inertiajs/react';
 import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
+import { rowErrorId, trackRowAction, useRowActionError } from '../../../Support/rowActionError';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import InfoHint from '../../../Components/App/InfoHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
@@ -19,8 +21,10 @@ function formatDate(value, locale) {
 }
 
 export default function UsersIndex({ users }) {
-    const { locale, translations = {} } = usePage().props;
+    const { locale, translations = {}, flash = {} } = usePage().props;
+    const rowError = useRowActionError(flash?.error ?? null);
     const tu = translations?.user ?? {};
+    const a11y = translations?.a11y ?? {};
     const [togglingUserId, setTogglingUserId] = useState(null);
 
     const toggleActive = (user) => {
@@ -34,10 +38,11 @@ export default function UsersIndex({ users }) {
 
         setTogglingUserId(user.id);
 
-        router.patch(user.toggle_active_url, {}, {
+        // A refusal is shown beside the row's button, not only in the banner at the top (A11Y-137).
+        router.patch(user.toggle_active_url, {}, trackRowAction(`user-toggle-${user.id}`, {
             preserveScroll: true,
             onFinish: () => setTogglingUserId(null),
-        });
+        }));
     };
 
     return (
@@ -140,10 +145,11 @@ export default function UsersIndex({ users }) {
                                                 {user.is_active ? 'Aktiv' : 'Inaktiv'}
                                             </span>
                                         </div>
-                                        <div className="text-xs text-slate-400">Opprettet {formatDate(user.created_at, locale)}</div>
+                                        <div className="text-xs text-slate-600">Opprettet {formatDate(user.created_at, locale)}</div>
                                         <div className="flex flex-col gap-2 sm:flex-row">
                                             <Link
                                                 href={user.edit_url}
+                                                aria-label={`Rediger ${user.name}`}
                                                 className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                             >
                                                 Rediger
@@ -152,6 +158,8 @@ export default function UsersIndex({ users }) {
                                                 type="button"
                                                 disabled={!user.can_toggle_active || togglingUserId === user.id}
                                                 onClick={() => toggleActive(user)}
+                                                                                                aria-describedby={rowError(`user-toggle-${user.id}`) ? rowErrorId(`user-toggle-${user.id}-card`) : undefined}
+aria-label={user.is_active && user.is_self ? undefined : `${user.is_active ? 'Deaktiver' : 'Aktiver'} ${user.name}`}
                                                 className={
                                                     user.can_toggle_active
                                                         ? user.is_active
@@ -171,35 +179,39 @@ export default function UsersIndex({ users }) {
                                                         : 'Aktiver'}
                                             </button>
                                         </div>
+                                        {rowError(`user-toggle-${user.id}`) ? (
+                                            <p id={rowErrorId(`user-toggle-${user.id}-card`)} className="text-sm text-rose-700">{rowError(`user-toggle-${user.id}`)}</p>
+                                        ) : null}
                                     </div>
                                 </article>
                             ))}
                         </section>
 
                         <section className="hidden overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:block">
-                            <div className="overflow-x-auto">
+                            <ScrollRegion label={a11y.table_users ?? 'Brukere'} edgeRoom={false}>
                                 <table className="min-w-full divide-y divide-slate-200">
+                                    <caption className="sr-only">{a11y.table_users ?? 'Brukere'}</caption>
                                     <thead className="bg-slate-50">
-                                        <tr className="text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                            <th className="px-6 py-4">Navn</th>
-                                            <th className="px-6 py-4">E-post</th>
-                                            <th className="px-6 py-4">Avdeling</th>
-                                            <th className="px-6 py-4">
+                                        <tr className="text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                            <th scope="col" className="px-6 py-4">Navn</th>
+                                            <th scope="col" className="px-6 py-4">E-post</th>
+                                            <th scope="col" className="px-6 py-4">Avdeling</th>
+                                            <th scope="col" className="px-6 py-4">
                                                 <span className="inline-flex items-center gap-1.5">
                                                     Rolle
                                                     <InfoHint size="sm" align="left" label="Vis forklaring for Rolle" text={tu.hint_role_column} />
                                                 </span>
                                             </th>
-                                            <th className="px-6 py-4">{tu.col_customer_roles ?? 'Egne roller'}</th>
-                                            <th className="px-6 py-4">Status</th>
-                                            <th className="px-6 py-4">Opprettet</th>
-                                            <th className="px-6 py-4">Handlinger</th>
+                                            <th scope="col" className="px-6 py-4">{tu.col_customer_roles ?? 'Egne roller'}</th>
+                                            <th scope="col" className="px-6 py-4">Status</th>
+                                            <th scope="col" className="px-6 py-4">Opprettet</th>
+                                            <th scope="col" className="px-6 py-4">Handlinger</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {users.map((user) => (
                                             <tr key={user.id} className="text-sm text-slate-700">
-                                                <td className="px-6 py-4 font-medium text-slate-950">{user.name}</td>
+                                                <th scope="row" className="px-6 py-4 text-left font-medium text-slate-950">{user.name}</th>
                                                 <td className="px-6 py-4">{user.email}</td>
                                                 <td className="px-6 py-4 text-slate-500">{user.department_name ?? '—'}</td>
                                                 <td className="px-6 py-4">
@@ -207,7 +219,7 @@ export default function UsersIndex({ users }) {
                                                         <div className="flex items-center gap-1.5">
                                                             <span>{user.bid_role}</span>
                                                             {user.is_qa ? (
-                                                                <span className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-[11px] font-semibold text-teal-700">
+                                                                <span className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-xs font-semibold text-teal-700">
                                                                     QA
                                                                 </span>
                                                             ) : null}
@@ -227,8 +239,8 @@ export default function UsersIndex({ users }) {
                                                                     key={role.id}
                                                                     className={
                                                                         role.is_active
-                                                                            ? 'inline-flex rounded-full bg-violet-100 px-2.5 py-0.5 text-[11px] font-semibold text-violet-700'
-                                                                            : 'inline-flex rounded-full bg-slate-200 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600'
+                                                                            ? 'inline-flex rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-semibold text-violet-700'
+                                                                            : 'inline-flex rounded-full bg-slate-200 px-2.5 py-0.5 text-xs font-semibold text-slate-600'
                                                                     }
                                                                 >
                                                                     {role.name}
@@ -253,6 +265,7 @@ export default function UsersIndex({ users }) {
                                                     <div className="flex flex-wrap gap-2">
                                                         <Link
                                                             href={user.edit_url}
+                                                            aria-label={`Rediger ${user.name}`}
                                                             className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                         >
                                                             Rediger
@@ -261,6 +274,8 @@ export default function UsersIndex({ users }) {
                                                             type="button"
                                                             disabled={!user.can_toggle_active || togglingUserId === user.id}
                                                             onClick={() => toggleActive(user)}
+                                                                                                                        aria-describedby={rowError(`user-toggle-${user.id}`) ? rowErrorId(`user-toggle-${user.id}-table`) : undefined}
+aria-label={user.is_active && user.is_self ? undefined : `${user.is_active ? 'Deaktiver' : 'Aktiver'} ${user.name}`}
                                                             className={
                                                                 user.can_toggle_active
                                                                     ? user.is_active
@@ -280,12 +295,15 @@ export default function UsersIndex({ users }) {
                                                                     : 'Aktiver'}
                                                         </button>
                                                     </div>
+                                                    {rowError(`user-toggle-${user.id}`) ? (
+                                                        <p id={rowErrorId(`user-toggle-${user.id}-table`)} className="mt-2 max-w-xs text-sm text-rose-700">{rowError(`user-toggle-${user.id}`)}</p>
+                                                    ) : null}
                                                 </td>
                                             </tr>
                                         ))}
                                     </tbody>
                                 </table>
-                            </div>
+                            </ScrollRegion>
                         </section>
                     </>
                 )}

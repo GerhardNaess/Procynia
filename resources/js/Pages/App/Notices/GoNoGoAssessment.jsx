@@ -1,7 +1,9 @@
 import { router } from '@inertiajs/react';
 import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import PageHelpPanel from '../../../Components/App/PageHelpPanel';
+import { useTranslations } from '../../../Support/useTranslations';
+import { useTransitionAnnouncement } from '../../../Support/statusAnnouncement';
 
 function ChevronDown({ className = '' }) {
     return (
@@ -15,6 +17,14 @@ function ChevronUp({ className = '' }) {
     return (
         <svg viewBox="0 0 20 20" fill="none" className={className} aria-hidden="true">
             <path d="m5 12.5 5-5 5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+    );
+}
+
+function CheckIcon({ className = '' }) {
+    return (
+        <svg viewBox="0 0 20 20" fill="none" className={className} aria-hidden="true">
+            <path d="m5 10.5 3.2 3.2L15 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
     );
 }
@@ -109,7 +119,20 @@ function WeightBadge({ weight, isReversed }) {
     );
 }
 
+/**
+ * The Go/No-go assessment on a case: one Lav/Middels/Høy rating and an optional reasoning per
+ * criterion, a preliminary verdict once every criterion is rated, and a save.
+ *
+ * Accessibility (A11Y-003): each criterion's three ratings are a named group (the criterion's title,
+ * described by its short description) of toggle buttons with aria-pressed — a rating can be cleared by
+ * pressing it again, which a radio group cannot express. The chosen rating carries a check mark as
+ * well as its colour. The reasoning field is named after its criterion, and each «?» says which
+ * criterion it explains and returns focus to itself when the help closes. When the verdict appears or
+ * changes it is spoken once; a rejected save says so beside the button. «Lagre vurdering» stays
+ * focusable while it saves and once saved (aria-disabled), so focus is not dropped to <body>.
+ */
 export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
+    const a11y = useTranslations().a11y ?? {};
     // Initialise local answer state from persisted assessment (if any)
     const [answers, setAnswers] = useState(() => {
         const map = {};
@@ -124,6 +147,8 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
     const [isSaving, setIsSaving]         = useState(false);
     const [lastSavedAt, setLastSavedAt]   = useState(assessment?.updated_at ?? null);
     const [hasPendingChanges, setHasPendingChanges] = useState(false);
+    const [saveFailed, setSaveFailed] = useState(false);
+    const helpTriggerRef = useRef(null);
 
     const criteria = template?.criteria ?? [];
     const totalPoints  = criteria.length;
@@ -132,6 +157,15 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
     const verdict      = computeVerdict(criteria, answers);
     const summary      = generateSummary(criteria, answers);
     const activePoint  = activeHelpKey !== null ? criteria.find(c => c.id === activeHelpKey) : null;
+    const saveUnavailable = isSaving || !hasPendingChanges;
+
+    // Spoken when the verdict first appears, changes, or goes away — not on load, and not on every
+    // rating that leaves it as it was.
+    useTransitionAnnouncement(verdict?.level ?? 'none', (_previous, next) => (
+        next === 'none' || !verdict
+            ? null
+            : { message: (a11y.gonogo_verdict ?? 'Foreløpig beslutningsgrunnlag: :verdict').replace(':verdict', verdict.label) }
+    ));
 
     function handleRatingClick(criterionId, value) {
         setAnswers(prev => {
@@ -156,8 +190,9 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
     }
 
     function handleSave() {
-        if (!saveUrl || isSaving) return;
+        if (!saveUrl || saveUnavailable) return;
         setIsSaving(true);
+        setSaveFailed(false);
         router.patch(saveUrl, {
             template_id: template.id,
             answers: criteria.map(c => ({
@@ -173,7 +208,10 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                 setLastSavedAt(new Date().toISOString());
                 setHasPendingChanges(false);
             },
-            onError: () => setIsSaving(false),
+            onError: () => {
+                setIsSaving(false);
+                setSaveFailed(true);
+            },
         });
     }
 
@@ -184,12 +222,12 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
 
     return (
         <>
-            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+            <section aria-labelledby="go-no-go-assessment-title" className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
 
                 {/* ── Header ────────────────────────────────────── */}
                 <div className="flex items-center justify-between gap-4">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <h2 className="text-xl font-semibold tracking-tight text-slate-950">Beslutningsvurdering</h2>
+                        <h2 id="go-no-go-assessment-title" className="text-xl font-semibold tracking-tight text-slate-950">Beslutningsvurdering</h2>
                         <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-base font-medium leading-6 text-slate-600">
                             {ratedCount} av {totalPoints} vurdert
                         </span>
@@ -209,6 +247,7 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                         type="button"
                         onClick={() => setIsCollapsed(v => !v)}
                         aria-expanded={!isCollapsed}
+                        aria-controls="go-no-go-assessment-body"
                         className="shrink-0 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-700"
                     >
                         {isCollapsed ? <><ChevronDown className="h-3.5 w-3.5" />Vis</> : <><ChevronUp className="h-3.5 w-3.5" />Skjul</>}
@@ -224,7 +263,7 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
 
                 {/* ── Expanded ──────────────────────────────────── */}
                 {!isCollapsed && (
-                    <>
+                    <div id="go-no-go-assessment-body">
                         <p className="mt-1 text-base leading-6 text-slate-600">
                             Vurder saken på tvers av {totalPoints} dimensjoner som grunnlag for Go/No-go-beslutningen.
                             {template?.name && <span className="ml-1 text-slate-600">· {template.name}</span>}
@@ -236,7 +275,7 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                                 <span className="text-base text-slate-600">{ratedCount} av {totalPoints} vurderinger fullført</span>
                                 <span className="text-base text-slate-600">{Math.round((ratedCount / Math.max(totalPoints, 1)) * 100)}%</span>
                             </div>
-                            <div className="h-1 w-full overflow-hidden rounded-full bg-slate-100">
+                            <div aria-hidden="true" className="h-1 w-full overflow-hidden rounded-full bg-slate-100">
                                 <div
                                     className="h-full rounded-full bg-violet-400 transition-all duration-300"
                                     style={{ width: `${(ratedCount / Math.max(totalPoints, 1)) * 100}%` }}
@@ -249,11 +288,12 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                             {allRated && verdict ? (
                                 <div className={`rounded-2xl border px-4 py-3.5 ${verdict.className}`}>
                                     <div className="flex items-center gap-2 text-base font-semibold">
-                                        <span className={`h-2 w-2 shrink-0 rounded-full ${verdict.dot}`} />
+                                        <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${verdict.dot}`} />
                                         <span>Foreløpig beslutningsgrunnlag: {verdict.label}</span>
                                     </div>
-                                    {summary && <p className="mt-1.5 text-base leading-6 opacity-90">{summary}</p>}
-                                    <p className="mt-1 text-base leading-6 opacity-75">Beslutningen tas av deg – dette er et strukturert grunnlag.</p>
+                                    {/* Full-strength text: at opacity-75 the verdict's own colour fell below 4.5:1 on its tint. */}
+                                    {summary && <p className="mt-1.5 text-base leading-6">{summary}</p>}
+                                    <p className="mt-1 text-base leading-6">Beslutningen tas av deg – dette er et strukturert grunnlag.</p>
                                 </div>
                             ) : (
                                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-600">
@@ -266,39 +306,51 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                         <div className="mt-4 space-y-2">
                             {criteria.map((criterion, index) => {
                                 const a = answers[criterion.id] ?? { selected_value: null, comment: '' };
+                                const titleId = `go-no-go-criterion-${criterion.id}-title`;
+                                const descriptionId = `go-no-go-criterion-${criterion.id}-description`;
                                 return (
                                     <div key={criterion.id} className="rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3">
                                         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
                                             <div className="min-w-0 flex-1">
                                                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                                    <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">{index + 1}</span>
-                                                    <span className="text-base font-semibold text-slate-900">{criterion.title}</span>
+                                                    <span aria-hidden="true" className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">{index + 1}</span>
+                                                    <span id={titleId} className="text-base font-semibold text-slate-900">{criterion.title}</span>
                                                     <WeightBadge weight={criterion.weight} isReversed={criterion.is_score_reversed} />
                                                 </div>
-                                                <p className="mt-0.5 text-base leading-6 text-slate-600">{criterion.short_description}</p>
+                                                <p id={descriptionId} className="mt-0.5 text-base leading-6 text-slate-600">{criterion.short_description}</p>
                                             </div>
 
-                                            <div className="flex shrink-0 flex-wrap items-center gap-1">
-                                                {RATING_VALUES.map(rv => {
-                                                    const semantic   = ratingSemantic(rv, criterion.is_score_reversed);
-                                                    const isSelected = a.selected_value === rv;
-                                                    return (
-                                                        <button
-                                                            key={`${criterion.id}-${rv}`}
-                                                            type="button"
-                                                            onClick={() => handleRatingClick(criterion.id, rv)}
-                                                            className={`inline-flex h-9 items-center rounded-full border px-3 text-base font-semibold leading-6 transition ${isSelected ? ACTIVE_COLOR[semantic] : INACTIVE_COLOR[semantic]}`}
-                                                        >
-                                                            {RATING_LABELS[rv]}
-                                                        </button>
-                                                    );
-                                                })}
+                                            {/* Not shrink-0: at 320 px the three ratings and «?» are wider than the
+                                                card, and a box that cannot shrink cannot wrap — the page scrolled
+                                                sideways (1.4.10). */}
+                                            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1">
+                                                <div role="group" aria-labelledby={titleId} aria-describedby={criterion.short_description ? descriptionId : undefined} className="flex flex-wrap items-center gap-1">
+                                                    {RATING_VALUES.map(rv => {
+                                                        const semantic   = ratingSemantic(rv, criterion.is_score_reversed);
+                                                        const isSelected = a.selected_value === rv;
+                                                        return (
+                                                            <button
+                                                                key={`${criterion.id}-${rv}`}
+                                                                type="button"
+                                                                aria-pressed={isSelected}
+                                                                onClick={() => handleRatingClick(criterion.id, rv)}
+                                                                className={`inline-flex h-9 items-center gap-1 rounded-full border px-3 text-base font-semibold leading-6 transition ${isSelected ? ACTIVE_COLOR[semantic] : INACTIVE_COLOR[semantic]}`}
+                                                            >
+                                                                {isSelected ? <CheckIcon className="h-4 w-4 shrink-0" /> : null}
+                                                                {RATING_LABELS[rv]}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
                                                 <button
                                                     key={`${criterion.id}-help`}
                                                     type="button"
-                                                    onClick={() => setActiveHelpKey(criterion.id)}
+                                                    onClick={(event) => {
+                                                        helpTriggerRef.current = event.currentTarget;
+                                                        setActiveHelpKey(criterion.id);
+                                                    }}
                                                     title="Vurderingshjelp"
-                                                    aria-label="Vurderingshjelp"
+                                                    aria-label={(a11y.gonogo_help ?? 'Vurderingshjelp for :criterion').replace(':criterion', criterion.title)}
                                                     className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-base font-bold text-slate-600 transition hover:border-violet-200 hover:text-violet-600"
                                                 >
                                                     ?
@@ -312,8 +364,9 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                                             value={a.comment}
                                             onChange={e => handleCommentChange(criterion.id, e.target.value)}
                                             rows={1}
+                                            aria-label={(a11y.gonogo_comment ?? 'Begrunnelse for :criterion (valgfritt)').replace(':criterion', criterion.title)}
                                             placeholder="Begrunnelse (valgfritt)…"
-                                            className="mt-2 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-base text-slate-900 placeholder:text-slate-500 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                            className="mt-2 w-full resize-none rounded-xl border border-field-border bg-white px-3 py-1.5 text-base text-slate-900 placeholder:text-slate-500 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                                         />
                                     </div>
                                 );
@@ -322,27 +375,35 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
 
                         {/* Save bar */}
                         {saveUrl && (
-                            <div className="mt-4 flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                <span className="text-base text-slate-600">
-                                    {hasPendingChanges
-                                        ? 'Ulagrede endringer'
-                                        : lastSavedAt
-                                            ? `Sist lagret ${formatSavedAt(lastSavedAt)}`
-                                            : 'Ikke lagret ennå'}
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={handleSave}
-                                    disabled={isSaving || !hasPendingChanges}
-                                    className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-base font-semibold shadow-sm disabled:cursor-default disabled:opacity-40 ${PRIMARY_COLOURS}`}
-                                >
-                                    {isSaving ? 'Lagrer…' : 'Lagre vurdering'}
-                                </button>
+                            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                <div className="flex flex-wrap items-center justify-between gap-4">
+                                    <span id="go-no-go-save-state" className="text-base text-slate-600">
+                                        {hasPendingChanges
+                                            ? 'Ulagrede endringer'
+                                            : lastSavedAt
+                                                ? `Sist lagret ${formatSavedAt(lastSavedAt)}`
+                                                : 'Ikke lagret ennå'}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={handleSave}
+                                        aria-disabled={saveUnavailable || undefined}
+                                        aria-describedby={saveFailed ? 'go-no-go-save-state go-no-go-save-error' : 'go-no-go-save-state'}
+                                        className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-base font-semibold shadow-sm aria-disabled:cursor-default aria-disabled:opacity-40 ${PRIMARY_COLOURS}`}
+                                    >
+                                        {isSaving ? 'Lagrer…' : 'Lagre vurdering'}
+                                    </button>
+                                </div>
+                                {saveFailed ? (
+                                    <p id="go-no-go-save-error" role="alert" className="mt-2 text-base text-rose-700">
+                                        {a11y.gonogo_save_failed ?? 'Vurderingen ble ikke lagret. Prøv igjen.'}
+                                    </p>
+                                ) : null}
                             </div>
                         )}
-                    </>
+                    </div>
                 )}
-            </div>
+            </section>
 
             {activePoint && (
                 <PageHelpPanel
@@ -352,6 +413,7 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                     sections={criterionHelpSections(activePoint)}
                     isOpen={activeHelpKey !== null}
                     onClose={() => setActiveHelpKey(null)}
+                    returnFocusRef={helpTriggerRef}
                 />
             )}
         </>

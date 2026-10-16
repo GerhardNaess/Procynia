@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { FOCUSABLE_SELECTOR, focusableWithin } from '../../Support/focusManagement';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -36,6 +37,13 @@ function classNames(...values) {
  * @param {string} [doneLabel]
  * @param {string} [selectedCountTemplate] - e.g. ":count dokumenter valgt" — used when 2+ are selected.
  * @param {number} [searchThreshold=8] - Show the internal search box only above this many options.
+ *
+ * Keyboard (WCAG 2.1.1, 2.4.3; docs/wcag-accessibility-plan.md A11Y-026). The panel is portaled to
+ * <body>, so in the DOM it comes after everything else on the page: Tab from the trigger used to go
+ * to the next control after the trigger and never reach the checkboxes. Opening therefore moves focus
+ * into the panel (its search field, or «Alle …»), and the panel keeps the Tab order as if it sat right
+ * after the trigger — Tab past its last control and Shift+Tab before its first close it and continue
+ * from the trigger. Escape and «Ferdig» return focus to the trigger, as before.
  */
 export default function MultiSelectFilterDropdown({
     label,
@@ -95,8 +103,46 @@ export default function MultiSelectFilterDropdown({
     const close = useCallback(() => {
         onOpenChange(false);
         setSearchQuery('');
-        buttonRef.current?.focus();
+        // preventScroll: giving focus back must not move the page. With the sticky header's
+        // scroll-padding (WCAG Fase 2) a trigger near the top would otherwise scroll the page between
+        // mousedown and mouseup when an outside click closes the panel, and that click would miss.
+        buttonRef.current?.focus({ preventScroll: true });
     }, [onOpenChange]);
+
+    // Tab off either end of the panel: close it and carry on from where the trigger sits in the page,
+    // forwards to the control after it, backwards to the trigger itself. Listened for on the document
+    // (like Escape below) rather than on the panel, which is a group, not a control.
+    const handleTabOut = useCallback((event) => {
+        if (event.key !== 'Tab' || ! panelRef.current?.contains(document.activeElement)) {
+            return false;
+        }
+
+        const controls = focusableWithin(panelRef.current);
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            close();
+
+            return true;
+        }
+
+        if (! event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            close();
+
+            const pageControls = Array.from(document.querySelectorAll(FOCUSABLE_SELECTOR))
+                .filter((element) => ! panelRef.current?.contains(element));
+            const next = pageControls[pageControls.indexOf(buttonRef.current) + 1];
+
+            next?.focus({ preventScroll: true });
+
+            return true;
+        }
+
+        return false;
+    }, [close]);
 
     const recalcPosition = useCallback(() => {
         const button = buttonRef.current;
@@ -157,25 +203,39 @@ export default function MultiSelectFilterDropdown({
             if (event.key === 'Escape') {
                 event.stopPropagation();
                 close();
+
+                return;
             }
+
+            handleTabOut(event);
         }
 
         document.addEventListener('keydown', onKeyDown);
         return () => document.removeEventListener('keydown', onKeyDown);
-    }, [isOpen, close]);
+    }, [isOpen, close, handleTabOut]);
 
+    // Into the panel as soon as it is drawn (panelStyle is set in a layout effect, so the panel exists
+    // by the time this runs). preventScroll: the panel is position:fixed under the trigger already.
     useEffect(() => {
-        if (isOpen && showSearch) {
-            searchInputRef.current?.focus();
+        if (! isOpen || ! panelStyle) {
+            return;
         }
-    }, [isOpen, showSearch]);
+
+        if (panelRef.current?.contains(document.activeElement)) {
+            return;
+        }
+
+        const target = showSearch ? searchInputRef.current : focusableWithin(panelRef.current)[0];
+
+        target?.focus({ preventScroll: true });
+    }, [isOpen, showSearch, panelStyle]);
 
     const labelId = `${panelId}-label`;
     const summaryId = `${panelId}-summary`;
 
     return (
         <div className="mb-4">
-            <span id={labelId} className="mb-2 block text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+            <span id={labelId} className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-600">
                 {label}
             </span>
             <button
@@ -190,8 +250,8 @@ export default function MultiSelectFilterDropdown({
                     'flex w-full items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-medium shadow-sm transition',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
                     allSelected
-                        ? 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                        : 'border-violet-300 bg-violet-50 text-violet-700 hover:border-violet-400',
+                        ? 'border-field-border bg-white text-slate-700 hover:border-slate-500'
+                        : 'border-violet-500 bg-violet-50 text-violet-700 hover:border-violet-600',
                 )}
             >
                 <span id={summaryId} className="min-w-0 truncate" title={summaryText}>{summaryText}</span>
@@ -223,7 +283,7 @@ export default function MultiSelectFilterDropdown({
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 placeholder={searchPlaceholder}
                                 aria-label={searchPlaceholder}
-                                className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                                className="w-full rounded-lg border border-field-border px-2.5 py-1.5 text-xs text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
                             />
                         </div>
                     )}
@@ -240,7 +300,7 @@ export default function MultiSelectFilterDropdown({
                         </label>
 
                         {filteredOptions.length === 0 ? (
-                            <p className="px-2 py-3 text-xs text-slate-400">{noResultsLabel}</p>
+                            <p className="px-2 py-3 text-xs text-slate-600">{noResultsLabel}</p>
                         ) : (
                             filteredOptions.map((option) => (
                                 <label key={option.id} className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50">
@@ -254,7 +314,7 @@ export default function MultiSelectFilterDropdown({
                                         {option.label}
                                     </span>
                                     {typeof option.count === 'number' && (
-                                        <span className="shrink-0 text-[11px] tabular-nums text-slate-400">
+                                        <span className="shrink-0 text-xs tabular-nums text-slate-600">
                                             {option.count}
                                         </span>
                                     )}
@@ -268,7 +328,7 @@ export default function MultiSelectFilterDropdown({
                             type="button"
                             onClick={() => onChange(new Set())}
                             disabled={allSelected}
-                            className="rounded-lg px-2 py-1 text-xs font-medium text-slate-500 transition hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="rounded-lg px-2 py-1 text-xs font-medium text-slate-600 transition hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                             {resetLabel}
                         </button>

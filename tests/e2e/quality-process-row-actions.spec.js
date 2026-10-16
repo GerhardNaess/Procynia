@@ -25,7 +25,7 @@ test('a process row offers Slett prosess and explains what survives', async ({ p
 
     await trigger.first().click();
 
-    const deleteItem = page.getByRole('menuitem', { name: 'Slett prosess' });
+    const deleteItem = page.getByRole('button', { name: 'Slett prosess', exact: true });
     await expect(deleteItem).toBeVisible();
 
     // Not clipped by the table's scroll container: the whole button is inside the viewport.

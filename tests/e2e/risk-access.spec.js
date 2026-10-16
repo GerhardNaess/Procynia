@@ -53,7 +53,8 @@ test('a role with a fagområde lets its holder register and read risks there', a
     await page.getByRole('radio', { name: /^Alle/ }).check();
     await expect(page.getByRole('checkbox', { name: areaName, exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: 'Lagre rolle' }).click();
-    await expect(page.locator('tr', { hasText: allRoleName }).getByRole('button', { name: 'Alle', exact: true })).toBeVisible();
+    // The button reads «Alle»; its name adds the row context (A11Y-109, Fase 3): «Alle – Endre fagområder: <rolle>».
+    await expect(page.locator('tr', { hasText: allRoleName }).getByRole('button', { name: `Alle – Endre fagområder: ${allRoleName}`, exact: true })).toBeVisible();
     await expect(page.locator('#business-areas tbody tr', { hasText: areaName })).toContainText(`${allRoleName} (Alle)`);
     await page.screenshot({ path: 'test-results/risk-tilganger.png', fullPage: true });
 

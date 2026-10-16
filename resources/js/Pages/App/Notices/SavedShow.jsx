@@ -9,6 +9,8 @@ import InfoHint from '../../../Components/App/InfoHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import ActionDialog from '../../../Components/App/ActionDialog';
 import StatusBadge from '../../../Components/App/StatusBadge';
+import FormField, { RequiredFieldsNote } from '../../../Components/App/FormField';
+import { refocusIfLost, useFocusFirstError } from '../../../Support/focusManagement';
 
 function formatDate(value, locale, options = {}) {
     if (!value) {
@@ -38,6 +40,23 @@ function formatFileSize(bytes) {
 
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+// The look these fields had before they were wired through FormField (Fase 4): same label, same gap,
+// error text one shade darker (rose-700, 6.06:1 — §10 of the WCAG plan).
+const INFO_FIELD = {
+    labelClassName: 'text-base font-medium text-slate-700',
+    controlClassName: 'mt-2',
+    errorClassName: 'mt-1 text-base text-rose-700',
+};
+
+// Status, owner and access fields: label above, 6 px gap, help and error below (as before Fase 4).
+const STATUS_FIELD = {
+    className: 'space-y-1.5',
+    labelClassName: 'text-base font-medium text-slate-800',
+    controlClassName: '',
+    hintClassName: 'text-base text-slate-600',
+    errorClassName: 'text-base text-rose-700',
+};
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -307,13 +326,14 @@ function closureActionGuidance(actionStatus, text) {
 }
 
 
-function ActionAccordionSection({ title, summary, hint = null, isOpen, onToggle, children }) {
+function ActionAccordionSection({ title, summary, hint = null, isOpen, onToggle, toggleId, children }) {
     return (
         <section className={classNames(
             'overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 transition',
             isOpen ? 'shadow-[0_6px_20px_rgba(15,23,42,0.04)]' : '',
         )}>
             <button
+                id={toggleId}
                 type="button"
                 onClick={onToggle}
                 aria-expanded={isOpen}
@@ -333,7 +353,7 @@ function ActionAccordionSection({ title, summary, hint = null, isOpen, onToggle,
                     ) : null}
                 </div>
 
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-base font-semibold text-slate-600">
+                <div aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-base font-semibold text-slate-600">
                     {isOpen ? '−' : '+'}
                 </div>
             </button>
@@ -461,6 +481,7 @@ export default function SavedNoticeShow({ notice }) {
     const { auth, errors = {}, translations = {}, goNoGoData = null } = page.props;
     const tsn = translations?.saved_notice ?? {};
     const common = translations?.common ?? {};
+    const a11y = translations?.a11y ?? {};
     const frontend = translations?.frontend ?? {};
     const locale = document.documentElement.lang || 'no-NO';
     const infoItems = notice.info_items;
@@ -510,7 +531,15 @@ export default function SavedNoticeShow({ notice }) {
     const [isCreatingInfoItem, setIsCreatingInfoItem] = useState(false);
     const [closingInfoItemId, setClosingInfoItemId] = useState(null);
     const [openClosureStatus, setOpenClosureStatus] = useState(null);
-    const [openActionSection, setOpenActionSection] = useState('decision');
+    // A rejected bid-manager or owner change comes back as a new page; its section opens so the
+    // error, and the field it is about, are on screen.
+    const [openActionSection, setOpenActionSection] = useState(() => (
+        errors.bid_manager_user_id
+            ? 'bid-manager'
+            : errors.opportunity_owner_user_id
+                ? 'opportunity-owner'
+                : 'decision'
+    ));
     const [openCommentPhases, setOpenCommentPhases] = useState({});
     const [isActivePhaseExpanded, setIsActivePhaseExpanded] = useState(true);
     const [isStatusActionProcessing, setIsStatusActionProcessing] = useState(false);
@@ -523,6 +552,29 @@ export default function SavedNoticeShow({ notice }) {
     const noGoClosureReasonRef = useRef(null);
     const archiveTriggerRef = useRef(null);
     const archiveTypeRef = useRef(null);
+    // One container per form, so a rejected submit puts focus on that form's first invalid field
+    // (useFocusFirstError, Fase 3) — never on a field in another form on the same page.
+    const phaseCommentFormRef = useRef(null);
+    const infoItemFormRef = useRef(null);
+    const closeInfoItemFormRef = useRef(null);
+    const decisionPanelRef = useRef(null);
+    const noGoFormRef = useRef(null);
+    const reopenNoGoFormRef = useRef(null);
+    const archiveFormRef = useRef(null);
+    const caseAccessFormRef = useRef(null);
+    const bidManagerFormRef = useRef(null);
+    const opportunityOwnerFormRef = useRef(null);
+    const focusPhaseCommentError = useFocusFirstError(phaseCommentFormRef);
+    const focusInfoItemError = useFocusFirstError(infoItemFormRef);
+    const focusCloseInfoItemError = useFocusFirstError(closeInfoItemFormRef);
+    const focusDecisionError = useFocusFirstError(decisionPanelRef);
+    const focusNoGoError = useFocusFirstError(noGoFormRef);
+    const focusReopenNoGoError = useFocusFirstError(reopenNoGoFormRef);
+    const focusArchiveError = useFocusFirstError(archiveFormRef);
+    const focusCaseAccessError = useFocusFirstError(caseAccessFormRef);
+    // The two owner forms post natively, so their answer is a fresh page carrying the error bag.
+    useFocusFirstError(bidManagerFormRef, { errorsOnMount: errors.bid_manager_user_id ? { bid_manager_user_id: errors.bid_manager_user_id } : null });
+    useFocusFirstError(opportunityOwnerFormRef, { errorsOnMount: errors.opportunity_owner_user_id ? { opportunity_owner_user_id: errors.opportunity_owner_user_id } : null });
     const shouldShowSubmissions = notice.submissions.length > 0
         || notice.bid_status === 'submitted'
         || notice.bid_status === 'negotiation';
@@ -656,6 +708,7 @@ export default function SavedNoticeShow({ notice }) {
         caseAccessForm.clearErrors();
         caseAccessForm.post(caseAccess.store_url, {
             preserveScroll: true,
+            onError: focusCaseAccessError,
             onSuccess: () => {
                 caseAccessForm.reset('user_id');
                 caseAccessForm.setData('access_role', caseAccessRoleOptions[0]?.value ?? 'contributor');
@@ -671,6 +724,9 @@ export default function SavedNoticeShow({ notice }) {
 
         router.delete(url, {
             preserveScroll: true,
+            // The revoked row, and the button that was pressed with it, are gone: focus goes on to
+            // the form for granting access, or the section's own toggle.
+            onFinish: () => refocusIfLost(['case_access_user_id', 'case-access-section-toggle']),
         });
     };
 
@@ -704,6 +760,7 @@ export default function SavedNoticeShow({ notice }) {
         archiveHistoryForm.clearErrors();
         archiveHistoryForm.patch(archiveUrl, {
             preserveScroll: true,
+            onError: focusArchiveError,
             onSuccess: () => {
                 setIsArchiveHistoryFormOpen(false);
                 archiveHistoryForm.reset();
@@ -751,6 +808,7 @@ export default function SavedNoticeShow({ notice }) {
 
         reopenNoGoForm.patch(reopenAfterNoGoUrl, {
             preserveScroll: true,
+            onError: focusReopenNoGoError,
             onSuccess: closeReopenNoGoDialog,
         });
     };
@@ -790,6 +848,14 @@ export default function SavedNoticeShow({ notice }) {
             },
             onError: (errors) => {
                 statusForm.setError(errors);
+
+                // The No-Go dialog holds its own fields; every other status change answers in the
+                // decision section, beside the button that was pressed.
+                if (action.status === 'no_go') {
+                    focusNoGoError();
+                } else {
+                    focusDecisionError();
+                }
             },
             onSuccess: () => {
                 resetStatusForm();
@@ -839,6 +905,7 @@ export default function SavedNoticeShow({ notice }) {
         phaseCommentForm.clearErrors();
         phaseCommentForm.post(phaseCommentStoreUrl, {
             preserveScroll: true,
+            onError: focusPhaseCommentError,
             onSuccess: () => {
                 phaseCommentForm.reset('comment');
                 phaseCommentForm.clearErrors();
@@ -867,6 +934,7 @@ export default function SavedNoticeShow({ notice }) {
         infoItemForm.post(infoItems.store_url, {
             preserveScroll: true,
             preserveState: true,
+            onError: focusInfoItemError,
             onSuccess: () => {
                 setIsCreatingInfoItem(false);
                 infoItemForm.reset();
@@ -906,6 +974,7 @@ export default function SavedNoticeShow({ notice }) {
         closeInfoItemForm.patch(item.close_url, {
             preserveScroll: true,
             preserveState: true,
+            onError: focusCloseInfoItemError,
             onSuccess: () => {
                 cancelInfoItemCloser();
             },
@@ -1062,7 +1131,9 @@ export default function SavedNoticeShow({ notice }) {
                         </section>
                     </aside>
 
-                    <main className="min-w-0 space-y-6">
+                    {/* Not <main>: the layout's <main> already holds the whole page, and a second main
+                        landmark inside it is one a screen reader lists twice. */}
+                    <div className="min-w-0 space-y-6">
                         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <div className="space-y-5">
                                 <div>
@@ -1267,7 +1338,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         : 'border-slate-200 bg-white text-slate-600 hover:border-violet-200 hover:text-violet-700',
                                                 )}
                                             >
-                                                <span className="text-[10px] font-bold uppercase tracking-[0.14em] opacity-70">
+                                                <span className="text-xs font-bold uppercase tracking-[0.14em] opacity-70">
                                                     {phaseOption.number}
                                                 </span>
                                                 <span className="whitespace-nowrap">
@@ -1288,6 +1359,8 @@ export default function SavedNoticeShow({ notice }) {
                                     <button
                                         type="button"
                                         onClick={() => setIsActivePhaseExpanded((v) => !v)}
+                                        aria-expanded={isActivePhaseExpanded}
+                                        aria-controls="active-phase-comments"
                                         className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left"
                                     >
                                         <div>
@@ -1298,13 +1371,13 @@ export default function SavedNoticeShow({ notice }) {
                                                 {guidance.phaseTitle}
                                             </div>
                                         </div>
-                                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-700">
+                                        <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-700">
                                             {isActivePhaseExpanded ? '−' : '+'}
                                         </span>
                                     </button>
 
                                     {isActivePhaseExpanded && (
-                                        <div className="space-y-4 border-t border-slate-200 px-4 pb-4 pt-4">
+                                        <div id="active-phase-comments" className="space-y-4 border-t border-slate-200 px-4 pb-4 pt-4">
                                             <div className="space-y-3">
                                                 {activePhaseCommentEntries.length > 0 ? (
                                                     activePhaseCommentEntries.map((comment) => (
@@ -1319,6 +1392,7 @@ export default function SavedNoticeShow({ notice }) {
 
                                             {canCommentOnCase ? (
                                                 <form
+                                                    ref={phaseCommentFormRef}
                                                     onSubmit={(event) => {
                                                         event.preventDefault();
                                                         submitPhaseComment();
@@ -1329,22 +1403,25 @@ export default function SavedNoticeShow({ notice }) {
                                                         {tsn.phase_comment_new}
                                                     </div>
 
-                                                    <label className="space-y-1.5">
-                                                        <span className="text-base font-medium text-slate-800">
-                                                            {tsn.phase_comment_form_label}
-                                                        </span>
-                                                        <textarea
-                                                            value={phaseCommentForm.data.comment}
-                                                            onChange={(event) => phaseCommentForm.setData('comment', event.target.value)}
-                                                            rows={4}
-                                                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                                                            placeholder={tsn.phase_comment_placeholder}
-                                                        />
-                                                    </label>
-
-                                                    {(phaseCommentForm.errors.comment || errors.comment) ? (
-                                                        <p className="text-base text-rose-700">{phaseCommentForm.errors.comment ?? errors.comment}</p>
-                                                    ) : null}
+                                                    <FormField
+                                                        id="phase_comment"
+                                                        label={tsn.phase_comment_form_label}
+                                                        error={phaseCommentForm.errors.comment ?? errors.comment}
+                                                        labelClassName="text-base font-medium text-slate-800"
+                                                        controlClassName="mt-1.5"
+                                                        errorClassName="mt-1 text-base text-rose-700"
+                                                    >
+                                                        {(field) => (
+                                                            <textarea
+                                                                {...field}
+                                                                value={phaseCommentForm.data.comment}
+                                                                onChange={(event) => phaseCommentForm.setData('comment', event.target.value)}
+                                                                rows={4}
+                                                                className="w-full rounded-xl border border-field-border bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                                placeholder={tsn.phase_comment_placeholder}
+                                                            />
+                                                        )}
+                                                    </FormField>
 
                                                     <div className="flex flex-wrap gap-3">
                                                         <button
@@ -1447,168 +1524,165 @@ export default function SavedNoticeShow({ notice }) {
 
                             {isCreatingInfoItem ? (
                                 <form
+                                    ref={infoItemFormRef}
                                     onSubmit={(event) => {
                                         event.preventDefault();
                                         submitInfoItemCreator();
                                     }}
                                     className="mt-5 space-y-5 rounded-2xl border border-slate-200 bg-slate-50 p-4"
                                 >
+                                    <RequiredFieldsNote text={a11y.required_fields} />
+
                                     <div className="grid gap-4 md:grid-cols-2">
-                                        <label className="space-y-2 md:col-span-2">
-                                            <span className="text-base font-medium text-slate-700">{tsn.subject_label}</span>
+                                        <FormField id="info_item_subject" label={tsn.subject_label} error={infoItemForm.errors.subject} className="md:col-span-2" {...INFO_FIELD}>
+                                            {(field) => (
+                                                <input
+                                                    {...field}
+                                                    type="text"
+                                                    value={infoItemForm.data.subject}
+                                                    onChange={(event) => infoItemForm.setData('subject', event.target.value)}
+                                                    className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    placeholder={tsn.subject_placeholder}
+                                                />
+                                            )}
+                                        </FormField>
+
+                                        <FormField id="info_item_body" label={tsn.description_label} error={infoItemForm.errors.body} required className="md:col-span-2" {...INFO_FIELD}>
+                                            {(field) => (
+                                                <textarea
+                                                    {...field}
+                                                    value={infoItemForm.data.body}
+                                                    onChange={(event) => infoItemForm.setData('body', event.target.value)}
+                                                    rows={5}
+                                                    className="w-full rounded-xl border border-field-border bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    placeholder={tsn.description_placeholder}
+                                                />
+                                            )}
+                                        </FormField>
+
+                                        <FormField id="info_item_owner" label={tsn.owner_label} error={infoItemForm.errors.owner_user_id} {...INFO_FIELD}>
+                                            {(field) => (
+                                                <select
+                                                    {...field}
+                                                    value={infoItemForm.data.owner_user_id}
+                                                    onChange={(event) => infoItemForm.setData('owner_user_id', event.target.value)}
+                                                    className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                >
+                                                    <option value="">{tsn.no_owner}</option>
+                                                    {infoItemOwnerOptions.map((option) => (
+                                                        <option key={option.value} value={option.value}>
+                                                            {option.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            )}
+                                        </FormField>
+
+                                        <FormField id="info_item_response_due_at" label={tsn.follow_up_deadline_label} error={infoItemForm.errors.response_due_at} {...INFO_FIELD}>
+                                            {(field) => (
+                                                <input
+                                                    {...field}
+                                                    type="date"
+                                                    value={infoItemForm.data.response_due_at}
+                                                    onChange={(event) => infoItemForm.setData('response_due_at', event.target.value)}
+                                                    className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                />
+                                            )}
+                                        </FormField>
+
+                                        <FormField id="info_item_status" label={tsn.status_label} error={infoItemForm.errors.status} {...INFO_FIELD}>
+                                            {(field) => (
+                                                <select
+                                                    {...field}
+                                                    value={infoItemForm.data.status}
+                                                    onChange={(event) => infoItemForm.setData('status', event.target.value)}
+                                                    className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                >
+                                                    {infoItemStatusOptions.map((option) => (
+                                                        <option key={option.value} value={option.value}>
+                                                            {option.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            )}
+                                        </FormField>
+
+                                        <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 md:col-span-2">
                                             <input
-                                                type="text"
-                                                value={infoItemForm.data.subject}
-                                                onChange={(event) => infoItemForm.setData('subject', event.target.value)}
-                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                placeholder={tsn.subject_placeholder}
-                                            />
-                                            {infoItemForm.errors.subject ? (
-                                                <p className="text-base text-rose-700">{infoItemForm.errors.subject}</p>
-                                            ) : null}
-                                        </label>
-
-                                        <label className="space-y-2 md:col-span-2">
-                                            <span className="text-base font-medium text-slate-700">{tsn.description_label}</span>
-                                            <textarea
-                                                value={infoItemForm.data.body}
-                                                onChange={(event) => infoItemForm.setData('body', event.target.value)}
-                                                rows={5}
-                                                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                placeholder={tsn.description_placeholder}
-                                            />
-                                            {infoItemForm.errors.body ? (
-                                                <p className="text-base text-rose-700">{infoItemForm.errors.body}</p>
-                                            ) : null}
-                                        </label>
-
-                                        <label className="space-y-2">
-                                            <span className="text-base font-medium text-slate-700">{tsn.owner_label}</span>
-                                            <select
-                                                value={infoItemForm.data.owner_user_id}
-                                                onChange={(event) => infoItemForm.setData('owner_user_id', event.target.value)}
-                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                            >
-                                                <option value="">{tsn.no_owner}</option>
-                                                {infoItemOwnerOptions.map((option) => (
-                                                    <option key={option.value} value={option.value}>
-                                                        {option.label}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                            {infoItemForm.errors.owner_user_id ? (
-                                                <p className="text-base text-rose-700">{infoItemForm.errors.owner_user_id}</p>
-                                            ) : null}
-                                        </label>
-
-                                        <label className="space-y-2">
-                                            <span className="text-base font-medium text-slate-700">{tsn.follow_up_deadline_label}</span>
-                                            <input
-                                                type="date"
-                                                value={infoItemForm.data.response_due_at}
-                                                onChange={(event) => infoItemForm.setData('response_due_at', event.target.value)}
-                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                            />
-                                            {infoItemForm.errors.response_due_at ? (
-                                                <p className="text-base text-rose-700">{infoItemForm.errors.response_due_at}</p>
-                                            ) : null}
-                                        </label>
-
-                                        <label className="space-y-2">
-                                            <span className="text-base font-medium text-slate-700">{tsn.status_label}</span>
-                                            <select
-                                                value={infoItemForm.data.status}
-                                                onChange={(event) => infoItemForm.setData('status', event.target.value)}
-                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                            >
-                                                {infoItemStatusOptions.map((option) => (
-                                                    <option key={option.value} value={option.value}>
-                                                        {option.label}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                            {infoItemForm.errors.status ? (
-                                                <p className="text-base text-rose-700">{infoItemForm.errors.status}</p>
-                                            ) : null}
-                                        </label>
-
-                                        <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 md:col-span-2">
-                                            <input
+                                                id="info_item_requires_response"
                                                 type="checkbox"
                                                 checked={infoItemForm.data.requires_response}
                                                 onChange={(event) => infoItemForm.setData('requires_response', event.target.checked)}
+                                                aria-describedby="info_item_requires_response_help"
                                                 className="mt-0.5 h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
                                             />
                                             <div className="space-y-1">
-                                                <span className="block text-base font-medium text-slate-700">{tsn.requires_response_label}</span>
-                                                <p className="text-base text-slate-600">
+                                                <label htmlFor="info_item_requires_response" className="block text-base font-medium text-slate-700">{tsn.requires_response_label}</label>
+                                                <p id="info_item_requires_response_help" className="text-base text-slate-600">
                                                     {tsn.requires_response_help}
                                                 </p>
                                             </div>
-                                        </label>
+                                        </div>
                                     </div>
 
-                                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                        <div className="text-base font-semibold uppercase tracking-[0.16em] text-slate-600">
+                                    <div role="group" aria-labelledby="info_item_classification_title" aria-describedby="info_item_classification_help" className="rounded-2xl border border-slate-200 bg-white p-4">
+                                        <div id="info_item_classification_title" className="text-base font-semibold uppercase tracking-[0.16em] text-slate-600">
                                             {tsn.classification_title}
                                         </div>
-                                        <p className="mt-1 text-base text-slate-600">
+                                        <p id="info_item_classification_help" className="mt-1 text-base text-slate-600">
                                             {tsn.classification_help}
                                         </p>
                                         <div className="mt-4 grid gap-4 md:grid-cols-3">
-                                            <label className="space-y-2">
-                                                <span className="text-base font-medium text-slate-700">{tsn.type_label}</span>
-                                                <select
-                                                    value={infoItemForm.data.type}
-                                                    onChange={(event) => infoItemForm.setData('type', event.target.value)}
-                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                >
-                                                    {infoItemTypeOptions.map((option) => (
-                                                        <option key={option.value} value={option.value}>
-                                                            {option.label}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                                {infoItemForm.errors.type ? (
-                                                    <p className="text-base text-rose-700">{infoItemForm.errors.type}</p>
-                                                ) : null}
-                                            </label>
+                                            <FormField id="info_item_type" label={tsn.type_label} error={infoItemForm.errors.type} {...INFO_FIELD}>
+                                                {(field) => (
+                                                    <select
+                                                        {...field}
+                                                        value={infoItemForm.data.type}
+                                                        onChange={(event) => infoItemForm.setData('type', event.target.value)}
+                                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    >
+                                                        {infoItemTypeOptions.map((option) => (
+                                                            <option key={option.value} value={option.value}>
+                                                                {option.label}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                )}
+                                            </FormField>
 
-                                            <label className="space-y-2">
-                                                <span className="text-base font-medium text-slate-700">{tsn.direction_label}</span>
-                                                <select
-                                                    value={infoItemForm.data.direction}
-                                                    onChange={(event) => infoItemForm.setData('direction', event.target.value)}
-                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                >
-                                                    {infoItemDirectionOptions.map((option) => (
-                                                        <option key={option.value} value={option.value}>
-                                                            {option.label}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                                {infoItemForm.errors.direction ? (
-                                                    <p className="text-base text-rose-700">{infoItemForm.errors.direction}</p>
-                                                ) : null}
-                                            </label>
+                                            <FormField id="info_item_direction" label={tsn.direction_label} error={infoItemForm.errors.direction} {...INFO_FIELD}>
+                                                {(field) => (
+                                                    <select
+                                                        {...field}
+                                                        value={infoItemForm.data.direction}
+                                                        onChange={(event) => infoItemForm.setData('direction', event.target.value)}
+                                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    >
+                                                        {infoItemDirectionOptions.map((option) => (
+                                                            <option key={option.value} value={option.value}>
+                                                                {option.label}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                )}
+                                            </FormField>
 
-                                            <label className="space-y-2">
-                                                <span className="text-base font-medium text-slate-700">{tsn.channel_label}</span>
-                                                <select
-                                                    value={infoItemForm.data.channel}
-                                                    onChange={(event) => infoItemForm.setData('channel', event.target.value)}
-                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                >
-                                                    {infoItemChannelOptions.map((option) => (
-                                                        <option key={option.value} value={option.value}>
-                                                            {option.label}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                                {infoItemForm.errors.channel ? (
-                                                    <p className="text-base text-rose-700">{infoItemForm.errors.channel}</p>
-                                                ) : null}
-                                            </label>
+                                            <FormField id="info_item_channel" label={tsn.channel_label} error={infoItemForm.errors.channel} {...INFO_FIELD}>
+                                                {(field) => (
+                                                    <select
+                                                        {...field}
+                                                        value={infoItemForm.data.channel}
+                                                        onChange={(event) => infoItemForm.setData('channel', event.target.value)}
+                                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    >
+                                                        {infoItemChannelOptions.map((option) => (
+                                                            <option key={option.value} value={option.value}>
+                                                                {option.label}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                )}
+                                            </FormField>
                                         </div>
                                     </div>
 
@@ -1707,6 +1781,7 @@ export default function SavedNoticeShow({ notice }) {
                                                             <button
                                                                 type="button"
                                                                 onClick={() => openInfoItemCloser(item)}
+                                                                aria-expanded={isCloseFormOpen}
                                                                 className="inline-flex min-h-9 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-base font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100"
                                                             >
                                                                 {isCloseFormOpen ? tsn.close_action_hide : tsn.close_action}
@@ -1717,6 +1792,7 @@ export default function SavedNoticeShow({ notice }) {
 
                                                 {isCloseFormOpen ? (
                                                     <form
+                                                        ref={closeInfoItemFormRef}
                                                         onSubmit={(event) => {
                                                             event.preventDefault();
                                                             submitInfoItemCloser(item);
@@ -1742,22 +1818,26 @@ export default function SavedNoticeShow({ notice }) {
                                                             </button>
                                                         </div>
 
-                                                        <label className="mt-4 block space-y-2">
-                                                            <span className="text-base font-medium text-slate-700">{tsn.close_action_comment_label}</span>
-                                                            <textarea
-                                                                value={closeInfoItemForm.data.closure_comment}
-                                                                onChange={(event) => closeInfoItemForm.setData('closure_comment', event.target.value)}
-                                                                rows={3}
-                                                                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
-                                                                placeholder={tsn.close_action_placeholder}
-                                                            />
-                                                            <p className="text-base leading-6 text-slate-600">
-                                                                {tsn.close_action_note}
-                                                            </p>
-                                                            {closeInfoItemForm.errors.closure_comment ? (
-                                                                <p className="text-base text-rose-700">{closeInfoItemForm.errors.closure_comment}</p>
-                                                            ) : null}
-                                                        </label>
+                                                        <FormField
+                                                            id={`info_item_closure_comment_${item.id}`}
+                                                            label={tsn.close_action_comment_label}
+                                                            hint={tsn.close_action_note}
+                                                            error={closeInfoItemForm.errors.closure_comment}
+                                                            className="mt-4"
+                                                            {...INFO_FIELD}
+                                                            hintClassName="mt-2 text-base leading-6 text-slate-600"
+                                                        >
+                                                            {(field) => (
+                                                                <textarea
+                                                                    {...field}
+                                                                    value={closeInfoItemForm.data.closure_comment}
+                                                                    onChange={(event) => closeInfoItemForm.setData('closure_comment', event.target.value)}
+                                                                    rows={3}
+                                                                    className="w-full rounded-xl border border-field-border bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+                                                                    placeholder={tsn.close_action_placeholder}
+                                                                />
+                                                            )}
+                                                        </FormField>
 
                                                         <div className="mt-4 flex flex-wrap gap-3">
                                                             <button
@@ -1824,7 +1904,7 @@ export default function SavedNoticeShow({ notice }) {
                                 )}
                             </section>
                         ) : null}
-                    </main>
+                    </div>
 
                     <aside className="min-w-0 space-y-3">
                         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
@@ -1866,10 +1946,11 @@ export default function SavedNoticeShow({ notice }) {
                                         isOpen={openActionSection === 'decision'}
                                         onToggle={() => setOpenActionSection((current) => (current === 'decision' ? null : 'decision'))}
                                     >
+                                        <div ref={decisionPanelRef}>
                                         {nextDecisionDescription ? <p className="text-base leading-6 text-slate-600">{nextDecisionDescription}</p> : null}
 
-                                        {statusForm.errors.status ? (
-                                            <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-base font-medium text-rose-700">
+                                        {statusForm.errors.status && !isNoGoDialogOpen ? (
+                                            <div data-form-error-summary="" className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-base font-medium text-rose-700">
                                                 {statusForm.errors.status}
                                             </div>
                                         ) : null}
@@ -1930,41 +2011,38 @@ export default function SavedNoticeShow({ notice }) {
                                                     </div>
                                                 ) : null}
 
-                                                <div className="space-y-1.5">
-                                                    <label className="text-base font-medium text-slate-800" htmlFor="bid_closure_reason">
-                                                        {tsn.close_reason_label}
-                                                    </label>
-                                                    <select
-                                                        id="bid_closure_reason"
-                                                        value={statusForm.data.bid_closure_reason}
-                                                        onChange={(event) => statusForm.setData('bid_closure_reason', event.target.value)}
-                                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                                                    >
-                                                        <option value="">{tsn.close_reason_placeholder}</option>
-                                                        {closureReasonOptions.map((option) => (
-                                                            <option key={option.value} value={option.value}>
-                                                                {option.label}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                    {statusForm.errors.bid_closure_reason ? (
-                                                        <p className="text-base text-rose-700">{statusForm.errors.bid_closure_reason}</p>
-                                                    ) : null}
-                                                </div>
+                                                <RequiredFieldsNote text={a11y.required_fields} />
 
-                                                <div className="space-y-1.5">
-                                                    <label className="text-base font-medium text-slate-800" htmlFor="bid_closure_note">
-                                                        {tsn.close_note_label}
-                                                    </label>
-                                                    <textarea
-                                                        id="bid_closure_note"
-                                                        value={statusForm.data.bid_closure_note}
-                                                        onChange={(event) => statusForm.setData('bid_closure_note', event.target.value)}
-                                                        rows={3}
-                                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                                                        placeholder={tsn.close_note_placeholder}
-                                                    />
-                                                </div>
+                                                <FormField id="bid_closure_reason" label={tsn.close_reason_label} error={statusForm.errors.bid_closure_reason} required {...STATUS_FIELD}>
+                                                    {(field) => (
+                                                        <select
+                                                            {...field}
+                                                            value={statusForm.data.bid_closure_reason}
+                                                            onChange={(event) => statusForm.setData('bid_closure_reason', event.target.value)}
+                                                            className="w-full rounded-xl border border-field-border bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                        >
+                                                            <option value="">{tsn.close_reason_placeholder}</option>
+                                                            {closureReasonOptions.map((option) => (
+                                                                <option key={option.value} value={option.value}>
+                                                                    {option.label}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    )}
+                                                </FormField>
+
+                                                <FormField id="bid_closure_note" label={tsn.close_note_label} error={statusForm.errors.bid_closure_note} {...STATUS_FIELD}>
+                                                    {(field) => (
+                                                        <textarea
+                                                            {...field}
+                                                            value={statusForm.data.bid_closure_note}
+                                                            onChange={(event) => statusForm.setData('bid_closure_note', event.target.value)}
+                                                            rows={3}
+                                                            className="w-full rounded-xl border border-field-border bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                            placeholder={tsn.close_note_placeholder}
+                                                        />
+                                                    )}
+                                                </FormField>
 
                                                 <div className="flex flex-wrap gap-3">
                                                     <button
@@ -1996,6 +2074,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 {submissionForm.processing ? tsn.registering : tsn.add_submission}
                                             </button>
                                         ) : null}
+                                        </div>
                                     </ActionAccordionSection>
 
                                     {isNoGoCase ? (
@@ -2046,37 +2125,37 @@ export default function SavedNoticeShow({ notice }) {
                                     >
                                         {notice.actions?.update_bid_manager_url ? (
                                             <form
+                                                ref={bidManagerFormRef}
                                                 method="post"
                                                 action={notice.actions.update_bid_manager_url}
                                                 className="space-y-3"
                                             >
                                                 {csrfToken ? <input type="hidden" name="_token" value={csrfToken} /> : null}
                                                 <input type="hidden" name="_method" value="patch" />
-                                                <div className="space-y-1.5">
-                                                    <label className="text-base font-medium text-slate-800" htmlFor="bid_manager_user_id">
-                                                        {tsn.bid_manager_section_title}
-                                                    </label>
-                                                    <select
-                                                        id="bid_manager_user_id"
-                                                        name="bid_manager_user_id"
-                                                        value={bidManagerForm.data.bid_manager_user_id}
-                                                        onChange={(event) => bidManagerForm.setData('bid_manager_user_id', event.target.value)}
-                                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                                                    >
-                                                        <option value="">{tsn.not_set}</option>
-                                                        {bidManagerOptions.map((option) => (
-                                                            <option key={option.value} value={option.value}>
-                                                                {option.label}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                    <p className="text-base text-slate-600">
-                                                        {tsn.bid_manager_help}
-                                                    </p>
-                                                    {(bidManagerForm.errors.bid_manager_user_id || errors.bid_manager_user_id) ? (
-                                                        <p className="text-base text-rose-700">{bidManagerForm.errors.bid_manager_user_id ?? errors.bid_manager_user_id}</p>
-                                                    ) : null}
-                                                </div>
+                                                <FormField
+                                                    id="bid_manager_user_id"
+                                                    label={tsn.bid_manager_section_title}
+                                                    hint={tsn.bid_manager_help}
+                                                    error={bidManagerForm.errors.bid_manager_user_id ?? errors.bid_manager_user_id}
+                                                    {...STATUS_FIELD}
+                                                >
+                                                    {(field) => (
+                                                        <select
+                                                            {...field}
+                                                            name="bid_manager_user_id"
+                                                            value={bidManagerForm.data.bid_manager_user_id}
+                                                            onChange={(event) => bidManagerForm.setData('bid_manager_user_id', event.target.value)}
+                                                            className="w-full rounded-xl border border-field-border bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                        >
+                                                            <option value="">{tsn.not_set}</option>
+                                                            {bidManagerOptions.map((option) => (
+                                                                <option key={option.value} value={option.value}>
+                                                                    {option.label}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    )}
+                                                </FormField>
 
                                                 <button
                                                     type="submit"
@@ -2098,37 +2177,37 @@ export default function SavedNoticeShow({ notice }) {
                                     >
                                         {notice.actions?.update_opportunity_owner_url ? (
                                             <form
+                                                ref={opportunityOwnerFormRef}
                                                 method="post"
                                                 action={notice.actions.update_opportunity_owner_url}
                                                 className="space-y-3"
                                             >
                                                 {csrfToken ? <input type="hidden" name="_token" value={csrfToken} /> : null}
                                                 <input type="hidden" name="_method" value="patch" />
-                                                <div className="space-y-1.5">
-                                                    <label className="text-base font-medium text-slate-800" htmlFor="opportunity_owner_user_id">
-                                                        {tsn.opportunity_owner_section_title}
-                                                    </label>
-                                                    <select
-                                                        id="opportunity_owner_user_id"
-                                                        name="opportunity_owner_user_id"
-                                                        value={opportunityOwnerForm.data.opportunity_owner_user_id}
-                                                        onChange={(event) => opportunityOwnerForm.setData('opportunity_owner_user_id', event.target.value)}
-                                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                                                    >
-                                                        <option value="">{tsn.not_set}</option>
-                                                        {opportunityOwnerOptions.map((option) => (
-                                                            <option key={option.value} value={option.value}>
-                                                                {option.label}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                    <p className="text-base text-slate-600">
-                                                        {tsn.opportunity_owner_help}
-                                                    </p>
-                                                    {(opportunityOwnerForm.errors.opportunity_owner_user_id || errors.opportunity_owner_user_id) ? (
-                                                        <p className="text-base text-rose-700">{opportunityOwnerForm.errors.opportunity_owner_user_id ?? errors.opportunity_owner_user_id}</p>
-                                                    ) : null}
-                                                </div>
+                                                <FormField
+                                                    id="opportunity_owner_user_id"
+                                                    label={tsn.opportunity_owner_section_title}
+                                                    hint={tsn.opportunity_owner_help}
+                                                    error={opportunityOwnerForm.errors.opportunity_owner_user_id ?? errors.opportunity_owner_user_id}
+                                                    {...STATUS_FIELD}
+                                                >
+                                                    {(field) => (
+                                                        <select
+                                                            {...field}
+                                                            name="opportunity_owner_user_id"
+                                                            value={opportunityOwnerForm.data.opportunity_owner_user_id}
+                                                            onChange={(event) => opportunityOwnerForm.setData('opportunity_owner_user_id', event.target.value)}
+                                                            className="w-full rounded-xl border border-field-border bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                        >
+                                                            <option value="">{tsn.not_set}</option>
+                                                            {opportunityOwnerOptions.map((option) => (
+                                                                <option key={option.value} value={option.value}>
+                                                                    {option.label}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    )}
+                                                </FormField>
 
                                                 <button
                                                     type="submit"
@@ -2147,6 +2226,7 @@ export default function SavedNoticeShow({ notice }) {
                                         hint={tsn.case_access_section_hint}
                                         isOpen={openActionSection === 'case-access'}
                                         onToggle={() => setOpenActionSection((current) => (current === 'case-access' ? null : 'case-access'))}
+                                        toggleId="case-access-section-toggle"
                                     >
                                         <div className="space-y-3">
                                             {caseAccessEntries.length > 0 ? (
@@ -2184,6 +2264,9 @@ export default function SavedNoticeShow({ notice }) {
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => revokeCaseAccess(access.revoke_url)}
+                                                                        aria-label={(a11y.row_action ?? ':action :name')
+                                                                            .replace(':action', tsn.access_revoke ?? '')
+                                                                            .replace(':name', access.user?.name || tsn.unknown_user || '')}
                                                                         className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
                                                                     >
                                                                         {tsn.access_revoke}
@@ -2200,52 +2283,44 @@ export default function SavedNoticeShow({ notice }) {
                                             )}
 
                                             {canManageCaseAccess ? (
-                                                <form onSubmit={grantCaseAccess} className="space-y-4 border-t border-slate-200 pt-4">
+                                                <form ref={caseAccessFormRef} onSubmit={grantCaseAccess} className="space-y-4 border-t border-slate-200 pt-4">
                                                     <div className="grid gap-4">
-                                                        <div className="space-y-1.5">
-                                                            <label className="text-base font-medium text-slate-800" htmlFor="case_access_user_id">
-                                                                {tsn.case_access_user_label}
-                                                            </label>
-                                                            <select
-                                                                id="case_access_user_id"
-                                                                name="user_id"
-                                                                value={caseAccessForm.data.user_id}
-                                                                onChange={(event) => caseAccessForm.setData('user_id', event.target.value)}
-                                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                                                            >
-                                                                <option value="">{tsn.case_access_user_placeholder}</option>
-                                                                {caseAccessUserOptions.map((option) => (
-                                                                    <option key={option.value} value={option.value}>
-                                                                        {option.label}
-                                                                    </option>
-                                                                ))}
-                                                            </select>
-                                                            {(caseAccessForm.errors.user_id || errors.user_id) ? (
-                                                                <p className="text-base text-rose-700">{caseAccessForm.errors.user_id ?? errors.user_id}</p>
-                                                            ) : null}
-                                                        </div>
+                                                        <FormField id="case_access_user_id" label={tsn.case_access_user_label} error={caseAccessForm.errors.user_id ?? errors.user_id} {...STATUS_FIELD}>
+                                                            {(field) => (
+                                                                <select
+                                                                    {...field}
+                                                                    name="user_id"
+                                                                    value={caseAccessForm.data.user_id}
+                                                                    onChange={(event) => caseAccessForm.setData('user_id', event.target.value)}
+                                                                    className="w-full rounded-xl border border-field-border bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                                >
+                                                                    <option value="">{tsn.case_access_user_placeholder}</option>
+                                                                    {caseAccessUserOptions.map((option) => (
+                                                                        <option key={option.value} value={option.value}>
+                                                                            {option.label}
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                            )}
+                                                        </FormField>
 
-                                                        <div className="space-y-1.5">
-                                                            <label className="text-base font-medium text-slate-800" htmlFor="case_access_role">
-                                                                {tsn.case_access_role_label}
-                                                            </label>
-                                                            <select
-                                                                id="case_access_role"
-                                                                name="access_role"
-                                                                value={caseAccessForm.data.access_role}
-                                                                onChange={(event) => caseAccessForm.setData('access_role', event.target.value)}
-                                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                                                            >
-                                                                {caseAccessRoleOptions.map((option) => (
-                                                                    <option key={option.value} value={option.value}>
-                                                                        {accessRoleLabel(option.value, tsn)}
-                                                                    </option>
-                                                                ))}
-                                                            </select>
-                                                            {(caseAccessForm.errors.access_role || errors.access_role) ? (
-                                                                <p className="text-base text-rose-700">{caseAccessForm.errors.access_role ?? errors.access_role}</p>
-                                                            ) : null}
-                                                        </div>
+                                                        <FormField id="case_access_role" label={tsn.case_access_role_label} error={caseAccessForm.errors.access_role ?? errors.access_role} {...STATUS_FIELD}>
+                                                            {(field) => (
+                                                                <select
+                                                                    {...field}
+                                                                    name="access_role"
+                                                                    value={caseAccessForm.data.access_role}
+                                                                    onChange={(event) => caseAccessForm.setData('access_role', event.target.value)}
+                                                                    className="w-full rounded-xl border border-field-border bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                                >
+                                                                    {caseAccessRoleOptions.map((option) => (
+                                                                        <option key={option.value} value={option.value}>
+                                                                            {accessRoleLabel(option.value, tsn)}
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                            )}
+                                                        </FormField>
                                                     </div>
 
                                                     <div className="flex flex-wrap gap-3">
@@ -2301,27 +2376,37 @@ export default function SavedNoticeShow({ notice }) {
                     onClose={closeReopenNoGoDialog}
                     closeDisabled={reopenNoGoForm.processing}
                     titleId="reopen-no-go-title"
+                    descriptionId="reopen-no-go-description"
                     initialFocusRef={reopenNoGoReasonRef}
                     returnFocusRef={reopenNoGoTriggerRef}
                 >
-                    <form onSubmit={submitReopenAfterNoGo}>
+                    <form ref={reopenNoGoFormRef} onSubmit={submitReopenAfterNoGo}>
                         <h2 id="reopen-no-go-title" className="text-xl font-semibold tracking-tight text-slate-950">{tsn.reopen_no_go_title}</h2>
-                        <p className="mt-2 text-base leading-6 text-slate-600">{tsn.reopen_no_go_description}</p>
+                        <p id="reopen-no-go-description" className="mt-2 text-base leading-6 text-slate-600">{tsn.reopen_no_go_description}</p>
                         <p className="mt-2 text-base leading-6 text-slate-600">{tsn.reopen_no_go_history_notice}</p>
                         <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-base text-amber-900">
                             <div className="font-semibold">{currentNoGoDecision?.closure_reason_label ?? notice.bid_closure_reason_label ?? tsn.notRegistered}</div>
                             {(currentNoGoDecision?.closure_note ?? notice.bid_closure_note) ? <p className="mt-1 whitespace-pre-wrap">{currentNoGoDecision?.closure_note ?? notice.bid_closure_note}</p> : null}
                         </div>
-                        <label className="mt-4 block space-y-1.5">
-                            <span className="text-base font-medium text-slate-800">{tsn.reopen_no_go_reason_label}</span>
-                            <textarea ref={reopenNoGoReasonRef} value={reopenNoGoForm.data.reopen_reason} onChange={(event) => reopenNoGoForm.setData('reopen_reason', event.target.value)} rows={4} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100" placeholder={tsn.reopen_no_go_reason_placeholder} />
-                            {reopenNoGoForm.errors.reopen_reason ? <p className="text-base text-rose-700">{reopenNoGoForm.errors.reopen_reason}</p> : null}
-                        </label>
+                        <RequiredFieldsNote text={a11y.required_fields} className="mt-4 text-sm text-slate-600" />
+                        <FormField id="reopen_no_go_reason" label={tsn.reopen_no_go_reason_label} error={reopenNoGoForm.errors.reopen_reason} required {...STATUS_FIELD} className="mt-4 space-y-1.5">
+                            {(field) => (
+                                <textarea {...field} ref={reopenNoGoReasonRef} value={reopenNoGoForm.data.reopen_reason} onChange={(event) => reopenNoGoForm.setData('reopen_reason', event.target.value)} rows={4} className="w-full rounded-xl border border-field-border bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100" placeholder={tsn.reopen_no_go_reason_placeholder} />
+                            )}
+                        </FormField>
                         <label className="mt-4 flex items-start gap-3 text-base text-slate-700">
-                            <input type="checkbox" checked={reopenNoGoForm.data.confirm_reopen} onChange={(event) => reopenNoGoForm.setData('confirm_reopen', event.target.checked)} className="mt-1 h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500" />
-                            <span>{tsn.reopen_no_go_confirm}</span>
+                            <input
+                                type="checkbox"
+                                checked={reopenNoGoForm.data.confirm_reopen}
+                                onChange={(event) => reopenNoGoForm.setData('confirm_reopen', event.target.checked)}
+                                aria-required="true"
+                                aria-invalid={reopenNoGoForm.errors.confirm_reopen ? true : undefined}
+                                aria-describedby={reopenNoGoForm.errors.confirm_reopen ? 'reopen_no_go_confirm-error' : undefined}
+                                className="mt-1 h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                            />
+                            <span>{tsn.reopen_no_go_confirm}<span aria-hidden="true" className="ml-0.5 text-rose-700">*</span></span>
                         </label>
-                        {reopenNoGoForm.errors.confirm_reopen ? <p className="mt-2 text-base text-rose-700">{reopenNoGoForm.errors.confirm_reopen}</p> : null}
+                        {reopenNoGoForm.errors.confirm_reopen ? <p id="reopen_no_go_confirm-error" className="mt-2 text-base text-rose-700">{reopenNoGoForm.errors.confirm_reopen}</p> : null}
                         <div className="mt-6 flex flex-wrap gap-3">
                             <button type="submit" disabled={reopenNoGoForm.processing || reopenNoGoForm.data.reopen_reason.trim() === '' || !reopenNoGoForm.data.confirm_reopen} className={PRIMARY_ACTION}>{reopenNoGoForm.processing ? tsn.reopening_no_go : tsn.reopen_no_go_action}</button>
                             <button type="button" onClick={closeReopenNoGoDialog} disabled={reopenNoGoForm.processing} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60">{common.cancel}</button>
@@ -2334,55 +2419,59 @@ export default function SavedNoticeShow({ notice }) {
                     onClose={closeNoGoDialog}
                     closeDisabled={isStatusActionProcessing}
                     titleId="set-no-go-title"
+                    descriptionId="set-no-go-description"
                     initialFocusRef={noGoClosureReasonRef}
                     returnFocusRef={noGoTriggerRef}
                 >
                     <form
+                        ref={noGoFormRef}
                         onSubmit={(event) => {
                             event.preventDefault();
                             submitStatusAction(noGoClosureAction, true);
                         }}
                     >
                         <h2 id="set-no-go-title" className="text-xl font-semibold tracking-tight text-slate-950">{tsn.set_no_go_dialog_title}</h2>
-                        <p className="mt-2 text-base leading-6 text-slate-600">{tsn.closureNoGo}</p>
+                        <p id="set-no-go-description" className="mt-2 text-base leading-6 text-slate-600">{tsn.closureNoGo}</p>
 
                         {statusForm.errors.status ? (
-                            <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-base font-medium text-rose-700">
+                            <div data-form-error-summary="" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-base font-medium text-rose-700">
                                 {statusForm.errors.status}
                             </div>
                         ) : null}
 
-                        <label className="mt-5 block space-y-1.5" htmlFor="no_go_closure_reason">
-                            <span className="text-base font-medium text-slate-800">{tsn.close_reason_label}</span>
-                            <select
-                                ref={noGoClosureReasonRef}
-                                id="no_go_closure_reason"
-                                value={statusForm.data.bid_closure_reason}
-                                onChange={(event) => statusForm.setData('bid_closure_reason', event.target.value)}
-                                aria-describedby={statusForm.errors.bid_closure_reason ? 'no_go_closure_reason_error' : undefined}
-                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                            >
-                                <option value="">{tsn.close_reason_placeholder}</option>
-                                {closureReasonOptions.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
-                            {statusForm.errors.bid_closure_reason ? <p id="no_go_closure_reason_error" className="text-base text-rose-700">{statusForm.errors.bid_closure_reason}</p> : null}
-                        </label>
+                        <RequiredFieldsNote text={a11y.required_fields} className="mt-4 text-sm text-slate-600" />
 
-                        <label className="mt-4 block space-y-1.5" htmlFor="no_go_closure_note">
-                            <span className="text-base font-medium text-slate-800">{tsn.close_note_label}</span>
-                            <textarea
-                                id="no_go_closure_note"
-                                value={statusForm.data.bid_closure_note}
-                                onChange={(event) => statusForm.setData('bid_closure_note', event.target.value)}
-                                rows={4}
-                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                                placeholder={tsn.close_note_placeholder}
-                            />
-                        </label>
+                        <FormField id="no_go_closure_reason" label={tsn.close_reason_label} error={statusForm.errors.bid_closure_reason} required {...STATUS_FIELD} className="mt-4 space-y-1.5">
+                            {(field) => (
+                                <select
+                                    {...field}
+                                    ref={noGoClosureReasonRef}
+                                    value={statusForm.data.bid_closure_reason}
+                                    onChange={(event) => statusForm.setData('bid_closure_reason', event.target.value)}
+                                    className="w-full rounded-xl border border-field-border bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                >
+                                    <option value="">{tsn.close_reason_placeholder}</option>
+                                    {closureReasonOptions.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                            {option.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            )}
+                        </FormField>
+
+                        <FormField id="no_go_closure_note" label={tsn.close_note_label} error={statusForm.errors.bid_closure_note} {...STATUS_FIELD} className="mt-4 space-y-1.5">
+                            {(field) => (
+                                <textarea
+                                    {...field}
+                                    value={statusForm.data.bid_closure_note}
+                                    onChange={(event) => statusForm.setData('bid_closure_note', event.target.value)}
+                                    rows={4}
+                                    className="w-full rounded-xl border border-field-border bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                    placeholder={tsn.close_note_placeholder}
+                                />
+                            )}
+                        </FormField>
 
                         <div className="mt-6 flex flex-wrap gap-3">
                             <button type="submit" disabled={isStatusActionProcessing} className={WARNING_ACTION}>
@@ -2400,14 +2489,15 @@ export default function SavedNoticeShow({ notice }) {
                     onClose={cancelArchiveSavedNoticeForm}
                     closeDisabled={archiveHistoryForm.processing}
                     titleId="archive-case-title"
+                    descriptionId="archive-case-description"
                     initialFocusRef={archiveTypeRef}
                     returnFocusRef={archiveTriggerRef}
                 >
-                    <form onSubmit={submitArchiveSavedNotice}>
+                    <form ref={archiveFormRef} onSubmit={submitArchiveSavedNotice}>
                         <h2 id="archive-case-title" className="text-xl font-semibold tracking-tight text-slate-950">
                             {tsn.archive_dialog_title}
                         </h2>
-                        <p className="mt-3 text-base leading-6 text-slate-600">{tsn.archive_dialog_description}</p>
+                        <p id="archive-case-description" className="mt-3 text-base leading-6 text-slate-600">{tsn.archive_dialog_description}</p>
 
                         {isNoGoCase ? (
                             <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-base leading-6 text-amber-900">
@@ -2423,7 +2513,8 @@ export default function SavedNoticeShow({ notice }) {
                                 value={archiveHistoryForm.data.history_type}
                                 onChange={(event) => archiveHistoryForm.setData('history_type', event.target.value)}
                                 aria-describedby={archiveHistoryForm.errors.history_type ? 'archive_case_history_type_error' : 'archive_case_history_type_help'}
-                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                aria-invalid={archiveHistoryForm.errors.history_type ? true : undefined}
+                                className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             >
                                 <option value="">{tsn.archive_type_placeholder}</option>
                                 {historyTypeOptions.map((option) => (

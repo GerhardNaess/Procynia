@@ -75,7 +75,9 @@ describe('the "Tilbake til funn" button reuses Procynia\'s shared primary action
 
         assert.ok(secondary, 'ordinary Wiki navigation keeps its own style');
         assert.equal(/\bbg-violet-\d{2,3}\b/.test(secondary), false, 'plain navigation must not become a primary button');
-        assert.ok(secondary.includes('text-slate-500'), 'unchanged from the original discreet link');
+        // slate-600, not the original slate-500: on the page background (#f6f7fb) slate-500 is
+        // 4.45:1, under the 4.5:1 WCAG 1.4.3 asks of 16px text (Fase 5). Still the discreet grey.
+        assert.ok(secondary.includes('text-slate-600'), 'the discreet link, at a readable contrast');
     });
 
     test('the destination is still driven by the deep-link context, not by the styling', () => {

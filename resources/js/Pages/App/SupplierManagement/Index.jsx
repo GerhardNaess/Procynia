@@ -1,20 +1,25 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { announce } from '../../../Support/announcer';
+import { useFocusFirstError } from '../../../Support/focusManagement';
+import { INPUT } from '../../../Support/formStyles';
 import { SupplierAttentionMarker } from './SupplierAttention';
 import SupplierForm from './SupplierForm';
 import { supplierHelp } from './supplierHelp';
 import SupplierCriticalityBadge from './SupplierCriticalityBadge';
 import { formatLongDate } from '../Improvements/improvementStatus';
 import { stateNow } from './assuranceStatus';
+import { registerResultAnnouncement } from './supplierA11y';
+import { useInlinePanelFocus } from './supplierFocus';
 import { SUPPLIER_STATUS_TONES, categoryLabel, countLabel, criticalityLabel, emptyCriticality, nextReviewText, statusLabel } from './supplierManagement';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const FILTER_LABEL = 'block text-base font-semibold text-slate-700';
 const REGISTER_URL = '/app/supplier-management';
 // A way to a read-only log, not work: a plain link, never a button competing with Registrer leverandør.
@@ -66,6 +71,7 @@ export default function SupplierManagementIndex() {
     } = usePage().props;
 
     const tr = translations?.supplier_management ?? {};
+    const ta = translations?.a11y ?? {};
     const canEdit = permissions.can_edit ?? false;
     const canViewDeletions = permissions.can_view_deletions ?? false;
     const formatDate = (date) => formatLongDate(date, locale);
@@ -77,6 +83,12 @@ export default function SupplierManagementIndex() {
     const [category, setCategory] = useState(filters.category ?? '');
     const [criticality, setCriticality] = useState(filters.criticality ?? '');
     const [attentionOnly, setAttentionOnly] = useState(Boolean(filters.attention));
+    // Registrer leverandør opens in place of its button; focus goes into the form and back (A11Y-014).
+    const rememberTrigger = useInlinePanelFocus(creating ? 'create' : null, { panelId: 'supplier-create-panel', fallbackIds: ['supplier-create-button'] });
+    const createFormRef = useRef(null);
+    const focusCreateError = useFocusFirstError(createFormRef);
+    // The hit count is said once, after the search or filter the person ran — never on first load.
+    const announceCount = (page) => announce(registerResultAnnouncement(page?.props?.suppliers?.length ?? 0, tr));
 
     const form = useForm({
         name: '',
@@ -100,7 +112,7 @@ export default function SupplierManagementIndex() {
             category: category || undefined,
             criticality: criticality || undefined,
             attention: attentionOnly ? 1 : undefined,
-        }, { preserveState: true, replace: true });
+        }, { preserveState: true, replace: true, onSuccess: announceCount });
     };
 
     const resetSearch = () => {
@@ -109,12 +121,17 @@ export default function SupplierManagementIndex() {
         setCategory('');
         setCriticality('');
         setAttentionOnly(false);
-        router.get(REGISTER_URL, {}, { replace: true });
+        router.get(REGISTER_URL, {}, { replace: true, onSuccess: announceCount });
     };
 
     const submitCreate = (event) => {
         event.preventDefault();
-        form.post(REGISTER_URL, { preserveScroll: true });
+
+        if (form.processing) {
+            return;
+        }
+
+        form.post(REGISTER_URL, { preserveScroll: true, onError: focusCreateError });
     };
 
     const filtered = Boolean(filters.search || filters.status || filters.category || filters.criticality || filters.attention);
@@ -123,7 +140,7 @@ export default function SupplierManagementIndex() {
 
     return (
         <CustomerAppLayout title={tr.index_title ?? 'Leverandører'} showPageTitle={false} workView={creating ? (tr.create ?? 'Registrer leverandør') : null}>
-            <div className="space-y-6">
+            <div className="space-y-6" onClickCapture={rememberTrigger}>
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-2">
                         <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{tr.index_heading ?? 'Leverandører'}</h1>
@@ -145,7 +162,7 @@ export default function SupplierManagementIndex() {
                             </Link>
                         )}
                         {canEdit && ! creating && (
-                            <button type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION}>
+                            <button type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION} id="supplier-create-button" data-panel-trigger="">
                                 {tr.create ?? 'Registrer leverandør'}
                             </button>
                         )}
@@ -153,10 +170,11 @@ export default function SupplierManagementIndex() {
                 </header>
 
                 {creating && (
-                    <section className={CARD} aria-labelledby="supplier-create-heading">
+                    <section id="supplier-create-panel" className={CARD} aria-labelledby="supplier-create-heading">
                         <h2 id="supplier-create-heading" className="mb-4 text-xl font-semibold text-slate-950">{tr.create_heading ?? 'Registrer leverandør'}</h2>
                         <SupplierForm
                             form={form}
+                            formRef={createFormRef}
                             onSubmit={submitCreate}
                             onCancel={() => { setCreating(false); form.reset(); form.clearErrors(); }}
                             categories={categories}
@@ -175,7 +193,7 @@ export default function SupplierManagementIndex() {
                     />
                 ) : (
                     <section className={CARD}>
-                        <form onSubmit={submitSearch} className="grid gap-3 sm:flex sm:flex-wrap sm:items-end">
+                        <form onSubmit={submitSearch} role="search" aria-label={ta.suppliers_register_search ?? 'Søk og filtrer leverandører'} className="grid gap-3 sm:flex sm:flex-wrap sm:items-end">
                             <div className="min-w-0 sm:min-w-[16rem] sm:flex-1">
                                 <label htmlFor="supplier-search" className={FILTER_LABEL}>{tr.search_label ?? 'Søk'}</label>
                                 <input
@@ -271,28 +289,29 @@ export default function SupplierManagementIndex() {
                                     ))}
                                 </ul>
 
-                                <div className="mt-4 hidden overflow-x-auto md:block">
+                                <ScrollRegion label={tr.index_heading ?? 'Leverandører'} className="mt-4 hidden md:block">
                                     <table className="w-full text-base" data-testid="supplier-table">
+                                        <caption className="sr-only">{tr.index_heading ?? 'Leverandører'}</caption>
                                         <thead>
                                             <tr className="border-b border-slate-200 text-left text-base font-semibold text-slate-600">
-                                                <th className="pb-3 pr-4">{tr.col_name ?? 'Leverandør'}</th>
-                                                <th className="px-4 pb-3">{tr.col_category ?? 'Kategori'}</th>
-                                                <th className="px-4 pb-3">{tr.col_criticality ?? 'Kritikalitet'}</th>
-                                                <th className="px-4 pb-3">{tr.col_deliverable ?? 'Leverer'}</th>
-                                                <th className="px-4 pb-3">{tr.col_owner ?? 'Intern ansvarlig'}</th>
-                                                <th className="px-4 pb-3">{tr.col_next_review ?? 'Neste vurdering'}</th>
-                                                {hasRequirementStatus && <th className="px-4 pb-3">{tr.col_requirement_status ?? 'Kravstatus'}</th>}
-                                                <th className="pb-3 pl-4">{tr.col_status ?? 'Status'}</th>
+                                                <th scope="col" className="pb-3 pr-4">{tr.col_name ?? 'Leverandør'}</th>
+                                                <th scope="col" className="px-4 pb-3">{tr.col_category ?? 'Kategori'}</th>
+                                                <th scope="col" className="px-4 pb-3">{tr.col_criticality ?? 'Kritikalitet'}</th>
+                                                <th scope="col" className="px-4 pb-3">{tr.col_deliverable ?? 'Leverer'}</th>
+                                                <th scope="col" className="px-4 pb-3">{tr.col_owner ?? 'Intern ansvarlig'}</th>
+                                                <th scope="col" className="px-4 pb-3">{tr.col_next_review ?? 'Neste vurdering'}</th>
+                                                {hasRequirementStatus && <th scope="col" className="px-4 pb-3">{tr.col_requirement_status ?? 'Kravstatus'}</th>}
+                                                <th scope="col" className="pb-3 pl-4">{tr.col_status ?? 'Status'}</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {suppliers.map((item) => (
                                                 <tr key={item.id}>
-                                                    <td className="py-3 pr-4 align-top">
+                                                    <th scope="row" className="py-3 pr-4 text-left align-top font-normal">
                                                         <Link href={item.url} className="break-words font-semibold text-violet-700 hover:text-violet-900">{item.name}</Link>
                                                         {item.organization_number && <p className="text-base text-slate-600">{item.organization_number}</p>}
                                                         <SupplierAttentionMarker keys={item.attention} tr={tr} />
-                                                    </td>
+                                                    </th>
                                                     <td className="px-4 py-3 align-top text-slate-700">{categoryLabel(item.category, tr)}</td>
                                                     <td className="px-4 py-3 align-top"><SupplierCriticalityBadge level={item.criticality} tr={tr} /></td>
                                                     <td className="max-w-md px-4 py-3 align-top text-slate-700"><span className="line-clamp-2 break-words">{item.deliverable_description}</span></td>
@@ -306,7 +325,7 @@ export default function SupplierManagementIndex() {
                                             ))}
                                         </tbody>
                                     </table>
-                                </div>
+                                </ScrollRegion>
                             </>
                         )}
                     </section>

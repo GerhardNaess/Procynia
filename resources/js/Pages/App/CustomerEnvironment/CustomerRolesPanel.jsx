@@ -1,6 +1,10 @@
-import { router, useForm } from '@inertiajs/react';
-import { useState } from 'react';
+import { router, useForm, usePage } from '@inertiajs/react';
+import { useRef, useState } from 'react';
 import { PRIMARY_COLOURS, SECONDARY_COLOURS, WARNING_COLOURS } from '../../../Support/actionStyles';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
+import { announce } from '../../../Support/announcer';
+import { fieldA11y } from '../../../Support/formFieldA11y';
+import { useFocusFirstError } from '../../../Support/focusManagement';
 import { rolesInDomain } from './customerRoleMatrix';
 import BusinessAreasPanel from './BusinessAreasPanel';
 import PermissionSection, { MATRIX } from './PermissionSection';
@@ -49,6 +53,8 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
     } = customerRoles;
     const tba = t.business_areas ?? {};
     const ts = t.sections ?? {};
+    const { translations = {} } = usePage().props;
+    const a11y = translations.a11y ?? {};
     // A matrix checkbox has no visible label of its own, so it names both its row and its column.
     const checkboxLabel = (permissionLabel, roleName) =>
         (ts.checkbox_label ?? ':permission – :role').replace(':permission', permissionLabel).replace(':role', roleName);
@@ -76,6 +82,10 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
         all_business_areas: false,
         business_area_ids: [],
     });
+    const roleFormRef = useRef(null);
+    const focusFirstRoleError = useFocusFirstError(roleFormRef);
+    const nameField = fieldA11y({ id: 'customer-role-name', hasError: Boolean(roleForm.errors.name) });
+    const descriptionField = fieldA11y({ id: 'customer-role-description', hasError: Boolean(roleForm.errors.description) });
 
     const openCreateRole = () => {
         roleForm.clearErrors();
@@ -104,7 +114,7 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
     const submitRole = (event) => {
         event.preventDefault();
 
-        const options = { preserveScroll: true, onSuccess: () => closeRoleModal() };
+        const options = { preserveScroll: true, onSuccess: () => closeRoleModal(), onError: focusFirstRoleError };
 
         if (roleModal.mode === 'edit' && roleModal.role) {
             roleForm.patch(roleModal.role.update_url, options);
@@ -118,6 +128,11 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
     // A single checkbox in a domain table sends only the permission set. The role's name and
     // active state are not on screen here, so they must not be part of what this write asserts.
     const togglePermission = (role, permissionKey) => {
+        // The box stays focusable while its row saves (aria-disabled, A11Y-029); a change then is ignored.
+        if (savingRoleId === role.id) {
+            return;
+        }
+
         const next = role.permission_keys.includes(permissionKey)
             ? role.permission_keys.filter((key) => key !== permissionKey)
             : [...role.permission_keys, permissionKey];
@@ -132,6 +147,8 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                 // The props carry the saved state; keeping the page's own state is what keeps the
                 // open sections open after a click.
                 preserveState: true,
+                onSuccess: () => announce(a11y.saved ?? 'Lagret'),
+                onError: () => announce(a11y.save_failed ?? 'Endringen ble ikke lagret.', { politeness: 'assertive' }),
                 onFinish: () => setSavingRoleId(null),
             },
         );
@@ -211,7 +228,11 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                     {t.domain_no_roles ?? 'Ingen av rollene har rettigheter her ennå. Rediger en rolle for å gi den rettigheter i dette området.'}
                                 </p>
                             ) : (
-                                <div className={MATRIX.wrapper}>
+                                <ScrollRegion
+                                    label={(a11y.table_permissions ?? 'Rettigheter: :section').replace(':section', domain.label)}
+                                    edgeRoom={false}
+                                    className={MATRIX.wrapper}
+                                >
                                     <table className={MATRIX.table}>
                                         <thead>
                                             <tr className={MATRIX.headRow}>
@@ -249,7 +270,7 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                                                 <input
                                                                     type="checkbox"
                                                                     checked={checked}
-                                                                    disabled={savingRoleId === role.id}
+                                                                    aria-disabled={savingRoleId === role.id ? true : undefined}
                                                                     onChange={() => togglePermission(role, permission.key)}
                                                                     aria-label={checkboxLabel(permission.label, role.name)}
                                                                     className={MATRIX.checkbox}
@@ -263,6 +284,7 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                                                 type="button"
                                                                 onClick={() => openEditRole(role)}
                                                                 title={t.areas_edit ?? 'Endre fagområder'}
+                                                                aria-label={`${areaSummary(role)} – ${t.areas_edit ?? 'Endre fagområder'}: ${role.name}`}
                                                                 className="rounded-lg text-left underline decoration-slate-300 underline-offset-4 hover:text-violet-700 hover:decoration-violet-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
                                                             >
                                                                 {areaSummary(role)}
@@ -273,7 +295,7 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                             ))}
                                         </tbody>
                                     </table>
-                                </div>
+                                </ScrollRegion>
                             )}
                         </PermissionSection>
                     );
@@ -306,20 +328,21 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                 ) : (
                     <div className="mt-6">
                         <div>
-                            <div className="overflow-x-auto">
+                            <ScrollRegion label={a11y.table_roles ?? 'Egne roller'}>
                                 <table className="w-full text-base">
+                                    <caption className="sr-only">{t.heading ?? 'Egne roller'}</caption>
                                     <thead>
                                         <tr className="border-b border-slate-200">
-                                            <th className="pb-3 pr-6 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                            <th scope="col" className="pb-3 pr-6 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                 {t.col_role ?? 'Rolle'}
                                             </th>
-                                            <th className="px-4 pb-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                            <th scope="col" className="px-4 pb-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                 {t.col_users ?? 'Brukere'}
                                             </th>
-                                            <th className="px-4 pb-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                            <th scope="col" className="px-4 pb-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                 {t.col_status ?? 'Status'}
                                             </th>
-                                            <th className="pb-3 pl-4 text-right text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                            <th scope="col" className="pb-3 pl-4 text-right text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                 {t.col_actions ?? 'Handlinger'}
                                             </th>
                                         </tr>
@@ -327,14 +350,14 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                     <tbody className="divide-y divide-slate-100">
                                         {roles.map((role) => (
                                             <tr key={role.id}>
-                                                <td className="py-4 pr-6 text-slate-900">
+                                                <th scope="row" className="py-4 pr-6 text-left font-normal text-slate-900">
                                                     <span className="font-medium">{role.name}</span>
                                                     {role.description ? (
-                                                        <span className="mt-0.5 block max-w-md text-base font-normal leading-6 text-slate-500">
+                                                        <span className="mt-0.5 block max-w-md text-base font-normal leading-6 text-slate-600">
                                                             {role.description}
                                                         </span>
                                                     ) : null}
-                                                </td>
+                                                </th>
                                                 <td className="px-4 py-4 text-slate-600">{role.user_count}</td>
                                                 <td className="px-4 py-4">
                                                     <span
@@ -353,6 +376,7 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                                         <button
                                                             type="button"
                                                             onClick={() => openEditRole(role)}
+                                                            aria-label={`${t.edit ?? 'Rediger'} ${role.name}`}
                                                             className={`inline-flex min-h-11 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition ${SECONDARY_COLOURS}`}
                                                         >
                                                             {t.edit ?? 'Rediger'}
@@ -361,6 +385,7 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                                             type="button"
                                                             disabled={savingRoleId === role.id}
                                                             onClick={() => toggleRoleActive(role)}
+                                                            aria-label={`${role.is_active ? (t.deactivate ?? 'Deaktiver') : (t.activate ?? 'Aktiver')} ${role.name}`}
                                                             className={`inline-flex min-h-11 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${SECONDARY_COLOURS}`}
                                                         >
                                                             {role.is_active ? (t.deactivate ?? 'Deaktiver') : (t.activate ?? 'Aktiver')}
@@ -368,6 +393,7 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                                         <button
                                                             type="button"
                                                             onClick={() => deleteRole(role)}
+                                                            aria-label={`${t.delete ?? 'Slett'} ${role.name}`}
                                                             className={`inline-flex min-h-11 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition ${WARNING_COLOURS}`}
                                                         >
                                                             {t.delete ?? 'Slett'}
@@ -378,7 +404,7 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                         ))}
                                     </tbody>
                                 </table>
-                            </div>
+                            </ScrollRegion>
                         </div>
                     </div>
                 )}
@@ -399,21 +425,21 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                 description={t.modal_description ?? ''}
                 onClose={closeRoleModal}
             >
-                <form onSubmit={submitRole} className="space-y-5">
+                <form ref={roleFormRef} onSubmit={submitRole} className="space-y-5">
                     <div>
                         <label htmlFor="customer-role-name" className="block text-base font-semibold text-slate-900">
                             {t.field_name ?? 'Rollenavn'}
                         </label>
                         <input
-                            id="customer-role-name"
+                            {...nameField.controlProps}
                             type="text"
                             value={roleForm.data.name}
                             onChange={(event) => roleForm.setData('name', event.target.value)}
                             placeholder={t.field_name_placeholder ?? ''}
-                            className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-base text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                            className="mt-2 w-full rounded-xl border border-field-border px-4 py-2.5 text-base text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-200"
                         />
                         {roleForm.errors.name ? (
-                            <p className="mt-1.5 text-base text-rose-600">{roleForm.errors.name}</p>
+                            <p id={nameField.errorId} className="mt-1.5 text-base text-rose-700">{roleForm.errors.name}</p>
                         ) : null}
                     </div>
 
@@ -422,35 +448,44 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                             {t.field_description ?? 'Beskrivelse'}
                         </label>
                         <textarea
-                            id="customer-role-description"
+                            {...descriptionField.controlProps}
                             rows={3}
                             value={roleForm.data.description}
                             onChange={(event) => roleForm.setData('description', event.target.value)}
-                            className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-base text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                            className="mt-2 w-full rounded-xl border border-field-border px-4 py-2.5 text-base text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-200"
                         />
                         {roleForm.errors.description ? (
-                            <p className="mt-1.5 text-base text-rose-600">{roleForm.errors.description}</p>
+                            <p id={descriptionField.errorId} className="mt-1.5 text-base text-rose-700">{roleForm.errors.description}</p>
                         ) : null}
                     </div>
 
-                    <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200 px-4 py-3">
+                    {/* The title names the box and the hint describes it, instead of both being read as
+                        one long name. The whole card still toggles it. */}
+                    <label className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 rounded-2xl border border-slate-200 px-4 py-3">
                         <input
                             type="checkbox"
                             checked={roleForm.data.is_active}
                             onChange={(event) => roleForm.setData('is_active', event.target.checked)}
-                            className="mt-1 h-4 w-4 cursor-pointer rounded border-slate-300 text-violet-600 focus:ring-violet-300"
+                            aria-labelledby="customer-role-active-title"
+                            aria-describedby={t.field_active_hint ? 'customer-role-active-hint' : undefined}
+                            className="row-span-2 mt-1 h-4 w-4 cursor-pointer rounded border-slate-300 text-violet-600 focus:ring-violet-300"
                         />
-                        <span>
-                            <span className="block text-base font-semibold text-slate-900">{t.field_active ?? 'Rollen er aktiv'}</span>
-                            <span className="block text-base leading-6 text-slate-600">{t.field_active_hint ?? ''}</span>
-                        </span>
+                        <span id="customer-role-active-title" className="block text-base font-semibold text-slate-900">{t.field_active ?? 'Rollen er aktiv'}</span>
+                        {t.field_active_hint ? (
+                            <span id="customer-role-active-hint" className="block text-base leading-6 text-slate-600">{t.field_active_hint}</span>
+                        ) : null}
                     </label>
 
-                    <div className="space-y-4">
-                        <p className="text-base font-semibold text-slate-900">{t.field_permissions ?? 'Rettigheter'}</p>
+                    {/* One question per group, so a screen reader entering a checkbox hears which module
+                        it belongs to (1.3.1, A11Y-120). */}
+                    <fieldset className="space-y-4">
+                        <legend className="text-base font-semibold text-slate-900">{t.field_permissions ?? 'Rettigheter'}</legend>
+                        {roleForm.errors.permissions ? (
+                            <p className="text-base text-rose-700">{roleForm.errors.permissions}</p>
+                        ) : null}
                         {domains.map((domain) => (
-                            <div key={domain.key} className="rounded-2xl border border-slate-200 p-4">
-                                <p className="text-base font-semibold text-slate-800">{domain.label}</p>
+                            <fieldset key={domain.key} className="rounded-2xl border border-slate-200 p-4">
+                                <legend className="px-1 text-base font-semibold text-slate-800">{domain.label}</legend>
                                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                                     {domain.permissions.map((permission) => {
                                         const checked = (roleForm.data.permissions ?? []).includes(permission.key);
@@ -476,9 +511,9 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                         );
                                     })}
                                 </div>
-                            </div>
+                            </fieldset>
                         ))}
-                    </div>
+                    </fieldset>
 
                     <fieldset className="rounded-2xl border border-slate-200 p-4">
                         <legend className="px-1 text-base font-semibold text-slate-900">{t.field_areas ?? 'Fagområder'}</legend>
@@ -488,7 +523,7 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                         <div className="mt-3 space-y-2">
                             <label
                                 className={classNames(
-                                    'flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2.5 text-base transition',
+                                    'grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 rounded-xl border px-3 py-2.5 text-base transition',
                                     roleForm.data.all_business_areas
                                         ? 'border-violet-300 bg-violet-50 text-violet-900'
                                         : 'border-slate-200 text-slate-700 hover:border-slate-300',
@@ -499,13 +534,13 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                     name="customer-role-areas"
                                     checked={roleForm.data.all_business_areas}
                                     onChange={() => roleForm.setData('all_business_areas', true)}
-                                    className="mt-1 h-4 w-4 cursor-pointer border-slate-300 text-violet-600 focus:ring-violet-300"
+                                    aria-labelledby="customer-role-areas-all-title"
+                                    aria-describedby="customer-role-areas-all-hint"
+                                    className="row-span-2 mt-1 h-4 w-4 cursor-pointer border-slate-300 text-violet-600 focus:ring-violet-300"
                                 />
-                                <span>
-                                    <span className="block font-semibold">{t.areas_all ?? 'Alle'}</span>
-                                    <span className="block leading-6 text-slate-600">
-                                        {t.areas_all_hint ?? 'Også fagområder som opprettes senere.'}
-                                    </span>
+                                <span id="customer-role-areas-all-title" className="block font-semibold">{t.areas_all ?? 'Alle'}</span>
+                                <span id="customer-role-areas-all-hint" className="block leading-6 text-slate-600">
+                                    {t.areas_all_hint ?? 'Også fagområder som opprettes senere.'}
                                 </span>
                             </label>
                             <label
@@ -528,7 +563,7 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                         </div>
                         {!roleForm.data.all_business_areas ? (
                             businessAreas.length === 0 ? (
-                                <p className="mt-3 text-base text-slate-500">
+                                <p className="mt-3 text-base text-slate-600">
                                     {tba.none_to_choose ?? 'Ingen fagområder er opprettet ennå.'}
                                 </p>
                             ) : (
@@ -559,7 +594,7 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                 </div>
                             )
                         ) : null}
-                        <p className="mt-3 text-base leading-6 text-slate-500">
+                        <p className="mt-3 text-base leading-6 text-slate-600">
                             {t.field_areas_scope_note ?? 'Brukes i dag av Risiko.'}
                         </p>
                     </fieldset>

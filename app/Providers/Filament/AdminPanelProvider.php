@@ -12,6 +12,7 @@ use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\View\PanelsRenderHook;
 use Filament\Widgets\AccountWidget;
 use Filament\Widgets\FilamentInfoWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -36,9 +37,15 @@ class AdminPanelProvider extends PanelProvider
             ->brandName('Procynia')
             ->login()
             ->viteTheme('resources/css/filament/admin/theme.css')
+            // Amber, with shade 600 taken one step darker (amber-700). Filament and the custom admin
+            // views use primary-600 for link text, selected-option badges and filled buttons with
+            // white text; amber-600 gives only about 3:1 against white and amber-50 (WCAG 1.4.3,
+            // A11Y-055). Amber-700 gives about 5:1. Every other shade is unchanged.
             ->colors([
-                'primary' => Color::Amber,
+                'primary' => array_replace(Color::Amber, [600 => Color::Amber[700]]),
             ])
+            // After a rejected submit, move focus to the first invalid field (A11Y-212).
+            ->renderHook(PanelsRenderHook::BODY_END, fn (): string => view('filament.components.focus-first-error')->render())
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\Filament\Pages')
             ->pages([

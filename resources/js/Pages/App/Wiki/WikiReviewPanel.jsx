@@ -1,6 +1,7 @@
-import { router } from '@inertiajs/react';
-import { useRef, useState } from 'react';
+import { router, usePage } from '@inertiajs/react';
+import { useEffect, useRef, useState } from 'react';
 import ActionDialog from '../../../Components/App/ActionDialog';
+import { refocusIfLost } from '../../../Support/focusManagement';
 import { isStaleStateRefusal } from './wikiReviewRefusal';
 import InfoHint from '../../../Components/App/InfoHint';
 import {
@@ -87,6 +88,22 @@ function httpErrorMessage(status, tw) {
  * that says "Endringer kreves" has not lost its published knowledge, and the UI must not imply it.
  */
 
+/**
+ * Where focus goes when an action ends and the control that started it is gone or disabled (2.4.3,
+ * A11Y-014): on a refusal, the field in the dialog the person is standing in; otherwise the panel,
+ * which by then says where the page stands. Only ever if focus was actually lost (refocusIfLost).
+ */
+const FOCUS_AFTER_ERROR = {
+    submit: ['wiki-reviewer', 'wiki-review-panel'],
+    qa: ['wiki-qa-user', 'wiki-review-panel'],
+    reject: ['wiki-change-reason', 'wiki-review-panel'],
+};
+
+// While a request runs the panel's buttons stay focusable (aria-disabled + a guard in each handler),
+// so focus is not dropped to <body> mid-request (2.4.3, A11Y-156). `disabled` is only for a fixed
+// precondition, such as no reviewer chosen yet.
+const BUSY = 'aria-disabled:cursor-not-allowed aria-disabled:opacity-50';
+
 const MIN_REASON = 10;
 const MAX_REASON = 2000;
 
@@ -169,9 +186,9 @@ function PublicationBlock({ publication, tw }) {
             {blockers.length > 0 && (
                 <div data-testid="wiki-publication-blockers">
                     <p className="text-base font-medium text-slate-700">{tw.publication_blocking_heading ?? 'Gjenstår'}</p>
-                    <ul className="mt-1 space-y-1">
+                    <ul className="mt-1 list-inside list-disc space-y-1 marker:text-amber-800">
                         {blockers.map((reason) => (
-                            <li key={reason} className="text-base text-amber-800">• {reason}</li>
+                            <li key={reason} className="text-base text-amber-800">{reason}</li>
                         ))}
                     </ul>
                 </div>
@@ -248,10 +265,10 @@ function QaAssignmentBlock({ qaAssignment, tw, busy, triggerRef, onOpen }) {
                     <button
                         ref={triggerRef}
                         type="button"
-                        disabled={busy}
-                        onClick={onOpen}
+                        aria-disabled={busy || undefined}
+                        onClick={() => { if (! busy) onOpen(); }}
                         data-testid="wiki-qa-assign"
-                        className="inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                        className={`inline-flex min-h-9 items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-700 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50 ${BUSY}`}
                     >
                         {assignee
                             ? (tw.qa_change_button ?? 'Endre kvalitetssikrer')
@@ -283,11 +300,23 @@ export default function WikiReviewPanel({
     const [reason, setReason] = useState('');
     const [showHistory, setShowHistory] = useState(false);
 
+    const { translations = {} } = usePage().props;
+    const ta = translations?.a11y ?? {};
     const submitTriggerRef = useRef(null);
+    const panelRef = useRef(null);
+    const lastActionRef = useRef(null);
     const reviewerSelectRef = useRef(null);
     const qaTriggerRef = useRef(null);
     const qaSelectRef = useRef(null);
     const reasonRef = useRef(null);
+
+    // A refusal shows its message (ActionError, an alert) where the action was started; if the
+    // button pressed was disabled meanwhile, focus is put back where the person can act on it.
+    useEffect(() => {
+        if (actionError) {
+            refocusIfLost(FOCUS_AFTER_ERROR[lastActionRef.current] ?? ['wiki-review-panel']);
+        }
+    }, [actionError]);
 
     if (! reviewAssignment) {
         return null;
@@ -334,6 +363,7 @@ export default function WikiReviewPanel({
         if (processing) return;
         setProcessing(key);
         setActionError(null);
+        lastActionRef.current = key;
 
         // `processing` blocks a second click, and only onFinish clears it — so if the dispatch
         // itself throws before Inertia's promise chain exists, onFinish never runs and every
@@ -348,6 +378,7 @@ export default function WikiReviewPanel({
                     setIsQaOpen(false);
                     setChangesTarget(null);
                     setReason('');
+                    refocusIfLost(['wiki-review-panel']);
                 },
                 // A refused handover used to leave the dialog sitting there saying nothing, which
                 // reads exactly like a click that never happened. Validation errors and aborts
@@ -382,6 +413,7 @@ export default function WikiReviewPanel({
                     setChangesTarget(null);
                     setReason('');
                     router.reload({ preserveScroll: true });
+                    refocusIfLost(['wiki-review-panel']);
 
                     return false;
                 },
@@ -408,7 +440,20 @@ export default function WikiReviewPanel({
     const reasonTooShort = reason.trim().length < MIN_REASON;
 
     return (
-        <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
+        // A named section of the page under its h1, with an h2 of its own above the h3 blocks (1.3.1).
+        // tabIndex -1: the place focus goes when the button that was pressed is gone afterwards —
+        // «Send til gjennomgang» once the page is in review, «Godkjenn og publiser» once it is
+        // published — so a keyboard user continues here, and hears where the page stands now.
+        <section
+            ref={panelRef}
+            id="wiki-review-panel"
+            tabIndex={-1}
+            aria-labelledby="wiki-review-panel-title"
+            className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]"
+        >
+            <h2 id="wiki-review-panel-title" className="sr-only">
+                {ta.wiki_review_panel_title ?? 'Gjennomgang og publisering'}
+            </h2>
             <PublicationBlock publication={publication} tw={tw} />
 
             <QaAssignmentBlock
@@ -433,7 +478,7 @@ export default function WikiReviewPanel({
                         </span>
                     </span>
                 ) : (
-                    <span className="text-slate-500">
+                    <span className="text-slate-600">
                         {tw.review_nothing_published ?? 'Ingen publisert versjon ennå'}
                     </span>
                 )}
@@ -564,13 +609,15 @@ export default function WikiReviewPanel({
                         <button
                             ref={submitTriggerRef}
                             type="button"
-                            disabled={busy || eligibleReviewers.length === 0}
+                            disabled={eligibleReviewers.length === 0}
+                            aria-disabled={busy || undefined}
                             onClick={() => {
+                                if (busy) return;
                                 setActionError(null);
                                 setReviewerId(eligibleReviewers.length === 1 ? String(eligibleReviewers[0].id) : '');
                                 setIsSubmitOpen(true);
                             }}
-                            className={PRIMARY_ACTION}
+                            className={`${PRIMARY_ACTION} ${BUSY}`}
                         >
                             {tw.submit_button ?? 'Send til gjennomgang'}
                         </button>
@@ -604,9 +651,9 @@ export default function WikiReviewPanel({
                 {canReopen && (
                     <button
                         type="button"
-                        disabled={busy}
+                        aria-disabled={busy || undefined}
                         onClick={reopen}
-                        className={PRIMARY_ACTION}
+                        className={`${PRIMARY_ACTION} ${BUSY}`}
                     >
                         {tw.reopen_button ?? 'Gjenåpne for redigering'}
                     </button>
@@ -615,9 +662,9 @@ export default function WikiReviewPanel({
                 {canApproveFinal && (
                     <button
                         type="button"
-                        disabled={busy}
+                        aria-disabled={busy || undefined}
                         onClick={approve}
-                        className={PRIMARY_ACTION}
+                        className={`${PRIMARY_ACTION} ${BUSY}`}
                     >
                         {isSystemOwner && reviewAssignment.reviewer && currentUserId !== null
                             && reviewAssignment.reviewer.id !== currentUserId
@@ -632,9 +679,9 @@ export default function WikiReviewPanel({
                 {canSendBack && (
                     <button
                         type="button"
-                        disabled={busy}
-                        onClick={() => { setActionError(null); setChangesTarget('page'); setReason(''); }}
-                        className={WARNING_ACTION}
+                        aria-disabled={busy || undefined}
+                        onClick={() => { if (busy) return; setActionError(null); setChangesTarget('page'); setReason(''); }}
+                        className={`${WARNING_ACTION} ${BUSY}`}
                     >
                         {tw.review_send_back ?? 'Send tilbake'}
                     </button>
@@ -648,15 +695,17 @@ export default function WikiReviewPanel({
                 onClose={() => setIsQaOpen(false)}
                 closeDisabled={busy}
                 titleId="wiki-qa-title"
+                descriptionId="wiki-qa-description"
                 initialFocusRef={qaSelectRef}
                 returnFocusRef={qaTriggerRef}
+                fallbackFocusRef={panelRef}
             >
                 <h2 id="wiki-qa-title" className="text-xl font-semibold tracking-tight text-slate-950">
                     {qaAssignment?.assignee
                         ? (tw.qa_change_button ?? 'Endre kvalitetssikrer')
                         : (tw.qa_assign_button ?? 'Tildel kvalitetssikrer')}
                 </h2>
-                <p className="mt-2 text-base leading-6 text-slate-600">
+                <p id="wiki-qa-description" className="mt-2 text-base leading-6 text-slate-600">
                     {tw.qa_assign_description
                         ?? 'Velg hvem som skal kvalitetssikre påstandene i denne versjonen. Vedkommende får beskjed. Kvalitetssikring er støtte i arbeidet og kreves ikke for å publisere siden.'}
                 </p>
@@ -668,7 +717,7 @@ export default function WikiReviewPanel({
                         id="wiki-qa-user"
                         value={qaUserId}
                         onChange={(event) => setQaUserId(event.target.value)}
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                        className="w-full rounded-xl border border-field-border bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                     >
                         <option value="">{tw.qa_choose_user ?? 'Velg kvalitetssikrer'}</option>
                         {(qaAssignment?.eligible_qa_users ?? []).map((candidate) => (
@@ -678,12 +727,12 @@ export default function WikiReviewPanel({
                 </label>
 
                 <div className="mt-6 flex flex-wrap gap-3">
-                    <button type="button" disabled={busy || qaUserId === ''} onClick={assignQa} className={PRIMARY_ACTION}>
+                    <button type="button" disabled={qaUserId === ''} aria-disabled={busy || undefined} onClick={assignQa} className={`${PRIMARY_ACTION} ${BUSY}`}>
                         {qaAssignment?.assignee
                             ? (tw.qa_update_button ?? 'Oppdater')
                             : (tw.qa_send_button ?? 'Tildel')}
                     </button>
-                    <button type="button" disabled={busy} onClick={() => setIsQaOpen(false)} className={SECONDARY_ACTION}>
+                    <button type="button" aria-disabled={busy || undefined} onClick={() => { if (! busy) setIsQaOpen(false); }} className={`${SECONDARY_ACTION} ${BUSY}`}>
                         {tw.cancel ?? 'Avbryt'}
                     </button>
                 </div>
@@ -694,13 +743,15 @@ export default function WikiReviewPanel({
                 onClose={() => { setIsSubmitOpen(false); setActionError(null); }}
                 closeDisabled={busy}
                 titleId="wiki-submit-title"
+                descriptionId="wiki-submit-description"
                 initialFocusRef={reviewerSelectRef}
                 returnFocusRef={submitTriggerRef}
+                fallbackFocusRef={panelRef}
             >
                 <h2 id="wiki-submit-title" className="text-xl font-semibold tracking-tight text-slate-950">
                     {tw.submit_button ?? 'Send til gjennomgang'}
                 </h2>
-                <p className="mt-2 text-base leading-6 text-slate-600">
+                <p id="wiki-submit-description" className="mt-2 text-base leading-6 text-slate-600">
                     {tw.review_submit_description ?? 'Velg hvem som skal kontrollere denne versjonen. Kontrolløren får beskjed og blir ansvarlig for å godkjenne eller be om endringer.'}
                 </p>
 
@@ -711,7 +762,7 @@ export default function WikiReviewPanel({
                         id="wiki-reviewer"
                         value={reviewerId}
                         onChange={(event) => setReviewerId(event.target.value)}
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                        className="w-full rounded-xl border border-field-border bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                     >
                         <option value="">{tw.review_choose_reviewer ?? 'Velg kontrollør'}</option>
                         {eligibleReviewers.map((reviewer) => (
@@ -727,12 +778,12 @@ export default function WikiReviewPanel({
                 )}
 
                 <div className="mt-6 flex flex-wrap gap-3">
-                    <button type="button" disabled={busy || reviewerId === ''} onClick={submit} className={PRIMARY_ACTION}>
+                    <button type="button" disabled={reviewerId === ''} aria-disabled={busy || undefined} onClick={submit} className={`${PRIMARY_ACTION} ${BUSY}`}>
                         {processing === 'submit'
                             ? (tw.review_sending ?? 'Sender …')
                             : (tw.submit_button ?? 'Send til gjennomgang')}
                     </button>
-                    <button type="button" disabled={busy} onClick={() => { setIsSubmitOpen(false); setActionError(null); }} className={SECONDARY_ACTION}>
+                    <button type="button" aria-disabled={busy || undefined} onClick={() => { if (busy) return; setIsSubmitOpen(false); setActionError(null); }} className={`${SECONDARY_ACTION} ${BUSY}`}>
                         {tw.cancel ?? 'Avbryt'}
                     </button>
                 </div>
@@ -745,12 +796,14 @@ export default function WikiReviewPanel({
                 onClose={() => { setChangesTarget(null); setActionError(null); }}
                 closeDisabled={busy}
                 titleId="wiki-changes-title"
+                descriptionId="wiki-changes-description"
                 initialFocusRef={reasonRef}
+                fallbackFocusRef={panelRef}
             >
                 <h2 id="wiki-changes-title" className="text-xl font-semibold tracking-tight text-slate-950">
                     {tw.review_send_back ?? 'Send tilbake'}
                 </h2>
-                <p className="mt-2 text-base leading-6 text-slate-600">
+                <p id="wiki-changes-description" className="mt-2 text-base leading-6 text-slate-600">
                     {tw.review_request_changes_page ?? 'Siden sendes tilbake til sideeier. Den publiserte versjonen berøres ikke.'}
                 </p>
 
@@ -766,10 +819,14 @@ export default function WikiReviewPanel({
                         value={reason}
                         onChange={(event) => setReason(event.target.value)}
                         aria-describedby="wiki-change-reason-help"
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                        aria-required="true"
+                        className="w-full rounded-xl border border-field-border bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                     />
+                    {/* The minimum is said where it applies (3.3.2, A11Y-118): «Send tilbake» stays
+                        unavailable until it is met, and nothing on screen used to say why. */}
                     <span id="wiki-change-reason-help" className="block text-sm text-slate-500">
                         {tw.review_comment_help ?? 'Forklar hva sideeier må endre før siden kan sendes inn på nytt.'}
+                        {' '}{(ta.wiki_review_reason_min ?? 'Minst :min tegn.').replace(':min', String(MIN_REASON))}
                         {' '}{reason.trim().length}/{MAX_REASON}
                     </span>
                 </label>
@@ -781,10 +838,10 @@ export default function WikiReviewPanel({
                 )}
 
                 <div className="mt-6 flex flex-wrap gap-3">
-                    <button type="button" disabled={busy || reasonTooShort} onClick={requestChanges} className={WARNING_ACTION}>
+                    <button type="button" disabled={reasonTooShort} aria-disabled={busy || undefined} onClick={requestChanges} className={`${WARNING_ACTION} ${BUSY}`}>
                         {tw.review_send_back ?? 'Send tilbake'}
                     </button>
-                    <button type="button" disabled={busy} onClick={() => { setChangesTarget(null); setActionError(null); }} className={SECONDARY_ACTION}>
+                    <button type="button" aria-disabled={busy || undefined} onClick={() => { if (busy) return; setChangesTarget(null); setActionError(null); }} className={`${SECONDARY_ACTION} ${BUSY}`}>
                         {tw.cancel ?? 'Avbryt'}
                     </button>
                 </div>

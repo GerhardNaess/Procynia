@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { router, useForm } from '@inertiajs/react';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { refocusIfLost, useFocusFirstError } from '../../../Support/focusManagement';
+import { fieldA11y } from '../../../Support/formFieldA11y';
+import { ERROR, INPUT, LABEL } from '../../../Support/formStyles';
+import { removalFocusCandidates } from './riskA11y';
+import useInlinePanelFocus from './useInlinePanelFocus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-base font-semibold text-slate-700';
 
 /**
  * Kontekst: the Kvalitet processes and activities this risk belongs to. Rendered only when the
@@ -25,39 +28,65 @@ export default function RiskContextPanel({ riskId, context, options, canLink, tr
         ? selectedProcess.linked
         : Boolean(selectedProcess.activities.find((activity) => activity.key === form.data.activity_key)?.linked));
 
+    // «Koble prosess» is hidden while its form is open: focus in, and back to it (A11Y-014).
+    const panelRef = useRef(null);
+    const focusFirstError = useFocusFirstError(panelRef);
+    useInlinePanelFocus(linking, { panelRef, returnIds: ['risk-context-link', 'risk-context-heading'] });
+
     const close = () => { setLinking(false); form.reset(); form.clearErrors(); };
 
     const submit = (event) => {
         event.preventDefault();
-        form.post(`/app/risk/risks/${riskId}/context`, { preserveScroll: true, onSuccess: close });
+
+        if (form.processing) {
+            return;
+        }
+
+        form.post(`/app/risk/risks/${riskId}/context`, { preserveScroll: true, onSuccess: close, onError: () => focusFirstError() });
     };
 
-    const unlink = (url) => {
+    // Every «Fjern kobling» on the panel, in page order: when one goes with its row, focus moves to
+    // the next one, else the previous one, else «Koble prosess» or the heading (2.4.3, A11Y-014).
+    const unlinkIds = context.flatMap((process) => [
+        ...(process.whole_process ? [`risk-context-process-${process.id}-unlink`] : []),
+        ...process.activities.map((activity) => `risk-context-activity-${activity.id}-unlink`),
+    ]);
+
+    const unlink = (url, buttonId) => {
         if (! window.confirm(tc.unlink_confirm ?? 'Fjerne koblingen? Prosessen og aktiviteten blir værende i Kvalitet.')) {
             return;
         }
 
-        router.delete(url, { preserveScroll: true });
+        const candidates = removalFocusCandidates(unlinkIds, buttonId, ['risk-context-link', 'risk-context-heading']);
+
+        router.delete(url, { preserveScroll: true, onSuccess: () => refocusIfLost(candidates) });
     };
+
+    const processField = fieldA11y({ id: 'risk-context-process', hasError: Boolean(form.errors.quality_item_id) });
+    const activityField = fieldA11y({
+        id: 'risk-context-activity',
+        hasHint: selectedProcess !== undefined && selectedProcess.activities.length === 0,
+        hasError: Boolean(form.errors.activity_key),
+    });
 
     return (
         <section className={CARD}>
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                    <h2 className="text-lg font-semibold text-slate-950">{tc.title ?? 'Kontekst'}</h2>
+                    <h2 id="risk-context-heading" className="text-lg font-semibold text-slate-950">{tc.title ?? 'Kontekst'}</h2>
                     <p className="mt-1 text-base text-slate-600">
                         {tc.description ?? 'Prosessene og aktivitetene i Kvalitet der risikoen kan oppstå.'}
                     </p>
                 </div>
                 {canLink && ! linking && (
-                    <button type="button" onClick={() => setLinking(true)} className={SECONDARY_ACTION}>
+                    <button id="risk-context-link" type="button" onClick={() => setLinking(true)} className={SECONDARY_ACTION}>
                         {tc.link ?? 'Koble prosess'}
                     </button>
                 )}
             </div>
 
             {linking && (
-                <form onSubmit={submit} className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <form ref={panelRef} onSubmit={submit} className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     {options.length === 0 ? (
                         <p className="text-base text-slate-700">{tc.no_options ?? 'Det finnes ingen prosesser i Kvalitet å koble til.'}</p>
                     ) : (
@@ -65,7 +94,7 @@ export default function RiskContextPanel({ riskId, context, options, canLink, tr
                             <div>
                                 <label htmlFor="risk-context-process" className={LABEL}>{tc.choose_process ?? 'Prosess'}</label>
                                 <select
-                                    id="risk-context-process"
+                                    {...processField.controlProps}
                                     value={form.data.quality_item_id}
                                     onChange={(event) => form.setData({ quality_item_id: event.target.value, activity_key: '' })}
                                     className={`mt-1 ${INPUT}`}
@@ -76,14 +105,14 @@ export default function RiskContextPanel({ riskId, context, options, canLink, tr
                                     ))}
                                 </select>
                                 {form.errors.quality_item_id && (
-                                    <p className="mt-1 text-base text-rose-700">{form.errors.quality_item_id}</p>
+                                    <p id={processField.errorId} className={ERROR}>{form.errors.quality_item_id}</p>
                                 )}
                             </div>
                             {selectedProcess && (
                                 <div>
                                     <label htmlFor="risk-context-activity" className={LABEL}>{tc.choose_activity ?? 'Aktivitet (valgfritt)'}</label>
                                     <select
-                                        id="risk-context-activity"
+                                        {...activityField.controlProps}
                                         value={form.data.activity_key}
                                         onChange={(event) => form.setData('activity_key', event.target.value)}
                                         className={`mt-1 ${INPUT}`}
@@ -100,10 +129,10 @@ export default function RiskContextPanel({ riskId, context, options, canLink, tr
                                         ))}
                                     </select>
                                     {selectedProcess.activities.length === 0 && (
-                                        <p className="mt-1 text-base text-slate-600">{tc.no_activities ?? 'Prosessen har ingen aktiviteter i flyten.'}</p>
+                                        <p id={activityField.hintId} className="mt-1 text-base text-slate-600">{tc.no_activities ?? 'Prosessen har ingen aktiviteter i flyten.'}</p>
                                     )}
                                     {form.errors.activity_key && (
-                                        <p className="mt-1 text-base text-rose-700">{form.errors.activity_key}</p>
+                                        <p id={activityField.errorId} className={ERROR}>{form.errors.activity_key}</p>
                                     )}
                                 </div>
                             )}
@@ -111,7 +140,7 @@ export default function RiskContextPanel({ riskId, context, options, canLink, tr
                     )}
                     <div className="flex flex-wrap gap-2">
                         {options.length > 0 && (
-                            <button type="submit" disabled={form.processing || ! selectedProcess || choiceTaken} className={PRIMARY_ACTION}>
+                            <button type="submit" disabled={! selectedProcess || choiceTaken} aria-disabled={form.processing || undefined} className={PRIMARY_ACTION}>
                                 {tc.save ?? 'Koble'}
                             </button>
                         )}
@@ -139,8 +168,9 @@ export default function RiskContextPanel({ riskId, context, options, canLink, tr
                                 </div>
                                 {canLink && process.whole_process && (
                                     <button
+                                        id={`risk-context-process-${process.id}-unlink`}
                                         type="button"
-                                        onClick={() => unlink(`/app/risk/risks/${riskId}/context/processes/${process.id}`)}
+                                        onClick={() => unlink(`/app/risk/risks/${riskId}/context/processes/${process.id}`, `risk-context-process-${process.id}-unlink`)}
                                         className={DESTRUCTIVE_ACTION}
                                         aria-label={`${tc.unlink ?? 'Fjern kobling'}: ${label(process)}`}
                                     >
@@ -157,8 +187,9 @@ export default function RiskContextPanel({ riskId, context, options, canLink, tr
                                             </a>
                                             {canLink && (
                                                 <button
+                                                    id={`risk-context-activity-${activity.id}-unlink`}
                                                     type="button"
-                                                    onClick={() => unlink(`/app/risk/risks/${riskId}/context/activities/${activity.id}`)}
+                                                    onClick={() => unlink(`/app/risk/risks/${riskId}/context/activities/${activity.id}`, `risk-context-activity-${activity.id}-unlink`)}
                                                     className={DESTRUCTIVE_ACTION}
                                                     aria-label={`${tc.unlink ?? 'Fjern kobling'}: ${activity.label}`}
                                                 >

@@ -28,13 +28,13 @@ async function openFlow(page, title) {
 
     await link.first().click();
     await page.getByRole('tab', { name: 'Flyt' }).or(page.getByRole('link', { name: 'Flyt' })).first().click();
-    await expect(page.getByRole('img', { name: /Prosessflyt/ })).toBeVisible();
+    await expect(page.locator('svg[aria-label^="Prosessflyt"]')).toBeVisible();
 }
 
 /** The surface is the scroll box; the drawing is the SVG inside it. */
 async function boxes(page) {
     return page.evaluate(() => {
-        const svg = document.querySelector('svg[role="img"]');
+        const svg = document.querySelector('svg[aria-label^="Prosessflyt"]');
         const surface = svg.closest('div.overflow-auto');
 
         return {

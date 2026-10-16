@@ -2,6 +2,7 @@ import { Link, router, usePage } from '@inertiajs/react';
 import { PRIMARY_COLOURS, SECONDARY_COLOURS, WARNING_COLOURS, DESTRUCTIVE_COLOURS } from '../../../Support/actionStyles';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 
 function formatDate(value, locale) {
@@ -29,6 +30,7 @@ function buildFilterQuery(filters) {
 export default function WatchProfilesIndex({ watchProfiles, filters, filterOptions }) {
     const { locale, translations = {} } = usePage().props;
     const wp = translations?.watch_profile_page ?? {};
+    const a11y = translations?.a11y ?? {};
     const [togglingId, setTogglingId] = useState(null);
     const [deletingId, setDeletingId] = useState(null);
 
@@ -112,7 +114,7 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                                     ...filters,
                                     user_id: event.target.value === '' ? null : Number(event.target.value),
                                 })}
-                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             >
                                 <option value="">Alle brukere</option>
                                 {filterOptions.users.map((option) => (
@@ -131,7 +133,7 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                                     ...filters,
                                     department_id: event.target.value === '' ? null : Number(event.target.value),
                                 })}
-                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             >
                                 <option value="">Alle avdelinger</option>
                                 {filterOptions.departments.map((option) => (
@@ -195,6 +197,7 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                                         <div className="flex flex-col gap-2 sm:flex-row">
                                             <Link
                                                 href={watchProfile.edit_url}
+                                                aria-label={`Rediger ${watchProfile.name}`}
                                                 className={`inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition ${SECONDARY_COLOURS}`}
                                             >
                                                 Rediger
@@ -202,6 +205,7 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                                             <button
                                                 type="button"
                                                 onClick={() => toggleActive(watchProfile)}
+                                                aria-label={watchProfile.is_active && watchProfile.is_self ? undefined : `${watchProfile.is_active ? 'Deaktiver' : 'Aktiver'} ${watchProfile.name}`}
                                                 disabled={togglingId === watchProfile.id}
                                                 className={
                                                     watchProfile.is_active
@@ -220,6 +224,7 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                                             <button
                                                 type="button"
                                                 onClick={() => deleteWatchProfile(watchProfile)}
+                                                aria-label={`Slett ${watchProfile.name}`}
                                                 disabled={deletingId === watchProfile.id}
                                                 className={`inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition disabled:opacity-60 ${DESTRUCTIVE_COLOURS}`}
                                             >
@@ -232,23 +237,24 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                         </section>
 
                         <section className="hidden overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:block">
-                            <div className="overflow-x-auto">
+                            <ScrollRegion label={a11y.table_watch_profiles ?? 'Watch Profiles'} edgeRoom={false}>
                                 <table className="min-w-full divide-y divide-slate-200">
+                                    <caption className="sr-only">{a11y.table_watch_profiles ?? 'Watch Profiles'}</caption>
                                     <thead className="bg-slate-50">
                                         <tr className="text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                            <th className="px-6 py-4">Navn</th>
-                                            <th className="px-6 py-4">Eier</th>
-                                            <th className="px-6 py-4">CPV-regler</th>
-                                            <th className="px-6 py-4">Nøkkelord</th>
-                                            <th className="px-6 py-4">Status</th>
-                                            <th className="px-6 py-4">Oppdatert</th>
-                                            <th className="px-6 py-4">Handlinger</th>
+                                            <th scope="col" className="px-6 py-4">Navn</th>
+                                            <th scope="col" className="px-6 py-4">Eier</th>
+                                            <th scope="col" className="px-6 py-4">CPV-regler</th>
+                                            <th scope="col" className="px-6 py-4">Nøkkelord</th>
+                                            <th scope="col" className="px-6 py-4">Status</th>
+                                            <th scope="col" className="px-6 py-4">Oppdatert</th>
+                                            <th scope="col" className="px-6 py-4">Handlinger</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {watchProfiles.map((watchProfile) => (
                                             <tr key={watchProfile.id} className="text-base text-slate-700">
-                                                <td className="px-6 py-4 font-medium text-slate-950">{watchProfile.name}</td>
+                                                <th scope="row" className="px-6 py-4 text-left font-medium text-slate-950">{watchProfile.name}</th>
                                                 <td className="px-6 py-4 text-slate-600">{`${watchProfile.owner_label}: ${watchProfile.owner_reference}`}</td>
                                                 <td className="px-6 py-4">{pluralize(watchProfile.cpv_rule_count, 'CPV-regel', 'CPV-regler')}</td>
                                                 <td className="px-6 py-4">{pluralize(watchProfile.keyword_count, 'nøkkelord', 'nøkkelord')}</td>
@@ -268,6 +274,7 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                                                     <div className="flex flex-wrap gap-2">
                                                         <Link
                                                             href={watchProfile.edit_url}
+                                                            aria-label={`Rediger ${watchProfile.name}`}
                                                             className={`inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition ${SECONDARY_COLOURS}`}
                                                         >
                                                             Rediger
@@ -275,6 +282,7 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                                                         <button
                                                             type="button"
                                                             onClick={() => toggleActive(watchProfile)}
+                                                            aria-label={watchProfile.is_active && watchProfile.is_self ? undefined : `${watchProfile.is_active ? 'Deaktiver' : 'Aktiver'} ${watchProfile.name}`}
                                                             disabled={togglingId === watchProfile.id}
                                                             className={
                                                                 watchProfile.is_active
@@ -293,6 +301,7 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                                                         <button
                                                             type="button"
                                                             onClick={() => deleteWatchProfile(watchProfile)}
+                                                            aria-label={`Slett ${watchProfile.name}`}
                                                             disabled={deletingId === watchProfile.id}
                                                             className={`inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition disabled:opacity-60 ${DESTRUCTIVE_COLOURS}`}
                                                         >
@@ -304,7 +313,7 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                                         ))}
                                     </tbody>
                                 </table>
-                            </div>
+                            </ScrollRegion>
                         </section>
                     </>
                 )}

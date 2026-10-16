@@ -6,6 +6,11 @@ import Sigma from 'sigma';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import MultiSelectFilterDropdown from '../../../Components/App/MultiSelectFilterDropdown';
+import { FieldsetField } from '../../../Components/App/FormField';
+import { useTransitionAnnouncement } from '../../../Support/statusAnnouncement';
+import { focusElement, refocusIfLost } from '../../../Support/focusManagement';
+import WikiGraphListView, { lintStatusText, pageTypeText } from './WikiGraphListView';
+import { buildGraphListRows, graphResultAnnouncement } from './wikiGraphList';
 import { truncateLabelToWidth } from './graphLabelLogic';
 import { articleHrefFromGraph } from './wikiGraphNavigation';
 import { computeFitToViewport } from './wikiGraphFitView';
@@ -75,6 +80,8 @@ const SELECTED_NODE_BORDER = '#1e293b';
 // (not SVG/HTML) at a fixed screen-space font size (see labelSize below): it does not scale
 // with the camera zoom ratio, so this size is the actual on-screen size at every zoom level.
 const NODE_LABEL_SIZE = 16;
+// How long the relation tooltip stays after the pointer leaves the line, so it can be reached.
+const EDGE_TOOLTIP_GRACE_MS = 300;
 const NODE_LABEL_COLOR = '#1e293b'; // slate-800 — darker than the slate-700 contrast floor
 const NODE_LABEL_MAX_WIDTH_PX = 180;
 
@@ -123,16 +130,16 @@ function SummaryPanel({ summary, totalNodeCount, tw }) {
         { label: tw.graph_summary_summaries ?? 'Sammendrag',      value: summary.summary_count },
         { label: tw.graph_summary_concepts ?? 'Konsepter',        value: summary.concept_count },
         { label: tw.graph_summary_entities ?? 'Entiteter',        value: summary.entity_count },
-        { label: tw.graph_summary_errors   ?? 'Feil',             value: summary.lint_error_count,   accent: summary.lint_error_count   > 0 ? 'text-rose-600'   : null },
-        { label: tw.graph_summary_warnings ?? 'Advarsler',        value: summary.lint_warning_count, accent: summary.lint_warning_count > 0 ? 'text-amber-600'  : null },
-        { label: tw.graph_summary_orphans  ?? 'Isolerte sider',   value: summary.orphan_count,       accent: summary.orphan_count       > 0 ? 'text-slate-500'  : null },
+        { label: tw.graph_summary_errors   ?? 'Feil',             value: summary.lint_error_count,   accent: summary.lint_error_count   > 0 ? 'text-rose-700'   : null },
+        { label: tw.graph_summary_warnings ?? 'Advarsler',        value: summary.lint_warning_count, accent: summary.lint_warning_count > 0 ? 'text-amber-700'  : null },
+        { label: tw.graph_summary_orphans  ?? 'Isolerte sider',   value: summary.orphan_count,       accent: summary.orphan_count       > 0 ? 'text-slate-600'  : null },
     ];
     const isFiltered = typeof totalNodeCount === 'number' && totalNodeCount !== summary.node_count;
     return (
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+            <h2 className="mb-1 text-xs font-semibold uppercase tracking-widest text-slate-600">
                 {tw.graph_summary_title ?? 'Grafoversikt'}
-            </h3>
+            </h2>
             {isFiltered && (
                 <p className="mb-2 text-xs font-semibold text-violet-700">
                     {(tw.graph_summary_coverage ?? ':shown av :total sider')
@@ -143,7 +150,7 @@ function SummaryPanel({ summary, totalNodeCount, tw }) {
             <dl className="space-y-1.5">
                 {rows.map(({ label, value, accent }) => (
                     <div key={label} className="flex items-center justify-between gap-3">
-                        <dt className="text-xs text-slate-500">{label}</dt>
+                        <dt className="text-xs text-slate-600">{label}</dt>
                         <dd className={`text-xs font-semibold tabular-nums ${accent ?? 'text-slate-800'}`}>
                             {value ?? 0}
                         </dd>
@@ -168,23 +175,24 @@ function Legend({ tw }) {
     ];
     return (
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+            <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-600">
                 {tw.graph_legend_title ?? 'Tegnforklaring'}
-            </h3>
+            </h2>
             <div className="space-y-3">
                 <div className="space-y-1.5">
                     {types.map(({ key, label, color }) => (
                         <div key={key} className="flex items-center gap-2">
-                            <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                            <span aria-hidden="true" className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: color }} />
                             <span className="text-xs text-slate-600">{label}</span>
                         </div>
                     ))}
                 </div>
                 <div className="border-t border-slate-100 pt-2 space-y-1.5">
-                    <p className="text-[11px] text-slate-400">{tw.lint_health_title ?? 'Lint-status'}</p>
+                    <p className="text-xs text-slate-600">{tw.lint_health_title ?? 'Lint-status'}</p>
                     {statuses.map(({ key, label, color }) => (
                         <div key={key} className="flex items-center gap-2">
                             <span
+                                aria-hidden="true"
                                 className="h-3 w-3 shrink-0 rounded-full border-2"
                                 style={{ borderColor: color, backgroundColor: 'white' }}
                             />
@@ -204,7 +212,7 @@ function FilterPanel({
     typeFilters, setTypeFilters,
     statusFilters, setStatusFilters,
     showOrphans, setShowOrphans,
-    tw, onReset, hasActiveFilters,
+    tw, ta = {}, onReset, hasActiveFilters,
     openFilterDropdown, setOpenFilterDropdown,
 }) {
     const types = [
@@ -232,10 +240,12 @@ function FilterPanel({
     }));
 
     return (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <section aria-labelledby="wiki-graph-filters-title" className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            {/* Named for headings navigation: the sidebar's other boxes are headed, this one was not. */}
+            <h2 id="wiki-graph-filters-title" className="sr-only">{ta.wiki_graph_filters_title ?? 'Filtrer grafen'}</h2>
             {/* 1. Search */}
             <div className="mb-4">
-                <label htmlFor="wiki-graph-search" className="mb-2 block text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                <label htmlFor="wiki-graph-search" className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-600">
                     {tw.graph_filter_search_label ?? 'Søk i Wiki-sider'}
                 </label>
                 <input
@@ -244,7 +254,7 @@ function FilterPanel({
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder={tw.graph_filter_search_placeholder ?? 'Søk på sidetittel …'}
-                    className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                    className="w-full rounded-lg border border-field-border px-2.5 py-1.5 text-xs text-slate-700 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
                 />
             </div>
 
@@ -284,50 +294,65 @@ function FilterPanel({
                 />
             )}
 
-            {/* 4. Page types */}
-            <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
-                {tw.graph_filter_page_types ?? 'Sidetyper'}
-            </h3>
-            <div className="space-y-1.5 mb-4">
-                {types.map(({ key, label }) => (
-                    <label key={key} className="flex cursor-pointer items-center gap-2">
-                        <input
-                            type="checkbox"
-                            checked={typeFilters[key]}
-                            onChange={() => setTypeFilters(f => ({ ...f, [key]: !f[key] }))}
-                            className="h-3.5 w-3.5 rounded border-slate-300 accent-violet-600"
-                        />
-                        <span className="flex items-center gap-1.5 text-xs text-slate-700">
-                            <span
-                                className="h-2.5 w-2.5 rounded-full"
-                                style={{ backgroundColor: PAGE_TYPE_COLORS[key] }}
-                            />
-                            {label}
-                        </span>
-                    </label>
-                ))}
-            </div>
+            {/* 4. Page types — a group of checkboxes under one question (1.3.1, A11Y-120). */}
+            <FieldsetField
+                id="wiki-graph-filter-types"
+                legend={tw.graph_filter_page_types ?? 'Sidetyper'}
+                className="mb-4"
+                legendRowClassName="mb-2"
+                legendClassName="block text-xs font-semibold uppercase tracking-widest text-slate-600"
+            >
+                {() => (
+                    <div className="space-y-1.5">
+                        {types.map(({ key, label }) => (
+                            <label key={key} className="flex min-h-6 cursor-pointer items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    checked={typeFilters[key]}
+                                    onChange={() => setTypeFilters(f => ({ ...f, [key]: !f[key] }))}
+                                    className="h-3.5 w-3.5 rounded border-slate-300 accent-violet-600"
+                                />
+                                <span className="flex items-center gap-1.5 text-xs text-slate-700">
+                                    <span
+                                        aria-hidden="true"
+                                        className="h-2.5 w-2.5 rounded-full"
+                                        style={{ backgroundColor: PAGE_TYPE_COLORS[key] }}
+                                    />
+                                    {label}
+                                </span>
+                            </label>
+                        ))}
+                    </div>
+                )}
+            </FieldsetField>
 
             {/* 5. Status */}
-            <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
-                {tw.graph_filter_status ?? 'Status'}
-            </h3>
-            <div className="space-y-1.5 mb-4">
-                {statuses.map(({ key, label }) => (
-                    <label key={key} className="flex cursor-pointer items-center gap-2">
-                        <input
-                            type="checkbox"
-                            checked={statusFilters[key]}
-                            onChange={() => setStatusFilters(f => ({ ...f, [key]: !f[key] }))}
-                            className="h-3.5 w-3.5 rounded border-slate-300 accent-violet-600"
-                        />
-                        <span className="text-xs text-slate-700">{label}</span>
-                    </label>
-                ))}
-            </div>
+            <FieldsetField
+                id="wiki-graph-filter-status"
+                legend={tw.graph_filter_status ?? 'Status'}
+                className="mb-4"
+                legendRowClassName="mb-2"
+                legendClassName="block text-xs font-semibold uppercase tracking-widest text-slate-600"
+            >
+                {() => (
+                    <div className="space-y-1.5">
+                        {statuses.map(({ key, label }) => (
+                            <label key={key} className="flex min-h-6 cursor-pointer items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    checked={statusFilters[key]}
+                                    onChange={() => setStatusFilters(f => ({ ...f, [key]: !f[key] }))}
+                                    className="h-3.5 w-3.5 rounded border-slate-300 accent-violet-600"
+                                />
+                                <span className="text-xs text-slate-700">{label}</span>
+                            </label>
+                        ))}
+                    </div>
+                )}
+            </FieldsetField>
 
             {/* 6. Show isolated pages */}
-            <label className="mb-4 flex cursor-pointer items-center gap-2">
+            <label className="mb-4 flex min-h-6 cursor-pointer items-center gap-2">
                 <input
                     type="checkbox"
                     checked={showOrphans}
@@ -344,50 +369,64 @@ function FilterPanel({
                 type="button"
                 onClick={onReset}
                 disabled={!hasActiveFilters}
-                className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
+                className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
             >
                 {tw.graph_filter_reset ?? 'Nullstill filtre'}
             </button>
-        </div>
+        </section>
     );
 }
 
-function NodePanel({ node, tw, onClose, graphScope, onFocus }) {
+/**
+ * The node panel is a named region (the page's title) that can take focus: opened from the list
+ * view, focus moves here so a keyboard user lands on what they asked for (Graph.jsx). The title
+ * stays a <p title> — the full title is in the attribute when the visual line is truncated.
+ */
+function NodePanel({ node, tw, ta = {}, onClose, graphScope, onFocus, panelRef = null }) {
     if (!node) return null;
     const statusColor = STATUS_RING[node.nodeStatus] ?? STATUS_RING.ok;
-    const typeLabel = {
-        article: tw.page_type_article ?? 'Artikkel',
-        summary: tw.page_type_summary ?? 'Sammendrag',
-        concept: tw.page_type_concept ?? 'Konsept',
-        entity:  tw.page_type_entity  ?? 'Entitet',
-    }[node.pageType] ?? node.pageType;
+    const typeLabel = pageTypeText(node.pageType, tw);
+    const titleId = 'wiki-graph-node-panel-title';
 
     return (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <section
+            ref={panelRef}
+            tabIndex={-1}
+            aria-labelledby={titleId}
+            data-graph-panel="node"
+            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+        >
+            <h2 className="sr-only">{ta.wiki_graph_node_panel_title ?? 'Sidedetaljer'}</h2>
             <div className="mb-3 flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-950" title={node.label}>
+                    <p id={titleId} className="truncate text-sm font-semibold text-slate-950" title={node.label}>
                         {node.label}
                     </p>
-                    <div className="mt-1 flex items-center gap-1.5">
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         <span
+                            aria-hidden="true"
                             className="inline-block h-2 w-2 rounded-full"
                             style={{ backgroundColor: PAGE_TYPE_COLORS[node.pageType] ?? '#6b7280' }}
                         />
-                        <span className="text-xs text-slate-500">{typeLabel}</span>
-                        <span className="h-3 w-px bg-slate-200" />
+                        <span className="text-xs text-slate-600">{typeLabel}</span>
+                        <span aria-hidden="true" className="h-3 w-px bg-slate-200" />
                         <span
+                            aria-hidden="true"
                             className="inline-block h-2 w-2 rounded-full border-2"
                             style={{ borderColor: statusColor, backgroundColor: 'white' }}
                         />
-                        <span className="text-xs text-slate-500">{node.nodeStatus}</span>
+                        {/* The status in words — the ring colour alone said nothing to a screen
+                            reader or in greyscale, and the raw key («ok», «error») was all it showed. */}
+                        <span className="text-xs text-slate-600">
+                            {(ta.wiki_graph_list_status ?? 'Status: :status').replace(':status', lintStatusText(node.nodeStatus, tw))}
+                        </span>
                     </div>
                 </div>
                 <button
                     type="button"
                     onClick={onClose}
-                    className="shrink-0 inline-flex h-6 w-6 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                    aria-label="Lukk"
+                    className="shrink-0 inline-flex h-6 w-6 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                    aria-label={ta.wiki_graph_close_node_panel ?? 'Lukk sidedetaljer'}
                 >
                     <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                         <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
@@ -399,11 +438,11 @@ function NodePanel({ node, tw, onClose, graphScope, onFocus }) {
                 {[
                     { label: tw.graph_node_claims        ?? 'Påstander',        value: node.claimCount },
                     { label: tw.graph_node_sources       ?? 'Kildereferanser',  value: node.sourceRefCount },
-                    { label: tw.graph_node_lint_errors   ?? 'Lint-feil',        value: node.lintErrors,   accent: node.lintErrors   > 0 ? 'text-rose-600'  : null },
-                    { label: tw.graph_node_lint_warnings ?? 'Lint-advarsler',   value: node.lintWarnings, accent: node.lintWarnings > 0 ? 'text-amber-600' : null },
+                    { label: tw.graph_node_lint_errors   ?? 'Lint-feil',        value: node.lintErrors,   accent: node.lintErrors   > 0 ? 'text-rose-700'  : null },
+                    { label: tw.graph_node_lint_warnings ?? 'Lint-advarsler',   value: node.lintWarnings, accent: node.lintWarnings > 0 ? 'text-amber-700' : null },
                 ].map(({ label, value, accent }) => (
                     <div key={label} className="flex items-center justify-between gap-2">
-                        <dt className="text-xs text-slate-500">{label}</dt>
+                        <dt className="text-xs text-slate-600">{label}</dt>
                         <dd className={`text-xs font-semibold tabular-nums ${accent ?? 'text-slate-800'}`}>
                             {value ?? 0}
                         </dd>
@@ -418,7 +457,7 @@ function NodePanel({ node, tw, onClose, graphScope, onFocus }) {
                 <button
                     type="button"
                     onClick={() => onFocus(node.pageId)}
-                    className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                    className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-950"
                 >
                     {tw.graph_focus_set_focus ?? 'Fokuser på denne siden'}
                 </button>
@@ -436,7 +475,7 @@ function NodePanel({ node, tw, onClose, graphScope, onFocus }) {
                     <path fillRule="evenodd" d="M5.22 14.78a.75.75 0 0 0 1.06 0l7.22-7.22v5.69a.75.75 0 0 0 1.5 0v-7.5a.75.75 0 0 0-.75-.75h-7.5a.75.75 0 0 0 0 1.5h5.69l-7.22 7.22a.75.75 0 0 0 0 1.06Z" clipRule="evenodd" />
                 </svg>
             </a>
-        </div>
+        </section>
     );
 }
 
@@ -452,17 +491,23 @@ function NodePanel({ node, tw, onClose, graphScope, onFocus }) {
 /**
  * The hover tooltip: the node pair, and why they are connected. Two lines, both at the panel's
  * text size — a tooltip is read, not glanced at.
+ *
+ * Content on hover must be hoverable, dismissible and persistent (WCAG 1.4.13, A11Y-153): it stays
+ * where it appeared rather than running ahead of the pointer, the pointer can move onto it (leaving
+ * the line only hides it after `EDGE_TOOLTIP_GRACE_MS`), and Escape closes it.
  */
-function EdgeTooltip({ hover, position }) {
+function EdgeTooltip({ hover, position, onPointerEnter, onPointerLeave }) {
     if (!hover) {
         return null;
     }
 
     return (
         <div
-            className="pointer-events-none absolute z-20 max-w-sm -translate-y-full rounded-lg bg-slate-900/95 px-3 py-2 text-base leading-snug text-white shadow-lg"
+            className="absolute z-20 max-w-sm -translate-y-full rounded-lg bg-slate-900/95 px-3 py-2 text-base leading-snug text-white shadow-lg"
             style={{ left: Math.max(8, position.x + 12), top: Math.max(24, position.y - 8) }}
             role="tooltip"
+            onPointerEnter={onPointerEnter}
+            onPointerLeave={onPointerLeave}
         >
             <p className="font-semibold">{hover.headline}</p>
             <p className="mt-1 text-slate-300">{hover.detail}</p>
@@ -481,7 +526,7 @@ function EdgeTooltip({ hover, position }) {
  * Everything shown is quoted from the source page's own recorded link intent, or — when no page
  * recorded a reason — is the plain statement that one links to the other. Nothing is composed.
  */
-function RelationPanel({ panel, tw, onClose, graphScope }) {
+function RelationPanel({ panel, tw, ta = {}, onClose, graphScope, panelRef = null }) {
     if (!panel) {
         return null;
     }
@@ -490,16 +535,25 @@ function RelationPanel({ panel, tw, onClose, graphScope }) {
     const multiple = reasons.length > 1;
 
     return (
-        <div className="flex h-full flex-col overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+        <section
+            ref={panelRef}
+            tabIndex={-1}
+            aria-labelledby="wiki-graph-relation-panel-title"
+            data-graph-panel="relation"
+            className="flex h-full flex-col overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"
+        >
+            <h2 id="wiki-graph-relation-panel-title" className="sr-only">
+                {(tw.graph_relation_heading ?? 'Relasjon')}: {panel.headline}
+            </h2>
             <div className="mb-3 flex items-start justify-between gap-2">
-                <p className="text-base font-semibold uppercase tracking-wide text-slate-500">
+                <p aria-hidden="true" className="text-base font-semibold uppercase tracking-wide text-slate-600">
                     {tw.graph_relation_heading ?? 'Relasjon'}
                 </p>
                 <button
                     type="button"
                     onClick={onClose}
-                    className="-mr-1 -mt-1 rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                    aria-label={tw.close ?? 'Lukk'}
+                    className="-mr-1 -mt-1 rounded-lg p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                    aria-label={ta.wiki_graph_close_relation_panel ?? 'Lukk relasjonen'}
                 >
                     <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                         <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
@@ -519,7 +573,7 @@ function RelationPanel({ panel, tw, onClose, graphScope }) {
                 {reasons.map((reason) => (
                     <div key={`${reason.sourceSlug}-${reason.text}`}>
                         <p className="text-base leading-snug text-slate-800">
-                            {multiple && <span className="text-slate-400">— </span>}
+                            {multiple && <span aria-hidden="true" className="text-slate-500">— </span>}
                             {reason.text}
                         </p>
 
@@ -528,7 +582,7 @@ function RelationPanel({ panel, tw, onClose, graphScope }) {
                                 <p className="mt-2 text-base font-semibold text-slate-700">
                                     {tw.graph_relation_context ?? 'Kontekst'}
                                 </p>
-                                <p className="mt-0.5 text-base italic leading-snug text-slate-500">
+                                <p className="mt-0.5 text-base italic leading-snug text-slate-600">
                                     «{reason.context}»
                                 </p>
                             </>
@@ -555,7 +609,7 @@ function RelationPanel({ panel, tw, onClose, graphScope }) {
                     </a>
                 ))}
             </div>
-        </div>
+        </section>
     );
 }
 
@@ -570,14 +624,14 @@ function RelationPanel({ panel, tw, onClose, graphScope }) {
  * They are modes rather than two pages because the user is looking at the same wiki either way;
  * what changes is the question, not the dataset they are exploring.
  */
-function GraphModeSwitch({ mode, setMode, tw }) {
+function GraphModeSwitch({ mode, setMode, tw, ta = {} }) {
     const modes = [
         { key: 'full', label: tw.graph_mode_full ?? 'Fullgraf' },
         { key: 'focus', label: tw.graph_mode_focus ?? 'Fokus' },
     ];
 
     return (
-        <div className="inline-flex items-center rounded-full border border-slate-200 bg-white p-0.5" role="group">
+        <div className="inline-flex items-center rounded-full border border-slate-300 bg-white p-0.5" role="group" aria-label={ta.wiki_graph_mode_label ?? 'Grafmodus'}>
             {modes.map(({ key, label }) => (
                 <button
                     key={key}
@@ -598,11 +652,45 @@ function GraphModeSwitch({ mode, setMode, tw }) {
 }
 
 /**
+ * Graf | Liste (A11Y-050). Two presentations of the same pages, links and filters: the canvas for a
+ * pointer, the list for a keyboard or a screen reader. Toggle buttons in a named group, like the mode
+ * switch beside it; pressing one leaves focus on it (nothing moves under the user), and the pressed
+ * state says which presentation is showing.
+ */
+function GraphViewSwitch({ view, setView, ta }) {
+    const views = [
+        { key: 'graph', label: ta.wiki_graph_view_graph ?? 'Graf' },
+        { key: 'list', label: ta.wiki_graph_view_list ?? 'Liste' },
+    ];
+
+    return (
+        <div className="inline-flex items-center rounded-full border border-slate-300 bg-white p-0.5" role="group" aria-label={ta.wiki_graph_view_label ?? 'Visning'}>
+            {views.map(({ key, label }) => (
+                <button
+                    key={key}
+                    type="button"
+                    onClick={() => setView(key)}
+                    aria-pressed={view === key}
+                    data-graph-view-switch={key}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                        view === key
+                            ? 'bg-slate-900 text-white'
+                            : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                >
+                    {label}
+                </button>
+            ))}
+        </div>
+    );
+}
+
+/**
  * Focus mode's only controls: which page, how far out, and which way the links point. Three
  * controls, because those are exactly the three parameters /app/wiki/graph-focus accepts — the
  * panel is the query, not a dashboard around it.
  */
-function FocusPanel({ pageOptions, focusPageId, setFocusPageId, depth, setDepth, direction, setDirection, tw }) {
+function FocusPanel({ pageOptions, focusPageId, setFocusPageId, depth, setDepth, direction, setDirection, tw, ta = {} }) {
     const directionLabels = {
         both: tw.graph_focus_direction_both ?? 'Begge veier',
         outgoing: tw.graph_focus_direction_outgoing ?? 'Lenker ut',
@@ -611,9 +699,9 @@ function FocusPanel({ pageOptions, focusPageId, setFocusPageId, depth, setDepth,
 
     return (
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+            <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-600">
                 {tw.graph_focus_title ?? 'Fokusvisning'}
-            </h3>
+            </h2>
 
             <label className="mb-1.5 block text-xs font-medium text-slate-600" htmlFor="graph-focus-page">
                 {tw.graph_focus_page ?? 'Fokusside'}
@@ -622,7 +710,7 @@ function FocusPanel({ pageOptions, focusPageId, setFocusPageId, depth, setDepth,
                 id="graph-focus-page"
                 value={focusPageId ?? ''}
                 onChange={(event) => setFocusPageId(event.target.value === '' ? null : Number(event.target.value))}
-                className="mb-4 w-full rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-800 focus:border-violet-400 focus:outline-none"
+                className="mb-4 w-full rounded-xl border border-field-border bg-white px-2.5 py-2 text-xs text-slate-800 focus:border-violet-400 focus:outline-none"
             >
                 <option value="">{tw.graph_focus_page_placeholder ?? 'Velg side …'}</option>
                 {pageOptions.map((option) => (
@@ -630,8 +718,8 @@ function FocusPanel({ pageOptions, focusPageId, setFocusPageId, depth, setDepth,
                 ))}
             </select>
 
-            <p className="mb-1.5 text-xs font-medium text-slate-600">{tw.graph_focus_depth ?? 'Dybde'}</p>
-            <div className="mb-4 inline-flex w-full rounded-xl border border-slate-200 p-0.5">
+            <p id="graph-focus-depth-label" className="mb-1.5 text-xs font-medium text-slate-600">{tw.graph_focus_depth ?? 'Dybde'}</p>
+            <div role="group" aria-labelledby="graph-focus-depth-label" className="mb-4 inline-flex w-full rounded-xl border border-slate-300 p-0.5">
                 {FOCUS_DEPTHS.map((option) => (
                     <button
                         key={option}
@@ -647,8 +735,8 @@ function FocusPanel({ pageOptions, focusPageId, setFocusPageId, depth, setDepth,
                 ))}
             </div>
 
-            <p className="mb-1.5 text-xs font-medium text-slate-600">{tw.graph_focus_direction ?? 'Retning'}</p>
-            <div className="flex flex-col gap-1">
+            <p id="graph-focus-direction-label" className="mb-1.5 text-xs font-medium text-slate-600">{tw.graph_focus_direction ?? 'Retning'}</p>
+            <div role="group" aria-labelledby="graph-focus-direction-label" className="flex flex-col gap-1">
                 {FOCUS_DIRECTIONS.map((option) => (
                     <button
                         key={option}
@@ -669,9 +757,35 @@ function FocusPanel({ pageOptions, focusPageId, setFocusPageId, depth, setDepth,
     );
 }
 
+/**
+ * The value, once it has stopped changing for `delay` ms — so a count is spoken after typing, not per
+ * key. The first real value (the graph has loaded) is taken at once: it is the baseline every later
+ * change is compared with, and a filter changed within `delay` of loading must still be heard.
+ */
+function useSettledValue(value, delay) {
+    const [settled, setSettled] = useState(value);
+    const hasBaselineRef = useRef(value !== null);
+
+    useEffect(() => {
+        if (! hasBaselineRef.current && value !== null) {
+            hasBaselineRef.current = true;
+            setSettled(value);
+
+            return undefined;
+        }
+
+        const timer = window.setTimeout(() => setSettled(value), delay);
+
+        return () => window.clearTimeout(timer);
+    }, [value, delay]);
+
+    return settled;
+}
+
 export default function WikiGraph({ initialRunId = null, initialPageId = null }) {
     const { translations = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
+    const ta = translations?.a11y ?? {};
 
     const containerRef   = useRef(null);
     const sigmaRef       = useRef(null);
@@ -691,6 +805,17 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
     const [hoveredEdge, setHoveredEdge] = useState(null);
     const [hoveredPairKey, setHoveredPairKey] = useState(null);
     const [pointer, setPointer] = useState({ x: 0, y: 0 });
+    // Leaving the line hides the tooltip after a short grace, so the pointer can reach it (A11Y-153).
+    const edgeTooltipHideRef = useRef(null);
+    const cancelEdgeTooltipHide = () => {
+        window.clearTimeout(edgeTooltipHideRef.current);
+        edgeTooltipHideRef.current = null;
+    };
+    const hideEdgeTooltip = () => {
+        cancelEdgeTooltipHide();
+        setHoveredPairKey(null);
+        setHoveredEdge(null);
+    };
 
     // Highlight state is read by Sigma's reducers on every frame, so it lives in a ref: putting it
     // in the reducer's closure would freeze it at the values present when Sigma was constructed.
@@ -712,6 +837,13 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
     // None of this reaches the full graph: focus is an alternative canvas with its own endpoint and
     // its own renderer, not a filter applied to the payload already loaded above.
     const [mode, setMode] = useState('full');
+    // Graf | Liste: how the same pages are presented. Applies to both modes.
+    const [view, setView] = useState('graph');
+    // Where focus goes back to when a panel opened from the list is closed: the button that opened it.
+    const panelTriggerIdRef = useRef(null);
+    const [panelFocusRequest, setPanelFocusRequest] = useState(0);
+    const nodePanelRef = useRef(null);
+    const relationPanelRef = useRef(null);
     const [focusPageId, setFocusPageId] = useState(initialPageId ?? null);
     const [focusDepth, setFocusDepth] = useState(DEFAULT_FOCUS_DEPTH);
     const [focusDirection, setFocusDirection] = useState(DEFAULT_FOCUS_DIRECTION);
@@ -723,6 +855,9 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
     const focusOnPage = (pageId) => {
         setFocusPageId(Number(pageId));
         setMode('focus');
+        // The button that was pressed (in the node panel or a list row) belongs to the full graph and
+        // is gone now; continue from the focus page picker, which shows the page just chosen.
+        refocusIfLost(['graph-focus-page']);
     };
 
     // The part of this view's state that IS representable in a URL, and therefore the part a
@@ -943,6 +1078,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         });
 
         renderer.on('enterEdge', ({ edge, event }) => {
+            cancelEdgeTooltipHide();
             setPointer({ x: event.x, y: event.y });
 
             // The tooltip describes the RELATION between the two pages, not the single row that
@@ -955,15 +1091,15 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         });
 
         renderer.on('leaveEdge', () => {
-            setHoveredPairKey(null);
-            setHoveredEdge(null);
+            cancelEdgeTooltipHide();
+            edgeTooltipHideRef.current = window.setTimeout(hideEdgeTooltip, EDGE_TOOLTIP_GRACE_MS);
         });
 
-        // Tooltip position follows the pointer. moveBody fires while the mouse moves over the
-        // canvas; it carries viewport coordinates, which is exactly the overlay's coordinate space.
-        renderer.on('moveBody', ({ event }) => setPointer({ x: event.x, y: event.y }));
+        // The tooltip stays where the pointer entered the line (the event carries the overlay's
+        // coordinate space). Following the pointer would keep it out of the pointer's reach.
 
         return () => {
+            cancelEdgeTooltipHide();
             renderer.kill();
             sigmaRef.current = null;
             graphRef.current = null;
@@ -1137,6 +1273,23 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         }
     }, [displayed]);
 
+    // Escape closes the hover tooltip without moving the pointer (1.4.13). Only while one is shown,
+    // so Escape keeps its other meanings everywhere else on the page.
+    useEffect(() => {
+        if (! hoveredEdge) {
+            return undefined;
+        }
+
+        const onKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                hideEdgeTooltip();
+            }
+        };
+        document.addEventListener('keydown', onKeyDown);
+
+        return () => document.removeEventListener('keydown', onKeyDown);
+    }, [hoveredEdge]);
+
     // The relation being examined — hover is transient, a click holds. Both feed the same reducers,
     // so a hovered line and a selected line look the same; only the panel distinguishes them.
     const activePairKey = hoveredPairKey ?? selectedPairKey;
@@ -1157,6 +1310,91 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         () => (selectedPairKey === null ? null : buildRelationPanel(selectedPairKey, relationIndex, nodesById, tw)),
         [selectedPairKey, relationIndex, nodesById, tw],
     );
+
+    // ── list view (A11Y-050) ─────────────────────────────────────────────────
+    // The rows are the canvas's own `displayed` set — the list can never show a page the canvas hides
+    // or the other way round, and it applies no rule of its own.
+    const listRows = useMemo(
+        () => buildGraphListRows(displayed.nodes, displayed.edges, document.documentElement.lang || 'nb'),
+        [displayed],
+    );
+
+    // The same state a click on a dot or a line sets, so the same panel opens beside the list.
+    // Pressing the row's button again closes it (it is a toggle, aria-pressed).
+    const showNodeFromList = (nodeId, triggerId) => {
+        if (selectedNode?.id === nodeId) {
+            setSelectedNode(null);
+
+            return;
+        }
+
+        const graph = graphRef.current;
+        const attributes = graph?.hasNode(nodeId) ? graph.getNodeAttributes(nodeId) : null;
+        const node = nodesById[nodeId];
+
+        setSelectedPairKey(null);
+        setHoveredPairKey(null);
+        setHoveredEdge(null);
+        setSelectedNode(attributes ? { id: nodeId, ...attributes } : {
+            id: nodeId,
+            label: node?.title,
+            pageId: node?.page_id,
+            slug: node?.slug,
+            pageType: node?.page_type,
+            nodeStatus: node?.status,
+            url: node?.url,
+            claimCount: node?.claim_count,
+            sourceRefCount: node?.source_reference_count,
+            lintErrors: node?.lint_error_count,
+            lintWarnings: node?.lint_warning_count,
+        });
+        panelTriggerIdRef.current = triggerId;
+        setPanelFocusRequest((count) => count + 1);
+    };
+
+    const showRelationFromList = (pairKey, triggerId) => {
+        if (selectedPairKey === pairKey) {
+            setSelectedPairKey(null);
+
+            return;
+        }
+
+        setSelectedNode(null);
+        setHoveredPairKey(null);
+        setHoveredEdge(null);
+        setSelectedPairKey(pairKey);
+        panelTriggerIdRef.current = triggerId;
+        setPanelFocusRequest((count) => count + 1);
+    };
+
+    // Into the panel that was asked for, once it has rendered. Only on a request from the list: a
+    // click on the canvas leaves focus where the pointer user has it.
+    useEffect(() => {
+        if (panelFocusRequest === 0) {
+            return;
+        }
+
+        focusElement(nodePanelRef.current ?? relationPanelRef.current);
+    }, [panelFocusRequest]);
+
+    const closeNodePanel = () => {
+        setSelectedNode(null);
+        refocusIfLost([panelTriggerIdRef.current]);
+    };
+
+    const closeRelationPanel = () => {
+        setSelectedPairKey(null);
+        refocusIfLost([panelTriggerIdRef.current]);
+    };
+
+    // What changed, said once: «Viser 2 av 16 sider.» after the search or a filter has settled. Not
+    // for the first load, and not per keystroke (useSettledValue).
+    const settledCount = useSettledValue(graphData ? displayed.nodes.length : null, 700);
+    useTransitionAnnouncement(settledCount === null ? 'loading' : String(settledCount), (previous, next) => {
+        const message = graphResultAnnouncement(previous === 'loading' ? null : previous, next, graphData?.nodes?.length ?? 0, tw, ta);
+
+        return message ? { message } : null;
+    });
 
     /**
      * Bring the whole visible graph into view.
@@ -1209,6 +1447,10 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         );
     };
 
+    const canvasSummary = (ta.wiki_graph_canvas_label ?? 'Kunnskapsgraf: :nodes sider og :edges koblinger. Grafen kan ikke brukes med tastatur – velg Liste for å gå gjennom sidene og koblingene.')
+        .replace(':nodes', String(displayed.nodes.length))
+        .replace(':edges', String(displayed.edges.length));
+
     const resetFilters = () => {
         setSearchQuery('');
         setSelectedDocumentIds(new Set());
@@ -1231,14 +1473,14 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
                         <Link
                             href="/app/wiki"
-                            className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800"
+                            className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-800"
                         >
                             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                 <path fillRule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clipRule="evenodd" />
                             </svg>
                             {tw.back ?? 'Tilbake til Wiki'}
                         </Link>
-                        <span className="h-4 w-px bg-slate-200" />
+                        <span aria-hidden="true" className="h-4 w-px bg-slate-200" />
                         <h1 className="text-base font-semibold text-slate-950">
                             {tw.graph_view_title ?? 'Enterprise Wiki Graf'}
                         </h1>
@@ -1247,13 +1489,14 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                         </span>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                    <GraphModeSwitch mode={mode} setMode={setMode} tw={tw} />
-                    {mode === 'full' && (
+                    <GraphModeSwitch mode={mode} setMode={setMode} tw={tw} ta={ta} />
+                    <GraphViewSwitch view={view} setView={setView} ta={ta} />
+                    {mode === 'full' && view === 'graph' && (
                     <button
                         type="button"
                         onClick={fitView}
                         disabled={!graphData || displayed.nodes.length === 0}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                         <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                             <path d="M13.28 7.78 19 2.06V6a.75.75 0 0 0 1.5 0V.75a.75.75 0 0 0-.75-.75H14a.75.75 0 0 0 0 1.5h3.94L12.22 7.22a.75.75 0 1 0 1.06 1.06ZM2 14a.75.75 0 0 0-1.5 0v5.25c0 .414.336.75.75.75H6a.75.75 0 0 0 0-1.5H2.06l5.72-5.72a.75.75 0 0 0-1.06-1.06L1 17.94V14Z" />
@@ -1281,6 +1524,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                                 direction={focusDirection}
                                 setDirection={setFocusDirection}
                                 tw={tw}
+                                ta={ta}
                             />
                         )}
                         {mode === 'full' && (
@@ -1302,6 +1546,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                             showOrphans={showOrphans}
                             setShowOrphans={setShowOrphans}
                             tw={tw}
+                            ta={ta}
                             onReset={resetFilters}
                             hasActiveFilters={hasActiveFilters}
                             openFilterDropdown={openFilterDropdown}
@@ -1336,7 +1581,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4Z" />
                                     </svg>
-                                    <p className="text-sm text-slate-500">
+                                    <p className="text-sm text-slate-600">
                                         {tw.graph_loading ?? 'Laster graf…'}
                                     </p>
                                 </div>
@@ -1363,7 +1608,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                                     <p className="text-sm font-semibold text-slate-600">
                                         {tw.graph_empty ?? 'Ingen sider å vise.'}
                                     </p>
-                                    <p className="mt-1 text-xs text-slate-400">
+                                    <p className="mt-1 text-xs text-slate-600">
                                         {tw.graph_empty_hint ?? 'Wikien er tom, eller alle sider er filtrert bort.'}
                                     </p>
                                 </div>
@@ -1371,23 +1616,26 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                         )}
 
                         {/* No matches — pages exist, but the active filters exclude all of them */}
-                        {mode === 'full' && !loading && !error && graphData && graphData.nodes.length > 0 && displayed.nodes.length === 0 && (
+                        {/* Not live: the result count is spoken once by the announcer (useTransitionAnnouncement
+                            above), «Ingen Wiki-sider matcher filtrene.» included — a region that mounts with
+                            its text would say it a second time, or not at all. */}
+                        {mode === 'full' && view === 'graph' && !loading && !error && graphData && graphData.nodes.length > 0 && displayed.nodes.length === 0 && (
                             <div
                                 role="status"
-                                aria-live="polite"
+                                aria-live="off"
                                 className="absolute inset-0 z-10 flex items-center justify-center bg-slate-50 p-8"
                             >
                                 <div className="max-w-sm text-center">
                                     <p className="text-sm font-semibold text-slate-600">
                                         {tw.graph_no_matches ?? 'Ingen Wiki-sider matcher filtrene.'}
                                     </p>
-                                    <p className="mt-1 text-xs text-slate-400">
+                                    <p className="mt-1 text-xs text-slate-600">
                                         {tw.graph_no_matches_hint ?? 'Prøv å endre søket, velge andre dokumenter eller nullstille filtrene.'}
                                     </p>
                                     <button
                                         type="button"
                                         onClick={resetFilters}
-                                        className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                                        className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
                                     >
                                         {tw.graph_filter_reset ?? 'Nullstill filtre'}
                                     </button>
@@ -1396,16 +1644,37 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                         )}
 
                         {/* Sigma container — always mounted so ref is stable */}
+                        {/* role="img": the canvas is a picture to assistive technology, named by what it
+                            shows and pointing to the list, which is the way to work with it. */}
                         <div
                             ref={containerRef}
                             data-graph-view="full"
+                            role="img"
+                            aria-label={canvasSummary}
                             className="absolute inset-0"
-                            style={{ visibility: (mode === 'full' && !loading && !error && graphData && graphData.nodes.length > 0) ? 'visible' : 'hidden' }}
+                            style={{ visibility: (mode === 'full' && view === 'graph' && !loading && !error && graphData && graphData.nodes.length > 0) ? 'visible' : 'hidden' }}
                         />
+
+                        {mode === 'full' && view === 'list' && !loading && !error && graphData && (
+                            <WikiGraphListView
+                                rows={listRows}
+                                totalCount={graphData.nodes.length}
+                                tw={tw}
+                                ta={ta}
+                                graphScope={graphScope}
+                                selectedNodeId={selectedNode?.id ?? null}
+                                selectedPairKey={selectedPairKey}
+                                onShowNode={showNodeFromList}
+                                onShowRelation={showRelationFromList}
+                                onFocusPage={focusOnPage}
+                            />
+                        )}
 
                         {/* Relation tooltip — positioned inside the canvas wrapper, which is the
                             coordinate space sigma reports pointer positions in. */}
-                        {mode === 'full' && <EdgeTooltip hover={hoveredEdge} position={pointer} />}
+                        {mode === 'full' && view === 'graph' && (
+                            <EdgeTooltip hover={hoveredEdge} position={pointer} onPointerEnter={cancelEdgeTooltipHide} onPointerLeave={hideEdgeTooltip} />
+                        )}
 
                         {/* Focus canvas. Mounted only in focus mode, so there is exactly one live
                             renderer at a time; the full graph's Sigma stays alive but hidden, which
@@ -1416,15 +1685,17 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                                 depth={focusDepth}
                                 direction={focusDirection}
                                 tw={tw}
+                                ta={ta}
+                                presentation={view}
                                 graphScope={graphScope}
                                 onMakeFocus={focusOnPage}
                             />
                         )}
 
                         {/* Scope badge overlay */}
-                        {mode === 'full' && !loading && !error && graphData && graphData.nodes.length > 0 && (
-                            <div className="pointer-events-none absolute bottom-3 right-3">
-                                <span className="inline-flex items-center rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-medium text-slate-500 shadow-sm ring-1 ring-slate-200 backdrop-blur-sm">
+                        {mode === 'full' && view === 'graph' && !loading && !error && graphData && graphData.nodes.length > 0 && (
+                            <div aria-hidden="true" className="pointer-events-none absolute bottom-3 right-3">
+                                <span className="inline-flex items-center rounded-full bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm ring-1 ring-slate-200 backdrop-blur-sm">
                                     {scopeLabel}
                                 </span>
                             </div>
@@ -1440,9 +1711,11 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                             <NodePanel
                                 node={selectedNode}
                                 tw={tw}
-                                onClose={() => setSelectedNode(null)}
+                                ta={ta}
+                                onClose={closeNodePanel}
                                 graphScope={graphScope}
                                 onFocus={focusOnPage}
+                                panelRef={nodePanelRef}
                             />
                         </div>
                     )}
@@ -1451,8 +1724,10 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                             <RelationPanel
                                 panel={relationPanel}
                                 tw={tw}
-                                onClose={() => setSelectedPairKey(null)}
+                                ta={ta}
+                                onClose={closeRelationPanel}
                                 graphScope={graphScope}
+                                panelRef={relationPanelRef}
                             />
                         </div>
                     )}

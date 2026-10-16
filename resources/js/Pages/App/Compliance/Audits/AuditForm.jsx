@@ -1,11 +1,12 @@
+import { useRef } from 'react';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
-import RequiredMark from '../../Risk/RequiredMark';
+import { BUSY_STYLE, submitWhenIdle } from '../../../../Support/focusManagement';
+import { HINT, INPUT, LABEL } from '../../../../Support/formStyles';
+import RequiredMark from '../RequiredMark';
+import FieldError from '../FieldError';
+import { fieldStateProps, radioGroupProps } from '../complianceA11y';
+import { useFocusOnRejectedSubmit } from '../useComplianceFocus';
 import { auditTypeLabel } from './complianceAudit';
-
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-base font-semibold text-slate-700';
-const HINT = 'mt-1 text-base text-slate-600';
-const ERROR = 'mt-1 text-base text-rose-700';
 
 const ALL_FIELDS = ['title', 'purpose', 'audit_type', 'responsible_user_id', 'auditor_name', 'planned_start_date', 'planned_end_date', 'scope_description'];
 
@@ -21,9 +22,12 @@ const ALL_FIELDS = ['title', 'purpose', 'audit_type', 'responsible_user_id', 'au
  */
 export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELDS, types = [], responsibleOptions = [], ta, children = null }) {
     const has = (field) => fields.includes(field);
+    const formRef = useRef(null);
+    useFocusOnRejectedSubmit(form, formRef);
+    const dateHint = 'compliance-audit-dates-hint';
 
     return (
-        <form onSubmit={onSubmit} className="space-y-5" data-testid="compliance-audit-form">
+        <form ref={formRef} onSubmit={submitWhenIdle(form, onSubmit)} className="space-y-5" data-testid="compliance-audit-form">
             {has('title') && (
                 <div>
                     <label htmlFor="compliance-audit-title" className={LABEL}>{ta.field_title ?? 'Tittel'}<RequiredMark /></label>
@@ -33,19 +37,19 @@ export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELD
                         type="text"
                         required
                         aria-required="true"
-                        aria-describedby="compliance-audit-title-hint"
+                        {...fieldStateProps('compliance-audit-title', form.errors.title, ['compliance-audit-title-hint'])}
                         maxLength={255}
                         value={form.data.title}
                         onChange={(event) => form.setData('title', event.target.value)}
                         className={`mt-1 ${INPUT}`}
                     />
-                    {form.errors.title && <p className={ERROR}>{form.errors.title}</p>}
+                    <FieldError field="compliance-audit-title" message={form.errors.title} />
                 </div>
             )}
 
             <div className="grid gap-5 md:grid-cols-2">
                 {has('audit_type') && (
-                    <fieldset>
+                    <fieldset {...radioGroupProps('compliance-audit-type', form.errors.audit_type, { required: true })}>
                         <legend className={LABEL}>{ta.field_type ?? 'Type'}<RequiredMark /></legend>
                         <div className="mt-2 flex flex-wrap gap-4">
                             {types.map((type) => (
@@ -64,7 +68,7 @@ export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELD
                                 </label>
                             ))}
                         </div>
-                        {form.errors.audit_type && <p className={ERROR}>{form.errors.audit_type}</p>}
+                        <FieldError field="compliance-audit-type" message={form.errors.audit_type} />
                     </fieldset>
                 )}
 
@@ -75,7 +79,7 @@ export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELD
                             id="compliance-audit-responsible"
                             required
                             aria-required="true"
-                            aria-describedby="compliance-audit-responsible-hint"
+                            {...fieldStateProps('compliance-audit-responsible', form.errors.responsible_user_id, ['compliance-audit-responsible-hint'])}
                             value={form.data.responsible_user_id}
                             onChange={(event) => form.setData('responsible_user_id', event.target.value)}
                             className={`mt-1 ${INPUT}`}
@@ -88,7 +92,7 @@ export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELD
                         <p id="compliance-audit-responsible-hint" className={HINT}>
                             {ta.field_responsible_hint ?? 'Personen i virksomheten som har ansvaret for revisjonen.'}
                         </p>
-                        {form.errors.responsible_user_id && <p className={ERROR}>{form.errors.responsible_user_id}</p>}
+                        <FieldError field="compliance-audit-responsible" message={form.errors.responsible_user_id} />
                     </div>
                 )}
             </div>
@@ -100,13 +104,13 @@ export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELD
                         id="compliance-audit-auditor"
                         type="text"
                         maxLength={255}
-                        aria-describedby="compliance-audit-auditor-hint"
+                        {...fieldStateProps('compliance-audit-auditor', form.errors.auditor_name, ['compliance-audit-auditor-hint'])}
                         value={form.data.auditor_name}
                         onChange={(event) => form.setData('auditor_name', event.target.value)}
                         className={`mt-1 ${INPUT}`}
                     />
                     <p id="compliance-audit-auditor-hint" className={HINT}>{ta.field_auditor_hint ?? 'Valgfritt. Navn på revisor eller revisjonsselskap.'}</p>
-                    {form.errors.auditor_name && <p className={ERROR}>{form.errors.auditor_name}</p>}
+                    <FieldError field="compliance-audit-auditor" message={form.errors.auditor_name} />
                 </div>
             )}
 
@@ -118,12 +122,12 @@ export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELD
                             <input
                                 id="compliance-audit-start"
                                 type="date"
-                                aria-describedby="compliance-audit-dates-hint"
+                                {...fieldStateProps('compliance-audit-start', form.errors.planned_start_date, [dateHint])}
                                 value={form.data.planned_start_date}
                                 onChange={(event) => form.setData('planned_start_date', event.target.value)}
                                 className={`mt-1 ${INPUT}`}
                             />
-                            {form.errors.planned_start_date && <p className={ERROR}>{form.errors.planned_start_date}</p>}
+                            <FieldError field="compliance-audit-start" message={form.errors.planned_start_date} />
                         </div>
                         <div>
                             <label htmlFor="compliance-audit-end" className={LABEL}>{ta.field_end ?? 'Planlagt slutt'}<RequiredMark /></label>
@@ -132,13 +136,13 @@ export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELD
                                 type="date"
                                 required
                                 aria-required="true"
-                                aria-describedby="compliance-audit-dates-hint"
+                                {...fieldStateProps('compliance-audit-end', form.errors.planned_end_date, [dateHint])}
                                 min={form.data.planned_start_date || undefined}
                                 value={form.data.planned_end_date}
                                 onChange={(event) => form.setData('planned_end_date', event.target.value)}
                                 className={`mt-1 ${INPUT}`}
                             />
-                            {form.errors.planned_end_date && <p className={ERROR}>{form.errors.planned_end_date}</p>}
+                            <FieldError field="compliance-audit-end" message={form.errors.planned_end_date} />
                         </div>
                     </div>
                     <p id="compliance-audit-dates-hint" className={HINT}>{ta.field_dates_hint ?? 'Planlagt slutt er påkrevd. Slutt kan ikke være før start.'}</p>
@@ -152,12 +156,12 @@ export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELD
                     <textarea
                         id="compliance-audit-purpose"
                         rows={3}
-                        aria-describedby="compliance-audit-purpose-hint"
+                        {...fieldStateProps('compliance-audit-purpose', form.errors.purpose, ['compliance-audit-purpose-hint'])}
                         value={form.data.purpose}
                         onChange={(event) => form.setData('purpose', event.target.value)}
                         className={`mt-1 ${INPUT}`}
                     />
-                    {form.errors.purpose && <p className={ERROR}>{form.errors.purpose}</p>}
+                    <FieldError field="compliance-audit-purpose" message={form.errors.purpose} />
                 </div>
             )}
 
@@ -168,12 +172,12 @@ export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELD
                     <textarea
                         id="compliance-audit-scope"
                         rows={4}
-                        aria-describedby="compliance-audit-scope-hint"
+                        {...fieldStateProps('compliance-audit-scope', form.errors.scope_description, ['compliance-audit-scope-hint'])}
                         value={form.data.scope_description}
                         onChange={(event) => form.setData('scope_description', event.target.value)}
                         className={`mt-1 ${INPUT}`}
                     />
-                    {form.errors.scope_description && <p className={ERROR}>{form.errors.scope_description}</p>}
+                    <FieldError field="compliance-audit-scope" message={form.errors.scope_description} />
                 </div>
             )}
 
@@ -184,12 +188,12 @@ export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELD
                     <textarea
                         id="compliance-audit-conclusion"
                         rows={4}
-                        aria-describedby="compliance-audit-conclusion-hint"
+                        {...fieldStateProps('compliance-audit-conclusion', form.errors.conclusion, ['compliance-audit-conclusion-hint'])}
                         value={form.data.conclusion}
                         onChange={(event) => form.setData('conclusion', event.target.value)}
                         className={`mt-1 ${INPUT}`}
                     />
-                    {form.errors.conclusion && <p className={ERROR}>{form.errors.conclusion}</p>}
+                    <FieldError field="compliance-audit-conclusion" message={form.errors.conclusion} />
                 </div>
             )}
 
@@ -201,7 +205,7 @@ export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELD
                 {onCancel && (
                     <button type="button" onClick={onCancel} className={SECONDARY_ACTION}>{ta.cancel ?? 'Avbryt'}</button>
                 )}
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`}>
                     {form.processing ? (ta.saving ?? 'Lagrer...') : (ta.save ?? 'Lagre')}
                 </button>
             </div>

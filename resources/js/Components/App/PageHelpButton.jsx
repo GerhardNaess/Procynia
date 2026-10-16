@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import PageHelpPanel from './PageHelpPanel';
 
 /**
@@ -26,18 +26,20 @@ import PageHelpPanel from './PageHelpPanel';
  */
 export default function PageHelpButton({ buttonLabel = 'Hjelp', title, introTitle, intro, sections = [] }) {
     const [isOpen, setIsOpen] = useState(false);
+    const buttonRef = useRef(null);
     const rawId = useId();
     const panelId = `page-help-${rawId.replace(/:/g, '')}`;
 
     return (
         <>
             <button
+                ref={buttonRef}
                 type="button"
                 aria-label={buttonLabel}
                 aria-expanded={isOpen}
                 aria-controls={isOpen ? panelId : undefined}
                 onClick={() => setIsOpen((current) => !current)}
-                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-2 text-base font-semibold leading-6 text-slate-600 shadow-sm transition hover:border-violet-200 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-2 text-base font-semibold leading-6 text-slate-600 shadow-sm transition hover:border-violet-200 hover:text-violet-700"
             >
                 <span
                     aria-hidden="true"
@@ -56,6 +58,7 @@ export default function PageHelpButton({ buttonLabel = 'Hjelp', title, introTitl
                 sections={sections}
                 isOpen={isOpen}
                 onClose={() => setIsOpen(false)}
+                returnFocusRef={buttonRef}
             />
         </>
     );

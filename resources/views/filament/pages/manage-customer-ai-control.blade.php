@@ -30,9 +30,9 @@
                 <dd>
                     <span @class([
                         'inline-flex items-center rounded-full px-2 py-1 text-base font-medium leading-6',
-                        'bg-success-100 text-success-800' => ($quota['status'] ?? '') === 'normal',
-                        'bg-warning-100 text-warning-800' => in_array($quota['status'] ?? '', ['warning', 'critical'], true),
-                        'bg-danger-100 text-danger-800' => in_array($quota['status'] ?? '', ['exhausted', 'suspended'], true),
+                        'bg-success-100 dark:bg-success-500/20 text-success-800 dark:text-success-300' => ($quota['status'] ?? '') === 'normal',
+                        'bg-warning-100 dark:bg-warning-500/20 text-warning-800 dark:text-warning-300' => in_array($quota['status'] ?? '', ['warning', 'critical'], true),
+                        'bg-danger-100 dark:bg-danger-500/20 text-danger-800 dark:text-danger-300' => in_array($quota['status'] ?? '', ['exhausted', 'suspended'], true),
                     ])>
                         {{ __('procynia.ai_quota.statuses.' . ($quota['status'] ?? 'normal')) }}
                     </span>
@@ -189,10 +189,10 @@
                             @php($percentage = $budget['percentage'] ?? null)
                             <span @class([
                                 'inline-flex items-center rounded-full px-2 py-1 text-base font-medium leading-6',
-                                'bg-gray-100 text-gray-700' => $percentage === null,
-                                'bg-success-100 text-success-800' => $percentage !== null && $percentage < 80,
-                                'bg-warning-100 text-warning-800' => $percentage !== null && $percentage >= 80 && $percentage < 100,
-                                'bg-danger-100 text-danger-800' => $percentage !== null && $percentage >= 100,
+                                'bg-gray-100 dark:bg-white/10 text-gray-700 dark:text-gray-200' => $percentage === null,
+                                'bg-success-100 dark:bg-success-500/20 text-success-800 dark:text-success-300' => $percentage !== null && $percentage < 80,
+                                'bg-warning-100 dark:bg-warning-500/20 text-warning-800 dark:text-warning-300' => $percentage !== null && $percentage >= 80 && $percentage < 100,
+                                'bg-danger-100 dark:bg-danger-500/20 text-danger-800 dark:text-danger-300' => $percentage !== null && $percentage >= 100,
                             ])>
                                 {{ $percentage === null ? __('procynia.ai_admin.operational.no_limit') : $percentage . ' %' }}
                             </span>
@@ -218,7 +218,7 @@
     </section>
 
     <section class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
-        <h2 class="text-base font-semibold text-gray-900 dark:text-gray-100">
+        <h2 id="manage-customer-ai-control-table-heading-1" class="text-base font-semibold text-gray-900 dark:text-gray-100">
             {{ __('procynia.ai_admin.sections.adjustments') }}
         </h2>
         <p class="mt-1 text-base leading-6 text-gray-600 dark:text-gray-400">
@@ -228,15 +228,15 @@
         @if ($adjustments === [])
             <p class="mt-4 text-base text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.empty_adjustments') }}</p>
         @else
-            <div class="mt-4 overflow-x-auto">
+            <div class="relative mt-4 overflow-x-auto" @include('filament.components.scroll-region-attrs', ['labelledby' => 'manage-customer-ai-control-table-heading-1'])>
                 <table class="w-full text-left text-base">
                     <thead class="text-gray-600 dark:text-gray-400">
                         <tr>
-                            <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.time') }}</th>
-                            <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.period') }}</th>
-                            <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.amount') }}</th>
-                            <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.actor') }}</th>
-                            <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.reason') }}</th>
+                            <th scope="col" class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.time') }}</th>
+                            <th scope="col" class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.period') }}</th>
+                            <th scope="col" class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.amount') }}</th>
+                            <th scope="col" class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.actor') }}</th>
+                            <th scope="col" class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.reason') }}</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -256,7 +256,7 @@
     </section>
 
     <section class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
-        <h2 class="text-base font-semibold text-gray-900 dark:text-gray-100">
+        <h2 id="manage-customer-ai-control-table-heading-2" class="text-base font-semibold text-gray-900 dark:text-gray-100">
             {{ __('procynia.ai_admin.sections.audit') }}
         </h2>
         <p class="mt-1 text-base leading-6 text-gray-600 dark:text-gray-400">
@@ -266,16 +266,16 @@
         @if ($auditEvents === [])
             <p class="mt-4 text-base text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.empty_audit') }}</p>
         @else
-            <div class="mt-4 overflow-x-auto">
+            <div class="relative mt-4 overflow-x-auto" @include('filament.components.scroll-region-attrs', ['labelledby' => 'manage-customer-ai-control-table-heading-2'])>
                 <table class="w-full text-left text-base">
                     <thead class="text-gray-600 dark:text-gray-400">
                         <tr>
-                            <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.time') }}</th>
-                            <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.action') }}</th>
-                            <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.actor') }}</th>
-                            <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.reason') }}</th>
-                            <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.before') }}</th>
-                            <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.after') }}</th>
+                            <th scope="col" class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.time') }}</th>
+                            <th scope="col" class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.action') }}</th>
+                            <th scope="col" class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.actor') }}</th>
+                            <th scope="col" class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.reason') }}</th>
+                            <th scope="col" class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.before') }}</th>
+                            <th scope="col" class="pb-2 pr-4 font-medium">{{ __('procynia.ai_admin.columns.after') }}</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100 dark:divide-gray-800">

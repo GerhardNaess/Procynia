@@ -77,7 +77,9 @@ describe('submitting names a reviewer explicitly', () => {
     });
 
     test('submitting is blocked until somebody is chosen', () => {
-        assert.match(panel, /disabled=\{busy \|\| reviewerId === ''\}/);
+        assert.match(panel, /disabled=\{reviewerId === ''\} aria-disabled=\{busy \|\| undefined\} onClick=\{submit\}/);
+        // Busy is aria-disabled (focus stays, A11Y-156); run() refuses a second request meanwhile.
+        assert.match(panel, /const run = \(key, url, data = \{\}\) => \{\s*\n\s*if \(processing\) return;/);
     });
 
     test('a single candidate is pre-selected but still visible and changeable', () => {
@@ -85,7 +87,7 @@ describe('submitting names a reviewer explicitly', () => {
     });
 
     test('no eligible reviewer is explained, not silently broken', () => {
-        assert.match(panel, /disabled=\{busy \|\| eligibleReviewers\.length === 0\}/);
+        assert.match(panel, /disabled=\{eligibleReviewers\.length === 0\}\s*aria-disabled=\{busy \|\| undefined\}\s*onClick=\{\(\) => \{\s*if \(busy\) return;/);
         assert.match(panel, /review_no_eligible_reviewers/);
 
         // Permission keys are for branching, never for reading: the panel now distinguishes "you
@@ -134,7 +136,7 @@ describe('changes requested is easy to find and act on', () => {
     test('a reason is required before changes can be requested', () => {
         assert.match(panel, /const MIN_REASON = 10/);
         assert.match(panel, /const MAX_REASON = 2000/);
-        assert.match(panel, /disabled=\{busy \|\| reasonTooShort\}/);
+        assert.match(panel, /disabled=\{reasonTooShort\} aria-disabled=\{busy \|\| undefined\} onClick=\{requestChanges\}/);
     });
 
     test('the dialog says the published version is untouched', () => {
@@ -281,7 +283,7 @@ describe('the reviewer can act on the page', () => {
     });
 
     test('a return still cannot be sent empty', () => {
-        assert.match(panel, /disabled=\{busy \|\| reasonTooShort\}/);
+        assert.match(panel, /disabled=\{reasonTooShort\} aria-disabled=\{busy \|\| undefined\} onClick=\{requestChanges\}/);
         assert.match(panel, /if \(trimmed\.length < MIN_REASON\) return;/);
     });
 

@@ -1,8 +1,11 @@
+import { useRef } from 'react';
 import { useForm } from '@inertiajs/react';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DISCLOSURE_INLINE, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { useFocusFirstError } from '../../../Support/focusManagement';
+import { INPUT as FIELD_INPUT, TEXTAREA } from '../../../Support/formStyles';
 import { formatLongDate } from '../Improvements/improvementStatus';
-import RequiredMark from '../Risk/RequiredMark';
+import SupplierField, { BUSY, FieldError, RequiredNote, RequiredStar, groupA11y } from './SupplierField';
 import {
     DISPLAY_STATUS_TONES,
     displayStatusLabel,
@@ -16,13 +19,17 @@ import {
 const HINT = 'text-base text-slate-600';
 const ERROR = 'text-base text-rose-700';
 const LABEL = 'block text-base font-semibold text-slate-900';
-const INPUT = 'mt-1 min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
+const INPUT = `mt-1 ${FIELD_INPUT}`;
 
 /**
  * Kontroller krav (docs/supplier-assurance-v2-plan.md §8, §10.2): the person reads the requirement,
  * names the documentation they relied on, chooses the result and explains it. Choosing a document
  * is evidence, not a conclusion — nothing here picks the result. The documentation itself is never
  * edited here; without any, the person is sent to Dokumentasjon.
+ *
+ * The groups and fields are tied to their hints and errors, a refused save puts focus on the first
+ * wrong field (A11Y-013), and «Registrer kontroll» stays focusable while it cannot be used yet:
+ * aria-disabled, described by why (A11Y-143).
  */
 export function EvaluationForm({ supplierId, row, options, onDone, locale = 'no', tr }) {
     const c = tr.control ?? {};
@@ -31,14 +38,24 @@ export function EvaluationForm({ supplierId, row, options, onDone, locale = 'no'
     const missing = evaluationMissing(form.data);
     const id = (field) => `evaluation-${row.id}-${field}`;
     const documents = options.documents ?? [];
+    const formRef = useRef(null);
+    const focusError = useFocusFirstError(formRef);
+    const documentGroup = groupA11y(id('documents'), { hint: Boolean(e.documents_hint), error: form.errors.document_ids });
+    const statusGroup = groupA11y(id('status'), { error: form.errors.status });
+    const requiresDocument = missing.includes('document');
 
     const send = (event) => {
         event.preventDefault();
-        form.post(`/app/supplier-management/${supplierId}/requirement-evaluations`, { preserveScroll: true, onSuccess: onDone });
+
+        if (form.processing || missing.length > 0) {
+            return;
+        }
+
+        form.post(`/app/supplier-management/${supplierId}/requirement-evaluations`, { preserveScroll: true, onSuccess: onDone, onError: focusError });
     };
 
     return (
-        <form onSubmit={send} className="mt-4 min-w-0 space-y-5 rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid="evaluation-form">
+        <form ref={formRef} onSubmit={send} className="mt-4 min-w-0 space-y-5 rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid="evaluation-form">
             <div className="min-w-0">
                 <h4 className="text-lg font-semibold text-slate-950">{e.heading ?? 'Kontroller krav'}</h4>
                 <p className="break-words text-base font-semibold text-slate-900">{row.title}</p>
@@ -62,9 +79,9 @@ export function EvaluationForm({ supplierId, row, options, onDone, locale = 'no'
                 </dl>
             )}
 
-            <fieldset className="min-w-0">
+            <fieldset className="min-w-0" {...documentGroup.groupProps}>
                 <legend className={LABEL}>{e.documents ?? 'Dokumentasjon lagt til grunn'}</legend>
-                <p className={HINT}>{e.documents_hint}</p>
+                {e.documents_hint && <p id={documentGroup.hintId} className={HINT}>{e.documents_hint}</p>}
                 {documents.length === 0 ? (
                     <div className="mt-2" data-testid="evaluation-no-documents">
                         <p className="text-base text-slate-800">{e.documents_none ?? 'Ingen dokumentasjon er registrert for leverandøren.'}</p>
@@ -84,6 +101,7 @@ export function EvaluationForm({ supplierId, row, options, onDone, locale = 'no'
                                             checked={form.data.document_ids.includes(document.id)}
                                             onChange={() => form.setData('document_ids', toggleDocument(form.data.document_ids, document.id))}
                                             className="mt-1 h-5 w-5 shrink-0"
+                                            {...documentGroup.optionProps}
                                         />
                                         <span className="min-w-0 break-words">
                                             <span className="block text-slate-600">{option.type}</span>
@@ -96,11 +114,11 @@ export function EvaluationForm({ supplierId, row, options, onDone, locale = 'no'
                         })}
                     </ul>
                 )}
-                {form.errors.document_ids && <p className={ERROR}>{form.errors.document_ids}</p>}
+                <FieldError id={documentGroup.errorId} message={form.errors.document_ids} className={ERROR} />
             </fieldset>
 
-            <fieldset className="min-w-0">
-                <legend className={LABEL}>{e.status ?? 'Kontrollresultat'}<RequiredMark /></legend>
+            <fieldset className="min-w-0" {...statusGroup.groupProps}>
+                <legend className={LABEL}>{e.status ?? 'Kontrollresultat'}<RequiredStar /></legend>
                 <div className="mt-1 space-y-1">
                     {(options.statuses ?? []).map((status) => (
                         <label key={status} className="flex min-h-10 items-start gap-3 py-1 text-base text-slate-900">
@@ -111,6 +129,7 @@ export function EvaluationForm({ supplierId, row, options, onDone, locale = 'no'
                                 checked={form.data.status === status}
                                 onChange={() => form.setData('status', status)}
                                 className="mt-1 h-5 w-5 shrink-0"
+                                {...statusGroup.optionProps}
                             />
                             <span className="min-w-0 break-words">
                                 <span className="font-semibold">{displayStatusLabel(status, tr)}</span>
@@ -119,53 +138,57 @@ export function EvaluationForm({ supplierId, row, options, onDone, locale = 'no'
                         </label>
                     ))}
                 </div>
-                {form.errors.status && <p className={ERROR}>{form.errors.status}</p>}
-                {missing.includes('document') && <p className="text-base text-amber-800" data-testid="evaluation-requires-document">{e.requires_document ?? 'Velg minst ett dokument for å registrere «Dokumentert».'}</p>}
+                <FieldError id={statusGroup.errorId} message={form.errors.status} className={ERROR} />
+                {requiresDocument && <p id={id('requires-document')} className="text-base text-amber-800" data-testid="evaluation-requires-document">{e.requires_document ?? 'Velg minst ett dokument for å registrere «Dokumentert».'}</p>}
             </fieldset>
 
             {form.data.status === 'temporarily_accepted' && (
-                <div>
-                    <label htmlFor={id('accepted-until')} className={LABEL}>{e.accepted_until ?? 'Akseptert til'}<RequiredMark /></label>
-                    <p className={HINT}>{e.accepted_until_hint}</p>
-                    <input
-                        id={id('accepted-until')}
-                        type="date"
-                        required
-                        min={options.today}
-                        max={options.max_accepted_until}
-                        value={form.data.accepted_until}
-                        onChange={(event) => form.setData('accepted_until', event.target.value)}
-                        className={`${INPUT} sm:max-w-xs`}
-                    />
-                    {form.errors.accepted_until && <p className={ERROR}>{form.errors.accepted_until}</p>}
-                </div>
+                <SupplierField id={id('accepted-until')} label={e.accepted_until ?? 'Akseptert til'} labelClassName={LABEL} hint={e.accepted_until_hint} hintClassName={HINT} error={form.errors.accepted_until} errorClassName={ERROR} required>
+                    {(field) => (
+                        <input
+                            {...field}
+                            type="date"
+                            required
+                            min={options.today}
+                            max={options.max_accepted_until}
+                            value={form.data.accepted_until}
+                            onChange={(event) => form.setData('accepted_until', event.target.value)}
+                            className={`${INPUT} sm:max-w-xs`}
+                        />
+                    )}
+                </SupplierField>
             )}
 
-            <div>
-                <label htmlFor={id('rationale')} className={LABEL}>{e.rationale ?? 'Begrunnelse'}<RequiredMark /></label>
-                <p className={HINT}>{e.rationale_hint}</p>
-                <textarea id={id('rationale')} rows={4} required aria-required value={form.data.rationale} onChange={(event) => form.setData('rationale', event.target.value)} className={INPUT} />
-                {form.errors.rationale && <p className={ERROR}>{form.errors.rationale}</p>}
-            </div>
+            <SupplierField id={id('rationale')} label={e.rationale ?? 'Begrunnelse'} labelClassName={LABEL} hint={e.rationale_hint} hintClassName={HINT} error={form.errors.rationale} errorClassName={ERROR} required>
+                {(field) => <textarea {...field} rows={4} required value={form.data.rationale} onChange={(event) => form.setData('rationale', event.target.value)} className={`mt-1 ${TEXTAREA}`} />}
+            </SupplierField>
 
-            <div>
-                <label htmlFor={id('evaluated-on')} className={LABEL}>{e.evaluated_on ?? 'Kontrolldato'}<RequiredMark /></label>
-                <p className={HINT}>{e.evaluated_on_hint}</p>
-                <input
-                    id={id('evaluated-on')}
-                    type="date"
-                    required
-                    max={options.today}
-                    value={form.data.evaluated_on}
-                    onChange={(event) => form.setData('evaluated_on', event.target.value)}
-                    className={`${INPUT} sm:max-w-xs`}
-                />
-                {form.errors.evaluated_on && <p className={ERROR}>{form.errors.evaluated_on}</p>}
-            </div>
-            {form.errors.requirement_id && <p className={ERROR}>{form.errors.requirement_id}</p>}
+            <SupplierField id={id('evaluated-on')} label={e.evaluated_on ?? 'Kontrolldato'} labelClassName={LABEL} hint={e.evaluated_on_hint} hintClassName={HINT} error={form.errors.evaluated_on} errorClassName={ERROR} required>
+                {(field) => (
+                    <input
+                        {...field}
+                        type="date"
+                        required
+                        max={options.today}
+                        value={form.data.evaluated_on}
+                        onChange={(event) => form.setData('evaluated_on', event.target.value)}
+                        className={`${INPUT} sm:max-w-xs`}
+                    />
+                )}
+            </SupplierField>
+            <FieldError message={form.errors.requirement_id} className={ERROR} summary />
+
+            <RequiredNote tr={tr} />
 
             <div className="flex flex-wrap gap-2">
-                <button type="submit" disabled={form.processing || missing.length > 0} className={PRIMARY_ACTION}>{e.submit ?? 'Registrer kontroll'}</button>
+                <button
+                    type="submit"
+                    aria-disabled={form.processing || missing.length > 0 || undefined}
+                    aria-describedby={requiresDocument ? id('requires-document') : undefined}
+                    className={`${PRIMARY_ACTION} ${BUSY}`}
+                >
+                    {e.submit ?? 'Registrer kontroll'}
+                </button>
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
             </div>
         </form>

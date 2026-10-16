@@ -2,12 +2,36 @@ import { Link, router, usePage } from '@inertiajs/react';
 import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
 import { useEffect, useId, useRef, useState } from 'react';
 import InfoHint from '../../../Components/App/InfoHint';
+import FormField from '../../../Components/App/FormField';
+
+const CONTROL = 'h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100';
+const TEXTAREA = 'w-full rounded-xl border border-field-border bg-white px-4 py-3 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100';
+
+/**
+ * A field of the watch profile form, wired through FormField (A11Y-001, A11Y-013). The «i» used to sit
+ * inside the field's <label>: a button inside a label becomes the label's control, so Eierskap,
+ * Beskrivelse and Nøkkelord had no name of their own and a click on the text opened the hint.
+ */
+function ProfileField({ wide = false, ...props }) {
+    return (
+        <FormField
+            {...props}
+            className={wide ? 'space-y-2 md:col-span-2' : 'space-y-2'}
+            labelClassName="text-base font-medium text-slate-700"
+            labelRowClassName="flex items-center gap-2"
+            controlClassName=""
+            hintClassName="text-base text-slate-600"
+            errorClassName="text-base text-rose-700"
+        />
+    );
+}
 
 function cpvFieldError(errors, index, field) {
     return errors[`cpv_codes.${index}.${field}`];
 }
 
 export default function WatchProfileForm({
+    formRef = null,
     title,
     subtitle,
     showHeader = true,
@@ -36,6 +60,8 @@ export default function WatchProfileForm({
     );
     const selectedCpvCodesSignature = [...selectedCodes].join('|');
     const trimmedCpvQuery = cpvQuery.trim();
+    // One explanation for Eierskap, whether the owner can be chosen or is fixed.
+    const ownerScopeHint = <InfoHint size="sm" label="Vis forklaring for Eierskap" text={wp.hint_owner_scope ?? 'Bestemmer om profilen er din egen eller tilhører en avdeling. Avdelingsprofiler er synlige for alle som er medlem av avdelingen.'} />;
 
     // The catalog is searched by description, so nobody has to know a CPV number to begin with.
     useEffect(() => {
@@ -147,6 +173,7 @@ export default function WatchProfileForm({
     return (
         <div className="mx-auto max-w-4xl">
             <form
+                ref={formRef}
                 onSubmit={onSubmit}
                 className="space-y-6 rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:p-8"
             >
@@ -158,63 +185,80 @@ export default function WatchProfileForm({
                 ) : null}
 
                 <div className="grid gap-5 md:grid-cols-2">
-                    <label className="space-y-2 md:col-span-2">
-                        <span className="text-base font-medium text-slate-700">Navn</span>
-                        <input
-                            type="text"
-                            value={form.data.name}
-                            onChange={(event) => form.setData('name', event.target.value)}
-                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                        />
-                        {form.errors.name ? <p className="text-base text-rose-700">{form.errors.name}</p> : null}
-                    </label>
+                    <ProfileField id="watch-profile-name" label="Navn" error={form.errors.name} wide>
+                        {(field) => (
+                            <input
+                                {...field}
+                                type="text"
+                                value={form.data.name}
+                                onChange={(event) => form.setData('name', event.target.value)}
+                                className={CONTROL}
+                            />
+                        )}
+                    </ProfileField>
 
-                    <label className="space-y-2">
-                        <span className="flex items-center gap-2 text-base font-medium text-slate-700">
-                            Eierskap
-                            <InfoHint size="sm" label="Vis forklaring for Eierskap" text={wp.hint_owner_scope ?? 'Bestemmer om profilen er din egen eller tilhører en avdeling. Avdelingsprofiler er synlige for alle som er medlem av avdelingen.'} />
-                        </span>
-                        {ownerOptions.length > 1 ? (
-                            <select
-                                value={form.data.owner_scope}
-                                onChange={(event) => {
-                                    const ownerScope = event.target.value;
+                    {ownerOptions.length > 1 ? (
+                        <ProfileField
+                            id="watch-profile-owner-scope"
+                            label="Eierskap"
+                            info={ownerScopeHint}
+                            hint={selectedOwnerOption?.description || null}
+                            error={form.errors.owner_scope}
+                        >
+                            {(field) => (
+                                <select
+                                    {...field}
+                                    value={form.data.owner_scope}
+                                    onChange={(event) => {
+                                        const ownerScope = event.target.value;
 
-                                    form.setData({
-                                        ...form.data,
-                                        owner_scope: ownerScope,
-                                        department_id: ownerScope === 'department'
-                                            ? (form.data.department_id ?? departmentOptions[0]?.value ?? null)
-                                            : null,
-                                    });
-                                }}
-                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                            >
-                                {ownerOptions.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
-                        ) : (
+                                        form.setData({
+                                            ...form.data,
+                                            owner_scope: ownerScope,
+                                            department_id: ownerScope === 'department'
+                                                ? (form.data.department_id ?? departmentOptions[0]?.value ?? null)
+                                                : null,
+                                        });
+                                    }}
+                                    className={CONTROL}
+                                >
+                                    {ownerOptions.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                            {option.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            )}
+                        </ProfileField>
+                    ) : (
+                        <div className="space-y-2">
+                            <span className="flex items-center gap-2 text-base font-medium text-slate-700">
+                                Eierskap
+                                {ownerScopeHint}
+                            </span>
                             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-700">
                                 {selectedOwnerOption?.label}
                             </div>
-                        )}
-                        {selectedOwnerOption?.description ? (
-                            <p className="text-base text-slate-600">{selectedOwnerOption.description}</p>
-                        ) : null}
-                        {form.errors.owner_scope ? <p className="text-base text-rose-700">{form.errors.owner_scope}</p> : null}
-                    </label>
+                            {selectedOwnerOption?.description ? (
+                                <p className="text-base text-slate-600">{selectedOwnerOption.description}</p>
+                            ) : null}
+                            {form.errors.owner_scope ? <p className="text-base text-rose-700">{form.errors.owner_scope}</p> : null}
+                        </div>
+                    )}
 
-                    <label className="space-y-2">
-                        <span className="text-base font-medium text-slate-700">Avdeling</span>
-                        {form.data.owner_scope === 'department' ? (
-                            <>
+                    {form.data.owner_scope === 'department' ? (
+                        <ProfileField
+                            id="watch-profile-department"
+                            label="Avdeling"
+                            hint={departmentOptions.length === 0 && canChooseDepartmentOwner ? 'Ingen avdeling er tilgjengelig for denne brukeren.' : null}
+                            error={form.errors.department_id}
+                        >
+                            {(field) => (
                                 <select
+                                    {...field}
                                     value={form.data.department_id ?? ''}
                                     onChange={(event) => form.setData('department_id', event.target.value === '' ? null : Number(event.target.value))}
-                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                    className={CONTROL}
                                 >
                                     <option value="">Velg avdeling</option>
                                     {departmentOptions.map((option) => (
@@ -223,21 +267,23 @@ export default function WatchProfileForm({
                                         </option>
                                     ))}
                                 </select>
-                                {departmentOptions.length === 0 && canChooseDepartmentOwner ? (
-                                    <p className="text-base text-slate-600">Ingen avdeling er tilgjengelig for denne brukeren.</p>
-                                ) : null}
-                            </>
-                        ) : (
+                            )}
+                        </ProfileField>
+                    ) : (
+                        <div className="space-y-2">
+                            <span className="text-base font-medium text-slate-700">Avdeling</span>
                             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-600">
                                 Personlige watch profiles knyttes til deg og ikke til en avdeling.
                             </div>
-                        )}
-                        {form.errors.department_id ? <p className="text-base text-rose-700">{form.errors.department_id}</p> : null}
-                    </label>
+                            {form.errors.department_id ? <p className="text-base text-rose-700">{form.errors.department_id}</p> : null}
+                        </div>
+                    )}
 
-                    <label className="space-y-2">
+                    {/* Was a <label> holding the «i» and a second <label>: nested labels are invalid, and the
+                        outer one took the hint button as its control. Now a named group. */}
+                    <div className="space-y-2" role="group" aria-labelledby="watch-profile-status-label">
                         <span className="flex items-center gap-2 text-base font-medium text-slate-700">
-                            Status
+                            <span id="watch-profile-status-label">Status</span>
                             <InfoHint size="sm" label="Vis forklaring for Status" text={wp.hint_status ?? 'Bare aktive profiler brukes til å finne nye treff. Inaktive beholder kriteriene sine.'} />
                         </span>
                         <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-base text-slate-700">
@@ -245,41 +291,51 @@ export default function WatchProfileForm({
                                 type="checkbox"
                                 checked={form.data.is_active}
                                 onChange={(event) => form.setData('is_active', event.target.checked)}
+                                aria-invalid={form.errors.is_active ? true : undefined}
+                                aria-describedby={form.errors.is_active ? 'watch-profile-status-error' : undefined}
                                 className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
                             />
                             <span>{form.data.is_active ? 'Aktiv' : 'Inaktiv'}</span>
                         </label>
-                        {form.errors.is_active ? <p className="text-base text-rose-700">{form.errors.is_active}</p> : null}
-                    </label>
+                        {form.errors.is_active ? <p id="watch-profile-status-error" className="text-base text-rose-700">{form.errors.is_active}</p> : null}
+                    </div>
 
-                    <label className="space-y-2 md:col-span-2">
-                        <span className="flex items-center gap-2 text-base font-medium text-slate-700">
-                            Beskrivelse
-                            <InfoHint size="sm" label="Vis forklaring for Beskrivelse" text={wp.hint_description ?? 'Valgfritt notat om hva profilen skal følge. Beskrivelsen påvirker ikke hvilke kunngjøringer som gir treff.'} />
-                        </span>
-                        <textarea
-                            value={form.data.description}
-                            onChange={(event) => form.setData('description', event.target.value)}
-                            rows={4}
-                            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                        />
-                        {form.errors.description ? <p className="text-base text-rose-700">{form.errors.description}</p> : null}
-                    </label>
+                    <ProfileField
+                        id="watch-profile-description"
+                        label="Beskrivelse"
+                        info={<InfoHint size="sm" label="Vis forklaring for Beskrivelse" text={wp.hint_description ?? 'Valgfritt notat om hva profilen skal følge. Beskrivelsen påvirker ikke hvilke kunngjøringer som gir treff.'} />}
+                        error={form.errors.description}
+                        wide
+                    >
+                        {(field) => (
+                            <textarea
+                                {...field}
+                                value={form.data.description}
+                                onChange={(event) => form.setData('description', event.target.value)}
+                                rows={4}
+                                className={TEXTAREA}
+                            />
+                        )}
+                    </ProfileField>
 
-                    <label className="space-y-2 md:col-span-2">
-                        <span className="flex items-center gap-2 text-base font-medium text-slate-700">
-                            Nøkkelord
-                            <InfoHint size="sm" label="Vis forklaring for Nøkkelord" text={wp.hint_keywords ?? 'Ord eller fraser som letes etter i kunngjøringens tittel, beskrivelse og oppdragsgiver. Ett nøkkelord per linje.'} />
-                        </span>
-                        <textarea
-                            value={form.data.keywords}
-                            onChange={(event) => form.setData('keywords', event.target.value)}
-                            rows={6}
-                            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                        />
-                        <p className="text-base text-slate-600">{wp.keywords_help ?? 'Ett nøkkelord per linje.'}</p>
-                        {form.errors.keywords ? <p className="text-base text-rose-700">{form.errors.keywords}</p> : null}
-                    </label>
+                    <ProfileField
+                        id="watch-profile-keywords"
+                        label="Nøkkelord"
+                        info={<InfoHint size="sm" label="Vis forklaring for Nøkkelord" text={wp.hint_keywords ?? 'Ord eller fraser som letes etter i kunngjøringens tittel, beskrivelse og oppdragsgiver. Ett nøkkelord per linje.'} />}
+                        hint={wp.keywords_help ?? 'Ett nøkkelord per linje.'}
+                        error={form.errors.keywords}
+                        wide
+                    >
+                        {(field) => (
+                            <textarea
+                                {...field}
+                                value={form.data.keywords}
+                                onChange={(event) => form.setData('keywords', event.target.value)}
+                                rows={6}
+                                className={TEXTAREA}
+                            />
+                        )}
+                    </ProfileField>
                 </div>
 
                 <section className="space-y-5 rounded-[20px] border border-slate-200 bg-slate-50/70 p-5">
@@ -293,7 +349,9 @@ export default function WatchProfileForm({
                         </p>
                     </div>
 
-                    {form.errors.cpv_codes ? <p className="text-base text-rose-700">{form.errors.cpv_codes}</p> : null}
+                    {/* Not tied to one field: the list as a whole is wrong. It takes focus after a rejected
+                        submit when no field does (useFocusFirstError). */}
+                    {form.errors.cpv_codes ? <p data-form-error-summary="" className="text-base text-rose-700">{form.errors.cpv_codes}</p> : null}
 
                     <div className="space-y-2">
                         <label className="text-base font-medium text-slate-700" htmlFor={cpvSearchId}>
@@ -306,7 +364,7 @@ export default function WatchProfileForm({
                             onChange={(event) => setCpvQuery(event.target.value)}
                             placeholder="Søk etter f.eks. nettverk, IT-drift eller datasenter"
                             aria-describedby={cpvResultsId}
-                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                            className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                         />
                     </div>
 
@@ -372,25 +430,29 @@ export default function WatchProfileForm({
                                             </div>
                                             <div className="text-base text-slate-600">{row.cpv_code}</div>
                                             {cpvFieldError(form.errors, index, 'cpv_code') ? (
-                                                <p className="text-base text-rose-700">{cpvFieldError(form.errors, index, 'cpv_code')}</p>
+                                                <p data-form-error-summary="" className="text-base text-rose-700">{cpvFieldError(form.errors, index, 'cpv_code')}</p>
                                             ) : null}
                                         </div>
 
                                         <div className="mt-3 flex items-center justify-between gap-3">
-                                            <label className="flex items-center gap-2">
+                                            {/* The «i» beside the label, not inside it (A11Y-001). */}
+                                            <div className="flex items-center gap-2">
                                                 <span className="flex items-center gap-1.5 text-base text-slate-600">
-                                                    Vekt
+                                                    <label htmlFor={`watch-profile-cpv-weight-${index}`}>Vekt</label>
                                                     <InfoHint size="sm" label="Vis forklaring for Vekt" text={wp.hint_weight ?? 'Hvor mye denne koden teller når en kunngjøring scores. Høyere vekt gir treffet større betydning enn koder med lavere vekt.'} />
                                                 </span>
                                                 <input
+                                                    id={`watch-profile-cpv-weight-${index}`}
                                                     type="number"
                                                     min="1"
                                                     value={row.weight}
                                                     onChange={(event) => setCpvWeight(row.cpv_code, event.target.value)}
                                                     aria-label={`Vekt for ${row.description || row.cpv_code}`}
-                                                    className="h-10 w-20 rounded-xl border border-slate-200 bg-white px-3 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    aria-invalid={cpvFieldError(form.errors, index, 'weight') ? true : undefined}
+                                                    aria-describedby={cpvFieldError(form.errors, index, 'weight') ? `watch-profile-cpv-weight-${index}-error` : undefined}
+                                                    className="h-10 w-20 rounded-xl border border-field-border bg-white px-3 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                 />
-                                            </label>
+                                            </div>
                                             <button
                                                 type="button"
                                                 onClick={() => removeCpvCode(row.cpv_code)}
@@ -402,7 +464,7 @@ export default function WatchProfileForm({
                                         </div>
 
                                         {cpvFieldError(form.errors, index, 'weight') ? (
-                                            <p className="mt-2 text-base text-rose-700">{cpvFieldError(form.errors, index, 'weight')}</p>
+                                            <p id={`watch-profile-cpv-weight-${index}-error`} className="mt-2 text-base text-rose-700">{cpvFieldError(form.errors, index, 'weight')}</p>
                                         ) : null}
                                     </li>
                                 ))}

@@ -1,15 +1,14 @@
 import StatusBadge from '../../../Components/App/StatusBadge';
+import { usePage } from '@inertiajs/react';
 import { SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { formatRiskLongDay } from './riskDates';
 
-/** "2026-10-04" as "4. oktober 2026", read as a calendar day so no time zone can shift it. */
-export function formatDay(day) {
-    if (! day) {
-        return null;
-    }
-
-    const [year, month, date] = day.split('-').map(Number);
-
-    return new Date(year, month - 1, date).toLocaleDateString('nb-NO', { day: 'numeric', month: 'long', year: 'numeric' });
+/**
+ * "2026-10-04" as "4. oktober 2026" / "4 October 2026", read as a calendar day so no time zone can
+ * shift it (A11Y-172: in the page's language, not always Norwegian).
+ */
+export function formatDay(day, locale) {
+    return formatRiskLongDay(day, locale);
 }
 
 /**
@@ -19,6 +18,7 @@ export function formatDay(day) {
  * at Vurderingsintervall, as Behandling → Endre does for behandlingsvalg.
  */
 export default function RiskReviewSchedule({ schedule, status, onEdit = null, tr }) {
+    const { locale } = usePage().props;
     const trReview = tr.review ?? {};
     const interval = schedule.interval_months;
     const intervalLabel = interval ? (trReview.intervals?.[interval] ?? String(interval)) : (trReview.no_interval ?? 'Ingen fast intervall');
@@ -31,7 +31,7 @@ export default function RiskReviewSchedule({ schedule, status, onEdit = null, tr
     } else {
         next = (
             <span className="inline-flex flex-wrap items-center gap-2">
-                <span>{formatDay(schedule.next_review_on)}</span>
+                <span>{formatDay(schedule.next_review_on, locale)}</span>
                 {schedule.is_overdue && <StatusBadge tone="rose">{trReview.overdue ?? 'Forfalt'}</StatusBadge>}
             </span>
         );
@@ -46,6 +46,7 @@ export default function RiskReviewSchedule({ schedule, status, onEdit = null, tr
                         <span>{intervalLabel}</span>
                         {onEdit && (
                             <button
+                                id="risk-review-interval-edit"
                                 type="button"
                                 onClick={onEdit}
                                 aria-label={`${trReview.edit ?? 'Endre'} ${(trReview.field_interval ?? 'Vurderingsintervall').toLowerCase()}`}
@@ -59,7 +60,7 @@ export default function RiskReviewSchedule({ schedule, status, onEdit = null, tr
                 <div>
                     <dt className="text-base font-semibold text-slate-600">{trReview.last_assessed ?? 'Sist vurdert'}</dt>
                     <dd className="mt-1 text-base text-slate-900">
-                        {formatDay(schedule.last_assessed_on) ?? <span className="text-slate-500">{trReview.never_assessed ?? 'Ikke vurdert'}</span>}
+                        {formatDay(schedule.last_assessed_on, locale) ?? <span className="text-slate-500">{trReview.never_assessed ?? 'Ikke vurdert'}</span>}
                     </dd>
                 </div>
                 <div>

@@ -1,4 +1,4 @@
-import { Link } from '@inertiajs/react';
+import { Link, usePage } from '@inertiajs/react';
 import { fill } from './reviewSections';
 
 /**
@@ -6,9 +6,12 @@ import { fill } from './reviewSections';
  * the period, the period before, status now or at finalization — then the lists, then the known
  * limitations of the source data. Nothing here decides what the reader may see; the server already
  * narrowed every number and row.
+ *
+ * A number that needs attention is amber — and says so in words to a screen reader (1.4.1, A11Y-024).
  */
 export default function SectionBasis({ basis, t, attentionKeys = [] }) {
     const ts = t.section ?? {};
+    const ta = usePage().props.translations?.a11y ?? {};
 
     if (! basis) {
         return null;
@@ -35,7 +38,11 @@ export default function SectionBasis({ basis, t, attentionKeys = [] }) {
                                     className={`flex items-baseline justify-between gap-3 rounded-2xl border px-4 py-3 ${flagged ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'}`}
                                     data-metric={metric.key}
                                 >
-                                    <dt className="min-w-0 break-words text-base text-slate-700">{metric.label}</dt>
+                                    {/* The words go with the label, so the value stays a bare number. */}
+                                    <dt className="min-w-0 break-words text-base text-slate-700">
+                                        {metric.label}
+                                        {flagged && <span className="sr-only">{` (${ta.management_review_metric_flagged ?? 'krever oppmerksomhet'})`}</span>}
+                                    </dt>
                                     <dd className={`shrink-0 text-xl font-semibold ${flagged ? 'text-amber-900' : 'text-slate-950'}`}>{metric.value}</dd>
                                 </div>
                             );

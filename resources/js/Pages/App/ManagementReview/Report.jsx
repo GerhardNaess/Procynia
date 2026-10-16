@@ -10,6 +10,7 @@ import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles'
 export default function ManagementReviewReport() {
     const { translations = {}, document, back_url: backUrl, pdf_url: pdfUrl } = usePage().props;
     const t = translations?.management_review ?? {};
+    const ta = translations?.a11y ?? {};
     const labels = document.labels ?? {};
 
     return (
@@ -17,19 +18,27 @@ export default function ManagementReviewReport() {
             <Head title={document.title} />
             <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-3 print:hidden">
                 <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-2">
-                    <Link href={backUrl} className="text-base font-semibold text-violet-700 hover:text-violet-900">← {t.back ?? 'Til ledelsens gjennomgang'}</Link>
+                    <Link href={backUrl} className="text-base font-semibold text-violet-700 hover:text-violet-900"><span aria-hidden="true">← </span>{t.back ?? 'Til ledelsens gjennomgang'}</Link>
                     <div className="flex flex-wrap gap-2">
                         <button type="button" onClick={() => window.print()} className={SECONDARY_ACTION} data-testid="mr-print">{t.print ?? 'Skriv ut'}</button>
-                        <a href={pdfUrl} className={PRIMARY_ACTION} data-testid="mr-download-pdf">{t.download_pdf ?? 'Last ned PDF'}</a>
+                        <a href={pdfUrl} className={PRIMARY_ACTION} aria-describedby="mr-pdf-note" data-testid="mr-download-pdf">{t.download_pdf ?? 'Last ned PDF'}</a>
                     </div>
                 </div>
+                {/* The PDF (dompdf) is not tagged for assistive technology; this page is the accessible
+                    version of the same document, and prints as it (EN 301 549 kap. 10, A11Y-126). */}
+                <p id="mr-pdf-note" className="mx-auto mt-2 max-w-4xl text-base text-slate-600" data-testid="mr-pdf-note">
+                    {ta.management_review_pdf_note ?? 'PDF-filen er ikke tilrettelagt for skjermleser.'}{' '}
+                    <a href="#mr-report" className="font-semibold text-violet-700 underline underline-offset-2 hover:text-violet-900">
+                        {ta.management_review_pdf_alternative ?? 'Les den tilgjengelige versjonen av rapporten på denne siden'}
+                    </a>
+                </p>
             </div>
 
             <main>
-            <article className="mx-auto my-6 max-w-4xl space-y-6 bg-white px-4 py-8 text-base leading-7 text-slate-900 shadow-sm sm:px-10 print:my-0 print:max-w-none print:px-0 print:py-0 print:shadow-none" data-testid="mr-report">
+            <article id="mr-report" tabIndex={-1} aria-labelledby="mr-report-title" className="mx-auto my-6 max-w-4xl space-y-6 bg-white px-4 py-8 text-base leading-7 text-slate-900 shadow-sm sm:px-10 print:my-0 print:max-w-none print:px-0 print:py-0 print:shadow-none" data-testid="mr-report">
                 {document.is_draft && <p className="text-lg font-bold text-amber-800" data-testid="mr-report-draft">{labels.draft_banner}</p>}
                 <header className="space-y-2">
-                    <h1 className="break-words text-3xl font-semibold text-slate-950">{document.title}</h1>
+                    <h1 id="mr-report-title" className="break-words text-3xl font-semibold text-slate-950">{document.title}</h1>
                     <p className="text-slate-700">{document.status} · {document.basis_note}</p>
                     <dl className="grid gap-x-6 gap-y-1 sm:grid-cols-[12rem_1fr]">
                         {document.meta.map(([label, value]) => (
@@ -64,10 +73,11 @@ export default function ManagementReviewReport() {
                                     <div key={group.key}>
                                         <h3 className="font-semibold text-slate-700">{group.label}</h3>
                                         <table className="mt-1 w-full">
+                                            <caption className="sr-only">{`${section.title}: ${group.label}`}</caption>
                                             <tbody>
                                                 {group.metrics.map((metric) => (
                                                     <tr key={metric.key} className="border-b border-slate-100">
-                                                        <td className="py-1 pr-4">{metric.label}</td>
+                                                        <th scope="row" className="py-1 pr-4 text-left font-normal">{metric.label}</th>
                                                         <td className="py-1 text-right font-semibold">{metric.value}</td>
                                                     </tr>
                                                 ))}

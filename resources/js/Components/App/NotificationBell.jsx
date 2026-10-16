@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import ControlHint from './ControlHint';
+import { useKeepInViewport } from '../../Support/useKeepInViewport';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -121,6 +122,15 @@ function useAvailableHeight(ref, isOpen) {
 
 export default function NotificationBell({
     menuRef,
+    /** The bell button, for the layout to give focus back to (Escape, a closed dialog). */
+    buttonRef = null,
+    /**
+     * The bell's accessible name, with the unread count in it («Varsler, 3 uleste»). The badge is
+     * drawn, not read: without the count in the name a screen-reader user would never hear it.
+     */
+    label = 'Varsler',
+    /** Called when keyboard focus leaves the bell and its panel, so an open panel can close behind it. */
+    onFocusLeave = null,
     /**
      * Read on hover and on keyboard focus. Says what the number means, because a badge on its own
      * cannot: unread messages, not outstanding work. Passed in rather than held here so it is
@@ -140,18 +150,29 @@ export default function NotificationBell({
 }) {
     const panelRef = useRef(null);
     const panelMaxHeight = useAvailableHeight(panelRef, isOpen);
+    useKeepInViewport(panelRef, isOpen);
     const items = Array.isArray(notifications?.items) ? notifications.items : [];
     const unreadCount = Number(notifications?.unread_count ?? 0);
     const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount);
     const hasUnreadItems = unreadCount > 0;
 
     return (
-        <div ref={menuRef} className="relative">
+        <div
+            ref={menuRef}
+            className="relative"
+            onBlur={(event) => {
+                // Only a move to another element counts; focus leaving the window does not.
+                if (onFocusLeave && event.relatedTarget && ! event.currentTarget.contains(event.relatedTarget)) {
+                    onFocusLeave();
+                }
+            }}
+        >
             {/* What the badge counts, said out loud. The bell and "Oppfølging" sit next to each
                 other and both look like somewhere work might be waiting; this one holds messages
                 about things that already happened, and the number is how many are unread. */}
             <ControlHint text={hint} suppressed={isOpen}>
             <button
+                ref={buttonRef}
                 type="button"
                 onClick={onToggle}
                 className={classNames(
@@ -160,10 +181,9 @@ export default function NotificationBell({
                         ? 'border-violet-300 ring-4 ring-violet-100'
                         : 'hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700',
                 )}
-                aria-haspopup="dialog"
                 aria-expanded={isOpen}
                 aria-controls="app-notifications-panel"
-                aria-label="Åpne varsler"
+                aria-label={label}
             >
                 <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                     <path
@@ -191,9 +211,14 @@ export default function NotificationBell({
             </ControlHint>
 
             {isOpen ? (
-                <div
+                // A disclosure, not a dialog: the panel opens next to the bell, focus stays on the bell
+                // and Tab walks into the panel. Named by its own heading. data-escape-layer: Escape
+                // closes this before anything behind it (FlashMessages).
+                <section
                     ref={panelRef}
                     id="app-notifications-panel"
+                    aria-labelledby="app-notifications-title"
+                    data-escape-layer=""
                     // The Tailwind cap is the first paint, before the measurement lands.
                     style={panelMaxHeight !== null ? { maxHeight: `${panelMaxHeight}px` } : undefined}
                     className="absolute right-0 top-[calc(100%+0.75rem)] z-[80] flex max-h-[calc(100dvh-6rem)] w-[24rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]"
@@ -203,7 +228,7 @@ export default function NotificationBell({
                         is enough to scroll. */}
                     <div className="shrink-0 border-b border-slate-200 px-4 py-4">
                         <div className="flex items-start justify-between gap-3">
-                            <div className="text-base font-semibold text-slate-950">Varsler</div>
+                            <div id="app-notifications-title" className="text-base font-semibold text-slate-950">Varsler</div>
                             {/* Two different intents, so two buttons and no shared wording:
                                 marking read keeps the messages and clears the badge, deleting
                                 removes them. Neither touches the work under Oppfølging. */}
@@ -257,7 +282,6 @@ export default function NotificationBell({
                                         type="button"
                                         onClick={() => onMarkNotification(notification)}
                                         className="block w-full rounded-2xl px-3 py-3 pr-10 text-left"
-                                        aria-label={`Åpne varsel: ${notification.title}`}
                                     >
                                         <div className="flex items-start justify-between gap-3">
                                             <div className="min-w-0 flex-1">
@@ -312,7 +336,7 @@ export default function NotificationBell({
                                         data-testid="notification-delete"
                                         title="Slett varsel"
                                         aria-label={`Slett varsel: ${notification.title}`}
-                                        className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                                        className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
                                     >
                                         <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                                             <path
@@ -328,7 +352,7 @@ export default function NotificationBell({
                             </div>
                         )}
                     </div>
-                </div>
+                </section>
             ) : null}
         </div>
     );

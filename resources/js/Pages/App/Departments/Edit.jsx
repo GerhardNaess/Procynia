@@ -1,8 +1,10 @@
 import { Link, router, useForm } from '@inertiajs/react';
 import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import FormButtonRow from '../../../Components/App/FormButtonRow';
+import FormField from '../../../Components/App/FormField';
+import { useFocusFirstError } from '../../../Support/focusManagement';
 
 export default function DepartmentsEdit({ department }) {
     const [toggling, setToggling] = useState(false);
@@ -11,9 +13,12 @@ export default function DepartmentsEdit({ department }) {
         description: department.description || '',
     });
 
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+
     const submit = (event) => {
         event.preventDefault();
-        form.put(department.update_url);
+        form.put(department.update_url, { onError: focusFirstError });
     };
 
     const toggleActive = () => {
@@ -33,38 +38,57 @@ export default function DepartmentsEdit({ department }) {
             <div className="space-y-7">
                 <section className="space-y-1.5">
                     <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Rediger avdeling</h1>
-                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                    <p className="max-w-3xl text-[15px] leading-7 text-slate-600">
                         Oppdater navn og beskrivelse. Avdelingen brukes kun som organisasjonsstruktur i denne fasen.
                     </p>
                 </section>
 
                 <div className="mx-auto max-w-3xl">
                 <form
+                    ref={formRef}
                     onSubmit={submit}
                     className="space-y-6 rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:p-8"
                 >
                     <div className="grid gap-5">
-                        <label className="space-y-2">
-                            <span className="text-sm font-medium text-slate-700">Navn</span>
-                            <input
-                                type="text"
-                                value={form.data.name}
-                                onChange={(event) => form.setData('name', event.target.value)}
-                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                            />
-                            {form.errors.name ? <p className="text-sm text-rose-600">{form.errors.name}</p> : null}
-                        </label>
+                        <FormField
+                            id="department-name"
+                            label="Navn"
+                            error={form.errors.name}
+                            className="space-y-2"
+                            labelClassName="text-sm font-medium text-slate-700"
+                            controlClassName=""
+                            errorClassName="text-sm text-rose-700"
+                        >
+                            {(field) => (
+                                <input
+                                    {...field}
+                                    type="text"
+                                    value={form.data.name}
+                                    onChange={(event) => form.setData('name', event.target.value)}
+                                    className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                />
+                            )}
+                        </FormField>
 
-                        <label className="space-y-2">
-                            <span className="text-sm font-medium text-slate-700">Beskrivelse</span>
-                            <textarea
-                                value={form.data.description}
-                                onChange={(event) => form.setData('description', event.target.value)}
-                                rows={5}
-                                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                            />
-                            {form.errors.description ? <p className="text-sm text-rose-600">{form.errors.description}</p> : null}
-                        </label>
+                        <FormField
+                            id="department-description"
+                            label="Beskrivelse"
+                            error={form.errors.description}
+                            className="space-y-2"
+                            labelClassName="text-sm font-medium text-slate-700"
+                            controlClassName=""
+                            errorClassName="text-sm text-rose-700"
+                        >
+                            {(field) => (
+                                <textarea
+                                    {...field}
+                                    value={form.data.description}
+                                    onChange={(event) => form.setData('description', event.target.value)}
+                                    rows={5}
+                                    className="w-full rounded-xl border border-field-border bg-white px-4 py-3 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                />
+                            )}
+                        </FormField>
 
                         <div className="space-y-2">
                             <span className="text-sm font-medium text-slate-700">Status</span>

@@ -1,18 +1,23 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { announce } from '../../../Support/announcer';
+import { refocusIfLost, useFocusFirstError } from '../../../Support/focusManagement';
+import { INPUT } from '../../../Support/formStyles';
 import RiskAttention from './RiskAttention';
 import RiskForm from './RiskForm';
+import { resultCountMessage } from './riskA11y';
 import { riskHelp } from './riskHelp';
 import { RISK_LEVEL_TONES } from './riskLevel';
 import { RISK_STATUS_TONES } from './riskStatus';
+import useInlinePanelFocus from './useInlinePanelFocus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 
 /**
  * Risiko — the risk register.
@@ -80,6 +85,12 @@ export default function RiskIndex() {
     const [creating, setCreating] = useState(false);
     const [search, setSearch] = useState(filters.search ?? '');
     const [status, setStatus] = useState(filters.status ?? '');
+    // Ny risiko opens in place of its button: focus into the form, and back to the button on Avbryt
+    // (A11Y-014). A rejected save puts focus on the first field that says why (A11Y-013).
+    const createPanelRef = useRef(null);
+    const createFormRef = useRef(null);
+    const focusFirstError = useFocusFirstError(createFormRef);
+    useInlinePanelFocus(creating, { panelRef: createPanelRef, returnIds: ['risk-create-button', 'risk-index-heading'] });
 
     const form = useForm({
         title: '',
@@ -93,20 +104,34 @@ export default function RiskIndex() {
         status: statuses[0] ?? 'identified',
     });
 
+    // A search changes the table out of sight of someone who stays in the form, so the number of
+    // risks found is said once when the answer arrives (4.1.3, A11Y-111) — never on first load.
+    const announceCount = (withFilter) => (page) => announce(resultCountMessage(page?.props?.risks?.length ?? 0, {
+        many: tr.count ?? ':count risikoer',
+        none: withFilter ? (tr.no_matches ?? 'Ingen risikoer passer søket.') : null,
+    }));
+
     const submitSearch = (event) => {
         event.preventDefault();
-        router.get('/app/risk', { search: search || undefined, status: status || undefined }, { preserveState: true, replace: true });
+        router.get('/app/risk', { search: search || undefined, status: status || undefined }, { preserveState: true, replace: true, onSuccess: announceCount(Boolean(search || status)) });
     };
 
     const resetSearch = () => {
         setSearch('');
         setStatus('');
-        router.get('/app/risk', {}, { replace: true });
+        // «Nullstill» goes away with the filter it cleared; focus goes back to the search field.
+        router.get('/app/risk', {}, {
+            replace: true,
+            onSuccess: (page) => {
+                announceCount(false)(page);
+                refocusIfLost(['risk-search']);
+            },
+        });
     };
 
     const submitCreate = (event) => {
         event.preventDefault();
-        form.post('/app/risk/risks', { preserveScroll: true });
+        form.post('/app/risk/risks', { preserveScroll: true, onError: () => focusFirstError() });
     };
 
     const filtered = Boolean(filters.search || filters.status);
@@ -116,14 +141,14 @@ export default function RiskIndex() {
             <div className="space-y-6">
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="space-y-2">
-                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
+                        <h1 id="risk-index-heading" className="text-4xl font-semibold tracking-tight text-slate-950">
                             {tr.index_heading ?? 'Risikoregister'}
                         </h1>
                         <p className="max-w-3xl text-base leading-6 text-slate-600">
                             {tr.index_subtitle ?? 'Risikoene dere har ansvar for, samlet med eier, fagområde og status.'}
                         </p>
                         {hasAreas && (
-                            <p className="text-base text-slate-500">
+                            <p className="text-base text-slate-600">
                                 {tr.scope_note ?? 'Du ser risikoene i fagområdene rollene dine gir deg.'}
                             </p>
                         )}
@@ -131,7 +156,7 @@ export default function RiskIndex() {
                     <div className="flex flex-wrap items-center gap-2">
                         <PageHelpButton {...riskHelp(tr, 'index')} />
                         {canCreate && ! creating && (
-                            <button type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION}>
+                            <button id="risk-create-button" type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION}>
                                 {tr.create ?? 'Ny risiko'}
                             </button>
                         )}
@@ -139,10 +164,11 @@ export default function RiskIndex() {
                 </header>
 
                 {creating && (
-                    <section className={CARD}>
-                        <h2 className="mb-4 text-xl font-semibold text-slate-950">{tr.create_heading ?? 'Ny risiko'}</h2>
+                    <section ref={createPanelRef} className={CARD} aria-labelledby="risk-create-heading">
+                        <h2 id="risk-create-heading" className="mb-4 text-xl font-semibold text-slate-950">{tr.create_heading ?? 'Ny risiko'}</h2>
                         <RiskForm
                             form={form}
+                            formRef={createFormRef}
                             onSubmit={submitCreate}
                             onCancel={() => { setCreating(false); form.clearErrors(); }}
                             areaOptions={areaOptions}
@@ -210,21 +236,22 @@ export default function RiskIndex() {
                                 description={filtered ? null : (canCreate ? (tr.empty_hint ?? '') : null)}
                             />
                         ) : (
-                            <div className="mt-4 overflow-x-auto">
+                            <ScrollRegion label={tr.index_heading ?? 'Risikoregister'} className="mt-4">
                                 <table className="w-full text-base">
+                                    <caption className="sr-only">{tr.index_heading ?? 'Risikoregister'}</caption>
                                     <thead>
                                         <tr className="border-b border-slate-200 text-left text-base font-semibold text-slate-600">
-                                            <th className="pb-3 pr-4">{tr.col_title ?? 'Risiko'}</th>
-                                            <th className="px-4 pb-3">{tr.col_area ?? 'Fagområde'}</th>
-                                            <th className="px-4 pb-3">{tr.col_owner ?? 'Risikoeier'}</th>
-                                            <th className="px-4 pb-3">{tr.col_residual ?? 'Restrisiko'}</th>
-                                            <th className="pb-3 pl-4">{tr.col_status ?? 'Status'}</th>
+                                            <th scope="col" className="pb-3 pr-4">{tr.col_title ?? 'Risiko'}</th>
+                                            <th scope="col" className="px-4 pb-3">{tr.col_area ?? 'Fagområde'}</th>
+                                            <th scope="col" className="px-4 pb-3">{tr.col_owner ?? 'Risikoeier'}</th>
+                                            <th scope="col" className="px-4 pb-3">{tr.col_residual ?? 'Restrisiko'}</th>
+                                            <th scope="col" className="pb-3 pl-4">{tr.col_status ?? 'Status'}</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {risks.map((risk) => (
                                             <tr key={risk.id}>
-                                                <td className="py-3 pr-4">
+                                                <th scope="row" className="py-3 pr-4 text-left font-normal">
                                                     <Link href={risk.url} className="font-semibold text-violet-700 hover:text-violet-900">
                                                         {risk.title}
                                                     </Link>
@@ -235,7 +262,7 @@ export default function RiskIndex() {
                                                             {tr.structured?.missing_short ?? 'Mangler årsak, hendelse og konsekvens'}
                                                         </p>
                                                     )}
-                                                </td>
+                                                </th>
                                                 <td className="px-4 py-3 text-slate-700">{risk.area_name}</td>
                                                 <td className="px-4 py-3 text-slate-700">{risk.owner_name ?? '—'}</td>
                                                 <td className="px-4 py-3">
@@ -256,7 +283,7 @@ export default function RiskIndex() {
                                         ))}
                                     </tbody>
                                 </table>
-                            </div>
+                            </ScrollRegion>
                         )}
                     </section>
                 )}

@@ -1,7 +1,13 @@
 import { Link, useForm, usePage } from '@inertiajs/react';
+import { useRef } from 'react';
 import { PRIMARY_ACTION } from '../../../Support/actionStyles';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import FormField from '../../../Components/App/FormField';
+import { useFocusFirstError } from '../../../Support/focusManagement';
+import { TEXTAREA } from '../../../Support/formStyles';
+import { useTransitionAnnouncement } from '../../../Support/statusAnnouncement';
+import { askAnnouncement, askStateKey } from './wikiAskStatus';
 
 function getAskHelpSections(tw) {
     return [
@@ -51,23 +57,42 @@ function getAskHelpSections(tw) {
 export default function Ask({ question = null, result = null, maxQuestionLength = 500 }) {
     const { translations = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
+    const ta = translations?.a11y ?? {};
 
     const form = useForm({ question: question ?? '' });
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
 
     const submit = (event) => {
         event.preventDefault();
 
+        // aria-disabled while asking (below), so the guard lives here.
+        if (form.processing || form.data.question.trim() === '') {
+            return;
+        }
+
         form.post('/app/wiki/ask', {
             preserveScroll: true,
             preserveState: true,
+            onError: () => focusFirstError(),
         });
     };
 
     const status = result?.answer_status ?? null;
     const citations = result?.citations ?? [];
 
+    // «Søker i Wiki-en …» and then what kind of answer came back — once each, never the answer text
+    // itself, and focus stays in the question field (4.1.3; the Fase 4 rule for AI answers).
+    useTransitionAnnouncement(askStateKey(form.processing, result), (previous, next) => {
+        const message = askAnnouncement(next, tw, ta);
+
+        return message ? { message } : null;
+    });
+
+    // The layout's own title is off: the page draws its h1 itself, with the description under it
+    // (A11Y-042 — there were two).
     return (
-        <CustomerAppLayout title={tw.ask_title ?? 'Spør Wiki'}>
+        <CustomerAppLayout title={tw.ask_title ?? 'Spør Wiki'} showPageTitle={false}>
             <div className="mx-auto max-w-[900px] space-y-6">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="space-y-1">
@@ -87,32 +112,41 @@ export default function Ask({ question = null, result = null, maxQuestionLength 
                 </div>
 
                 <form
+                    ref={formRef}
                     onSubmit={submit}
+                    aria-busy={form.processing || undefined}
                     className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
                 >
-                    <div className="space-y-2">
-                        <label htmlFor="wiki-question" className="block text-base font-semibold text-slate-900">
-                            {tw.ask_question_label ?? 'Spørsmål'}
-                        </label>
-                        <textarea
-                            id="wiki-question"
-                            name="question"
-                            rows={3}
-                            maxLength={maxQuestionLength}
-                            value={form.data.question}
-                            onChange={(event) => form.setData('question', event.target.value)}
-                            placeholder={tw.ask_question_placeholder ?? 'Skriv et spørsmål om kunnskapen i Wiki-en...'}
-                            className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base text-slate-900 shadow-sm transition placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-200"
-                        />
-                        {form.errors.question ? (
-                            <p className="text-sm font-medium text-rose-600">{form.errors.question}</p>
-                        ) : null}
-                    </div>
+                    <FormField
+                        id="wiki-question"
+                        label={tw.ask_question_label ?? 'Spørsmål'}
+                        error={form.errors.question}
+                        className="space-y-2"
+                        labelClassName="block text-base font-semibold text-slate-900"
+                        controlClassName=""
+                        errorClassName="text-base font-medium text-rose-700"
+                    >
+                        {(field) => (
+                            <textarea
+                                {...field}
+                                name="question"
+                                rows={3}
+                                maxLength={maxQuestionLength}
+                                value={form.data.question}
+                                onChange={(event) => form.setData('question', event.target.value)}
+                                placeholder={tw.ask_question_placeholder ?? 'Skriv et spørsmål om kunnskapen i Wiki-en...'}
+                                className={`${TEXTAREA} placeholder:text-slate-500`}
+                            />
+                        )}
+                    </FormField>
 
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                        {/* Disabled only while there is nothing to ask; while asking it stays focusable
+                            (aria-disabled) so pressing it does not drop focus to the page. */}
                         <button
                             type="submit"
-                            disabled={form.processing || form.data.question.trim() === ''}
+                            disabled={form.data.question.trim() === ''}
+                            aria-disabled={form.processing || undefined}
                             className={`${PRIMARY_ACTION} gap-2 shadow-sm`}
                         >
                             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden="true">

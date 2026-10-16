@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useForm } from '@inertiajs/react';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { useFocusFirstError } from '../../../Support/focusManagement';
+import { TEXTAREA } from '../../../Support/formStyles';
 import { formatLongDate } from '../Improvements/improvementStatus';
-import RequiredMark from '../Risk/RequiredMark';
 import CriticalityFields from './CriticalityFields';
+import SupplierField, { BUSY, RequiredNote } from './SupplierField';
+import { useInlinePanelFocus } from './supplierFocus';
 import SupplierCriticalityBadge from './SupplierCriticalityBadge';
 import {
     CRITICALITY_QUESTIONS,
@@ -17,7 +20,6 @@ import {
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const TERM = 'text-base font-semibold text-slate-600';
 const VALUE = 'mt-1 break-words text-base text-slate-900';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 
 /** The four questions and their answers; with `before`, an answer that changed says what it was. */
 function Basis({ classification, before = null, tr }) {
@@ -51,14 +53,21 @@ function CriticalityForm({ supplierId, current, reviewIntervals, onDone, tr }) {
             reason: '',
         }
         : { ...emptyCriticality(), reason: '' });
+    const formRef = useRef(null);
+    const focusError = useFocusFirstError(formRef);
 
     const send = (event) => {
         event.preventDefault();
-        form.post(`/app/supplier-management/${supplierId}/criticality`, { preserveScroll: true, onSuccess: onDone });
+
+        if (form.processing) {
+            return;
+        }
+
+        form.post(`/app/supplier-management/${supplierId}/criticality`, { preserveScroll: true, onSuccess: onDone, onError: focusError });
     };
 
     return (
-        <form onSubmit={send} className="mt-4 space-y-5 border-t border-slate-100 pt-5" data-testid="criticality-form">
+        <form ref={formRef} id="supplier-criticality-panel" onSubmit={send} className="mt-4 space-y-5 border-t border-slate-100 pt-5" data-testid="criticality-form">
             <div>
                 <h4 className="text-lg font-semibold text-slate-950">{c.form_heading ?? 'Hvor kritisk er leverandøren?'}</h4>
                 <p className="mt-1 text-base text-slate-600">
@@ -68,29 +77,24 @@ function CriticalityForm({ supplierId, current, reviewIntervals, onDone, tr }) {
 
             <CriticalityFields form={form} reviewIntervals={reviewIntervals} idPrefix="supplier-criticality" tr={tr} />
 
-            <div>
-                <label htmlFor="supplier-criticality-reason" className="block text-base font-semibold text-slate-900">
-                    {c.reason_label ?? 'Begrunnelse'}<RequiredMark />
-                </label>
-                <p id="supplier-criticality-reason-hint" className="mt-1 text-base text-slate-600">
-                    {c.reason_hint ?? 'Hvorfor er leverandøren vurdert slik?'}
-                </p>
-                <textarea
-                    id="supplier-criticality-reason"
-                    rows={3}
-                    required
-                    aria-required="true"
-                    aria-describedby="supplier-criticality-reason-hint"
-                    value={form.data.reason}
-                    onChange={(event) => form.setData('reason', event.target.value)}
-                    className={`mt-1 ${INPUT}`}
-                />
-                {form.errors.reason && <p className="mt-1 text-base text-rose-700">{form.errors.reason}</p>}
-            </div>
+            <SupplierField id="supplier-criticality-reason" label={c.reason_label ?? 'Begrunnelse'} hint={c.reason_hint ?? 'Hvorfor er leverandøren vurdert slik?'} error={form.errors.reason} required>
+                {(field) => (
+                    <textarea
+                        {...field}
+                        rows={3}
+                        required
+                        value={form.data.reason}
+                        onChange={(event) => form.setData('reason', event.target.value)}
+                        className={`mt-1 ${TEXTAREA}`}
+                    />
+                )}
+            </SupplierField>
+
+            <RequiredNote tr={tr} />
 
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY}`}>
                     {form.processing ? (tr.saving ?? 'Lagrer...') : (c.submit ?? 'Lagre vurdering')}
                 </button>
             </div>
@@ -111,9 +115,11 @@ export default function SupplierCriticality({ supplierId, criticality, canChange
     const c = tr.criticality ?? {};
     const [open, setOpen] = useState(false);
     const current = criticality?.current ?? null;
+    // The form opens in place of its button: focus in, and back to it (A11Y-014).
+    const rememberTrigger = useInlinePanelFocus(open ? 'criticality' : null, { panelId: 'supplier-criticality-panel', fallbackIds: ['supplier-criticality-change', 'supplier-criticality-heading-toggle'] });
 
     return (
-        <div data-testid="supplier-criticality">
+        <div data-testid="supplier-criticality" onClickCapture={rememberTrigger}>
             <p className="text-base text-slate-600">{c.intro ?? 'Hvor viktig leverandøren er for virksomheten – ikke hvor godt den fungerer.'}</p>
 
             {current ? (
@@ -152,7 +158,7 @@ export default function SupplierCriticality({ supplierId, criticality, canChange
             )}
 
             {canChange && ! open && (
-                <button type="button" onClick={() => setOpen(true)} className={`mt-4 ${current ? SECONDARY_ACTION : PRIMARY_ACTION}`}>
+                <button type="button" id="supplier-criticality-change" data-panel-trigger="" onClick={() => setOpen(true)} className={`mt-4 ${current ? SECONDARY_ACTION : PRIMARY_ACTION}`}>
                     {current ? (c.change ?? 'Endre kritikalitet') : (c.assess ?? 'Vurder kritikalitet')}
                 </button>
             )}

@@ -1,14 +1,17 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { usePage } from '@inertiajs/react';
+import FormField, { RequiredFieldsNote } from '../../../Components/App/FormField';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
-import RequiredMark from '../Risk/RequiredMark';
+import { useFocusFirstError } from '../../../Support/focusManagement';
+import { fieldA11y } from '../../../Support/formFieldA11y';
+import { ERROR, HINT, INPUT, LABEL, TEXTAREA } from '../../../Support/formStyles';
 import { kpiUnitSuffix } from './kpiUnitSuffix';
 import { formatKpiAmount, resolvedTarget, targetFields, targetRuleText, toleranceRuleText, TARGET_TYPES, unitProblem, unitProblemMessage } from './kpiTarget';
 import UnitInput from './UnitInput';
 import { useKpiNumberFields } from './useKpiNumberFields';
 
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-base font-semibold text-slate-700';
+// The «*» FormField draws, for the fields wired by hand; the field itself carries aria-required.
+const STAR = <span aria-hidden="true" className="ml-0.5 text-rose-700">*</span>;
 const STEP = 'space-y-4 rounded-2xl border border-slate-200 p-4';
 const LEGEND = 'px-1 text-base font-semibold text-slate-900';
 const PERCENT_UNITS = ['percent', 'percent_change'];
@@ -58,6 +61,9 @@ export function initialKpiData(kpi, options = {}) {
  *
  * Once the KPI has measurements its unit, unit label and currency are locked (unitLocked): only
  * Prosentandel and Prosentvis endring can still be swapped, since both are written in per cent.
+ *
+ * Every field is tied to its hint and error, and after a refused save focus goes to the first field
+ * that is wrong (A11Y-013): onSubmit gets that request as its second argument, for the visit's onError.
  */
 export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, unitLocked = false }) {
     const unitLabels = tr.units ?? {};
@@ -90,7 +96,9 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
     };
 
     const numbers = useKpiNumberFields(form, tr, locale, { ruleProblem });
-    const numberError = (field, id) => (form.errors[field] ? `${id}-error` : null);
+    // After a refused save — here, or by the server — focus goes to the first field that is wrong.
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
     const visibleNumberFields = [...targetFields(data.target_type), 'tolerance'];
     const rule = targetRuleText(data, tr, locale, rules);
     const toleranceRule = toleranceRuleText(data, tr, locale, rules);
@@ -100,11 +108,12 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
         if (! numbers.checkBeforeSubmit(visibleNumberFields)) {
             event.preventDefault();
             setAdvancedOpen((open) => open || Boolean(form.errors.tolerance));
+            focusFirstError();
 
             return;
         }
 
-        onSubmit(event);
+        onSubmit(event, focusFirstError);
     };
 
     const changeUnit = (unit) => {
@@ -118,102 +127,106 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
         }));
     };
 
-    const error = (field, id = undefined) => form.errors[field] && <p id={id} className="mt-1 text-base text-rose-600">{form.errors[field]}</p>;
-
     // The advanced settings open by themselves when the server reports a problem in them.
     const advancedVisible = advancedOpen || Boolean(form.errors.tolerance || form.errors.reporting_grace_days);
 
+    // A number field: label, the unit inside the field, hint and error tied to it (A11Y-013).
     const numberField = (field, id, label, { hint = null, suffix = suffixFor(field), required = true } = {}) => (
-        <div>
-            <label htmlFor={id} className={LABEL}>{label}{required && <RequiredMark />}</label>
-            <UnitInput
-                id={id}
-                suffix={suffix}
-                required={required}
-                aria-required={required ? 'true' : undefined}
-                describedBy={[hint ? `${id}-hint` : null, numberError(field, id)].filter(Boolean).join(' ') || null}
-                {...numbers.bind(field)}
-                className="mt-1"
-            />
-            {hint && <p id={`${id}-hint`} className="mt-1 text-base text-slate-500">{hint}</p>}
-            {error(field, `${id}-error`)}
-        </div>
+        <FormField id={id} label={label} hint={hint} error={form.errors[field]} required={required}>
+            {(control) => (
+                <UnitInput
+                    id={control.id}
+                    suffix={suffix}
+                    required={required}
+                    aria-required={control['aria-required']}
+                    describedBy={control['aria-describedby'] ?? null}
+                    {...numbers.bind(field)}
+                />
+            )}
+        </FormField>
     );
 
+    // Fields whose hint sits above the control, as before; wired the way FormField does it.
+    const title = fieldA11y({ id: 'kpi-title', hasHint: true, hasError: Boolean(form.errors.title), required: true });
+    const description = fieldA11y({ id: 'kpi-description', hasHint: true, hasError: Boolean(form.errors.description) });
+    const unitHint = unitHints[data.unit] ?? '';
+    const unitDescribedBy = [unitHint ? 'kpi-unit-hint' : null, unitLocked ? 'kpi-unit-locked-hint' : null, form.errors.unit ? 'kpi-unit-error' : null]
+        .filter(Boolean).join(' ') || undefined;
+    const targetTypeDescribedBy = ['kpi-target-type-hint', form.errors.target_type ? 'kpi-target-type-error' : null].filter(Boolean).join(' ');
+
     return (
-        <form onSubmit={submit} className="space-y-4">
+        <form ref={formRef} onSubmit={submit} className="space-y-4">
             <fieldset className={STEP}>
                 <legend className={LEGEND}>{`1. ${tr.step_what ?? 'Hva skal måles?'}`}</legend>
                 <div>
-                    <label htmlFor="kpi-title" className={LABEL}>{tr.field_title ?? 'Tittel'}<RequiredMark /></label>
-                    <p id="kpi-title-hint" className="text-base text-slate-600">
+                    <label htmlFor="kpi-title" className={LABEL}>{tr.field_title ?? 'Tittel'}{STAR}</label>
+                    <p id={title.hintId} className="text-base text-slate-600">
                         {tr.field_title_hint ?? 'Hva som måles, for eksempel «Oppetid» eller «Alvorlige avvik».'}
                     </p>
                     <input
-                        id="kpi-title"
+                        {...title.controlProps}
                         type="text"
                         required
-                        aria-required="true"
-                        aria-describedby="kpi-title-hint"
                         value={data.title}
                         onChange={(event) => form.setData('title', event.target.value)}
                         className={`mt-1 ${INPUT}`}
                     />
-                    {error('title')}
+                    {form.errors.title && <p id={title.errorId} className={ERROR}>{form.errors.title}</p>}
                 </div>
 
                 <div>
                     <label htmlFor="kpi-description" className={LABEL}>{tr.field_description ?? 'Beskrivelse'}</label>
-                    <p id="kpi-description-hint" className="text-base text-slate-600">
+                    <p id={description.hintId} className="text-base text-slate-600">
                         {tr.field_description_hint ?? 'Valgfritt. Hvordan KPI-en måles, og hvor tallet hentes fra.'}
                     </p>
                     <textarea
-                        id="kpi-description"
+                        {...description.controlProps}
                         rows={3}
-                        aria-describedby="kpi-description-hint"
                         value={data.description}
                         onChange={(event) => form.setData('description', event.target.value)}
-                        className={`mt-1 ${INPUT}`}
+                        className={`mt-1 ${TEXTAREA}`}
                     />
-                    {error('description')}
+                    {form.errors.description && <p id={description.errorId} className={ERROR}>{form.errors.description}</p>}
                 </div>
 
-                <div>
-                    <label htmlFor="kpi-owner" className={LABEL}>{tr.field_owner ?? 'Ansvarlig'}</label>
-                    <select
-                        id="kpi-owner"
-                        aria-describedby="kpi-owner-hint"
-                        value={data.owner_user_id}
-                        onChange={(event) => form.setData('owner_user_id', event.target.value)}
-                        className={`mt-1 ${INPUT}`}
-                    >
-                        <option value="">
-                            {objectiveOwner
-                                ? (tr.owner_fallback_option ?? 'Målets ansvarlig (:name)').replace(':name', objectiveOwner)
-                                : (tr.owner_fallback_option_none ?? 'Målets ansvarlig')}
-                        </option>
-                        {(options.owner_options ?? []).map((owner) => (
-                            <option key={owner.id} value={owner.id}>{owner.name}</option>
-                        ))}
-                    </select>
-                    <p id="kpi-owner-hint" className="mt-1 text-base text-slate-500">
-                        {tr.field_owner_hint ?? 'Valgfritt. Uten egen ansvarlig er målets ansvarlige også ansvarlig for KPI-en.'}
-                    </p>
-                    {error('owner_user_id')}
-                </div>
+                <FormField
+                    id="kpi-owner"
+                    label={tr.field_owner ?? 'Ansvarlig'}
+                    hint={tr.field_owner_hint ?? 'Valgfritt. Uten egen ansvarlig er målets ansvarlige også ansvarlig for KPI-en.'}
+                    error={form.errors.owner_user_id}
+                >
+                    {(field) => (
+                        <select
+                            {...field}
+                            value={data.owner_user_id}
+                            onChange={(event) => form.setData('owner_user_id', event.target.value)}
+                            className={INPUT}
+                        >
+                            <option value="">
+                                {objectiveOwner
+                                    ? (tr.owner_fallback_option ?? 'Målets ansvarlig (:name)').replace(':name', objectiveOwner)
+                                    : (tr.owner_fallback_option_none ?? 'Målets ansvarlig')}
+                            </option>
+                            {(options.owner_options ?? []).map((owner) => (
+                                <option key={owner.id} value={owner.id}>{owner.name}</option>
+                            ))}
+                        </select>
+                    )}
+                </FormField>
             </fieldset>
 
             <fieldset className={STEP}>
                 <legend className={LEGEND}>{`2. ${tr.step_unit ?? 'Hvilken enhet brukes?'}`}</legend>
                 <div className="grid gap-4 md:grid-cols-2">
                     <div>
-                        <label htmlFor="kpi-unit" className={LABEL}>{tr.field_unit ?? 'Enhet'}<RequiredMark /></label>
+                        <label htmlFor="kpi-unit" className={LABEL}>{tr.field_unit ?? 'Enhet'}{STAR}</label>
                         <select
                             id="kpi-unit"
                             required
                             aria-required="true"
+                            aria-invalid={form.errors.unit ? true : undefined}
                             disabled={unitLocked && ! lockedToPercent}
-                            aria-describedby={['kpi-unit-hint', unitLocked ? 'kpi-unit-locked-hint' : null].filter(Boolean).join(' ')}
+                            aria-describedby={unitDescribedBy}
                             value={data.unit}
                             onChange={(event) => changeUnit(event.target.value)}
                             className={`mt-1 ${INPUT}`}
@@ -225,54 +238,56 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
                                     <option key={unit} value={unit}>{unitLabels[unit] ?? unit}</option>
                                 ))}
                         </select>
-                        <p id="kpi-unit-hint" className="mt-1 text-base text-slate-500">{unitHints[data.unit] ?? ''}</p>
+                        <p id="kpi-unit-hint" className={HINT}>{unitHint}</p>
                         {unitLocked && (
-                            <p id="kpi-unit-locked-hint" className="mt-1 text-base text-slate-500">
+                            <p id="kpi-unit-locked-hint" className={HINT}>
                                 {tr.unit_locked_hint ?? 'Enheten er låst fordi KPI-en har målinger.'}
                             </p>
                         )}
-                        {error('unit')}
+                        {form.errors.unit && <p id="kpi-unit-error" className={ERROR}>{form.errors.unit}</p>}
                     </div>
 
                     {showsLabel && (
-                        <div>
-                            <label htmlFor="kpi-unit-label" className={LABEL}>{tr.field_unit_label ?? 'Benevning'}</label>
-                            <input
-                                id="kpi-unit-label"
-                                type="text"
-                                disabled={unitLocked}
-                                aria-describedby="kpi-unit-label-hint"
-                                value={data.unit_label}
-                                onChange={(event) => form.setData('unit_label', event.target.value)}
-                                className={`mt-1 ${INPUT}`}
-                            />
-                            <p id="kpi-unit-label-hint" className="mt-1 text-base text-slate-500">
-                                {tr.field_unit_label_hint ?? 'Valgfritt. For eksempel saker, hendelser eller brukere.'}
-                            </p>
-                            {error('unit_label')}
-                        </div>
+                        <FormField
+                            id="kpi-unit-label"
+                            label={tr.field_unit_label ?? 'Benevning'}
+                            hint={tr.field_unit_label_hint ?? 'Valgfritt. For eksempel saker, hendelser eller brukere.'}
+                            error={form.errors.unit_label}
+                        >
+                            {(field) => (
+                                <input
+                                    {...field}
+                                    type="text"
+                                    disabled={unitLocked}
+                                    value={data.unit_label}
+                                    onChange={(event) => form.setData('unit_label', event.target.value)}
+                                    className={INPUT}
+                                />
+                            )}
+                        </FormField>
                     )}
 
                     {showsCurrency && (
-                        <div>
-                            <label htmlFor="kpi-currency-code" className={LABEL}>{tr.field_currency_code ?? 'Valuta'}<RequiredMark /></label>
-                            <input
-                                id="kpi-currency-code"
-                                type="text"
-                                disabled={unitLocked}
-                                required
-                                aria-required="true"
-                                maxLength={3}
-                                aria-describedby="kpi-currency-code-hint"
-                                value={data.currency_code}
-                                onChange={(event) => form.setData('currency_code', event.target.value.toUpperCase())}
-                                className={`mt-1 ${INPUT}`}
-                            />
-                            <p id="kpi-currency-code-hint" className="mt-1 text-base text-slate-500">
-                                {tr.field_currency_code_hint ?? 'Tre bokstaver, for eksempel NOK.'}
-                            </p>
-                            {error('currency_code')}
-                        </div>
+                        <FormField
+                            id="kpi-currency-code"
+                            label={tr.field_currency_code ?? 'Valuta'}
+                            hint={tr.field_currency_code_hint ?? 'Tre bokstaver, for eksempel NOK.'}
+                            error={form.errors.currency_code}
+                            required
+                        >
+                            {(field) => (
+                                <input
+                                    {...field}
+                                    type="text"
+                                    disabled={unitLocked}
+                                    required
+                                    maxLength={3}
+                                    value={data.currency_code}
+                                    onChange={(event) => form.setData('currency_code', event.target.value.toUpperCase())}
+                                    className={INPUT}
+                                />
+                            )}
+                        </FormField>
                     )}
                 </div>
             </fieldset>
@@ -281,8 +296,8 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
                 <legend className={LEGEND}>{`3. ${tr.step_target ?? 'Hva er ønsket resultat?'}`}</legend>
                 <p className="text-base text-slate-600">{tr.target_hint ?? 'Velg hva som regnes som måloppnåelse, og fyll inn feltene som hører til.'}</p>
 
-                <div role="radiogroup" aria-labelledby="kpi-target-type-label" aria-describedby="kpi-target-type-hint">
-                    <p id="kpi-target-type-label" className={LABEL}>{tr.field_target_type ?? 'Måltype'}<RequiredMark /></p>
+                <div role="radiogroup" aria-labelledby="kpi-target-type-label" aria-describedby={targetTypeDescribedBy} aria-required="true" aria-invalid={form.errors.target_type ? true : undefined}>
+                    <p id="kpi-target-type-label" className={LABEL}>{tr.field_target_type ?? 'Måltype'}{STAR}</p>
                     <div className="mt-2 flex flex-wrap gap-2">
                         {TARGET_TYPES.map((type) => {
                             const unavailable = type === 'growth' && data.unit !== '' && ! growthUnits.includes(data.unit);
@@ -292,7 +307,7 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
                                 <label
                                     key={type}
                                     className={`inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-base ${
-                                        selected ? 'border-violet-500 bg-violet-50 font-semibold text-violet-900' : 'border-slate-200 bg-white text-slate-800'
+                                        selected ? 'border-violet-500 bg-violet-50 font-semibold text-violet-900' : 'border-field-border bg-white text-slate-800'
                                     } ${unavailable ? 'cursor-not-allowed opacity-50' : ''}`}
                                 >
                                     <input
@@ -309,12 +324,12 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
                             );
                         })}
                     </div>
-                    <p id="kpi-target-type-hint" className="mt-2 text-base text-slate-500">
+                    <p id="kpi-target-type-hint" className="mt-2 text-base text-slate-600">
                         {data.unit !== '' && ! growthUnits.includes(data.unit) && data.target_type !== 'growth'
                             ? `${typeHints[data.target_type] ?? ''} ${tr.growth_unavailable ?? ''}`.trim()
                             : (typeHints[data.target_type] ?? '')}
                     </p>
-                    {error('target_type')}
+                    {form.errors.target_type && <p id="kpi-target-type-error" className={ERROR}>{form.errors.target_type}</p>}
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
@@ -330,19 +345,18 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
                     {data.target_type === 'growth' && (
                         <>
                             {numberField('baseline_value', 'kpi-baseline', tr.field_baseline ?? 'Startverdi', { hint: tr.field_baseline_hint })}
-                            <div>
-                                <label htmlFor="kpi-baseline-date" className={LABEL}>{tr.field_baseline_date ?? 'Dato for startverdi'}<RequiredMark /></label>
-                                <input
-                                    id="kpi-baseline-date"
-                                    type="date"
-                                    required
-                                    aria-required="true"
-                                    value={data.baseline_date}
-                                    onChange={(event) => form.setData('baseline_date', event.target.value)}
-                                    className={`mt-1 ${INPUT}`}
-                                />
-                                {error('baseline_date')}
-                            </div>
+                            <FormField id="kpi-baseline-date" label={tr.field_baseline_date ?? 'Dato for startverdi'} error={form.errors.baseline_date} required>
+                                {(field) => (
+                                    <input
+                                        {...field}
+                                        type="date"
+                                        required
+                                        value={data.baseline_date}
+                                        onChange={(event) => form.setData('baseline_date', event.target.value)}
+                                        className={INPUT}
+                                    />
+                                )}
+                            </FormField>
                             {numberField('change_percent', 'kpi-change', tr.field_change ?? 'Ønsket endring', { hint: tr.field_change_hint, suffix: '%' })}
                             <div>
                                 <p className={LABEL}>{tr.computed_target ?? 'Beregnet målverdi'}</p>
@@ -371,23 +385,23 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
                                 ? (tr.deadline_follows ?? ':date (målets måldato)').replace(':date', deadline.date_display)
                                 : (tr.deadline_running ?? 'Løpende – målet har ingen måldato')}
                         </p>
-                        <p className="mt-1 text-base text-slate-500">{tr.deadline_form_hint ?? 'KPI-en følger målets måldato. Endre måldatoen på målet.'}</p>
+                        <p className="mt-1 text-base text-slate-600">{tr.deadline_form_hint ?? 'KPI-en følger målets måldato. Endre måldatoen på målet.'}</p>
                     </div>
-                    <div>
-                        <label htmlFor="kpi-frequency" className={LABEL}>{tr.field_frequency ?? 'Målefrekvens'}</label>
-                        <select
-                            id="kpi-frequency"
-                            value={data.frequency}
-                            onChange={(event) => form.setData('frequency', event.target.value)}
-                            className={`mt-1 ${INPUT}`}
-                        >
-                            <option value="">{tr.no_frequency ?? 'Ingen fast målefrekvens'}</option>
-                            {(options.frequencies ?? []).map((frequency) => (
-                                <option key={frequency} value={frequency}>{frequencyLabels[frequency] ?? frequency}</option>
-                            ))}
-                        </select>
-                        {error('frequency')}
-                    </div>
+                    <FormField id="kpi-frequency" label={tr.field_frequency ?? 'Målefrekvens'} error={form.errors.frequency}>
+                        {(field) => (
+                            <select
+                                {...field}
+                                value={data.frequency}
+                                onChange={(event) => form.setData('frequency', event.target.value)}
+                                className={INPUT}
+                            >
+                                <option value="">{tr.no_frequency ?? 'Ingen fast målefrekvens'}</option>
+                                {(options.frequencies ?? []).map((frequency) => (
+                                    <option key={frequency} value={frequency}>{frequencyLabels[frequency] ?? frequency}</option>
+                                ))}
+                            </select>
+                        )}
+                    </FormField>
                 </div>
             </fieldset>
 
@@ -403,7 +417,7 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
                         {`5. ${tr.advanced_heading ?? 'Avanserte innstillinger'}`}
                         <span className="block text-base font-normal text-slate-600">{tr.advanced_hint ?? 'Toleranse og innrapporteringsfrist.'}</span>
                     </span>
-                    <span aria-hidden="true" className="text-slate-500">{advancedVisible ? '▲' : '▼'}</span>
+                    <span aria-hidden="true" className="text-slate-600">{advancedVisible ? '▲' : '▼'}</span>
                 </button>
                 {advancedVisible && (
                     <div id="kpi-advanced" className="grid gap-4 border-t border-slate-200 p-4 md:grid-cols-2">
@@ -412,29 +426,32 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
                             suffix: toleranceSuffix,
                             required: false,
                         })}
-                        <div>
-                            <label htmlFor="kpi-grace-days" className={LABEL}>{tr.field_grace_days ?? 'Innrapporteringsfrist (dager)'}<RequiredMark /></label>
-                            <input
-                                id="kpi-grace-days"
-                                type="number"
-                                min={0}
-                                max={365}
-                                step={1}
-                                required
-                                aria-required="true"
-                                aria-describedby="kpi-grace-days-hint"
-                                value={data.reporting_grace_days}
-                                onChange={(event) => form.setData('reporting_grace_days', event.target.value)}
-                                className={`mt-1 ${INPUT}`}
-                            />
-                            <p id="kpi-grace-days-hint" className="mt-1 text-base text-slate-500">
-                                {tr.field_grace_days_hint ?? 'Antall dager etter at en periode er slutt før målingen for perioden regnes som manglende.'}
-                            </p>
-                            {error('reporting_grace_days')}
-                        </div>
+                        <FormField
+                            id="kpi-grace-days"
+                            label={tr.field_grace_days ?? 'Innrapporteringsfrist (dager)'}
+                            hint={tr.field_grace_days_hint ?? 'Antall dager etter at en periode er slutt før målingen for perioden regnes som manglende.'}
+                            error={form.errors.reporting_grace_days}
+                            required
+                        >
+                            {(field) => (
+                                <input
+                                    {...field}
+                                    type="number"
+                                    min={0}
+                                    max={365}
+                                    step={1}
+                                    required
+                                    value={data.reporting_grace_days}
+                                    onChange={(event) => form.setData('reporting_grace_days', event.target.value)}
+                                    className={INPUT}
+                                />
+                            )}
+                        </FormField>
                     </div>
                 )}
             </div>
+
+            <RequiredFieldsNote text={tr.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
 
             <div className="flex flex-wrap justify-end gap-3">
                 {onCancel && (

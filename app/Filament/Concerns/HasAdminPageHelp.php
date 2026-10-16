@@ -3,6 +3,7 @@
 namespace App\Filament\Concerns;
 
 use App\Filament\Resources\AdminPageHelpResource;
+use App\Filament\Support\AdminText;
 use App\Models\AdminPageHelp;
 use Filament\Actions\Action;
 use Filament\Support\Icons\Heroicon;
@@ -20,22 +21,22 @@ trait HasAdminPageHelp
     protected function buildPageHelpAction(?AdminPageHelp $help): Action
     {
         return Action::make('pageHelp')
-            ->label('Hjelp')
+            ->label(AdminText::get('admin_a11y.help_button', 'Hjelp'))
             ->icon(Heroicon::OutlinedQuestionMarkCircle)
             ->color('gray')
             ->visible($help !== null)
-            ->modalHeading($help?->title ?? 'Hjelp')
+            ->modalHeading($help?->title ?? AdminText::get('admin_a11y.help_button', 'Hjelp'))
             ->modalDescription($help?->description)
             ->modalContent(view('filament.components.page-help', [
-                'intro'    => $help?->intro,
+                'intro' => $help?->intro,
                 'sections' => $help?->sections ?? [],
-                'editUrl'  => ($help && AdminPageHelpResource::canAccess())
+                'editUrl' => ($help && AdminPageHelpResource::canAccess())
                     ? AdminPageHelpResource::getUrl('edit', ['record' => $help->getKey()])
                     : null,
-                'editLabel' => 'Rediger hjelpetekst',
+                'editLabel' => AdminText::get('admin_a11y.help_edit', 'Rediger hjelpetekst'),
             ]))
             ->modalSubmitAction(false)
-            ->modalCancelActionLabel('Lukk');
+            ->modalCancelActionLabel(AdminText::get('admin_a11y.help_close', 'Lukk'));
     }
 
     /**

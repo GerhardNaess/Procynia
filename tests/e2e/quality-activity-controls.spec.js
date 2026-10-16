@@ -23,7 +23,7 @@ test('an activity gets a control, shows it, and loses it again', async ({ page }
 
     await link.first().click();
     await page.getByRole('tab', { name: 'Flyt' }).or(page.getByRole('link', { name: 'Flyt' })).first().click();
-    await expect(page.getByRole('img', { name: /Prosessflyt/ })).toBeVisible();
+    await expect(page.locator('svg[aria-label^="Prosessflyt"]')).toBeVisible();
 
     const title = `E2E kontroll ${Date.now()}`;
 
@@ -66,7 +66,7 @@ test('"Rediger steg" shows the activity\'s controls and leads to adding one', as
 
     await link.first().click();
     await page.getByRole('tab', { name: 'Flyt' }).or(page.getByRole('link', { name: 'Flyt' })).first().click();
-    await expect(page.getByRole('img', { name: /Prosessflyt/ })).toBeVisible();
+    await expect(page.locator('svg[aria-label^="Prosessflyt"]')).toBeVisible();
 
     const title = `E2E kontroll fra steget ${Date.now()}`;
     const dialog = page.getByRole('dialog');

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Link } from '@inertiajs/react';
 import PublicLayout from '../../Layouts/PublicLayout';
 
@@ -7,7 +7,7 @@ function ChevronIcon({ open }) {
         <svg
             viewBox="0 0 20 20"
             fill="none"
-            className={`h-5 w-5 shrink-0 text-slate-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+            className={`h-5 w-5 shrink-0 text-slate-500 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
             aria-hidden="true"
         >
             <path d="m5 7.5 5 5 5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
@@ -15,23 +15,30 @@ function ChevronIcon({ open }) {
     );
 }
 
+/**
+ * One question as a disclosure (WCAG 4.1.2, 1.3.1; Fase 6): the button sits in an h3 under the group's
+ * h2, so the questions are reachable by heading; aria-expanded says whether the answer is shown and
+ * aria-controls points at it. The answer is slate-600 (A11Y-016).
+ */
 function FaqItem({ question, children }) {
     const [open, setOpen] = useState(false);
+    const answerId = `faq-answer-${useId().replace(/[^A-Za-z0-9_-]/g, '')}`;
 
     return (
         <div className="border-b border-slate-100 last:border-0">
-            <button
-                type="button"
-                onClick={() => setOpen((v) => !v)}
-                className="flex w-full items-center justify-between gap-4 py-5 text-left"
-                aria-expanded={open}
-            >
-                <span className="text-sm font-semibold text-slate-900">{question}</span>
-                <ChevronIcon open={open} />
-            </button>
-            {open && (
-                <div className="pb-5 text-sm leading-7 text-slate-500">{children}</div>
-            )}
+            <h3>
+                <button
+                    type="button"
+                    onClick={() => setOpen((v) => !v)}
+                    className="flex w-full items-center justify-between gap-4 py-5 text-left"
+                    aria-expanded={open}
+                    aria-controls={answerId}
+                >
+                    <span className="text-sm font-semibold text-slate-900">{question}</span>
+                    <ChevronIcon open={open} />
+                </button>
+            </h3>
+            <div id={answerId} hidden={! open} className="pb-5 text-sm leading-7 text-slate-600">{children}</div>
         </div>
     );
 }
@@ -39,7 +46,7 @@ function FaqItem({ question, children }) {
 function FaqGroup({ title, children }) {
     return (
         <div className="mb-12">
-            <h2 className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-400">{title}</h2>
+            <h2 className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-600">{title}</h2>
             <div className="rounded-2xl border border-slate-100 bg-white px-6 shadow-sm">
                 {children}
             </div>
@@ -54,9 +61,9 @@ export default function Faq() {
             <div className="mb-12 text-center">
                 <div className="mb-3 text-sm font-semibold uppercase tracking-widest text-blue-600">FAQ</div>
                 <h1 className="text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">Ofte stilte spørsmål</h1>
-                <p className="mx-auto mt-4 max-w-xl text-lg leading-8 text-slate-500">
+                <p className="mx-auto mt-4 max-w-xl text-lg leading-8 text-slate-600">
                     Finner du ikke svaret? Send oss en e-post på{' '}
-                    <a href="mailto:hei@procynia.no" className="text-blue-600 hover:underline">hei@procynia.no</a>.
+                    <a href="mailto:hei@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">hei@procynia.no</a>.
                 </p>
             </div>
 
@@ -76,14 +83,14 @@ export default function Faq() {
                     <FaqItem question="Hvordan oppretter jeg konto?">
                         <p>
                             Gå til{' '}
-                            <Link href="/registrer" className="text-blue-600 hover:underline">procynia.no/registrer</Link>{' '}
+                            <Link href="/registrer" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">procynia.no/registrer</Link>{' '}
                             og fyll inn informasjon om din bedrift. Kontoen er gratis å opprette – du velger abonnement etter at kontoen er etablert. Det kreves ingen kredittkort for registrering.
                         </p>
                     </FaqItem>
                     <FaqItem question="Kan jeg prøve Procynia gratis?">
                         <p>
                             Ja. Du kan opprette konto og utforske plattformen uten å binde deg til et abonnement. Abonnement velges etter kontoetablering. Ta kontakt på{' '}
-                            <a href="mailto:hei@procynia.no" className="text-blue-600 hover:underline">hei@procynia.no</a>{' '}
+                            <a href="mailto:hei@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">hei@procynia.no</a>{' '}
                             for mer informasjon om tilgjengelige planer.
                         </p>
                     </FaqItem>
@@ -93,7 +100,7 @@ export default function Faq() {
                     <FaqItem question="Hva koster Procynia?">
                         <p>
                             Vi tilbyr ulike abonnementsplaner tilpasset teamstørrelse og bruksbehov. Se{' '}
-                            <Link href="/priser" className="text-blue-600 hover:underline">prissiden</Link>{' '}
+                            <Link href="/priser" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">prissiden</Link>{' '}
                             for oppdatert prisinformasjon.
                         </p>
                     </FaqItem>
@@ -105,7 +112,7 @@ export default function Faq() {
                     <FaqItem question="Tilbyr dere rabatt for større team eller offentlige virksomheter?">
                         <p>
                             Ja, vi tilbyr volumrabatter og tilpassede avtaler for større organisasjoner. Kontakt oss på{' '}
-                            <a href="mailto:salg@procynia.no" className="text-blue-600 hover:underline">salg@procynia.no</a>{' '}
+                            <a href="mailto:salg@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">salg@procynia.no</a>{' '}
                             for et tilbud.
                         </p>
                     </FaqItem>
@@ -136,9 +143,9 @@ export default function Faq() {
                     <FaqItem question="Brukes innholdet mitt til å trene AI-modeller?">
                         <p>
                             Nei. Innholdet du laster opp brukes kun til å levere tjenesten til deg. Vi deler ikke kundedata med tredjepart for opplæringsformål. Se{' '}
-                            <Link href="/personvern" className="text-blue-600 hover:underline">personvernerklæringen</Link>{' '}
+                            <Link href="/personvern" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">personvernerklæringen</Link>{' '}
                             og{' '}
-                            <Link href="/betingelser" className="text-blue-600 hover:underline">brukervilkårene</Link>{' '}
+                            <Link href="/betingelser" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">brukervilkårene</Link>{' '}
                             for detaljer.
                         </p>
                     </FaqItem>
@@ -148,21 +155,21 @@ export default function Faq() {
                     <FaqItem question="Er dataene mine trygge?">
                         <p>
                             Ja. All data er kryptert under overføring (TLS) og i ro. Tilgangskontroll sikrer at brukere kun har tilgang til sin kundes data. Se{' '}
-                            <Link href="/sikkerhet" className="text-blue-600 hover:underline">sikkerhetssiden</Link>{' '}
+                            <Link href="/sikkerhet" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">sikkerhetssiden</Link>{' '}
                             for en fullstendig oversikt over tiltak.
                         </p>
                     </FaqItem>
                     <FaqItem question="Er Procynia GDPR-kompatibel?">
                         <p>
                             Ja. Procynia opptrer som databehandler for personopplysninger i kundedata, og vi inngår databehandleravtale (DPA) som en del av kundeforholdet. Se{' '}
-                            <Link href="/personvern" className="text-blue-600 hover:underline">personvernerklæringen</Link>{' '}
+                            <Link href="/personvern" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">personvernerklæringen</Link>{' '}
                             for detaljer om behandlingsgrunnlag og rettigheter.
                         </p>
                     </FaqItem>
                     <FaqItem question="Kan jeg slette kontoen og dataene mine?">
                         <p>
                             Ja. Du kan be om sletting av konto og tilhørende data ved å kontakte{' '}
-                            <a href="mailto:personvern@procynia.no" className="text-blue-600 hover:underline">personvern@procynia.no</a>.
+                            <a href="mailto:personvern@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">personvern@procynia.no</a>.
                             Data slettes innen 30 dager, med unntak av data vi er lovpålagt å oppbevare (som regnskapsdata).
                         </p>
                     </FaqItem>
@@ -172,14 +179,14 @@ export default function Faq() {
                     <FaqItem question="Hvordan får jeg hjelp?">
                         <p>
                             Send oss en e-post på{' '}
-                            <a href="mailto:support@procynia.no" className="text-blue-600 hover:underline">support@procynia.no</a>.
+                            <a href="mailto:support@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">support@procynia.no</a>.
                             Vi svarer normalt innen 1–2 virkedager.
                         </p>
                     </FaqItem>
                     <FaqItem question="Tilbyr dere onboarding eller opplæring?">
                         <p>
                             Ja. Vi tilbyr onboarding for nye kunder og kan gi tilpasset opplæring for team. Ta kontakt med{' '}
-                            <a href="mailto:salg@procynia.no" className="text-blue-600 hover:underline">salg@procynia.no</a>{' '}
+                            <a href="mailto:salg@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">salg@procynia.no</a>{' '}
                             for å høre mer.
                         </p>
                     </FaqItem>

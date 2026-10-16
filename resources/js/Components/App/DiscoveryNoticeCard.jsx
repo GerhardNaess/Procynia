@@ -1,6 +1,7 @@
 import { router } from '@inertiajs/react';
 import { PRIMARY_COLOURS } from '../../Support/actionStyles';
-import { useState } from 'react';
+import { domSafeId } from '../../Support/formFieldA11y';
+import { useId, useState } from 'react';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -110,6 +111,17 @@ function worklistPayloadFromNotice(notice) {
     };
 }
 
+/**
+ * One notice in a live search or a watch alert list.
+ *
+ * Accessibility (Fase 4): the title is a heading one level below the list it sits in (`headingLevel`,
+ * h3 under a results section's h2; h2 where the list has no heading of its own). Every action on the
+ * card — Lagre, Slett, Åpne i Doffin — is described by the card's title, so a screen reader that lists
+ * the page's buttons hears «Lagre, <tittel>» rather than ten identical «Lagre» (2.4.6); the visible
+ * name is unchanged. `actions` may be a function receiving the title's id for the same reason. Once
+ * saved, «Lagret» is aria-disabled rather than disabled, so the keyboard focus that pressed it stays
+ * there instead of dropping to <body>.
+ */
 export default function DiscoveryNoticeCard({
     notice,
     locale,
@@ -119,7 +131,16 @@ export default function DiscoveryNoticeCard({
     actions = null,
     provenanceBadges = [],
     texts = {},
+    headingLevel = 'h3',
 }) {
+    // Stable across a re-mount (a save redirects back without preserveState), so Support/routeFocus.js
+    // finds the same «Lagre» button again by its id and puts focus back on it.
+    const generatedId = useId();
+    const cardId = `notice-card-${domSafeId(notice?.id !== undefined && notice?.id !== null ? String(notice.id) : generatedId)}`;
+    const titleId = `${cardId}-title`;
+    const descriptionId = `${cardId}-description`;
+    const Heading = headingLevel === 'h2' ? 'h2' : 'h3';
+    const renderedActions = typeof actions === 'function' ? actions(titleId) : actions;
     const saveLabel = saveButtonLabel ?? texts.save_label;
     const statusTag = statusBadge(notice.status, notice.deadline, texts);
     const deadlineBadge = {
@@ -128,7 +149,7 @@ export default function DiscoveryNoticeCard({
     };
     const canRenderSaveAction = canSaveToWorklist && Boolean(notice.notice_id) && Boolean(notice.title);
     const canDelete = Boolean(deleteAction?.href);
-    const hasActions = canRenderSaveAction || canDelete || actions;
+    const hasActions = canRenderSaveAction || canDelete || renderedActions;
     const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
     const description = (notice.summary ?? '').trim();
     const shouldCollapseDescription = description.length > DESCRIPTION_PREVIEW_LIMIT;
@@ -181,9 +202,9 @@ export default function DiscoveryNoticeCard({
                     ) : null}
 
                     <div className="flex flex-wrap items-center gap-2.5">
-                        <h2 className="text-[1.7rem] font-semibold tracking-tight text-slate-950">
+                        <Heading id={titleId} className="text-[1.7rem] font-semibold tracking-tight text-slate-950">
                             {notice.title}
-                        </h2>
+                        </Heading>
                     </div>
 
                     <div className="mt-1.5 flex flex-wrap items-center gap-4 text-sm text-slate-600">
@@ -194,10 +215,12 @@ export default function DiscoveryNoticeCard({
                     </div>
 
                     <div className="mt-3 max-w-4xl text-sm leading-7 text-slate-600 whitespace-pre-line">
-                        <div style={descriptionStyle}>{summarizeText(notice.summary, texts)}</div>
+                        <div id={descriptionId} style={descriptionStyle}>{summarizeText(notice.summary, texts)}</div>
                         {shouldCollapseDescription ? (
                             <button
                                 type="button"
+                                aria-expanded={isDescriptionExpanded}
+                                aria-controls={descriptionId}
                                 onClick={() => setIsDescriptionExpanded((current) => !current)}
                                 className="mt-2 text-sm font-medium text-violet-700 transition hover:text-violet-800"
                             >
@@ -238,9 +261,11 @@ export default function DiscoveryNoticeCard({
                     <div className="flex shrink-0 flex-row gap-3 lg:flex-col">
                         {canRenderSaveAction ? (
                             <button
+                                id={`${cardId}-save`}
                                 type="button"
                                 onClick={saveNoticeToWorklist}
-                                disabled={notice.is_saved || notice.is_in_history}
+                                aria-disabled={notice.is_saved || notice.is_in_history || undefined}
+                                aria-describedby={titleId}
                                 title={notice.is_in_history ? texts.save_already_in_history : undefined}
                                 className={classNames(
                                     'inline-flex min-w-[132px] items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition',
@@ -261,13 +286,14 @@ export default function DiscoveryNoticeCard({
                         {canDelete ? (
                             <button
                                 type="button"
+                                aria-describedby={titleId}
                                 onClick={deleteNoticeFromDiscovery}
                                 className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
                             >
                                 {deleteAction.label ?? texts.delete_label}
                             </button>
                         ) : null}
-                        {actions}
+                        {renderedActions}
                     </div>
                 ) : null}
             </div>

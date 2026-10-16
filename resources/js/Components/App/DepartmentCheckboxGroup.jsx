@@ -1,12 +1,29 @@
+import { FieldsetField } from './FormField';
+
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
 }
 
+/**
+ * Pick one or more departments. A group of checkboxes under one question, so it is a fieldset named
+ * by the question (1.3.1, A11Y-120): before, the question was a loose <span>, and a screen reader on
+ * a checkbox heard only the department's name — not whether ticking it meant "belongs to" or
+ * "manages". The hint and the error describe the group, and an error marks the options invalid so a
+ * rejected submit lands focus here. The helper text is slate-600 (it was slate-400, about 2.6:1).
+ */
 export default function DepartmentCheckboxGroup({ label, fieldName, options, selectedIds, onToggle, helperText, error }) {
     return (
-        <div className="space-y-2 md:col-span-2">
-            <span className="text-sm font-medium text-slate-700">{label}</span>
-            {options.length > 0 ? (
+        <FieldsetField
+            id={`department-group-${fieldName}`}
+            legend={label}
+            hint={helperText}
+            error={error}
+            className="space-y-2 md:col-span-2"
+            legendClassName="text-sm font-medium text-slate-700"
+            hintClassName="text-xs text-slate-600"
+            errorClassName="text-sm text-rose-700"
+        >
+            {(optionProps) => (options.length > 0 ? (
                 <div className="max-h-[280px] overflow-y-auto pr-1">
                     <div className="grid gap-2 sm:grid-cols-2">
                         {options.map((option) => {
@@ -23,6 +40,7 @@ export default function DepartmentCheckboxGroup({ label, fieldName, options, sel
                                     )}
                                 >
                                     <input
+                                        {...optionProps}
                                         type="checkbox"
                                         name={`${fieldName}[]`}
                                         value={option.value}
@@ -37,12 +55,10 @@ export default function DepartmentCheckboxGroup({ label, fieldName, options, sel
                     </div>
                 </div>
             ) : (
-                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-600">
                     Ingen tilgjengelige avdelinger.
                 </div>
-            )}
-            <p className="text-xs text-slate-400">{helperText}</p>
-            {error ? <p className="text-sm text-rose-600">{error}</p> : null}
-        </div>
+            ))}
+        </FieldsetField>
     );
 }

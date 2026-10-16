@@ -65,7 +65,7 @@ class CustomerCreatePageTest extends TestCase
         $this->assertNotSame('', (string) $user->password);
 
         $this->assertSame(['basis'], $customer->packageEntitlements()->active()->pluck('package_key')->all());
-        $this->assertSame(['wiki', 'quality', 'improvements'], app(ModuleEntitlementService::class)->modulesFor($customer));
+        $this->assertSame(['wiki', 'quality', 'improvements', 'management_review'], app(ModuleEntitlementService::class)->modulesFor($customer));
 
         Notification::assertNotified('Kunden ble opprettet');
     }

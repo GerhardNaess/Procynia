@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useForm } from '@inertiajs/react';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { useFocusFirstError } from '../../../Support/focusManagement';
+import { TEXTAREA } from '../../../Support/formStyles';
 import { formatLongDate } from '../Improvements/improvementStatus';
-import RequiredMark from '../Risk/RequiredMark';
+import SupplierField, { BUSY, FieldError, RequiredNote, groupA11y } from './SupplierField';
+import { useInlinePanelFocus } from './supplierFocus';
 import {
     isListField,
     profileAnswerLabel,
@@ -20,7 +23,6 @@ const VALUE = 'mt-1 break-words text-base text-slate-900';
 const LEGEND = 'text-base text-slate-900';
 const HINT = 'text-base text-slate-600';
 const ERROR = 'text-base text-rose-700';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 
 /** The values a single-choice question offers. */
 function choicesFor(field, options) {
@@ -35,11 +37,10 @@ function choicesFor(field, options) {
     return options.answers ?? ['yes', 'no', 'unknown'];
 }
 
-function FieldError({ message }) {
-    return message ? <p className={ERROR}>{message}</p> : null;
-}
-
-/** One question in the form: explicit choices, never a toggle, so «Ikke avklart» stays apart from «Nei». */
+/**
+ * One question in the form: explicit choices, never a toggle, so «Ikke avklart» stays apart from «Nei».
+ * The group is described by its hint and error, and its options are aria-invalid while it is wrong.
+ */
 function Question({ field, form, options, tr }) {
     const p = tr.profile ?? {};
     const question = p.questions?.[field] ?? field;
@@ -51,12 +52,14 @@ function Question({ field, form, options, tr }) {
         const noneChosen = Array.isArray(value) && value.length === 0;
         const withUnknown = takesListUnknown(field);
         const hint = withUnknown ? (p.list_hint_unknown ?? 'Velg alle som passer, «Ingen av disse» eller «Ikke avklart».') : (p.list_hint ?? 'Velg alle som passer, eller «Ingen av disse».');
+        const listError = form.errors[field] ?? form.errors[`${field}.0`];
+        const list = groupA11y(name, { hint: true, error: listError });
 
         return (
-            <fieldset className="rounded-xl border border-slate-200 px-4 py-3" data-testid={`profile-question-${field}`}>
+            <fieldset className="rounded-xl border border-slate-200 px-4 py-3" data-testid={`profile-question-${field}`} {...list.groupProps}>
                 <legend className="sr-only">{question}</legend>
                 <p className={LEGEND} aria-hidden="true">{question}</p>
-                <p className={HINT}>{field === 'sectors' ? `${hint} ${p.sectors_hint ?? ''}`.trim() : hint}</p>
+                <p id={list.hintId} className={HINT}>{field === 'sectors' ? `${hint} ${p.sectors_hint ?? ''}`.trim() : hint}</p>
                 <div className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
                     {codes.map((code) => (
                         <label key={code} className="flex min-h-10 items-start gap-2 py-1 text-base text-slate-900">
@@ -65,6 +68,7 @@ function Question({ field, form, options, tr }) {
                                 checked={Array.isArray(value) && value.includes(code)}
                                 onChange={() => form.setData(field, toggleListAnswer(value, code, codes))}
                                 className="mt-1 h-5 w-5 shrink-0"
+                                {...list.optionProps}
                             />
                             <span className="min-w-0 break-words">{profileAnswerLabel(field, [code], tr)}</span>
                         </label>
@@ -75,6 +79,7 @@ function Question({ field, form, options, tr }) {
                             checked={noneChosen}
                             onChange={() => form.setData(field, toggleListAnswer(value, null, codes))}
                             className="mt-1 h-5 w-5 shrink-0"
+                            {...list.optionProps}
                         />
                         <span>{p.none_selected ?? 'Ingen av disse'}</span>
                     </label>
@@ -85,18 +90,21 @@ function Question({ field, form, options, tr }) {
                                 checked={isListUnknown(value)}
                                 onChange={() => form.setData(field, toggleListAnswer(value, 'unknown', codes))}
                                 className="mt-1 h-5 w-5 shrink-0"
+                                {...list.optionProps}
                             />
                             <span>{p.answers?.unknown ?? 'Ikke avklart'}</span>
                         </label>
                     )}
                 </div>
-                <FieldError message={form.errors[field] ?? form.errors[`${field}.0`]} />
+                <FieldError id={list.errorId} message={listError} className={ERROR} />
             </fieldset>
         );
     }
 
+    const single = groupA11y(name, { error: form.errors[field] });
+
     return (
-        <fieldset className="rounded-xl border border-slate-200 px-4 py-3" data-testid={`profile-question-${field}`}>
+        <fieldset className="rounded-xl border border-slate-200 px-4 py-3" data-testid={`profile-question-${field}`} {...single.groupProps}>
             <legend className="sr-only">{question}</legend>
             <p className={LEGEND} aria-hidden="true">{question}</p>
             <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1">
@@ -109,12 +117,13 @@ function Question({ field, form, options, tr }) {
                             checked={value === choice}
                             onChange={() => form.setData(field, choice)}
                             className="h-5 w-5 shrink-0"
+                            {...single.optionProps}
                         />
                         {profileAnswerLabel(field, choice, tr)}
                     </label>
                 ))}
             </div>
-            <FieldError message={form.errors[field]} />
+            <FieldError id={single.errorId} message={form.errors[field]} className={ERROR} />
         </fieldset>
     );
 }
@@ -125,9 +134,16 @@ function ProfileForm({ supplierId, profile, fields, onDone, tr }) {
     const isChange = profile.answers !== null;
     const form = useForm(profileFormData(fields, profile.answers));
     const visible = visibleProfileFields(fields, profile.basis, form.data);
+    const formRef = useRef(null);
+    const focusError = useFocusFirstError(formRef);
 
     const send = (event) => {
         event.preventDefault();
+
+        if (form.processing) {
+            return;
+        }
+
         // A question not asked for the supplier is not sent; the server stores it as not answered.
         form.transform((data) => {
             const payload = { reason: data.reason };
@@ -138,13 +154,13 @@ function ProfileForm({ supplierId, profile, fields, onDone, tr }) {
 
             return payload;
         });
-        form.post(`/app/supplier-management/${supplierId}/profile`, { preserveScroll: true, onSuccess: onDone });
+        form.post(`/app/supplier-management/${supplierId}/profile`, { preserveScroll: true, onSuccess: onDone, onError: focusError });
     };
 
     return (
-        <form onSubmit={send} className="mt-4 space-y-6 border-t border-slate-100 pt-5" data-testid="profile-form">
+        <form ref={formRef} id="supplier-profile-panel" onSubmit={send} className="mt-4 space-y-6 border-t border-slate-100 pt-5" data-testid="profile-form">
             <p className={HINT}>{p.form_intro ?? 'Svar så godt du kan. Velg «Ikke avklart» når dere ikke vet svaret ennå – det er noe annet enn «Nei».'}</p>
-            {form.errors.profile && <p className={ERROR}>{form.errors.profile}</p>}
+            <FieldError message={form.errors.profile} className={ERROR} summary />
 
             {Object.entries(options.groups ?? {}).map(([group, groupFields]) => {
                 const shown = groupFields.filter((field) => visible.includes(field));
@@ -158,28 +174,26 @@ function ProfileForm({ supplierId, profile, fields, onDone, tr }) {
             })}
 
             {isChange && (
-                <div>
-                    <label htmlFor="supplier-profile-reason" className="block text-base font-semibold text-slate-900">
-                        {p.reason_label ?? 'Begrunnelse'}<RequiredMark />
-                    </label>
-                    <p id="supplier-profile-reason-hint" className={`mt-1 ${HINT}`}>{p.reason_hint ?? 'Hvorfor endres profilen?'}</p>
-                    <textarea
-                        id="supplier-profile-reason"
-                        rows={3}
-                        required
-                        aria-required="true"
-                        aria-describedby="supplier-profile-reason-hint"
-                        value={form.data.reason}
-                        onChange={(event) => form.setData('reason', event.target.value)}
-                        className={`mt-1 ${INPUT}`}
-                    />
-                    <FieldError message={form.errors.reason} />
-                </div>
+                <>
+                    <SupplierField id="supplier-profile-reason" label={p.reason_label ?? 'Begrunnelse'} hint={p.reason_hint ?? 'Hvorfor endres profilen?'} error={form.errors.reason} required>
+                        {(field) => (
+                            <textarea
+                                {...field}
+                                rows={3}
+                                required
+                                value={form.data.reason}
+                                onChange={(event) => form.setData('reason', event.target.value)}
+                                className={`mt-1 ${TEXTAREA}`}
+                            />
+                        )}
+                    </SupplierField>
+                    <RequiredNote tr={tr} />
+                </>
             )}
 
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY}`}>
                     {form.processing ? (tr.saving ?? 'Lagrer...') : (p.submit ?? 'Lagre profil')}
                 </button>
             </div>
@@ -200,6 +214,8 @@ function ProfileForm({ supplierId, profile, fields, onDone, tr }) {
 export default function SupplierProfile({ supplierId, profile, canEdit, locale, tr }) {
     const p = tr.profile ?? {};
     const [open, setOpen] = useState(false);
+    // The form opens in place of its button: focus in, and back to it (A11Y-014).
+    const rememberTrigger = useInlinePanelFocus(open ? 'profile' : null, { panelId: 'supplier-profile-panel', fallbackIds: ['supplier-profile-edit', 'supplier-profile-heading-toggle'] });
 
     if (! profile) {
         return null;
@@ -212,7 +228,7 @@ export default function SupplierProfile({ supplierId, profile, canEdit, locale, 
     const unknownUser = tr.unknown_user ?? 'en tidligere bruker';
 
     return (
-        <div data-testid="supplier-profile">
+        <div data-testid="supplier-profile" onClickCapture={rememberTrigger}>
             <p className="text-base text-slate-600">{p.intro ?? 'Profilen beskriver forhold ved leveransen som senere brukes til å avgjøre hvilke kontrollkrav som gjelder.'}</p>
 
             {answers === null ? (
@@ -259,7 +275,7 @@ export default function SupplierProfile({ supplierId, profile, canEdit, locale, 
             )}
 
             {canEdit && ! open && (
-                <button type="button" onClick={() => setOpen(true)} className={`mt-4 ${answers ? SECONDARY_ACTION : PRIMARY_ACTION}`}>
+                <button type="button" id="supplier-profile-edit" data-panel-trigger="" onClick={() => setOpen(true)} className={`mt-4 ${answers ? SECONDARY_ACTION : PRIMARY_ACTION}`}>
                     {answers ? (p.edit ?? 'Rediger profil') : (p.fill ?? 'Fyll ut profil')}
                 </button>
             )}

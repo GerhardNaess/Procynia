@@ -20,7 +20,7 @@ function BackToRegistration() {
                 </svg>
                 Tilbake til registrering
             </button>
-            <span className="text-slate-300">|</span>
+            <span aria-hidden="true" className="text-slate-400">|</span>
             <span className="text-sm text-blue-600">Les gjerne ferdig og trykk tilbake for å fortsette.</span>
         </div>
     );
@@ -30,7 +30,7 @@ const UPDATED = '24. mai 2026';
 
 function Verify() {
     return (
-        <span className="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[0.7rem] font-semibold text-amber-700">
+        <span className="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
             ⚠ verifiseres
         </span>
     );
@@ -40,7 +40,7 @@ function Section({ id, num, title, children }) {
     return (
         <section id={id} className="scroll-mt-24 border-t border-slate-100 pt-10 pb-2">
             <div className="mb-4 flex items-baseline gap-3">
-                <span className="font-mono text-xs font-semibold text-blue-400">{num}</span>
+                <span className="font-mono text-xs font-semibold text-blue-700">{num}</span>
                 <h2 className="text-lg font-semibold text-slate-950">{title}</h2>
             </div>
             <div className="space-y-3 text-sm leading-7 text-slate-600">
@@ -54,17 +54,18 @@ function TOC({ items }) {
     return (
         <aside className="hidden lg:block">
             <div className="sticky top-24 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-                <p className="mb-3 text-[0.65rem] font-semibold uppercase tracking-widest text-slate-400">
+                <p id="terms-toc-heading" className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-600">
                     Innhold
                 </p>
-                <nav className="space-y-0.5">
+                {/* Named by its heading, so the landmark is not just «navigation». */}
+                <nav aria-labelledby="terms-toc-heading" className="space-y-0.5">
                     {items.map((item) => (
                         <a
                             key={item.id}
                             href={`#${item.id}`}
                             className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
                         >
-                            <span className="w-5 shrink-0 font-mono text-[0.65rem] text-slate-300">
+                            <span className="w-5 shrink-0 font-mono text-xs text-slate-500">
                                 {item.num}
                             </span>
                             <span>{item.short}</span>
@@ -113,13 +114,13 @@ export default function Terms() {
                     Disse vilkårene regulerer tilgangen til og bruken av Procynia. Les dem nøye
                     før du tar tjenesten i bruk på vegne av din virksomhet.
                 </p>
-                <p className="mt-3 text-sm text-slate-400">Sist oppdatert: {UPDATED}</p>
+                <p className="mt-3 text-sm text-slate-600">Sist oppdatert: {UPDATED}</p>
             </div>
 
             <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900">
                 <strong className="font-semibold">Utkast – må juridisk kvalitetssikres før publisering.</strong>{' '}
                 Punkter merket{' '}
-                <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[0.7rem] font-semibold text-amber-700">
+                <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800">
                     ⚠ verifiseres
                 </span>{' '}
                 forutsetter teknisk eller juridisk avklaring.
@@ -128,7 +129,8 @@ export default function Terms() {
             <div className="mt-12 grid grid-cols-1 gap-8 lg:grid-cols-[220px_1fr]">
                 <TOC items={TOC_ITEMS} />
 
-                <div>
+                {/* min-w-0: a grid item is as wide as its content by default; long words must not widen the page. */}
+                <div className="min-w-0 break-words">
                     <Section id="om-vilkarene" num="01" title="Om disse vilkårene">
                         <p>
                             Disse brukervilkårene regulerer avtaleforholdet mellom din virksomhet og
@@ -255,7 +257,7 @@ export default function Terms() {
                         </p>
                         <p>
                             Se{' '}
-                            <Link href="/personvern" className="text-blue-600 hover:underline">
+                            <Link href="/personvern" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">
                                 personvernerklæringen
                             </Link>{' '}
                             for fullstendig beskrivelse av databehandlingen.

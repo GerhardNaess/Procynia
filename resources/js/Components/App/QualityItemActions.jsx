@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { router } from '@inertiajs/react';
+import { router, usePage } from '@inertiajs/react';
 import ActionDialog from './ActionDialog';
+import { rowErrorId, trackRowAction, useRowActionError } from '../../Support/rowActionError';
 import {
     DESTRUCTIVE_CONFIRM,
     SECONDARY_ACTION,
@@ -19,6 +20,10 @@ import {
  * much as what it removes: the articles the process's activities were the source of stay in Wiki,
  * and a one-line browser prompt has no room to say so. See QualityItemService::deleteItem.
  *
+ * The trigger is a disclosure, not a menu button (A11Y-103): `role="menu"` promises arrow-key
+ * navigation this one action never had. Tab reaches the action; Escape closes and returns focus to
+ * the trigger.
+ *
  * @param {object} item  The row's item. `id`, `title` and `quality_type`, plus
  *                       `produced_wiki_page_count` and `can_delete_produced_wiki_pages`, which
  *                       decide whether the dialog asks what should happen to the knowledge.
@@ -34,6 +39,13 @@ export default function QualityItemActions({ tq, item, tab = null }) {
     const menuRef = useRef(null);
     const triggerRef = useRef(null);
     const cancelRef = useRef(null);
+    const panelId = `quality-item-actions-${item.id}`;
+    // Wiki can refuse to delete the knowledge (flash error). The reason is shown at the button in the
+    // dialog and describes it; the banner behind the dialog stays the one alert (§10).
+    const { flash = {} } = usePage().props;
+    const rowError = useRowActionError(flash?.error ?? null);
+    const errorKey = `quality-item-delete-${item.id}`;
+    const deleteError = isConfirmOpen ? rowError(errorKey) : null;
 
     const isProcess = item.quality_type === 'process';
     // A control is not a document, and the dialog never calls it one.
@@ -102,10 +114,10 @@ export default function QualityItemActions({ tq, item, tab = null }) {
             <button
                 ref={triggerRef}
                 type="button"
-                aria-haspopup="menu"
                 aria-expanded={isMenuOpen}
+                aria-controls={isMenuOpen ? panelId : undefined}
                 aria-label={`${menuLabel} – ${item.title}`}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-transparent text-slate-500 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-transparent text-slate-600 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
                 onClick={() => setIsMenuOpen((open) => ! open)}
             >
                 <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -116,13 +128,12 @@ export default function QualityItemActions({ tq, item, tab = null }) {
             {isMenuOpen && menuPosition && (
                 <div
                     ref={menuRef}
-                    role="menu"
+                    id={panelId}
                     style={{ top: `${menuPosition.top}px`, right: `${menuPosition.right}px` }}
                     className="fixed z-40 w-60 rounded-2xl border border-slate-200 bg-white p-1.5 text-left shadow-lg"
                 >
                     <button
                         type="button"
-                        role="menuitem"
                         className="block w-full rounded-xl px-3 py-2 text-left text-base font-semibold text-rose-700 transition hover:bg-rose-50"
                         onClick={() => {
                             setIsMenuOpen(false);
@@ -142,6 +153,7 @@ export default function QualityItemActions({ tq, item, tab = null }) {
                 onClose={() => setIsConfirmOpen(false)}
                 closeDisabled={deleting}
                 titleId={`quality-item-delete-title-${item.id}`}
+                descriptionId={`quality-item-delete-description-${item.id}`}
                 initialFocusRef={cancelRef}
                 returnFocusRef={triggerRef}
             >
@@ -161,7 +173,7 @@ export default function QualityItemActions({ tq, item, tab = null }) {
                     </h2>
                     <p className="mt-2 text-base leading-6 text-slate-600">{item.title}</p>
 
-                    <dl className="mt-5 space-y-4">
+                    <dl id={`quality-item-delete-description-${item.id}`} className="mt-5 space-y-4">
                         <div>
                             <dt className="text-base font-semibold uppercase tracking-wide text-rose-700">
                                 {tq.delete_dialog_removed_heading ?? 'Dette slettes'}
@@ -175,7 +187,7 @@ export default function QualityItemActions({ tq, item, tab = null }) {
                             </dd>
                         </div>
                         <div>
-                            <dt className="text-base font-semibold uppercase tracking-wide text-slate-500">
+                            <dt className="text-base font-semibold uppercase tracking-wide text-slate-600">
                                 {tq.delete_dialog_kept_heading ?? 'Dette beholdes'}
                             </dt>
                             <dd className="mt-1 text-base leading-6 text-slate-700">
@@ -201,6 +213,10 @@ export default function QualityItemActions({ tq, item, tab = null }) {
                     <p className="mt-4 text-base font-semibold text-slate-700">
                         {tq.delete_dialog_irreversible ?? 'Handlingen kan ikke angres.'}
                     </p>
+
+                    {deleteError && (
+                        <p id={rowErrorId(errorKey)} className="mt-4 text-base text-rose-700">{deleteError}</p>
+                    )}
 
                     <div className="mt-6 flex flex-wrap gap-3">
                         <button
@@ -228,9 +244,10 @@ export default function QualityItemActions({ tq, item, tab = null }) {
 
                                 router.delete(
                                     `/app/quality/items/${item.id}${suffix ? `?${suffix}` : ''}`,
-                                    { onFinish: () => setDeleting(false) },
+                                    trackRowAction(errorKey, { onFinish: () => setDeleting(false) }),
                                 );
                             }}
+                            aria-describedby={deleteError ? rowErrorId(errorKey) : undefined}
                         >
                             {deleting
                                 ? (tq.delete_dialog_deleting ?? 'Sletter …')
@@ -271,7 +288,7 @@ function WikiKnowledgeChoice({ tq, itemId, count, mayChoose, deleteWikiPages, on
 
     return (
         <section className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <h3 className="text-base font-semibold uppercase tracking-wide text-slate-500">
+            <h3 id={`quality-wiki-choice-heading-${itemId}`} className="text-base font-semibold uppercase tracking-wide text-slate-600">
                 {tq.delete_dialog_wiki_heading ?? 'Wiki-kunnskap fra denne prosessen'}
             </h3>
             <p className="mt-1 text-base leading-6 text-slate-700">{countText}</p>
@@ -283,8 +300,9 @@ function WikiKnowledgeChoice({ tq, itemId, count, mayChoose, deleteWikiPages, on
             )}
 
             {mayChoose && (
-                <div className="mt-3 space-y-3">
-                    <label className="flex gap-3" htmlFor={`quality-wiki-keep-${itemId}`}>
+                <div className="mt-3 space-y-3" role="radiogroup" aria-labelledby={`quality-wiki-choice-heading-${itemId}`}>
+                    {/* The option's name is its label; the line under it describes it (1.3.1). */}
+                    <div className="flex gap-3">
                         <input
                             id={`quality-wiki-keep-${itemId}`}
                             type="radio"
@@ -292,19 +310,20 @@ function WikiKnowledgeChoice({ tq, itemId, count, mayChoose, deleteWikiPages, on
                             className="mt-1.5 h-4 w-4 shrink-0 accent-violet-600"
                             checked={! deleteWikiPages}
                             disabled={disabled}
+                            aria-describedby={`quality-wiki-keep-${itemId}-hint`}
                             onChange={() => onChange(false)}
                         />
-                        <span>
-                            <span className="block text-base font-semibold text-slate-900">
+                        <div>
+                            <label htmlFor={`quality-wiki-keep-${itemId}`} className="block text-base font-semibold text-slate-900">
                                 {tq.delete_dialog_wiki_keep ?? 'Behold Wiki-kunnskapen'}
-                            </span>
-                            <span className="block text-base leading-6 text-slate-600">
+                            </label>
+                            <p id={`quality-wiki-keep-${itemId}-hint`} className="text-base leading-6 text-slate-600">
                                 {tq.delete_dialog_wiki_keep_hint ?? 'Sidene blir stående i Wiki. Kunnskapen er virksomhetens, ikke prosessens.'}
-                            </span>
-                        </span>
-                    </label>
+                            </p>
+                        </div>
+                    </div>
 
-                    <label className="flex gap-3" htmlFor={`quality-wiki-delete-${itemId}`}>
+                    <div className="flex gap-3">
                         <input
                             id={`quality-wiki-delete-${itemId}`}
                             type="radio"
@@ -312,17 +331,18 @@ function WikiKnowledgeChoice({ tq, itemId, count, mayChoose, deleteWikiPages, on
                             className="mt-1.5 h-4 w-4 shrink-0 accent-rose-600"
                             checked={deleteWikiPages}
                             disabled={disabled}
+                            aria-describedby={`quality-wiki-delete-${itemId}-hint`}
                             onChange={() => onChange(true)}
                         />
-                        <span>
-                            <span className="block text-base font-semibold text-rose-700">
+                        <div>
+                            <label htmlFor={`quality-wiki-delete-${itemId}`} className="block text-base font-semibold text-rose-700">
                                 {tq.delete_dialog_wiki_delete ?? 'Slett Wiki-sidene som denne prosessen har produsert'}
-                            </span>
-                            <span className="block text-base leading-6 text-slate-600">
+                            </label>
+                            <p id={`quality-wiki-delete-${itemId}-hint`} className="text-base leading-6 text-slate-600">
                                 {tq.delete_dialog_wiki_delete_hint ?? 'Bare sider som kan spores til denne prosessen. Kildedokumentene og alle andre Wiki-sider beholdes.'}
-                            </span>
-                        </span>
-                    </label>
+                            </p>
+                        </div>
+                    </div>
                 </div>
             )}
         </section>

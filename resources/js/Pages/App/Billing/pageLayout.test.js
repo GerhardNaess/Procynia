@@ -101,13 +101,16 @@ describe('nothing but the framing moved', () => {
 
     test('the overlays keep their own widths, which the page container never set', () => {
         // The confirm dialog is a fixed overlay, unaffected by the page wrapper. (The plan-change
-        // modal is gone: customers no longer pick a legacy plan.)
-        assert.match(billing, /w-full max-w-md/);
+        // modal is gone: customers no longer pick a legacy plan.) Since WCAG Fase 3 it is an
+        // ActionDialog, whose `xs` size is the max-w-md the overlay always had.
+        assert.match(billing, /<ActionDialog[\s\S]*?size="xs"/);
     });
 
-    test('flash messages still render above the content', () => {
-        assert.match(billing, /flash\?\.success/);
-        assert.match(billing, /flash\?\.error/);
-        assert.ok(billing.indexOf('flash?.success') < billing.indexOf('<h1'), 'flash stays at the top');
+    test('flash messages are the layout\'s, shown once (A11Y-138)', () => {
+        // The page drew its own copy of flash.success and flash.error on top of the layout's
+        // FlashMessages, so every message stood on screen twice. The layout's one stays: a toast in the
+        // polite live region for success, a role="alert" banner above the content for errors.
+        assert.ok(! /flash\?\.(success|error)/.test(billing), 'the page renders no flash of its own');
+        assert.match(billing, /<CustomerAppLayout/);
     });
 });

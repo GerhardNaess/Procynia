@@ -11,7 +11,7 @@
             >
                 <summary class="flex cursor-pointer select-none items-center justify-between px-4 py-3 font-semibold text-gray-900 hover:bg-orange-100/60 dark:text-gray-100 dark:hover:bg-orange-900/20">
                     {{ $section['title'] ?? '' }}
-                    <svg class="h-4 w-4 shrink-0 text-orange-400 transition-transform group-open:rotate-180" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <svg class="h-4 w-4 shrink-0 text-orange-700 dark:text-orange-400 transition-transform group-open:rotate-180" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                         <path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd"/>
                     </svg>
                 </summary>
@@ -35,12 +35,12 @@
 @if (!empty($editUrl))
     <div class="mt-4 border-t border-gray-100 pt-4 dark:border-gray-700">
         <a href="{{ $editUrl }}"
-           class="inline-flex items-center gap-1.5 text-base font-medium text-primary-600 hover:text-primary-500">
+           class="inline-flex items-center gap-1.5 text-base font-medium text-primary-600 dark:text-primary-400 hover:text-primary-800 hover:underline dark:hover:text-primary-300">
             <x-filament::icon
                 icon="heroicon-m-pencil-square"
                 class="h-3.5 w-3.5"
             />
-            {{ $editLabel ?? 'Rediger hjelpetekst' }}
+            {{ $editLabel ?? \App\Filament\Support\AdminText::get('admin_a11y.help_edit', 'Rediger hjelpetekst') }}
         </a>
     </div>
 @endif

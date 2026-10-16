@@ -142,8 +142,13 @@ export default function UnitInput({
     };
 
     return (
+        // The frame is only the field's look. A click on it (the unit, the padding) focuses the input —
+        // what a <label> would do for a pointer, without making the unit part of the field's name.
+        // Keyboard users reach the input directly, so the frame has no role and no tab stop.
         <div
-            className={`${FRAME} ${invalid ? 'border-rose-400' : 'border-slate-200'} ${className}`}
+            role="presentation"
+            // The frame is the field's visible edge: the field tone (≥ 3:1, A11Y-019), rose-600 when wrong.
+            className={`${FRAME} ${invalid ? 'border-rose-600' : 'border-field-border'} ${className}`}
             onClick={focusInput}
             data-testid={`${id}-frame`}
         >

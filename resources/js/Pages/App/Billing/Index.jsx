@@ -1,7 +1,10 @@
 import { router, usePage } from '@inertiajs/react';
 import { PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import ActionDialog from '../../../Components/App/ActionDialog';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
+import { domSafeId } from '../../../Support/formFieldA11y';
 import AiCapacityCard from '../../../Components/App/AiCapacityCard';
 import AlertBox from '../../../Components/App/AlertBox';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
@@ -50,34 +53,46 @@ function resolveLabel(value, labels, fallback) {
 }
 
 
+/**
+ * Si opp, gjenoppta, bestill, avbestill — each asks once before it acts. ActionDialog does the dialog
+ * work (A11Y-002): named by the title, described by the message (focus lands on a button, so the
+ * consequence is read with it), focus kept inside, Escape and «Avbryt» hand focus back to the button
+ * that asked, the page behind inert.
+ */
 function ConfirmDialog({ isOpen, title, message, onConfirm, onCancel, confirmLabel = 'Bekreft', cancelLabel = 'Avbryt', warning = false }) {
-    if (!isOpen) {
-        return null;
-    }
+    const baseId = `billing-confirm-${domSafeId(useId())}`;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-            <div role="dialog" aria-modal="true" aria-label={title} className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
-                <h3 className="text-lg font-semibold text-slate-950">{title}</h3>
+        <ActionDialog
+            isOpen={isOpen}
+            onClose={onCancel}
+            titleId={`${baseId}-title`}
+            descriptionId={`${baseId}-message`}
+            size="xs"
+        >
+            <h3 id={`${baseId}-title`} className="text-lg font-semibold text-slate-950">{title}</h3>
+            <div id={`${baseId}-message`}>
                 {(Array.isArray(message) ? message : [message]).map((line) => (
                     <p key={line} className="mt-2 text-base leading-6 text-slate-600">{line}</p>
                 ))}
-                <div className="mt-5 flex justify-end gap-3">
-                    <button
-                        onClick={onCancel}
-                        className={`${SECONDARY_ACTION} ${FOCUS_RING}`}
-                    >
-                        {cancelLabel}
-                    </button>
-                    <button
-                        onClick={onConfirm}
-                        className={warning ? `${WARNING_ACTION} ${FOCUS_RING}` : PRIMARY_ACTION}
-                    >
-                        {confirmLabel}
-                    </button>
-                </div>
             </div>
-        </div>
+            <div className="mt-5 flex justify-end gap-3">
+                <button
+                    type="button"
+                    onClick={onCancel}
+                    className={`${SECONDARY_ACTION} ${FOCUS_RING}`}
+                >
+                    {cancelLabel}
+                </button>
+                <button
+                    type="button"
+                    onClick={onConfirm}
+                    className={warning ? `${WARNING_ACTION} ${FOCUS_RING}` : PRIMARY_ACTION}
+                >
+                    {confirmLabel}
+                </button>
+            </div>
+        </ActionDialog>
     );
 }
 
@@ -95,11 +110,11 @@ export default function BillingIndex() {
         // on its own which packages or modules are active.
         module_packages: modulePackages = [],
         translations = {},
-        flash,
         locale = 'nb-NO',
     } = page;
 
     const tb = translations.billing ?? {};
+    const a11y = translations.a11y ?? {};
     const cardText = tb.subscription_card ?? {};
     const intervalLabels = tb.interval_labels ?? {};
     const aiCapacityText = tb.ai_capacity ?? {};
@@ -268,17 +283,9 @@ export default function BillingIndex() {
     return (
         <CustomerAppLayout title={tb.title ?? 'Abonnement'} showPageTitle={false}>
             <div className="space-y-7">
-                {flash?.success && (
-                    <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-base leading-6 text-green-800">
-                        {flash.success}
-                    </div>
-                )}
-                {flash?.error && (
-                    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-base leading-6 text-red-800">
-                        {flash.error}
-                    </div>
-                )}
-
+                {/* Flash success and error are the layout's (FlashMessages: a toast in the polite live
+                    region, a role="alert" banner). This page used to draw its own copy as well, so every
+                    message stood on screen twice (A11Y-138). */}
                 <section className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-1.5">
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{tb.title ?? 'Abonnement'}</h1>
@@ -449,13 +456,14 @@ export default function BillingIndex() {
                         <p className={SECTION_HELP}>
                             {servicesText.help ?? 'Tjenester som faktureres i tillegg til Basis og opsjonene.'}
                         </p>
-                        <div className="mt-4 overflow-x-auto">
+                        <ScrollRegion label={servicesText.heading ?? 'Andre fakturerte tjenester'} className="mt-4">
                             <table className="w-full text-base">
+                                <caption className="sr-only">{servicesText.heading ?? 'Andre fakturerte tjenester'}</caption>
                                 <thead>
                                     <tr className="border-b border-slate-200 text-left text-base font-medium text-slate-600">
-                                        <th className="pb-2 pr-4">{servicesTableText.service ?? 'Tjeneste'}</th>
-                                        <th className="pb-2 pr-4">{servicesTableText.type ?? 'Type'}</th>
-                                        <th className="pb-2 pr-4">{servicesTableText.status ?? 'Status'}</th>
+                                        <th scope="col" className="pb-2 pr-4">{servicesTableText.service ?? 'Tjeneste'}</th>
+                                        <th scope="col" className="pb-2 pr-4">{servicesTableText.type ?? 'Type'}</th>
+                                        <th scope="col" className="pb-2 pr-4">{servicesTableText.status ?? 'Status'}</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-50">
@@ -478,7 +486,7 @@ export default function BillingIndex() {
                                     ))}
                                 </tbody>
                             </table>
-                        </div>
+                        </ScrollRegion>
                     </section>
                 )}
 
@@ -500,15 +508,16 @@ export default function BillingIndex() {
                     </div>
 
                     {sortedInvoices.length > 0 ? (
-                        <div className="mt-4 overflow-x-auto">
+                        <ScrollRegion label={a11y.table_invoices ?? 'Fakturaer'} className="mt-4">
                             <table className="w-full text-base">
+                                <caption className="sr-only">{a11y.table_invoices ?? 'Fakturaer'}</caption>
                                 <thead>
                                     <tr className="border-b border-slate-200 text-left text-base font-medium text-slate-600">
-                                        <th className="pb-2 pr-4">{invoicesTableText.number ?? 'Fakturanummer'}</th>
-                                        <th className="pb-2 pr-4">{invoicesTableText.date ?? 'Dato'}</th>
-                                        <th className="pb-2 pr-4">{invoicesTableText.amount ?? 'Beløp'}</th>
-                                        <th className="pb-2 pr-4">{invoicesTableText.status ?? 'Status'}</th>
-                                        <th className="pb-2">{invoicesTableText.download ?? 'PDF'}</th>
+                                        <th scope="col" className="pb-2 pr-4">{invoicesTableText.number ?? 'Fakturanummer'}</th>
+                                        <th scope="col" className="pb-2 pr-4">{invoicesTableText.date ?? 'Dato'}</th>
+                                        <th scope="col" className="pb-2 pr-4">{invoicesTableText.amount ?? 'Beløp'}</th>
+                                        <th scope="col" className="pb-2 pr-4">{invoicesTableText.status ?? 'Status'}</th>
+                                        <th scope="col" className="pb-2">{invoicesTableText.download ?? 'PDF'}</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-50">
@@ -530,6 +539,8 @@ export default function BillingIndex() {
                                                         href={invoice.invoice_pdf ?? invoice.hosted_invoice_url}
                                                         target="_blank"
                                                         rel="noreferrer"
+                                                        // Every row's link said only «PDF» (A11Y-109); the name says which invoice, and that it opens a new tab.
+                                                        aria-label={(a11y.invoice_pdf ?? 'PDF for faktura :number (åpnes i ny fane)').replace(':number', invoice.number ?? formatDate(invoice.date))}
                                                         className={`rounded text-base font-medium text-blue-700 hover:underline ${FOCUS_RING}`}
                                                     >
                                                         PDF
@@ -542,7 +553,7 @@ export default function BillingIndex() {
                                     ))}
                                 </tbody>
                             </table>
-                        </div>
+                        </ScrollRegion>
                     ) : (
                         <p className="mt-4 text-base leading-7 text-slate-600">
                             {invoicesText.empty ?? 'Ingen fakturaer tilgjengelig.'}

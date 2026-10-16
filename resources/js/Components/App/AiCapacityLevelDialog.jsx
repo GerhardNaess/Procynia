@@ -1,29 +1,30 @@
 import { PRIMARY_COLOURS, SECONDARY_COLOURS } from '../../Support/actionStyles';
 import { interpolate, levelDescription, levelUnitsLabel } from '../../Support/aiCapacity';
+import ActionDialog from './ActionDialog';
 
 /**
  * Choose the AI capacity level (Nivå 1/2/3). Each level shows what it would include for this
  * customer — computed by the backend from its users and modules. No formula, no multiplier.
  * Room is left for a price per period once one is decided; none is shown until then.
+ *
+ * ActionDialog does the dialog work (A11Y-002): before, focus stayed on the page behind the overlay,
+ * Escape did nothing and the page could be tabbed through under it.
  */
 export default function AiCapacityLevelDialog({ isOpen, levels = [], texts = {}, locale = 'nb-NO', processing = false, onSelect, onClose }) {
-    if (!isOpen) {
-        return null;
-    }
-
     const title = texts.level_dialog_title ?? 'Velg nivå for AI-kapasitet';
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-            <div
-                role="dialog"
-                aria-modal="true"
-                aria-label={title}
-                className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-xl"
-                data-testid="ai-capacity-level-dialog"
-            >
-                <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
-                <p className="mt-2 text-base leading-6 text-slate-600">
+        <ActionDialog
+            isOpen={isOpen}
+            onClose={onClose}
+            closeDisabled={processing}
+            titleId="ai-capacity-level-dialog-title"
+            descriptionId="ai-capacity-level-dialog-intro"
+            size="sm"
+        >
+            <div data-testid="ai-capacity-level-dialog">
+                <h3 id="ai-capacity-level-dialog-title" className="text-lg font-semibold text-slate-900">{title}</h3>
+                <p id="ai-capacity-level-dialog-intro" className="mt-2 text-base leading-6 text-slate-600">
                     {texts.level_dialog_intro ?? 'Kapasiteten gjelder per faktureringsperiode og deles av alle AI-funksjoner. Nytt nivå gjelder med en gang. Brukt kapasitet beholdes.'}
                 </p>
 
@@ -69,6 +70,6 @@ export default function AiCapacityLevelDialog({ isOpen, levels = [], texts = {},
                     </button>
                 </div>
             </div>
-        </div>
+        </ActionDialog>
     );
 }

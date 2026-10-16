@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import ControlHint from '../../../Components/App/ControlHint';
+import FormField, { FieldsetField, RequiredFieldsNote } from '../../../Components/App/FormField';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
-import RequiredMark from '../Risk/RequiredMark';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { BUSY_STYLE, focusElement, refocusIfLost, useFocusFirstError, usePanelFocus } from '../../../Support/focusManagement';
+import { INPUT as FIELD, LABEL, TEXTAREA } from '../../../Support/formStyles';
 import ReviewForm from './ReviewForm';
+import { paneHeadingId, readinessStateText, removalFocusCandidates } from './reviewA11y';
 import SectionBasis from './SectionBasis';
 import WikiKnowledgeHandoffPanel from '../../../Components/App/WikiKnowledgeHandoffPanel';
 import { DecisionList } from './ReviewDecisions';
@@ -17,20 +20,20 @@ import {
 } from './reviewSections';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-base font-semibold text-slate-700';
-const ERROR = 'mt-1 text-base text-rose-700';
+// The review pages' fields are a touch taller (min-h-11) than the shared ones.
+const INPUT = FIELD.replace('min-h-10', 'min-h-11');
 const ICON = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[13px] font-bold leading-none';
 
 /**
  * The one marker a section gets — chosen by sectionStatus(), drawn here. Each state has a shape of
- * its own as well as a colour: nothing, a tick, an exclamation mark, a dash.
+ * its own as well as a colour: nothing, a tick, an exclamation mark, a dash. Borders and symbols are
+ * at least 3:1 against white (1.4.11); the words are in the button's name (statusDescription).
  */
 const MARKER_STYLE = {
-    open: 'border-slate-400 bg-slate-50',
-    attention: 'border-amber-400 bg-amber-50 text-amber-700',
-    judged: 'border-emerald-500 bg-emerald-50 text-emerald-700',
-    unavailable: 'border-slate-200 bg-white text-slate-400',
+    open: 'border-slate-500 bg-slate-50',
+    attention: 'border-amber-600 bg-amber-50 text-amber-700',
+    judged: 'border-emerald-600 bg-emerald-50 text-emerald-700',
+    unavailable: 'border-slate-500 bg-white text-slate-600',
 };
 
 function StatusIcon({ marker }) {
@@ -101,11 +104,52 @@ export default function ManagementReviewShow() {
         }
     }, []);
 
-    const open = (key) => {
+    // «Neste seksjon», «Forrige seksjon» and the section links on Oversikt are left behind when the pane
+    // changes, so they ask for focus on the new pane's heading. The navigation itself keeps focus: it
+    // is still there, and aria-current says which pane is open (2.4.3, A11Y-014).
+    const [headingFocus, setHeadingFocus] = useState(null);
+
+    // A fresh object per request, so asking twice for the same heading still moves focus; reloads of
+    // the page's props never do.
+    useEffect(() => {
+        if (headingFocus !== null) {
+            focusElement(document.getElementById(headingFocus.id));
+        }
+    }, [headingFocus]);
+
+    const open = (key, { focusHeading = false } = {}) => {
         setPane(key);
+        if (focusHeading) {
+            setHeadingFocus({ id: paneHeadingId(key, Boolean(readiness)) });
+        }
         if (typeof window !== 'undefined') {
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
+    };
+    const openWithFocus = (key) => open(key, { focusHeading: true });
+
+    // Rediger and Ferdigstill open in place: focus into the panel, back to the button on close — or,
+    // when a finalized review no longer offers it, to the title (A11Y-014).
+    const panelRef = useRef(null);
+    const [panelFocusRequest, setPanelFocusRequest] = useState(0);
+    const triggerRef = useRef(null);
+
+    useEffect(() => {
+        if (panelFocusRequest > 0 && panelRef.current) {
+            const target = panelRef.current.querySelector('input, select, textarea, button');
+            focusElement(target ?? panelRef.current);
+        }
+    }, [panelFocusRequest]);
+
+    const openPanel = (name) => {
+        triggerRef.current = `mr-action-${name}`;
+        setPanel(name);
+        setPanelFocusRequest((count) => count + 1);
+    };
+
+    const closePanel = () => {
+        setPanel(null);
+        refocusIfLost([triggerRef.current, 'mr-action-edit', 'mr-review-title']);
     };
 
     const destroy = () => {
@@ -127,7 +171,7 @@ export default function ManagementReviewShow() {
                                 <StatusBadge tone={REVIEW_STATUS_TONES[review.status] ?? 'slate'}>{statusLabel(review.status, t)}</StatusBadge>
                                 {! finalized && ready && <StatusBadge tone="emerald">{t.ready ?? 'Klar for ferdigstilling'}</StatusBadge>}
                             </div>
-                            <h1 className="break-words text-3xl font-semibold tracking-tight text-slate-950">{review.title}</h1>
+                            <h1 id="mr-review-title" className="break-words text-3xl font-semibold tracking-tight text-slate-950">{review.title}</h1>
                             <p className="text-base text-slate-700">
                                 {formatDay(review.period_start)}–{formatDay(review.period_end)}
                                 {' · '}{review.all_business_areas ? (t.scope_all ?? 'Hele virksomheten') : review.business_areas.map((area) => area.name).join(', ')}
@@ -137,7 +181,7 @@ export default function ManagementReviewShow() {
                         <div className="flex flex-wrap items-center gap-2">
                             <PageHelpButton {...reviewHelp(t, 'review')} />
                             {permissions.can_edit && panel === null && (
-                                <button type="button" onClick={() => setPanel('edit')} className={SECONDARY_ACTION}>{t.edit ?? 'Rediger'}</button>
+                                <button type="button" id="mr-action-edit" onClick={() => openPanel('edit')} className={SECONDARY_ACTION}>{t.edit ?? 'Rediger'}</button>
                             )}
                             <Link href={`/app/management-reviews/${review.id}/report`} className={SECONDARY_ACTION} data-testid="mr-report-link">{t.report_link ?? 'Rapport'}</Link>
                             {permissions.can_delete && (
@@ -146,14 +190,22 @@ export default function ManagementReviewShow() {
                             {permissions.can_finalize && panel === null && (
                                 <button
                                     type="button"
-                                    onClick={() => setPanel('finalize')}
+                                    id="mr-action-finalize"
+                                    onClick={() => openPanel('finalize')}
                                     disabled={! ready}
-                                    title={ready ? undefined : t.finalize?.not_ready}
+                                    aria-describedby={ready ? undefined : 'mr-finalize-not-ready'}
                                     className={PRIMARY_ACTION}
                                     data-testid="mr-finalize"
                                 >
                                     {t.finalize?.button ?? 'Ferdigstill'}
                                 </button>
+                            )}
+                            {/* Why «Ferdigstill» is unavailable is said in text, not only in a hover
+                                title that keyboard and touch users never see (A11Y-184). */}
+                            {permissions.can_finalize && panel === null && ! ready && (
+                                <p id="mr-finalize-not-ready" className="basis-full text-base text-slate-600" data-testid="mr-finalize-not-ready">
+                                    {t.finalize?.not_ready ?? 'Gjennomgangen er ikke klar for ferdigstilling ennå. Se sjekklisten på Oversikt.'}
+                                </p>
                             )}
                         </div>
                     </div>
@@ -167,8 +219,12 @@ export default function ManagementReviewShow() {
                     )}
                 </header>
 
-                {panel === 'edit' && <EditPanel review={review} participants={participants} t={t} ownerOptions={ownerOptions} areaOptions={areaOptions} frameworkOptions={frameworkOptions} participantOptions={participantOptions} onDone={() => setPanel(null)} />}
-                {panel === 'finalize' && <FinalizePanel review={review} readiness={readiness} t={t} onDone={() => setPanel(null)} />}
+                {panel !== null && (
+                    <div ref={panelRef}>
+                        {panel === 'edit' && <EditPanel review={review} participants={participants} t={t} ownerOptions={ownerOptions} areaOptions={areaOptions} frameworkOptions={frameworkOptions} participantOptions={participantOptions} onDone={closePanel} />}
+                        {panel === 'finalize' && <FinalizePanel review={review} readiness={readiness} t={t} onDone={closePanel} />}
+                    </div>
+                )}
 
                 <div className="lg:grid lg:grid-cols-[17rem_minmax(0,1fr)] lg:gap-6">
                     <SectionNav sections={sections} decisions={decisions} readiness={readiness} pane={pane} onOpen={open} t={t} />
@@ -186,7 +242,7 @@ export default function ManagementReviewShow() {
                                 ownerOptions={ownerOptions}
                                 participantOptions={participantOptions}
                                 finalized={finalized}
-                                onOpen={open}
+                                onOpen={openWithFocus}
                                 t={t}
                             />
                         )}
@@ -207,22 +263,22 @@ export default function ManagementReviewShow() {
                                 handoffOptions={handoffOptions}
                                 canEdit={Boolean(permissions.can_edit)}
                                 finalized={finalized}
-                                onOpen={open}
+                                onOpen={openWithFocus}
                                 t={t}
                             />
                         )}
 
                         {pane === DECISIONS && (
                             <section className={CARD} aria-labelledby="mr-decisions-heading" data-testid="mr-decisions-pane">
-                                <h2 id="mr-decisions-heading" className="text-xl font-semibold text-slate-950">{t.decisions?.heading ?? 'Beslutninger og tiltak'}</h2>
+                                <h2 id="mr-decisions-heading" tabIndex={-1} className="text-xl font-semibold text-slate-950">{t.decisions?.heading ?? 'Beslutninger og tiltak'}</h2>
                                 <p className="mb-2 mt-1 text-base text-slate-600">{t.decisions?.intro}</p>
-                                <DecisionList review={review} decisions={decisions} sections={sections} ownerOptions={ownerOptions} handoffOptions={handoffOptions} canEdit={Boolean(permissions.can_edit)} finalized={finalized} t={t} />
+                                <DecisionList review={review} decisions={decisions} sections={sections} ownerOptions={ownerOptions} handoffOptions={handoffOptions} canEdit={Boolean(permissions.can_edit)} finalized={finalized} headingId="mr-decisions-heading" t={t} />
                             </section>
                         )}
 
                         {pane === HISTORY && (
                             <section className={CARD} aria-labelledby="mr-history-heading">
-                                <h2 id="mr-history-heading" className="text-xl font-semibold text-slate-950">{t.history?.heading ?? 'Historikk'}</h2>
+                                <h2 id="mr-history-heading" tabIndex={-1} className="text-xl font-semibold text-slate-950">{t.history?.heading ?? 'Historikk'}</h2>
                                 {history.length === 0 ? (
                                     <p className="mt-2 text-base text-slate-600">{t.history?.empty ?? 'Ingen hendelser.'}</p>
                                 ) : (
@@ -300,20 +356,23 @@ function SectionNav({ sections, decisions, readiness, pane, onOpen, t }) {
 
 function Overview({ review, sections, participants, readiness, frameworks, amendments, permissions, ownerOptions, participantOptions, finalized, onOpen, t }) {
     const to = t.overview ?? {};
+    const ta = usePage().props.translations?.a11y ?? {};
     const flagged = sections.map((section) => ({ section, items: attentionItems(section) })).filter((row) => row.items.length > 0);
 
     return (
         <>
             {readiness && (
                 <section className={CARD} aria-labelledby="mr-readiness-heading" data-testid="mr-readiness">
-                    <h2 id="mr-readiness-heading" className="text-xl font-semibold text-slate-950">{to.readiness_heading ?? 'Klar for ferdigstilling?'}</h2>
+                    <h2 id="mr-readiness-heading" tabIndex={-1} className="text-xl font-semibold text-slate-950">{to.readiness_heading ?? 'Klar for ferdigstilling?'}</h2>
                     {readiness.ready && <p className="mt-2 text-base font-semibold text-emerald-800">{to.readiness_ready}</p>}
                     <ul className="mt-3 space-y-2">
                         {readiness.items.map((item) => (
                             <li key={item.key} className="flex gap-2 text-base" data-testid={`mr-readiness-${item.key}`} data-done={item.done ? 'true' : 'false'}>
-                                <span aria-hidden="true" className={item.done ? 'text-emerald-700' : 'text-slate-500'}>{item.done ? '✓' : '○'}</span>
+                                <span aria-hidden="true" className={item.done ? 'text-emerald-700' : 'text-slate-600'}>{item.done ? '✓' : '○'}</span>
                                 <span className={item.done ? 'text-slate-800' : 'font-semibold text-slate-950'}>
                                     {to.readiness_items?.[item.key] ?? item.key}
+                                    {/* ✓ and ○ are hidden; the state is said in words (A11Y-024). */}
+                                    <span className="sr-only">{` (${readinessStateText(item.done, ta)})`}</span>
                                     {item.key === 'judgements' && item.sections?.length > 0 && (
                                         <span className="block font-normal text-slate-700">
                                             {to.readiness_missing_sections?.split(':sections')[0]}
@@ -338,7 +397,7 @@ function Overview({ review, sections, participants, readiness, frameworks, amend
             )}
 
             <section className={CARD} aria-labelledby="mr-attention-heading" data-testid="mr-attention">
-                <h2 id="mr-attention-heading" className="text-xl font-semibold text-slate-950">{to.attention_heading ?? 'Hva krever oppmerksomhet'}</h2>
+                <h2 id="mr-attention-heading" tabIndex={-1} className="text-xl font-semibold text-slate-950">{to.attention_heading ?? 'Hva krever oppmerksomhet'}</h2>
                 {flagged.length === 0 ? (
                     <p className="mt-2 text-base text-slate-600">{to.attention_none}</p>
                 ) : (
@@ -373,7 +432,7 @@ function SectionPane({ review, section, sections, readiness, decisions, ownerOpt
             <section className={CARD} aria-labelledby={`mr-section-${section.key}`} data-testid={`mr-section-${section.key}`} data-state={section.state}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
-                        <h2 id={`mr-section-${section.key}`} className="text-2xl font-semibold text-slate-950">{sectionTitle(section.key, t)}</h2>
+                        <h2 id={`mr-section-${section.key}`} tabIndex={-1} className="text-2xl font-semibold text-slate-950">{sectionTitle(section.key, t)}</h2>
                         {intro && <p className="mt-1 text-base text-slate-600">{intro}</p>}
                         <SectionStatus section={section} readiness={readiness} t={t} />
                     </div>
@@ -408,7 +467,7 @@ function SectionPane({ review, section, sections, readiness, decisions, ownerOpt
             <section className={CARD} aria-labelledby={`mr-section-decisions-${section.key}`}>
                 <h3 id={`mr-section-decisions-${section.key}`} className="text-lg font-semibold text-slate-900">{ts.decisions_here ?? 'Beslutninger og tiltak i denne seksjonen'}</h3>
                 <div className="mt-2">
-                    <DecisionList review={review} decisions={decisions} sections={sections} ownerOptions={ownerOptions} handoffOptions={handoffOptions} canEdit={canEdit} finalized={finalized} sectionKey={section.key} t={t} />
+                    <DecisionList review={review} decisions={decisions} sections={sections} ownerOptions={ownerOptions} handoffOptions={handoffOptions} canEdit={canEdit} finalized={finalized} sectionKey={section.key} headingId={`mr-section-decisions-${section.key}`} t={t} />
                 </div>
             </section>
 
@@ -440,10 +499,12 @@ function Assessment({ review, section, canEdit, t }) {
     const ts = t.section ?? {};
     const manual = section.type !== 'module';
     const form = useForm({ judgement: section.judgement ?? '', comment: section.comment ?? '', notes: section.notes ?? '' });
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
 
     useEffect(() => {
         form.setData({ judgement: section.judgement ?? '', comment: section.comment ?? '', notes: section.notes ?? '' });
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        // Only the section's saved values reset the form; `form` itself is a new object every render.
     }, [section.key, section.judgement, section.comment, section.notes]);
 
     if (! section.judgement_visible) {
@@ -465,7 +526,7 @@ function Assessment({ review, section, canEdit, t }) {
 
     const submit = (event) => {
         event.preventDefault();
-        form.put(`/app/management-reviews/${review.id}/sections/${section.key}`, { preserveScroll: true });
+        form.put(`/app/management-reviews/${review.id}/sections/${section.key}`, { preserveScroll: true, onError: focusFirstError });
     };
 
     // Takes back only the judgement; the saved comment and description stay as they are.
@@ -476,30 +537,36 @@ function Assessment({ review, section, canEdit, t }) {
     );
 
     return (
-        <form onSubmit={submit} className="mt-6 space-y-4 border-t border-slate-100 pt-5" data-testid="mr-assessment-form">
+        <form ref={formRef} onSubmit={submit} className="mt-6 space-y-4 border-t border-slate-100 pt-5" data-testid="mr-assessment-form">
             <h3 className="text-lg font-semibold text-slate-900">{ts.assessment ?? 'Ledelsens vurdering'}</h3>
             {manual && (
-                <div>
-                    <label htmlFor={`mr-notes-${section.key}`} className={LABEL}>{ts.notes ?? 'Ledelsens beskrivelse'}</label>
-                    <textarea id={`mr-notes-${section.key}`} rows={4} maxLength={20000} value={form.data.notes} onChange={(event) => form.setData('notes', event.target.value)} className={`mt-1 ${INPUT}`} />
-                </div>
+                <FormField id={`mr-notes-${section.key}`} label={ts.notes ?? 'Ledelsens beskrivelse'} error={form.errors.notes}>
+                    {(field) => (
+                        <textarea {...field} rows={4} maxLength={20000} value={form.data.notes} onChange={(event) => form.setData('notes', event.target.value)} className={TEXTAREA} />
+                    )}
+                </FormField>
             )}
-            <fieldset>
-                <legend className={LABEL}>{ts.judgement ?? 'Vurdering'}</legend>
-                <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1">
-                    {['satisfactory', 'needs_improvement', 'not_satisfactory'].map((value) => (
-                        <label key={value} className="flex min-h-11 items-center gap-2 text-base text-slate-800">
-                            <input type="radio" name={`mr-judgement-${section.key}`} value={value} checked={form.data.judgement === value} onChange={() => form.setData('judgement', value)} className="h-5 w-5" data-testid={`mr-judgement-${value}`} />
-                            {judgementLabel(value, t)}
-                        </label>
-                    ))}
-                </div>
-                {form.errors.judgement && <p className={ERROR}>{form.errors.judgement}</p>}
-            </fieldset>
-            <div>
-                <label htmlFor={`mr-comment-${section.key}`} className={LABEL}>{ts.comment ?? 'Kommentar'} <span className="font-normal text-slate-600">({ts.comment_hint ?? 'Valgfritt.'})</span></label>
-                <textarea id={`mr-comment-${section.key}`} rows={3} maxLength={10000} value={form.data.comment} onChange={(event) => form.setData('comment', event.target.value)} className={`mt-1 ${INPUT}`} />
-            </div>
+            <FieldsetField id={`mr-judgement-group-${section.key}`} legend={ts.judgement ?? 'Vurdering'} error={form.errors.judgement}>
+                {(optionProps) => (
+                    <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1">
+                        {['satisfactory', 'needs_improvement', 'not_satisfactory'].map((value) => (
+                            <label key={value} className="flex min-h-11 items-center gap-2 text-base text-slate-800">
+                                <input {...optionProps} type="radio" name={`mr-judgement-${section.key}`} value={value} checked={form.data.judgement === value} onChange={() => form.setData('judgement', value)} className="h-5 w-5" data-testid={`mr-judgement-${value}`} />
+                                {judgementLabel(value, t)}
+                            </label>
+                        ))}
+                    </div>
+                )}
+            </FieldsetField>
+            <FormField
+                id={`mr-comment-${section.key}`}
+                label={<>{ts.comment ?? 'Kommentar'} <span className="font-normal text-slate-600">({ts.comment_hint ?? 'Valgfritt.'})</span></>}
+                error={form.errors.comment}
+            >
+                {(field) => (
+                    <textarea {...field} rows={3} maxLength={10000} value={form.data.comment} onChange={(event) => form.setData('comment', event.target.value)} className={TEXTAREA} />
+                )}
+            </FormField>
             <div className="flex flex-wrap gap-2">
                 <button type="submit" disabled={form.processing} className={PRIMARY_ACTION} data-testid="mr-save-assessment">{ts.save_assessment ?? 'Lagre vurdering'}</button>
                 {section.judgement && (
@@ -514,48 +581,71 @@ function Participants({ review, participants, canEdit, participantOptions, t }) 
     const to = t.overview ?? {};
     const [adding, setAdding] = useState(false);
     const form = useForm({ user_id: '', name: '', role_label: '' });
+    const formRef = useRef(null);
+    const addButtonRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+    usePanelFocus(adding, { panelRef: formRef, returnFocusRef: addButtonRef });
     const submit = (event) => {
         event.preventDefault();
         form.transform((data) => ({ ...data, user_id: data.user_id || null }));
-        form.post(`/app/management-reviews/${review.id}/participants`, { preserveScroll: true, onSuccess: () => { form.reset(); setAdding(false); } });
+        form.post(`/app/management-reviews/${review.id}/participants`, { preserveScroll: true, onSuccess: () => { form.reset(); setAdding(false); }, onError: focusFirstError });
     };
-    const remove = (participant) => router.delete(`/app/management-reviews/${review.id}/participants/${participant.id}`, { preserveScroll: true });
+    // Once the participant is gone, focus goes to the next «Fjern», the one before, «Legg til
+    // deltaker» or the heading — never to <body> (A11Y-014).
+    const removeId = (id) => `mr-participant-remove-${id}`;
+    const remove = (participant) => router.delete(`/app/management-reviews/${review.id}/participants/${participant.id}`, {
+        preserveScroll: true,
+        onSuccess: () => refocusIfLost(removalFocusCandidates(participants.map((item) => item.id), participant.id, removeId, ['mr-add-participant', 'mr-participants-heading'])),
+    });
 
     return (
         <section className={CARD} aria-labelledby="mr-participants-heading" data-testid="mr-participants">
-            <h2 id="mr-participants-heading" className="text-xl font-semibold text-slate-950">{to.participants_heading ?? 'Deltakere'}</h2>
+            <h2 id="mr-participants-heading" tabIndex={-1} className="text-xl font-semibold text-slate-950">{to.participants_heading ?? 'Deltakere'}</h2>
             {participants.length === 0 ? (
                 <p className="mt-2 text-base text-slate-600">{to.participants_empty}</p>
             ) : (
                 <ul className="mt-3 divide-y divide-slate-100">
                     {participants.map((participant) => (
                         <li key={participant.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                            <span className="text-base text-slate-900">{participant.name}{participant.role_label && <span className="text-slate-600"> – {participant.role_label}</span>}</span>
-                            {canEdit && <button type="button" onClick={() => remove(participant)} className="text-base font-semibold text-rose-700 hover:text-rose-900">{to.remove ?? 'Fjern'}</button>}
+                            <span id={`mr-participant-name-${participant.id}`} className="text-base text-slate-900">{participant.name}{participant.role_label && <span className="text-slate-600"> – {participant.role_label}</span>}</span>
+                            {canEdit && (
+                                <button
+                                    type="button"
+                                    id={removeId(participant.id)}
+                                    onClick={() => remove(participant)}
+                                    // Named «Fjern» and described by the person: the participants picker above
+                                    // already has a «Fjern <name>» chip, and two controls must not share a name.
+                                    aria-describedby={`mr-participant-name-${participant.id}`}
+                                    className="text-base font-semibold text-rose-700 hover:text-rose-900"
+                                >
+                                    {to.remove ?? 'Fjern'}
+                                </button>
+                            )}
                         </li>
                     ))}
                 </ul>
             )}
             {canEdit && (adding ? (
-                <form onSubmit={submit} className="mt-3 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <form ref={formRef} onSubmit={submit} className="mt-3 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     <div className="grid gap-4 md:grid-cols-3">
-                        <div>
-                            <label htmlFor="mr-participant-user" className={LABEL}>{to.participant_user}</label>
-                            <select id="mr-participant-user" value={form.data.user_id} onChange={(event) => form.setData('user_id', event.target.value)} className={`mt-1 ${INPUT}`}>
-                                <option value="">{to.participant_choose}</option>
-                                {participantOptions.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
-                            </select>
-                            {form.errors.user_id && <p className={ERROR}>{form.errors.user_id}</p>}
-                        </div>
-                        <div>
-                            <label htmlFor="mr-participant-name" className={LABEL}>{to.participant_name}</label>
-                            <input id="mr-participant-name" maxLength={255} value={form.data.name} disabled={Boolean(form.data.user_id)} onChange={(event) => form.setData('name', event.target.value)} className={`mt-1 ${INPUT}`} />
-                            {form.errors.name && <p className={ERROR}>{form.errors.name}</p>}
-                        </div>
-                        <div>
-                            <label htmlFor="mr-participant-role" className={LABEL}>{to.participant_role}</label>
-                            <input id="mr-participant-role" maxLength={255} value={form.data.role_label} onChange={(event) => form.setData('role_label', event.target.value)} className={`mt-1 ${INPUT}`} />
-                        </div>
+                        <FormField id="mr-participant-user" label={to.participant_user} error={form.errors.user_id}>
+                            {(field) => (
+                                <select {...field} value={form.data.user_id} onChange={(event) => form.setData('user_id', event.target.value)} className={INPUT}>
+                                    <option value="">{to.participant_choose}</option>
+                                    {participantOptions.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
+                                </select>
+                            )}
+                        </FormField>
+                        <FormField id="mr-participant-name" label={to.participant_name} error={form.errors.name}>
+                            {(field) => (
+                                <input {...field} maxLength={255} value={form.data.name} disabled={Boolean(form.data.user_id)} onChange={(event) => form.setData('name', event.target.value)} className={INPUT} />
+                            )}
+                        </FormField>
+                        <FormField id="mr-participant-role" label={to.participant_role} error={form.errors.role_label}>
+                            {(field) => (
+                                <input {...field} maxLength={255} value={form.data.role_label} onChange={(event) => form.setData('role_label', event.target.value)} className={INPUT} />
+                            )}
+                        </FormField>
                     </div>
                     <div className="flex flex-wrap gap-2">
                         <button type="submit" disabled={form.processing} className={PRIMARY_ACTION} data-testid="mr-participant-save">{to.add_participant ?? 'Legg til deltaker'}</button>
@@ -563,7 +653,7 @@ function Participants({ review, participants, canEdit, participantOptions, t }) 
                     </div>
                 </form>
             ) : (
-                <button type="button" onClick={() => setAdding(true)} className={`mt-3 ${SECONDARY_ACTION}`} data-testid="mr-add-participant">{to.add_participant ?? 'Legg til deltaker'}</button>
+                <button type="button" id="mr-add-participant" ref={addButtonRef} onClick={() => setAdding(true)} className={`mt-3 ${SECONDARY_ACTION}`} data-testid="mr-add-participant">{to.add_participant ?? 'Legg til deltaker'}</button>
             ))}
         </section>
     );
@@ -572,18 +662,23 @@ function Participants({ review, participants, canEdit, participantOptions, t }) 
 function Conclusion({ review, canEdit, t }) {
     const to = t.overview ?? {};
     const form = useForm({ conclusion: review.conclusion ?? '' });
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
     const submit = (event) => {
         event.preventDefault();
-        form.put(`/app/management-reviews/${review.id}/conclusion`, { preserveScroll: true });
+        form.put(`/app/management-reviews/${review.id}/conclusion`, { preserveScroll: true, onError: focusFirstError });
     };
 
     return (
         <section className={CARD} aria-labelledby="mr-conclusion-heading" data-testid="mr-conclusion">
             <h2 id="mr-conclusion-heading" className="text-xl font-semibold text-slate-950">{to.conclusion_heading ?? 'Ledelsens samlede konklusjon'}</h2>
             {canEdit ? (
-                <form onSubmit={submit} className="mt-2 space-y-3">
-                    <label htmlFor="mr-conclusion-text" className="block text-base text-slate-600">{to.conclusion_hint}</label>
-                    <textarea id="mr-conclusion-text" rows={5} maxLength={20000} value={form.data.conclusion} onChange={(event) => form.setData('conclusion', event.target.value)} className={INPUT} />
+                <form ref={formRef} onSubmit={submit} className="mt-2 space-y-3">
+                    <FormField id="mr-conclusion-text" label={to.conclusion_hint} labelClassName="block text-base text-slate-600" error={form.errors.conclusion} controlClassName="">
+                        {(field) => (
+                            <textarea {...field} rows={5} maxLength={20000} value={form.data.conclusion} onChange={(event) => form.setData('conclusion', event.target.value)} className={`mt-3 ${TEXTAREA}`} />
+                        )}
+                    </FormField>
                     <button type="submit" disabled={form.processing} className={PRIMARY_ACTION} data-testid="mr-save-conclusion">{t.save ?? 'Lagre'}</button>
                 </form>
             ) : (
@@ -596,9 +691,11 @@ function Conclusion({ review, canEdit, t }) {
 function NextReview({ review, canPlan, ownerOptions, t }) {
     const to = t.overview ?? {};
     const form = useForm({ next_review_due_on: review.next_review_due_on ?? '', owner_user_id: review.owner_user_id ? String(review.owner_user_id) : '' });
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
     const submit = (event) => {
         event.preventDefault();
-        form.put(`/app/management-reviews/${review.id}/next-review`, { preserveScroll: true });
+        form.put(`/app/management-reviews/${review.id}/next-review`, { preserveScroll: true, onError: focusFirstError });
     };
 
     return (
@@ -606,18 +703,19 @@ function NextReview({ review, canPlan, ownerOptions, t }) {
             <h2 id="mr-next-heading" className="text-xl font-semibold text-slate-950">{to.next_heading ?? 'Neste gjennomgang'}</h2>
             <p className="mt-1 text-base text-slate-600">{to.next_hint}</p>
             {canPlan ? (
-                <form onSubmit={submit} className="mt-3 grid gap-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
-                    <div>
-                        <label htmlFor="mr-next-date" className={LABEL}>{t.fields?.next_review_due_on ?? 'Neste gjennomgang innen'}</label>
-                        <input id="mr-next-date" type="date" value={form.data.next_review_due_on} onChange={(event) => form.setData('next_review_due_on', event.target.value)} className={`mt-1 ${INPUT}`} />
-                    </div>
-                    <div>
-                        <label htmlFor="mr-next-owner" className={LABEL}>{t.fields?.owner ?? 'Ansvarlig'}</label>
-                        <select id="mr-next-owner" value={form.data.owner_user_id} onChange={(event) => form.setData('owner_user_id', event.target.value)} className={`mt-1 ${INPUT}`}>
-                            {ownerOptions.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
-                        </select>
-                        {form.errors.owner_user_id && <p className={ERROR}>{form.errors.owner_user_id}</p>}
-                    </div>
+                <form ref={formRef} onSubmit={submit} className="mt-3 grid gap-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
+                    <FormField id="mr-next-date" label={t.fields?.next_review_due_on ?? 'Neste gjennomgang innen'} error={form.errors.next_review_due_on}>
+                        {(field) => (
+                            <input {...field} type="date" value={form.data.next_review_due_on} onChange={(event) => form.setData('next_review_due_on', event.target.value)} className={INPUT} />
+                        )}
+                    </FormField>
+                    <FormField id="mr-next-owner" label={t.fields?.owner ?? 'Ansvarlig'} error={form.errors.owner_user_id}>
+                        {(field) => (
+                            <select {...field} value={form.data.owner_user_id} onChange={(event) => form.setData('owner_user_id', event.target.value)} className={INPUT}>
+                                {ownerOptions.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
+                            </select>
+                        )}
+                    </FormField>
                     <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>{t.save ?? 'Lagre'}</button>
                 </form>
             ) : (
@@ -657,11 +755,16 @@ function Frameworks({ frameworks, t }) {
 
 function Amendments({ review, amendments, canAmend, t }) {
     const ta = t.amendments ?? {};
+    const a11y = usePage().props.translations?.a11y ?? {};
     const [adding, setAdding] = useState(false);
     const form = useForm({ text: '', reason: '' });
+    const formRef = useRef(null);
+    const addButtonRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+    usePanelFocus(adding, { panelRef: formRef, returnFocusRef: addButtonRef });
     const submit = (event) => {
         event.preventDefault();
-        form.post(`/app/management-reviews/${review.id}/amendments`, { preserveScroll: true, onSuccess: () => { form.reset(); setAdding(false); } });
+        form.post(`/app/management-reviews/${review.id}/amendments`, { preserveScroll: true, onSuccess: () => { form.reset(); setAdding(false); }, onError: focusFirstError });
     };
 
     return (
@@ -682,24 +785,25 @@ function Amendments({ review, amendments, canAmend, t }) {
                 </ul>
             )}
             {canAmend && (adding ? (
-                <form onSubmit={submit} className="mt-3 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <div>
-                        <label htmlFor="mr-amendment-text" className={LABEL}>{ta.text ?? 'Rettelse'}<RequiredMark /></label>
-                        <textarea id="mr-amendment-text" required rows={3} value={form.data.text} onChange={(event) => form.setData('text', event.target.value)} className={`mt-1 ${INPUT}`} />
-                        {form.errors.text && <p className={ERROR}>{form.errors.text}</p>}
-                    </div>
-                    <div>
-                        <label htmlFor="mr-amendment-reason" className={LABEL}>{ta.reason ?? 'Begrunnelse'}<RequiredMark /></label>
-                        <textarea id="mr-amendment-reason" required rows={2} value={form.data.reason} onChange={(event) => form.setData('reason', event.target.value)} className={`mt-1 ${INPUT}`} />
-                        {form.errors.reason && <p className={ERROR}>{form.errors.reason}</p>}
-                    </div>
+                <form ref={formRef} onSubmit={submit} className="mt-3 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <FormField id="mr-amendment-text" label={ta.text ?? 'Rettelse'} error={form.errors.text} required>
+                        {(field) => (
+                            <textarea {...field} required rows={3} value={form.data.text} onChange={(event) => form.setData('text', event.target.value)} className={TEXTAREA} />
+                        )}
+                    </FormField>
+                    <FormField id="mr-amendment-reason" label={ta.reason ?? 'Begrunnelse'} error={form.errors.reason} required>
+                        {(field) => (
+                            <textarea {...field} required rows={2} value={form.data.reason} onChange={(event) => form.setData('reason', event.target.value)} className={TEXTAREA} />
+                        )}
+                    </FormField>
+                    <RequiredFieldsNote text={a11y.required_fields ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
                     <div className="flex flex-wrap gap-2">
                         <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>{ta.add ?? 'Registrer rettelse'}</button>
                         <button type="button" onClick={() => setAdding(false)} className={SECONDARY_ACTION}>{t.cancel ?? 'Avbryt'}</button>
                     </div>
                 </form>
             ) : (
-                <button type="button" onClick={() => setAdding(true)} className={`mt-3 ${SECONDARY_ACTION}`} data-testid="mr-add-amendment">{ta.add ?? 'Registrer rettelse'}</button>
+                <button type="button" ref={addButtonRef} onClick={() => setAdding(true)} className={`mt-3 ${SECONDARY_ACTION}`} data-testid="mr-add-amendment">{ta.add ?? 'Registrer rettelse'}</button>
             ))}
         </section>
     );
@@ -724,10 +828,10 @@ function EditPanel({ review, participants, t, ownerOptions, areaOptions, framewo
         owner_user_id: review.owner_user_id ? String(review.owner_user_id) : '',
         participant_user_ids: chosenPeople.map((participant) => participant.user_id),
     });
-    const submit = (event) => {
+    const submit = (event, focusFirstError) => {
         event.preventDefault();
         form.transform((data) => ({ ...data, meeting_date: data.meeting_date || null }));
-        form.patch(`/app/management-reviews/${review.id}`, { preserveScroll: true, onSuccess: onDone });
+        form.patch(`/app/management-reviews/${review.id}`, { preserveScroll: true, onSuccess: onDone, onError: focusFirstError });
     };
 
     return (
@@ -741,6 +845,10 @@ function FinalizePanel({ review, readiness, t, onDone }) {
     const tf = t.finalize ?? {};
     const [processing, setProcessing] = useState(false);
     const confirm = () => {
+        if (processing) {
+            return;
+        }
+
         setProcessing(true);
         router.post(`/app/management-reviews/${review.id}/finalize`, {}, { preserveScroll: true, onFinish: () => setProcessing(false), onSuccess: onDone });
     };
@@ -755,7 +863,7 @@ function FinalizePanel({ review, readiness, t, onDone }) {
                 </p>
             )}
             <div className="mt-4 flex flex-wrap gap-2">
-                <button type="button" onClick={confirm} disabled={processing} className={PRIMARY_ACTION} data-testid="mr-finalize-confirm">{tf.confirm ?? 'Ferdigstill'}</button>
+                <button type="button" onClick={confirm} aria-disabled={processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`} data-testid="mr-finalize-confirm">{tf.confirm ?? 'Ferdigstill'}</button>
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{t.cancel ?? 'Avbryt'}</button>
             </div>
         </section>

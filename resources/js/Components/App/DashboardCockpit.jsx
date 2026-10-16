@@ -8,6 +8,7 @@ import {
     managementRows as buildManagementRows,
     visibleOutcomes as buildVisibleOutcomes,
     winRateMetric,
+    calendarDayLabel,
 } from './dashboardLogic';
 
 function classNames(...values) {
@@ -385,7 +386,7 @@ function FollowUpSignal({ signal, locale, isOpen, onToggle, actionTexts = {} }) 
             <span className="min-w-0 flex-1">
                 <span className={classNames(
                     'block text-[30px] font-semibold leading-none tabular-nums',
-                    isActive ? 'text-slate-950' : 'text-slate-400',
+                    isActive ? 'text-slate-950' : 'text-slate-500',
                 )}>
                     {formatNumber(signal.count, locale)}
                 </span>
@@ -424,14 +425,14 @@ function PipelineStage({ stage, locale, stageMax }) {
     return (
         <div className={classNames(
             'flex min-w-0 flex-1 flex-col gap-2 px-4 py-4',
-            hasCases ? 'bg-violet-50' : '',
+            hasCases ? 'bg-violet-50' : 'bg-slate-50',
         )}>
             <div className="text-sm font-semibold uppercase tracking-[0.06em] text-slate-500">
                 {stage.label}
             </div>
             <div className={classNames(
                 'text-[26px] font-semibold leading-none tabular-nums',
-                hasCases ? 'text-slate-950' : 'text-slate-400',
+                hasCases ? 'text-slate-950' : 'text-slate-500',
             )}>
                 {formatNumber(count, locale)}
             </div>
@@ -448,7 +449,7 @@ function PipelineStage({ stage, locale, stageMax }) {
 /** The join between two phases. Decoration, so it is hidden from assistive technology. */
 function PipelineChevron() {
     return (
-        <span className="hidden shrink-0 items-center text-slate-300 sm:flex" aria-hidden="true">
+        <span className="hidden shrink-0 items-center bg-slate-50 text-slate-300 @5xl:flex" aria-hidden="true">
             <Icon path={ICON_PATHS.chevronRight} className="h-4 w-4" />
         </span>
     );
@@ -461,34 +462,50 @@ const CALENDAR_CONTROL_CLS = 'h-11 rounded-lg border border-slate-200 bg-white p
 const CALENDAR_LABEL_CLS = 'text-sm font-medium text-slate-500';
 const CALENDAR_ARROW_CLS = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-200';
 
-function DeadlinePopover({ items, locale, texts = {}, commonText = {} }) {
+/**
+ * The deadlines of the selected day, under the calendar. They used to open as a hover card inside
+ * the day button — links inside a button, reachable only by pointer or by tabbing through the hidden
+ * card (A11Y-023). Selecting a day now lists them here, as ordinary links in the page.
+ */
+function DeadlineDayList({ id, dateLabel, items, locale, texts = {}, commonText = {} }) {
     return (
-        <div className="absolute left-0 top-full z-20 mt-2 hidden w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_20px_40px_rgba(15,23,42,0.12)] group-hover:block group-focus-within:block">
-            <div className="mb-2 text-sm font-semibold text-slate-600">
-                {texts.title}
-            </div>
-            <div className="space-y-2">
-                {items.map((item) => (
-                    <Link
-                        key={item.id}
-                        href={item.show_url}
-                        className="block rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left transition hover:border-violet-200 hover:bg-violet-50/80"
-                    >
-                        <div className="text-base font-semibold leading-6 text-slate-950">
-                            {item.title}
-                        </div>
-                        <div className="mt-1 text-sm leading-5 text-slate-600">
-                            {item.deadline_type_label}
-                            {' · '}
-                            {formatDate(item.date, locale, commonText.not_available, { day: 'numeric', month: 'short' })}
-                        </div>
-                        <div className="mt-1 text-sm leading-5 text-slate-600">
-                            {item.bid_manager_name ?? texts.no_bid_manager}
-                            {item.phase_label ? ` · ${item.phase_label}` : ''}
-                        </div>
-                    </Link>
-                ))}
-            </div>
+        <div id={id} data-testid="deadline-day-list" className="mt-5 border-t border-slate-200 pt-4">
+            {dateLabel === null ? (
+                <p className="text-base leading-6 text-slate-600">{texts.prompt}</p>
+            ) : (
+                <>
+                    <h3 className="text-base font-semibold text-slate-900">
+                        {(texts.title ?? 'Frister :date').replace(':date', dateLabel)}
+                    </h3>
+                    {items.length === 0 ? (
+                        <p className="mt-2 text-base leading-6 text-slate-600">{texts.none}</p>
+                    ) : (
+                        <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+                            {items.map((item) => (
+                                <li key={item.id}>
+                                    <Link
+                                        href={item.show_url}
+                                        className="block rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left transition hover:border-violet-200 hover:bg-violet-50/80"
+                                    >
+                                        <span className="block text-base font-semibold leading-6 text-slate-950">
+                                            {item.title}
+                                        </span>
+                                        <span className="mt-1 block text-sm leading-5 text-slate-600">
+                                            {item.deadline_type_label}
+                                            {' · '}
+                                            {formatDate(item.date, locale, commonText.not_available, { day: 'numeric', month: 'short' })}
+                                        </span>
+                                        <span className="mt-1 block text-sm leading-5 text-slate-600">
+                                            {item.bid_manager_name ?? texts.no_bid_manager}
+                                            {item.phase_label ? ` · ${item.phase_label}` : ''}
+                                        </span>
+                                    </Link>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </>
+            )}
         </div>
     );
 }
@@ -503,7 +520,6 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
         calendar: calendarText = {},
         actions: actionsText = {},
         empty_states: emptyStatesText = {},
-        popovers: popoversText = {},
     } = dashboardText;
     const [openInfoKey, setOpenInfoKey] = useState(null);
     const [openAttentionKey, setOpenAttentionKey] = useState(null);
@@ -663,7 +679,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
             </section>
 
             <div className="grid gap-8 xl:grid-cols-12 xl:gap-6">
-                <div className="xl:col-span-8">
+                <div className="min-w-0 xl:col-span-8">
                     <Card
                         title={redesignText.pipeline_title}
                         subtitle={redesignText.pipeline_subtitle}
@@ -673,8 +689,13 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                         setOpenInfoKey={setOpenInfoKey}
                         texts={dashboardText}
                     >
-                        {/* Stacked below sm, where six segments in a row would be unreadable. */}
-                        <div className="flex flex-col divide-y divide-slate-200 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 sm:flex-row sm:items-stretch sm:divide-y-0">
+                        {/* Laid out by the room the card has, not the window (container queries): one,
+                            two or three phases a row, and the single strip with chevrons only where all
+                            six names fit. Six in a row at any width cut the names off — «FORHAN…» at
+                            1280 px — and pushed the page sideways at 640 px (WCAG 1.4.10, 1.4.4). The
+                            1 px gap over a slate-200 ground draws the lines between the cells. */}
+                        <div className="@container">
+                        <div className="grid grid-cols-1 gap-px overflow-hidden rounded-2xl border border-slate-200 bg-slate-200 @sm:grid-cols-2 @xl:grid-cols-3 @5xl:flex @5xl:items-stretch @5xl:gap-0 @5xl:bg-slate-50">
                             {pipelineStages.map((stage, index) => (
                                 <Fragment key={stage.key}>
                                     {index > 0 ? <PipelineChevron /> : null}
@@ -686,10 +707,11 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                 </Fragment>
                             ))}
                         </div>
+                        </div>
                     </Card>
                 </div>
 
-                <div className="xl:col-span-4">
+                <div className="min-w-0 xl:col-span-4">
                     <Card
                         title={redesignText.management_title}
                         infoKey="management"
@@ -714,7 +736,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
             </div>
 
             <div className="grid gap-8 xl:grid-cols-12 xl:items-start xl:gap-6">
-                <div className="xl:col-span-8">
+                <div className="min-w-0 xl:col-span-8">
                     <Card
                         title={sectionsText.deadlines?.title}
                         subtitle={`${sectionsText.deadlines?.subtitle_prefix ?? ''} ${calendar.monthLabel}`.trim()}
@@ -818,13 +840,14 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                             </div>
 
                             {calendarText.hover_hint ? (
-                                <p className="max-w-44 text-sm leading-5 text-slate-400">
+                                <p className="max-w-44 text-sm leading-5 text-slate-600">
                                     {calendarText.hover_hint}
                                 </p>
                             ) : null}
                         </div>
 
-                        <div className="mt-5 grid grid-cols-7 gap-1 text-sm font-semibold uppercase tracking-[0.06em] text-slate-500">
+                        {/* The column heads are for the eye; every day button says its own weekday. */}
+                        <div aria-hidden="true" className="mt-5 grid grid-cols-7 gap-1 text-sm font-semibold uppercase tracking-[0.06em] text-slate-500">
                             {calendarText.weekdays?.map((label) => (
                                 <div key={label} className="px-1 pb-1 text-center">
                                     {label}
@@ -837,18 +860,24 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                 const items = deadlineGroups[day.dateKey] ?? [];
                                 const isSelected = selectedDateKey === day.dateKey;
 
+                                // aria-pressed: which day is chosen. aria-current="date": today. Both
+                                // were shown by colour and a ring only.
                                 return (
                                     <button
                                         key={day.dateKey}
                                         type="button"
                                         onClick={() => setSelectedDateKey(day.dateKey)}
+                                        aria-label={calendarDayLabel(day, items.length, locale, calendarText)}
+                                        aria-pressed={isSelected}
+                                        aria-current={day.isToday ? 'date' : undefined}
+                                        aria-controls="deadline-day-list"
                                         className={classNames(
-                                            'group relative min-h-11 rounded-lg border px-2 py-1.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
+                                            'relative min-h-11 rounded-lg border px-2 py-1.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
                                             day.inCurrentMonth
                                                 ? 'border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50'
-                                                : 'border-slate-100 bg-slate-50/70 text-slate-400',
-                                            day.isToday ? 'ring-2 ring-violet-200' : '',
-                                            isSelected ? 'border-violet-400 bg-violet-50' : '',
+                                                : 'border-slate-100 bg-slate-50/70 text-slate-500',
+                                            day.isToday ? 'ring-2 ring-violet-500' : '',
+                                            isSelected ? 'border-violet-600 bg-violet-50' : '',
                                         )}
                                     >
                                         <div className="flex items-start justify-between gap-1">
@@ -861,21 +890,30 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                                 </span>
                                             ) : null}
                                         </div>
-
-                                        {items.length > 0 ? (
-                                            <DeadlinePopover items={items} locale={locale} texts={{
-                                                title: popoversText.deadlines_title,
-                                                no_bid_manager: emptyStatesText.no_bid_manager,
-                                            }} commonText={sharedText} />
-                                        ) : null}
                                     </button>
                                 );
                             })}
                         </div>
+
+                        <DeadlineDayList
+                            id="deadline-day-list"
+                            dateLabel={selectedDateKey === null
+                                ? null
+                                : new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${selectedDateKey}T00:00:00`))}
+                            items={selectedDateKey === null ? [] : (deadlineGroups[selectedDateKey] ?? [])}
+                            locale={locale}
+                            texts={{
+                                title: calendarText.selected_day_title,
+                                prompt: calendarText.select_day_prompt ?? 'Velg en dag i kalenderen for å se fristene den dagen.',
+                                none: calendarText.no_deadlines_on_day ?? 'Ingen frister denne dagen.',
+                                no_bid_manager: emptyStatesText.no_bid_manager,
+                            }}
+                            commonText={sharedText}
+                        />
                     </Card>
                 </div>
 
-                <div className="xl:col-span-4">
+                <div className="min-w-0 xl:col-span-4">
                     <Card
                         title={redesignText.results_title}
                         subtitle={redesignText.results_subtitle}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../../Components/App/PageHelpButton';
@@ -13,12 +13,22 @@ import RequirementForm from './RequirementForm';
 import RequirementHistory from './RequirementHistory';
 import RequirementQualityContext from './RequirementQualityContext';
 import { RequirementReopenForm, RequirementRetireForm } from './RequirementStatusForms';
+import { usePanelSwitchFocus } from '../useComplianceFocus';
 import { complianceHelp } from './complianceHelp';
 import { REQUIREMENT_STATUS_TONES, reviewIntervalLabel } from './complianceRequirement';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const TERM = 'text-base font-semibold text-slate-600';
 const VALUE = 'mt-1 break-words text-base text-slate-900';
+
+// Where focus goes when a panel closes: the button that opened it, or — when the step removed that
+// button (Sett som utgått turns into Gjenåpne) — the nearest control or heading of the same section.
+const PANEL_RETURN = {
+    edit: ['compliance-requirement-edit-open'],
+    assess: ['compliance-assess-open', 'compliance-assessment-heading'],
+    retire: ['compliance-requirement-retire-open', 'compliance-requirement-reopen-open', 'compliance-status-section'],
+    reopen: ['compliance-requirement-reopen-open', 'compliance-requirement-retire-open', 'compliance-status-section'],
+};
 
 /**
  * One requirement, read top to bottom as the assessment is done: where it comes from
@@ -64,6 +74,8 @@ export default function ComplianceRequirementShow() {
     // Which panel is open: 'edit', 'assess', 'retire', 'reopen' or none. One at a time. «Vurder» in
     // the worklist arrives with assess=1 and the form open.
     const [panel, setPanel] = useState(() => (query.get('assess') === '1' && permissions.can_assess ? 'assess' : null));
+    const pageRef = useRef(null);
+    usePanelSwitchFocus(panel, { containerRef: pageRef, returnTargets: (key) => PANEL_RETURN[key] ?? [] });
 
     // Back to the worklist or the register as the person left it — filters, view and open chapters.
     useEffect(() => {
@@ -94,7 +106,7 @@ export default function ComplianceRequirementShow() {
 
     return (
         <CustomerAppLayout title={item.title} showPageTitle={false} workView={panel === 'edit' ? (tr.edit ?? 'Rediger') : null}>
-            <div className="space-y-6">
+            <div ref={pageRef} className="space-y-6">
                 <Link href={backHref} className="inline-block text-base font-semibold text-violet-700 hover:text-violet-900" data-testid="compliance-back">
                     ← {back.area === 'compliance-assessments' ? (tr.back_to_assessments ?? 'Tilbake til etterlevelsesvurdering') : (tr.back ?? 'Tilbake til kravregisteret')}
                 </Link>
@@ -113,7 +125,7 @@ export default function ComplianceRequirementShow() {
                         <div className="flex flex-wrap items-center gap-2">
                             <PageHelpButton {...complianceHelp(tr, 'requirement')} />
                             {permissions.can_edit && panel === null && (
-                                <button type="button" onClick={() => setPanel('edit')} className={SECONDARY_ACTION}>{tr.edit ?? 'Rediger'}</button>
+                                <button id="compliance-requirement-edit-open" type="button" onClick={() => setPanel('edit')} className={SECONDARY_ACTION}>{tr.edit ?? 'Rediger'}</button>
                             )}
                             {permissions.can_delete && (
                                 <button type="button" onClick={destroy} className={DESTRUCTIVE_ACTION}>{tr.delete ?? 'Slett krav'}</button>
@@ -123,7 +135,7 @@ export default function ComplianceRequirementShow() {
                 </header>
 
                 {panel === 'edit' ? (
-                    <section className={CARD} aria-label={tr.edit ?? 'Rediger'}>
+                    <section className={CARD} aria-label={tr.edit ?? 'Rediger'} data-inline-panel="edit">
                         <RequirementForm
                             form={form}
                             onSubmit={submit}
@@ -173,7 +185,7 @@ export default function ComplianceRequirementShow() {
                         </p>
                         {library.withdrawn && <p className="mt-2 text-base text-amber-800">{tr.library?.withdrawn_hint ?? ''}</p>}
                         <div className="mt-4">
-                            <RequirementGuidance details={library} tr={tr} idPrefix="compliance-requirement-library" />
+                            <RequirementGuidance details={library} tr={tr} idPrefix="compliance-requirement-library" headingLevel={3} />
                         </div>
                     </section>
                 )}
@@ -214,17 +226,17 @@ export default function ComplianceRequirementShow() {
                     />
                 )}
 
-                <section className={CARD} aria-labelledby="compliance-status-heading" data-testid="compliance-status">
+                <section id="compliance-status-section" className={CARD} aria-labelledby="compliance-status-heading" data-testid="compliance-status">
                     <h2 id="compliance-status-heading" className="text-xl font-semibold text-slate-950">{tr.status_heading ?? 'Status'}</h2>
                     <p className="mt-3 text-base text-slate-800">{tr.status_text?.[item.status] ?? ''}</p>
 
                     {panel === null && (permissions.can_retire || permissions.can_reopen) && (
                         <div className="mt-4 flex flex-wrap gap-2">
                             {permissions.can_retire && (
-                                <button type="button" onClick={() => setPanel('retire')} className={SECONDARY_ACTION}>{tr.retire ?? 'Sett som utgått'}</button>
+                                <button id="compliance-requirement-retire-open" type="button" onClick={() => setPanel('retire')} className={SECONDARY_ACTION}>{tr.retire ?? 'Sett som utgått'}</button>
                             )}
                             {permissions.can_reopen && (
-                                <button type="button" onClick={() => setPanel('reopen')} className={PRIMARY_ACTION}>{tr.reopen ?? 'Gjenåpne'}</button>
+                                <button id="compliance-requirement-reopen-open" type="button" onClick={() => setPanel('reopen')} className={PRIMARY_ACTION}>{tr.reopen ?? 'Gjenåpne'}</button>
                             )}
                         </div>
                     )}

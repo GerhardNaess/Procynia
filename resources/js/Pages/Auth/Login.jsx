@@ -1,4 +1,7 @@
 import { Head, useForm, usePage } from '@inertiajs/react';
+import { useEffect } from 'react';
+import { fieldA11y } from '../../Support/formFieldA11y';
+import { focusFirstInvalidField } from '../../Support/focusManagement';
 
 export default function Login() {
     const { appName, translations, authOptions = {} } = usePage().props;
@@ -17,10 +20,24 @@ export default function Login() {
         post('/login');
     };
 
+    // A rejected sign-in puts the user on the field that says why; its error is read with it. Run when
+    // the errors arrive and have rendered (the field already carries aria-invalid) — not from onError,
+    // which runs before that render. Errors only ever come from a submit, so this never fires on its own.
+    useEffect(() => {
+        if (errors.email || errors.password) {
+            focusFirstInvalidField(document.getElementById('login-form'));
+        }
+    }, [errors]);
+
+    // Each field is tied to its own error (aria-describedby + aria-invalid), so the message is heard
+    // on the field instead of being a loose line under it (A11Y-013, A11Y-051).
+    const email = fieldA11y({ id: 'email', hasError: Boolean(errors.email) });
+    const password = fieldA11y({ id: 'password', hasError: Boolean(errors.password) });
+
     return (
         <>
             <Head title={`${translations.auth.title} · ${appName}`} />
-            <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 py-16">
+            <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-16 sm:px-6">
                 <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-2xl shadow-slate-950/25">
                     <div className="mb-8 space-y-2">
                         <div className="text-sm font-medium uppercase tracking-[0.2em] text-slate-500">{appName}</div>
@@ -28,8 +45,9 @@ export default function Login() {
                         <p className="text-sm text-slate-600">{translations.auth.subtitle}</p>
                     </div>
 
+                    {/* Not tied to a field — the Microsoft sign-in failed — so it is announced itself. */}
                     {errors.entra ? (
-                        <p className="mb-5 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{errors.entra}</p>
+                        <p role="alert" className="mb-5 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{errors.entra}</p>
                     ) : null}
 
                     {entraEnabled ? (
@@ -50,7 +68,7 @@ export default function Login() {
                     {entraEnabled && localLoginEnabled ? (
                         <div className="my-6 flex items-center gap-4">
                             <span className="h-px flex-1 bg-slate-200" />
-                            <span className="text-xs uppercase tracking-widest text-slate-400">
+                            <span className="text-xs uppercase tracking-widest text-slate-600">
                                 {translations.auth.or ?? 'eller'}
                             </span>
                             <span className="h-px flex-1 bg-slate-200" />
@@ -58,13 +76,13 @@ export default function Login() {
                     ) : null}
 
                     {localLoginEnabled ? (
-                    <form className="space-y-5" onSubmit={submit}>
+                    <form id="login-form" className="space-y-5" onSubmit={submit}>
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-slate-700" htmlFor="email">
                                 {translations.auth.email}
                             </label>
                             <input
-                                id="email"
+                                {...email.controlProps}
                                 type="email"
                                 value={data.email}
                                 onChange={(event) => setData('email', event.target.value)}
@@ -72,7 +90,7 @@ export default function Login() {
                                 autoComplete="email"
                                 required
                             />
-                            {errors.email ? <p className="text-sm text-rose-600">{errors.email}</p> : null}
+                            {errors.email ? <p id={email.errorId} className="text-sm text-rose-700">{errors.email}</p> : null}
                         </div>
 
                         <div className="space-y-2">
@@ -80,7 +98,7 @@ export default function Login() {
                                 {translations.auth.password}
                             </label>
                             <input
-                                id="password"
+                                {...password.controlProps}
                                 type="password"
                                 value={data.password}
                                 onChange={(event) => setData('password', event.target.value)}
@@ -88,7 +106,7 @@ export default function Login() {
                                 autoComplete="current-password"
                                 required
                             />
-                            {errors.password ? <p className="text-sm text-rose-600">{errors.password}</p> : null}
+                            {errors.password ? <p id={password.errorId} className="text-sm text-rose-700">{errors.password}</p> : null}
                         </div>
 
                         <label className="flex items-center gap-3 text-sm text-slate-600">
@@ -111,7 +129,7 @@ export default function Login() {
                     </form>
                     ) : null}
                 </div>
-            </div>
+            </main>
         </>
     );
 }

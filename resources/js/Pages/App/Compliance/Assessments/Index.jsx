@@ -3,8 +3,12 @@ import { Link, router, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../../Components/App/PageHelpButton';
+import ScrollRegion from '../../../../Components/App/ScrollRegion';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
+import { INPUT } from '../../../../Support/formStyles';
+import { useTransitionAnnouncement } from '../../../../Support/statusAnnouncement';
+import { filterSignature } from '../complianceA11y';
 import { rememberWorklist } from '../../../../Support/complianceNavigation';
 import { formatLongDate } from '../../Improvements/improvementStatus';
 import RequirementOrigin from '../RequirementOrigin';
@@ -23,7 +27,6 @@ import {
 } from './complianceAssessments';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const FILTER_LABEL = 'block text-base font-semibold text-slate-700';
 
 /**
@@ -53,20 +56,24 @@ function Figures({ stats, filters, ta }) {
                 {STAT_TILES.map(({ key, filter }) => {
                     const value = stats[key] ?? 0;
                     const tone = key === 'non_compliant' && value > 0 ? 'text-rose-700' : key === 'partially_compliant' && value > 0 ? 'text-amber-800' : 'text-slate-950';
-                    const body = (
-                        <>
-                            <dt className="text-base font-semibold text-slate-600">{statLabel(key, ta)}</dt>
-                            <dd className={`mt-1 text-3xl font-semibold ${tone}`}>{value}</dd>
-                        </>
-                    );
+                    const figure = <dd className={`mt-1 text-3xl font-semibold ${tone}`}>{value}</dd>;
 
+                    // A dt and its dd stay direct children of the tile (1.3.1: a link round them broke
+                    // the list); the link sits in the dt and stretches over the tile, which draws the
+                    // focus outline for it.
                     return filter === null ? (
-                        <div key={key} className="rounded-2xl border border-slate-200 bg-slate-50 p-4" data-testid={`compliance-assessments-stat-${key}`}>{body}</div>
+                        <div key={key} className="rounded-2xl border border-slate-200 bg-slate-50 p-4" data-testid={`compliance-assessments-stat-${key}`}>
+                            <dt className="text-base font-semibold text-slate-600">{statLabel(key, ta)}</dt>
+                            {figure}
+                        </div>
                     ) : (
-                        <div key={key} className="rounded-2xl border border-slate-200 bg-slate-50 hover:border-violet-300 hover:bg-violet-50" data-testid={`compliance-assessments-stat-${key}`}>
-                            <Link href={href(filter)} preserveScroll className="block rounded-2xl p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300" aria-label={`${statLabel(key, ta)}: ${value}. ${ta.show_these ?? 'Vis disse kravene'}`}>
-                                {body}
-                            </Link>
+                        <div key={key} className="relative rounded-2xl border border-slate-200 bg-slate-50 p-4 hover:border-violet-300 hover:bg-violet-50 has-[a:focus-visible]:outline-2 has-[a:focus-visible]:outline-offset-2 has-[a:focus-visible]:outline-violet-600 has-[a:focus-visible]:outline-solid" data-testid={`compliance-assessments-stat-${key}`}>
+                            <dt className="text-base font-semibold text-slate-600">
+                                <Link href={href(filter)} preserveScroll className="after:absolute after:inset-0 after:rounded-2xl focus-visible:outline-none" data-focus-indicator="own" aria-label={`${statLabel(key, ta)}: ${value}. ${ta.show_these ?? 'Vis disse kravene'}`}>
+                                    {statLabel(key, ta)}
+                                </Link>
+                            </dt>
+                            {figure}
                         </div>
                     );
                 })}
@@ -118,24 +125,25 @@ function PerSource({ rows, filters, ta }) {
                 ))}
             </ul>
 
-            <div className="mt-4 hidden overflow-x-auto lg:block">
+            <ScrollRegion className="mt-4 hidden overflow-x-auto lg:block" label={ta.per_source_heading ?? 'Per standard'}>
                 <table className="w-full text-base">
+                    <caption className="sr-only">{ta.per_source_heading ?? 'Per standard'}</caption>
                     <thead>
                         <tr className="border-b border-slate-200 text-left font-semibold text-slate-600">
-                            <th className="pb-3 pr-4">{ta.col_standard ?? 'Standard'}</th>
-                            {SOURCE_COLUMNS.map((key) => <th key={key} className="px-3 pb-3 text-right">{statLabel(key, ta)}</th>)}
+                            <th scope="col" className="pb-3 pr-4">{ta.col_standard ?? 'Standard'}</th>
+                            {SOURCE_COLUMNS.map((key) => <th key={key} scope="col" className="px-3 pb-3 text-right">{statLabel(key, ta)}</th>)}
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                         {rows.map((row) => (
                             <tr key={row.id} data-testid={`compliance-assessments-source-row-${row.id}`}>
-                                <td className="py-3 pr-4"><Link href={filterHref(row.id)} className="font-semibold text-violet-700 hover:text-violet-900">{row.label}</Link></td>
+                                <th scope="row" className="py-3 pr-4 text-left font-normal"><Link href={filterHref(row.id)} className="font-semibold text-violet-700 hover:text-violet-900">{row.label}</Link></th>
                                 {SOURCE_COLUMNS.map((key) => <td key={key} className="px-3 py-3 text-right text-slate-800">{row.stats[key] ?? 0}</td>)}
                             </tr>
                         ))}
                     </tbody>
                 </table>
-            </div>
+            </ScrollRegion>
         </section>
     );
 }
@@ -147,6 +155,7 @@ function WorklistRow({ item, ta, locale }) {
             .replace(':date', formatLongDate(item.assessed_at, locale))
             .replace(':name', item.assessed_by_name ?? (ta.unknown_user ?? 'en tidligere bruker'))
         : null;
+    const relevanceAction = item.is_control ? (ta.choose_control ?? 'Gjør kontrollvalg') : (ta.clarify_relevance ?? 'Avklar relevans');
 
     return (
         <li className="flex flex-wrap items-start justify-between gap-3 py-4" data-testid="compliance-assessments-row" data-requirement-id={item.id}>
@@ -165,8 +174,8 @@ function WorklistRow({ item, ta, locale }) {
                     </Link>
                 )}
                 {item.relevance_url && (
-                    <Link href={item.relevance_url} className={SECONDARY_ACTION}>
-                        {item.is_control ? (ta.choose_control ?? 'Gjør kontrollvalg') : (ta.clarify_relevance ?? 'Avklar relevans')}
+                    <Link href={item.relevance_url} className={SECONDARY_ACTION} aria-label={`${relevanceAction}: ${item.origin?.reference ?? ''} ${item.origin?.title ?? ''}`.trim()}>
+                        {relevanceAction}
                     </Link>
                 )}
             </div>
@@ -225,6 +234,10 @@ export default function ComplianceAssessmentsIndex() {
     };
 
     const filtered = Boolean(filters.source || filters.status || filters.search);
+    const countText = countLabel(visibleCount, ta.count_one ?? '1 krav vises', ta.count ?? ':count krav vises');
+
+    // The count is on screen; it is also spoken once after each Vis (4.1.3, A11Y-111).
+    useTransitionAnnouncement(filterSignature(filters, ['source', 'status', 'search']), () => ({ message: countText }));
     const empty = (stats.assessable ?? 0) + (stats.not_applicable ?? 0) + (stats.relevance_open ?? 0) === 0;
 
     return (
@@ -284,7 +297,7 @@ export default function ComplianceAssessmentsIndex() {
                             </form>
 
                             <p className="mt-4 text-base text-slate-600" data-testid="compliance-assessments-count">
-                                {countLabel(visibleCount, ta.count_one ?? '1 krav vises', ta.count ?? ':count krav vises')}
+                                {countText}
                             </p>
 
                             {filters.status === 'relevance_open' && (

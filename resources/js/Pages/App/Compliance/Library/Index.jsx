@@ -30,11 +30,17 @@ export default function ComplianceLibraryIndex() {
     const [confirming, setConfirming] = useState(null);
     const [activating, setActivating] = useState(false);
     const confirmRef = useRef(null);
+    // «Aktiver» is gone once the standard is activated, so the dialog cannot hand focus back to it;
+    // it goes to the card's «Til etterlevelsesvurdering» instead (2.4.3, A11Y-014).
+    const [activatedKey, setActivatedKey] = useState(null);
+    const afterActivationRef = useRef(null);
 
     const activate = () => {
         if (! confirming || activating) {
             return;
         }
+
+        setActivatedKey(confirming.key);
 
         router.post(confirming.activate_url, {}, {
             preserveScroll: true,
@@ -99,7 +105,7 @@ export default function ComplianceLibraryIndex() {
                                 <div className="mt-auto flex flex-wrap gap-3">
                                     {framework.activated ? (
                                         <>
-                                            <Link href={framework.assessments_url} className={PRIMARY_ACTION}>{tl.open_assessments ?? 'Til etterlevelsesvurdering'}</Link>
+                                            <Link ref={framework.key === activatedKey ? afterActivationRef : undefined} href={framework.assessments_url} className={PRIMARY_ACTION}>{tl.open_assessments ?? 'Til etterlevelsesvurdering'}</Link>
                                             <Link href={framework.register_url} className={SECONDARY_ACTION}>{tl.open_register ?? 'Åpne i kravregisteret'}</Link>
                                             <Link href={framework.url} className={SECONDARY_ACTION}>{tl.open_framework ?? 'Se innholdet'}</Link>
                                         </>
@@ -127,17 +133,21 @@ export default function ComplianceLibraryIndex() {
                     onClose={() => setConfirming(null)}
                     closeDisabled={activating}
                     titleId="compliance-library-activate-title"
+                    descriptionId="compliance-library-activate-description"
                     initialFocusRef={confirmRef}
+                    fallbackFocusRef={afterActivationRef}
                 >
                     {confirming && (
                         <div data-testid="compliance-library-activate-dialog">
                             <h2 id="compliance-library-activate-title" className="text-xl font-semibold tracking-tight text-slate-950">
                                 {(tl.activate_dialog_title ?? 'Aktiver :name?').replace(':name', confirming.reference)}
                             </h2>
-                            <p className="mt-2 text-base leading-6 text-slate-600">{activationText(confirming, tl)}</p>
+                            <p id="compliance-library-activate-description" className="mt-2 text-base leading-6 text-slate-600">{activationText(confirming, tl)}</p>
                             <div className="mt-6 flex flex-wrap justify-end gap-3">
-                                <button type="button" onClick={() => setConfirming(null)} disabled={activating} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
-                                <button ref={confirmRef} type="button" onClick={activate} disabled={activating} className={PRIMARY_ACTION}>
+                                {/* Unavailable while activating, but focusable: a disabled button inside the
+                                    dialog dropped focus out of it to <body> (2.4.3, A11Y-196). */}
+                                <button type="button" onClick={() => { if (! activating) setConfirming(null); }} aria-disabled={activating || undefined} className={`${SECONDARY_ACTION} aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}>{tr.cancel ?? 'Avbryt'}</button>
+                                <button ref={confirmRef} type="button" onClick={activate} aria-disabled={activating || undefined} className={`${PRIMARY_ACTION} aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}>
                                     {activating ? (tl.activating ?? 'Aktiverer...') : (tl.activate ?? 'Aktiver for virksomheten')}
                                 </button>
                             </div>

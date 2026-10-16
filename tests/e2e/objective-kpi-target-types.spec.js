@@ -131,9 +131,13 @@ test('a growth KPI is defined from a startverdi, measured, corrected and judged'
     // Utvikling over tid: one point per period, the corrected value only.
     const trend = page.getByTestId('kpi-trend');
     await expect(trend).toBeVisible();
-    await expect(trend.locator('circle[tabindex="0"]')).toHaveCount(2);
-    await trend.locator('circle[tabindex="0"]').last().focus();
-    await expect(page.getByRole('status').filter({ hasText: 'NOK 1 350 000' })).toBeVisible();
+    // One point per period. The chart is a picture named by its summary (A11Y-052): no tab stop per
+    // point; hovering one still shows its value, and every value is in Målehistorikk.
+    await expect(trend.getByTestId('kpi-trend-point')).toHaveCount(2);
+    await expect(trend.locator('[tabindex]')).toHaveCount(0);
+    await expect(trend).toHaveAttribute('aria-label', /Siste verdi er NOK\s1\s350\s000 for /);
+    await trend.getByTestId('kpi-trend-point').last().hover();
+    await expect(page.getByTestId('kpi-trend-tooltip')).toContainText('NOK 1 350 000');
     await page.screenshot({ path: 'test-results/kpi-target-types-02-growth-measured.png', fullPage: true });
 
     // Rediger: the growth fields come back as they were; a higher change moves the målverdi.

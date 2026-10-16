@@ -1,6 +1,9 @@
 {{-- Ledelsens gjennomgang as a PDF (ManagementReviewReportController::pdf). Rendered by dompdf from
      ManagementReviewReportBuilder::document() — the same document as the print view, already narrowed
-     to what the reader may see. DejaVu Sans carries æ, ø and å. --}}
+     to what the reader may see. DejaVu Sans carries æ, ø and å.
+     dompdf writes no PDF tags, so this file is not accessible to assistive technology on its own: the
+     HTML print view (Report.jsx) is the accessible version and says so beside the download (A11Y-126).
+     Header cells carry scope for any reader of this HTML. --}}
 @php($labels = $document['labels'])
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
@@ -80,8 +83,8 @@
                         <h3>{{ $list['label'] }} ({{ $list['total'] }})</h3>
                         <table>
                             <tr>
-                                <th>{{ $labels['item'] }}</th>
-                                @foreach ($list['columns'] as $column)<th>{{ $column['label'] }}</th>@endforeach
+                                <th scope="col">{{ $labels['item'] }}</th>
+                                @foreach ($list['columns'] as $column)<th scope="col">{{ $column['label'] }}</th>@endforeach
                             </tr>
                             @foreach ($list['rows'] as $row)
                                 <tr>
@@ -111,7 +114,7 @@
         <p class="muted">{{ $labels['none'] }}</p>
     @else
         <table>
-            <tr><th>{{ $labels['type'] }}</th><th>{{ $labels['decision'] }}</th><th>{{ $labels['owner'] }}</th><th>{{ $labels['due'] }}</th><th>{{ $labels['follow_up'] }}</th></tr>
+            <tr><th scope="col">{{ $labels['type'] }}</th><th scope="col">{{ $labels['decision'] }}</th><th scope="col">{{ $labels['owner'] }}</th><th scope="col">{{ $labels['due'] }}</th><th scope="col">{{ $labels['follow_up'] }}</th></tr>
             @foreach ($document['decisions'] as $decision)
                 <tr>
                     <td>{{ $decision['kind'] }}</td>

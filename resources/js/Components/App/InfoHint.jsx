@@ -74,7 +74,9 @@ export default function InfoHint({
                 onBlur={close}
                 className={classNames(
                     'inline-flex items-center justify-center rounded-full border border-slate-300 bg-white font-semibold leading-none text-slate-500 transition',
-                    'hover:border-violet-300 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
+                    // Keyboard focus is the app-wide 2 px violet-600 outline (resources/css/app.css); the
+                    // old violet-300 ring beside it was under 3:1 and only doubled the indicator.
+                    'hover:border-violet-300 hover:text-violet-700',
                     isOpen ? 'border-violet-300 text-violet-700 shadow-sm' : '',
                     buttonSizeClass,
                 )}

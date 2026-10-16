@@ -1,7 +1,14 @@
 import { router, useForm, usePage } from '@inertiajs/react';
 import { PRIMARY_COLOURS, SECONDARY_COLOURS, WARNING_COLOURS } from '../../../Support/actionStyles';
-import { useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import ActionDialog, { DialogTitleBar } from '../../../Components/App/ActionDialog';
+import FormField from '../../../Components/App/FormField';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
+import { announce } from '../../../Support/announcer';
+import { domSafeId } from '../../../Support/formFieldA11y';
+import { useFocusFirstError } from '../../../Support/focusManagement';
+import { rowErrorId, trackRowAction, useRowActionError } from '../../../Support/rowActionError';
 import CustomerEnvironmentHeader from './CustomerEnvironmentHeader';
 import CustomerRolesPanel from './CustomerRolesPanel';
 import PermissionSection, { MATRIX } from './PermissionSection';
@@ -23,36 +30,43 @@ function formatDate(value, locale) {
     }).format(new Date(value));
 }
 
-function EnvironmentModal({ isOpen, title, description, onClose, children, footer, maxWidthClass = 'max-w-2xl' }) {
-    if (!isOpen) {
-        return null;
-    }
+const MODAL_SIZES = { 'max-w-xl': 'md', 'max-w-2xl': 'lg', 'max-w-3xl': 'xl' };
+
+/**
+ * The dialog for this page and its panels (avdeling, rolle, fagområde) — ActionDialog with this
+ * page's own header and footer bands (A11Y-002): named by its title, described by its description,
+ * focus kept inside and handed back on close, the page behind it inert.
+ */
+function EnvironmentModal({ isOpen, title, description, onClose, children, footer, maxWidthClass = 'max-w-2xl', closeDisabled = false }) {
+    const { translations = {} } = usePage().props;
+    const baseId = `environment-modal-${domSafeId(useId())}`;
+    const titleId = `${baseId}-title`;
+    const descriptionId = description ? `${baseId}-description` : undefined;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-slate-950/45 px-4 py-4">
-            <div
-                className={classNames(
-                    'flex max-h-[90vh] w-full flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]',
-                    maxWidthClass,
-                )}
-            >
-                <div className="shrink-0 flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
-                    <div className="space-y-1">
-                        <h2 className="text-xl font-semibold text-slate-950">{title}</h2>
-                        {description ? <p className="text-base leading-6 text-slate-600">{description}</p> : null}
-                    </div>
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
-                    >
-                        ×
-                    </button>
-                </div>
+        <ActionDialog
+            isOpen={isOpen}
+            onClose={onClose}
+            closeDisabled={closeDisabled}
+            titleId={titleId}
+            descriptionId={descriptionId}
+            size={MODAL_SIZES[maxWidthClass] ?? 'lg'}
+            padded={false}
+        >
+            <div className="flex max-h-[calc(100vh-2rem)] flex-col">
+                <DialogTitleBar
+                    titleId={titleId}
+                    title={title}
+                    descriptionId={descriptionId}
+                    description={description}
+                    onClose={onClose}
+                    closeDisabled={closeDisabled}
+                    closeLabel={translations.a11y?.close_dialog ?? 'Lukk dialog'}
+                />
                 <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">{children}</div>
                 {footer ? <div className="shrink-0 border-t border-slate-200 bg-white px-6 py-5">{footer}</div> : null}
             </div>
-        </div>
+        </ActionDialog>
     );
 }
 
@@ -131,27 +145,6 @@ function DepartmentSelector({
     );
 }
 
-function CollapsibleSection({ title, description, isOpen, onToggle, children }) {
-    return (
-        <section className="rounded-[24px] border border-slate-200 bg-slate-50/60">
-            <button
-                type="button"
-                onClick={onToggle}
-                className="flex w-full items-start justify-between gap-4 px-5 py-4 text-left"
-            >
-                <div className="space-y-1">
-                    <div className="text-base font-semibold text-slate-900">{title}</div>
-                    {description ? <p className="text-base leading-6 text-slate-600">{description}</p> : null}
-                </div>
-                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold leading-6 text-slate-600">
-                    {isOpen ? 'Skjul' : 'Vis'}
-                </span>
-            </button>
-            {isOpen ? <div className="border-t border-slate-200 px-5 py-5">{children}</div> : null}
-        </section>
-    );
-}
-
 export default function CustomerEnvironmentIndex({
     activeTab,
     departments,
@@ -166,8 +159,10 @@ export default function CustomerEnvironmentIndex({
     customerRoles = null,
     routes,
 }) {
-    const { locale = 'nb-NO', translations = {} } = usePage().props;
+    const { locale = 'nb-NO', translations = {}, flash = {} } = usePage().props;
+    const rowError = useRowActionError(flash?.error ?? null);
     const tce = translations?.customer_env ?? {};
+    const a11y = translations?.a11y ?? {};
     const [departmentModalState, setDepartmentModalState] = useState({ mode: null, department: null });
     const [togglingDepartmentId, setTogglingDepartmentId] = useState(null);
     const [togglingUserId, setTogglingUserId] = useState(null);
@@ -194,6 +189,8 @@ export default function CustomerEnvironmentIndex({
         description: '',
         redirect_to: departmentsTabUrl,
     });
+    const departmentFormRef = useRef(null);
+    const focusFirstDepartmentError = useFocusFirstError(departmentFormRef);
 
     const normalizedSearch = userSearch.trim().toLowerCase();
     const selectedDepartmentId = userDepartmentFilter === '' ? null : Number(userDepartmentFilter);
@@ -212,6 +209,25 @@ export default function CustomerEnvironmentIndex({
 
         return matchesSearch && matchesDepartment && matchesStatus;
     });
+
+    // The table changes as the administrator types or picks a filter; the count is said once the
+    // filters settle, not on every keystroke (4.1.3, A11Y-111). The visible table needs no copy.
+    const filterKey = `${normalizedSearch}|${userDepartmentFilter}|${userStatusFilter}`;
+    const filterKeyRef = useRef(filterKey);
+    useEffect(() => {
+        if (filterKeyRef.current === filterKey) {
+            return undefined;
+        }
+
+        filterKeyRef.current = filterKey;
+        const timer = window.setTimeout(() => {
+            announce(filteredUsers.length === 0
+                ? (a11y.results_none ?? 'Ingen treff')
+                : (a11y.results_count ?? ':count treff').replace(':count', String(filteredUsers.length)));
+        }, 600);
+
+        return () => window.clearTimeout(timer);
+    }, [filterKey, filteredUsers.length, a11y.results_none, a11y.results_count]);
 
     const openCreateDepartment = () => {
         departmentForm.reset();
@@ -245,6 +261,7 @@ export default function CustomerEnvironmentIndex({
             departmentForm.put(departmentModalState.department.update_url, {
                 preserveScroll: true,
                 onSuccess: closeDepartmentModal,
+                onError: focusFirstDepartmentError,
             });
 
             return;
@@ -253,6 +270,7 @@ export default function CustomerEnvironmentIndex({
         departmentForm.post(routes.departments_store, {
             preserveScroll: true,
             onSuccess: closeDepartmentModal,
+            onError: focusFirstDepartmentError,
         });
     };
 
@@ -300,10 +318,12 @@ export default function CustomerEnvironmentIndex({
         router.patch(
             user.toggle_active_url,
             { redirect_to: usersTabUrl },
-            {
+            // A refusal («minst én aktiv systemeier») is shown beside this row's button, not only in
+            // the banner at the top of the page (A11Y-137).
+            trackRowAction(`user-toggle-${user.id}`, {
                 preserveScroll: true,
                 onFinish: () => setTogglingUserId(null),
-            },
+            }),
         );
     };
 
@@ -327,7 +347,11 @@ export default function CustomerEnvironmentIndex({
             open={openSections.includes(BASE_SECTION_KEY)}
             onToggle={() => toggleOpenSection(BASE_SECTION_KEY)}
         >
-            <div className={MATRIX.wrapper}>
+            <ScrollRegion
+                label={(a11y.table_permissions ?? 'Rettigheter: :section').replace(':section', tcs.base_title ?? 'Anbudsroller og kundemiljø')}
+                edgeRoom={false}
+                className={MATRIX.wrapper}
+            >
                 <table className={MATRIX.table}>
                     <thead>
                         <tr className={MATRIX.headRow}>
@@ -358,14 +382,24 @@ export default function CustomerEnvironmentIndex({
                                     const checked = row.roles.includes(col.value);
                                     const locked = col.locked;
 
+                                    const saving = permissionSaving === row.key;
+
                                     return (
                                         <td key={col.value} className={MATRIX.cell}>
+                                            {/* While the row saves the box is aria-disabled, not disabled: a
+                                                disabled control drops focus to <body>, and the next Tab
+                                                started at the top of the page (A11Y-029). */}
                                             <input
                                                 type="checkbox"
                                                 checked={checked}
-                                                disabled={locked || permissionSaving === row.key}
+                                                disabled={locked}
+                                                aria-disabled={saving ? true : undefined}
                                                 aria-label={(tcs.checkbox_label ?? ':permission – :role').replace(':permission', row.label).replace(':role', col.label)}
                                                 onChange={() => {
+                                                    if (saving) {
+                                                        return;
+                                                    }
+
                                                     const nextRoles = checked
                                                         ? row.roles.filter((r) => r !== col.value)
                                                         : [...row.roles, col.value];
@@ -380,6 +414,8 @@ export default function CustomerEnvironmentIndex({
                                                             // Keeps the open sections open; the
                                                             // props carry the saved roles.
                                                             preserveState: true,
+                                                            onSuccess: () => announce(a11y.saved ?? 'Lagret'),
+                                                            onError: () => announce(a11y.save_failed ?? 'Endringen ble ikke lagret.', { politeness: 'assertive' }),
                                                             onFinish: () => setPermissionSaving(null),
                                                         },
                                                     );
@@ -393,7 +429,7 @@ export default function CustomerEnvironmentIndex({
                         ))}
                     </tbody>
                 </table>
-            </div>
+            </ScrollRegion>
         </PermissionSection>
     ) : null;
 
@@ -433,22 +469,23 @@ export default function CustomerEnvironmentIndex({
                                     <p className="mt-2 text-base text-slate-600">Opprett den første avdelingen for å strukturere kundemiljøet.</p>
                                 </div>
                             ) : (
-                                <div className="overflow-x-auto">
+                                <ScrollRegion label={a11y.table_departments ?? 'Avdelinger'} edgeRoom={false}>
                                     <table className="min-w-full divide-y divide-slate-200">
+                                        <caption className="sr-only">{a11y.table_departments ?? 'Avdelinger'}</caption>
                                         <thead className="bg-slate-50">
                                             <tr className="text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                <th className="px-6 py-4">Navn</th>
-                                                <th className="px-6 py-4">Beskrivelse</th>
-                                                <th className="px-6 py-4">Brukere</th>
-                                                <th className="px-6 py-4">Status</th>
-                                                <th className="px-6 py-4">Oppdatert</th>
-                                                <th className="px-6 py-4">Handlinger</th>
+                                                <th scope="col" className="px-6 py-4">Navn</th>
+                                                <th scope="col" className="px-6 py-4">Beskrivelse</th>
+                                                <th scope="col" className="px-6 py-4">Brukere</th>
+                                                <th scope="col" className="px-6 py-4">Status</th>
+                                                <th scope="col" className="px-6 py-4">Oppdatert</th>
+                                                <th scope="col" className="px-6 py-4">Handlinger</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {departments.map((department) => (
                                                 <tr key={department.id} className="text-base text-slate-700">
-                                                    <td className="px-6 py-4 font-medium text-slate-950">{department.name}</td>
+                                                    <th scope="row" className="px-6 py-4 text-left font-medium text-slate-950">{department.name}</th>
                                                     <td className="px-6 py-4 text-slate-600">{department.description || '—'}</td>
                                                     <td className="px-6 py-4 text-slate-600">{department.user_count}</td>
                                                     <td className="px-6 py-4">
@@ -470,6 +507,7 @@ export default function CustomerEnvironmentIndex({
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => openEditDepartment(department)}
+                                                                        aria-label={`Rediger ${department.name}`}
                                                                         className={`inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition ${SECONDARY_COLOURS}`}
                                                                     >
                                                                         Rediger
@@ -478,6 +516,7 @@ export default function CustomerEnvironmentIndex({
                                                                         type="button"
                                                                         onClick={() => toggleDepartmentActive(department)}
                                                                         disabled={togglingDepartmentId === department.id}
+                                                                        aria-label={`${department.is_active ? 'Deaktiver' : 'Aktiver'} ${department.name}`}
                                                                         className={
                                                                             department.is_active
                                                                                 ? `inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition disabled:opacity- ${WARNING_COLOURS}`
@@ -504,7 +543,7 @@ export default function CustomerEnvironmentIndex({
                                             ))}
                                         </tbody>
                                     </table>
-                                </div>
+                                </ScrollRegion>
                             )}
                         </section>
                     </section>
@@ -534,7 +573,7 @@ export default function CustomerEnvironmentIndex({
                                         value={userSearch}
                                         onChange={(event) => setUserSearch(event.target.value)}
                                         placeholder="Søk på navn eller e-post"
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                     />
                                 </label>
                                 <label className="space-y-2">
@@ -542,7 +581,7 @@ export default function CustomerEnvironmentIndex({
                                     <select
                                         value={userDepartmentFilter}
                                         onChange={(event) => setUserDepartmentFilter(event.target.value)}
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                     >
                                         <option value="">Alle avdelinger</option>
                                         {departmentFilterOptions.map((department) => (
@@ -557,7 +596,7 @@ export default function CustomerEnvironmentIndex({
                                     <select
                                         value={userStatusFilter}
                                         onChange={(event) => setUserStatusFilter(event.target.value)}
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                     >
                                         <option value="all">Alle</option>
                                         <option value="active">Aktive</option>
@@ -576,28 +615,29 @@ export default function CustomerEnvironmentIndex({
                                     </p>
                                 </div>
                             ) : (
-                                <div className="overflow-x-auto">
+                                <ScrollRegion label={a11y.table_users ?? 'Brukere'} edgeRoom={false}>
                                     <table className="min-w-full divide-y divide-slate-200">
+                                        <caption className="sr-only">{a11y.table_users ?? 'Brukere'}</caption>
                                         <thead className="bg-slate-50">
                                             <tr className="text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                <th className="px-6 py-4">Navn</th>
-                                                <th className="px-6 py-4">E-post</th>
-                                                <th className="px-6 py-4">Rolle</th>
-                                                <th className="px-6 py-4">{tce.col_customer_roles ?? 'Egne roller'}</th>
-                                                <th className="px-6 py-4">Avdelinger</th>
-                                                <th className="px-6 py-4">Status</th>
-                                                <th className="px-6 py-4">Handlinger</th>
+                                                <th scope="col" className="px-6 py-4">Navn</th>
+                                                <th scope="col" className="px-6 py-4">E-post</th>
+                                                <th scope="col" className="px-6 py-4">Rolle</th>
+                                                <th scope="col" className="px-6 py-4">{tce.col_customer_roles ?? 'Egne roller'}</th>
+                                                <th scope="col" className="px-6 py-4">Avdelinger</th>
+                                                <th scope="col" className="px-6 py-4">Status</th>
+                                                <th scope="col" className="px-6 py-4">Handlinger</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {filteredUsers.map((user) => (
                                                 <tr key={user.id} className="text-base text-slate-700">
-                                                    <td className="px-6 py-4">
+                                                    <th scope="row" className="px-6 py-4 text-left font-normal">
                                                         <div className="font-medium text-slate-950">{user.name}</div>
                                                         <div className="mt-1 text-base text-slate-600">
                                                             Opprettet {formatDate(user.created_at, locale)}
                                                         </div>
-                                                    </td>
+                                                    </th>
                                                     <td className="px-6 py-4 text-slate-600">{user.email}</td>
                                                     <td className="px-6 py-4">
                                                         <span
@@ -725,6 +765,7 @@ export default function CustomerEnvironmentIndex({
                                                         <div className="flex flex-wrap gap-2">
                                                             <a
                                                                 href={userEditHref(user)}
+                                                                aria-label={`Rediger ${user.name}`}
                                                                 className={`inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition ${SECONDARY_COLOURS}`}
                                                             >
                                                                 Rediger
@@ -733,6 +774,8 @@ export default function CustomerEnvironmentIndex({
                                                                 type="button"
                                                                 disabled={!user.can_toggle_active || togglingUserId === user.id}
                                                                 onClick={() => toggleUserActive(user)}
+                                                                aria-label={user.is_active && user.is_self ? undefined : `${user.is_active ? 'Deaktiver' : 'Aktiver'} ${user.name}`}
+                                                                aria-describedby={rowError(`user-toggle-${user.id}`) ? rowErrorId(`user-toggle-${user.id}`) : undefined}
                                                                 className={
                                                                     user.can_toggle_active
                                                                         ? user.is_active
@@ -752,12 +795,17 @@ export default function CustomerEnvironmentIndex({
                                                                         : 'Aktiver'}
                                                             </button>
                                                         </div>
+                                                        {rowError(`user-toggle-${user.id}`) ? (
+                                                            <p id={rowErrorId(`user-toggle-${user.id}`)} className="mt-2 max-w-xs text-base text-rose-700">
+                                                                {rowError(`user-toggle-${user.id}`)}
+                                                            </p>
+                                                        ) : null}
                                                     </td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                     </table>
-                                </div>
+                                </ScrollRegion>
                             )}
                         </section>
                     </section>
@@ -768,35 +816,54 @@ export default function CustomerEnvironmentIndex({
                     title={departmentModalState.mode === 'edit' ? 'Rediger avdeling' : 'Opprett avdeling'}
                     description="Alle endringer gjelder kun deres eget kundemiljø."
                     onClose={closeDepartmentModal}
+                    closeDisabled={departmentForm.processing}
                 >
-                    <form id="department-environment-form" onSubmit={handleDepartmentSubmit} className="space-y-6">
+                    <form ref={departmentFormRef} id="department-environment-form" onSubmit={handleDepartmentSubmit} className="space-y-6">
                         {firstDepartmentError ? (
                             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base leading-6 text-rose-800">
                                 {firstDepartmentError}
                             </div>
                         ) : null}
 
-                        <label className="block space-y-2">
-                            <span className="text-base font-medium text-slate-700">Navn</span>
-                            <input
-                                type="text"
-                                value={departmentForm.data.name}
-                                onChange={(event) => departmentForm.setData('name', event.target.value)}
-                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                            />
-                            {departmentForm.errors.name ? <p className="text-base text-rose-700">{departmentForm.errors.name}</p> : null}
-                        </label>
+                        <FormField
+                            id="department-environment-name"
+                            label="Navn"
+                            error={departmentForm.errors.name}
+                            className="space-y-2"
+                            labelClassName="text-base font-medium text-slate-700"
+                            controlClassName=""
+                            errorClassName="text-base text-rose-700"
+                        >
+                            {(field) => (
+                                <input
+                                    {...field}
+                                    type="text"
+                                    value={departmentForm.data.name}
+                                    onChange={(event) => departmentForm.setData('name', event.target.value)}
+                                    className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                />
+                            )}
+                        </FormField>
 
-                        <label className="block space-y-2">
-                            <span className="text-base font-medium text-slate-700">Beskrivelse</span>
-                            <textarea
-                                rows={4}
-                                value={departmentForm.data.description}
-                                onChange={(event) => departmentForm.setData('description', event.target.value)}
-                                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                            />
-                            {departmentForm.errors.description ? <p className="text-base text-rose-700">{departmentForm.errors.description}</p> : null}
-                        </label>
+                        <FormField
+                            id="department-environment-description"
+                            label="Beskrivelse"
+                            error={departmentForm.errors.description}
+                            className="space-y-2"
+                            labelClassName="text-base font-medium text-slate-700"
+                            controlClassName=""
+                            errorClassName="text-base text-rose-700"
+                        >
+                            {(field) => (
+                                <textarea
+                                    {...field}
+                                    rows={4}
+                                    value={departmentForm.data.description}
+                                    onChange={(event) => departmentForm.setData('description', event.target.value)}
+                                    className="w-full rounded-2xl border border-field-border bg-white px-4 py-3 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                />
+                            )}
+                        </FormField>
 
                         <div className="sticky bottom-0 -mx-6 mt-6 border-t border-slate-200 bg-white/95 px-6 pt-5 backdrop-blur-sm">
                             <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">

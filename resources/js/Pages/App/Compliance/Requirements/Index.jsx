@@ -1,10 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../../Components/App/PageHelpButton';
+import ScrollRegion from '../../../../Components/App/ScrollRegion';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
+import { usePanelFocus } from '../../../../Support/focusManagement';
+import { INPUT } from '../../../../Support/formStyles';
+import { useTransitionAnnouncement } from '../../../../Support/statusAnnouncement';
+import { filterSignature } from '../complianceA11y';
 import { APPLICABILITY_TONES, applicabilityLabel } from '../Library/complianceLibrary';
 import RequirementOrigin from '../RequirementOrigin';
 import { rememberRegister } from '../../../../Support/complianceNavigation';
@@ -16,7 +21,6 @@ import { REGISTER_URL, VIEW_GROUPED, VIEW_LIST, isFiltered, registerQuery, toggl
 import { REQUIREMENT_STATUS_TONES, countLabel } from './complianceRequirement';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const FILTER_LABEL = 'block text-base font-semibold text-slate-700';
 
 /**
@@ -61,7 +65,7 @@ function ViewSwitch({ view, shownAs, onChange, tr }) {
                             aria-pressed={active}
                             disabled={searching}
                             onClick={() => onChange(option.value)}
-                            className={`min-h-10 rounded-lg px-4 text-base font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 disabled:cursor-not-allowed ${active ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-700 hover:text-slate-950'}`}
+                            className={`min-h-10 rounded-lg px-4 text-base font-semibold disabled:cursor-not-allowed ${active ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-700 hover:text-slate-950'}`}
                         >
                             {option.label}
                         </button>
@@ -128,6 +132,14 @@ export default function ComplianceRequirementsIndex() {
         rememberRegister(pageUrl);
     }, [pageUrl]);
 
+    // Nytt krav and Kravkilder open in place of their buttons: focus goes into them, and back (A11Y-014).
+    const createPanelRef = useRef(null);
+    const createButtonRef = useRef(null);
+    const sourcesHeadingRef = useRef(null);
+    const sourcesButtonRef = useRef(null);
+    usePanelFocus(creating, { panelRef: createPanelRef, returnFocusRef: createButtonRef });
+    usePanelFocus(showSources, { panelRef: sourcesHeadingRef, returnFocusRef: sourcesButtonRef, initialFocus: 'panel' });
+
     // Nothing is registered by hand under an activated Kravbibliotek framework.
     const manualSources = sources.filter((option) => ! option.from_library);
 
@@ -188,6 +200,14 @@ export default function ComplianceRequirementsIndex() {
     // narrowed to one standard («Åpne i kravregisteret» arrives with it selected).
     const sourceOptions = sources.map((option) => ({ id: option.id, label: option.label }));
 
+    // The hit count is on screen; it is also spoken once after each search or filter (4.1.3,
+    // A11Y-111) — not on the first render, and not when a group opens or the view changes.
+    const countText = countLabel(visibleCount, tr.count_one ?? '1 krav', tr.count ?? ':count krav');
+    const matchingText = (tr.register_view?.matching ?? ':count passer søket og filtrene').replace(':count', String(matchingCount));
+    useTransitionAnnouncement(filterSignature(filters, ['search', 'source', 'status', 'applicability']), () => ({
+        message: filtered ? `${countText} · ${matchingText}` : countText,
+    }));
+
     return (
         <CustomerAppLayout title={tr.register_title ?? 'Kravregister'} showPageTitle={false} workView={creating ? (tr.create ?? 'Nytt krav') : null}>
             <div className="space-y-6">
@@ -207,12 +227,12 @@ export default function ComplianceRequirementsIndex() {
                             {tr.to_assessments ?? 'Til etterlevelsesvurdering'}
                         </Link>
                         {! showSources && (
-                            <button type="button" onClick={() => setShowSources(true)} className={SECONDARY_ACTION}>
+                            <button ref={sourcesButtonRef} type="button" onClick={() => setShowSources(true)} className={SECONDARY_ACTION}>
                                 {tr.sources?.manage ?? 'Kravkilder'}
                             </button>
                         )}
                         {canEdit && ! creating && manualSources.length > 0 && (
-                            <button type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION}>
+                            <button ref={createButtonRef} type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION}>
                                 {tr.create ?? 'Nytt krav'}
                             </button>
                         )}
@@ -231,12 +251,13 @@ export default function ComplianceRequirementsIndex() {
                         kinds={kinds}
                         canEdit={canEdit}
                         onClose={() => setShowSources(false)}
+                        headingRef={sourcesHeadingRef}
                         tr={tr}
                     />
                 )}
 
                 {creating && (
-                    <section className={CARD} aria-labelledby="compliance-create-heading">
+                    <section ref={createPanelRef} className={CARD} aria-labelledby="compliance-create-heading">
                         <h2 id="compliance-create-heading" className="mb-4 text-xl font-semibold text-slate-950">{tr.create_heading ?? 'Nytt krav'}</h2>
                         <RequirementForm
                             form={form}
@@ -250,7 +271,9 @@ export default function ComplianceRequirementsIndex() {
                     </section>
                 )}
 
-                <section className={CARD}>
+                <section className={CARD} aria-labelledby="compliance-register-heading">
+                    {/* The page's h1 is the module; the register's groups below are h3 (A11Y-119). */}
+                    <h2 id="compliance-register-heading" className="sr-only">{tr.register_title ?? 'Kravregister'}</h2>
                     <form onSubmit={submitSearch} className="grid gap-3 sm:flex sm:flex-wrap sm:items-end">
                         <div className="min-w-0 sm:min-w-[16rem] sm:flex-1">
                             <label htmlFor="compliance-search" className={FILTER_LABEL}>{tr.search_label ?? 'Søk'}</label>
@@ -300,11 +323,11 @@ export default function ComplianceRequirementsIndex() {
 
                     <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                         <p className="text-base text-slate-600">
-                            <span data-testid="compliance-count">{countLabel(visibleCount, tr.count_one ?? '1 krav', tr.count ?? ':count krav')}</span>
+                            <span data-testid="compliance-count">{countText}</span>
                             {filtered && (
                                 <span data-testid="compliance-matching-count">
                                     {' · '}
-                                    {(tr.register_view?.matching ?? ':count passer søket og filtrene').replace(':count', String(matchingCount))}
+                                    {matchingText}
                                 </span>
                             )}
                         </p>
@@ -334,21 +357,22 @@ export default function ComplianceRequirementsIndex() {
                                 ))}
                             </ul>
 
-                            <div className="mt-4 hidden overflow-x-auto md:block">
+                            <ScrollRegion className="mt-4 hidden overflow-x-auto md:block" label={tr.register_title ?? 'Kravregister'}>
                                 <table className="w-full text-base" data-testid="compliance-requirement-table">
+                                    <caption className="sr-only">{tr.register_title ?? 'Kravregister'}</caption>
                                     <thead>
                                         <tr className="border-b border-slate-200 text-left text-base font-semibold text-slate-600">
-                                            <th className="pb-3 pr-4">{tr.col_requirement ?? 'Krav'}</th>
-                                            <th className="px-4 pb-3">{tr.col_relevance ?? 'Relevans / kontrollvalg'}</th>
-                                            <th className="pb-3 pl-4">{tr.col_status ?? 'Status'}</th>
+                                            <th scope="col" className="pb-3 pr-4">{tr.col_requirement ?? 'Krav'}</th>
+                                            <th scope="col" className="px-4 pb-3">{tr.col_relevance ?? 'Relevans / kontrollvalg'}</th>
+                                            <th scope="col" className="pb-3 pl-4">{tr.col_status ?? 'Status'}</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {requirements.map((item) => (
                                             <tr key={item.id}>
-                                                <td className="py-3 pr-4 align-top">
+                                                <th scope="row" className="py-3 pr-4 text-left align-top font-normal">
                                                     <RequirementOrigin origin={item.origin} href={item.url} />
-                                                </td>
+                                                </th>
                                                 <td className="px-4 py-3 align-top" data-testid="compliance-relevance-cell"><Relevance item={item} tr={tr} /></td>
                                                 <td className="py-3 pl-4 align-top">
                                                     <StatusBadge tone={REQUIREMENT_STATUS_TONES[item.status] ?? 'slate'}>{statusLabels[item.status] ?? item.status}</StatusBadge>
@@ -357,7 +381,7 @@ export default function ComplianceRequirementsIndex() {
                                         ))}
                                     </tbody>
                                 </table>
-                            </div>
+                            </ScrollRegion>
                         </>
                     )}
                 </section>

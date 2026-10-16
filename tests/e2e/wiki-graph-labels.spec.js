@@ -86,43 +86,63 @@ test('long node titles are handled: truncated on canvas (unit-tested), never tru
     // title via a `title` attribute — regardless of the node clicked, and never with an
     // ellipsis — which is the "full title tilgjengelig hvis visuell tekst avkortes" behavior
     // the canvas-truncated label relies on.
+    // Sigma renders nodes on canvas only (no per-node DOM elements, and node positions come
+    // from a Math.random()-seeded force-directed layout), so neither a grid of clicks nor a guess
+    // from label pixels finds a node every run (OPPF-002). Sigma does tell where each node is,
+    // though: drawTruncatedNodeLabel (Graph.jsx) draws every visible label with
+    // fillText(label, data.x + data.size + 3, data.y + labelSize / 3), in CSS pixels of the label
+    // canvas. Recording those calls gives each drawn node's right edge and centre line exactly, so
+    // the click lands a few pixels inside a node that is on screen this run. No app code changes.
+    await page.addInitScript(() => {
+        const { clearRect, fillText } = CanvasRenderingContext2D.prototype;
+        window.__wikiGraphLabels = new Map();
+        // Sigma clears the label canvas before each frame's labels, so the map holds one frame.
+        CanvasRenderingContext2D.prototype.clearRect = function (...args) {
+            if (this.canvas?.classList?.contains('sigma-labels')) {
+                window.__wikiGraphLabels = new Map();
+            }
+
+            return clearRect.apply(this, args);
+        };
+        CanvasRenderingContext2D.prototype.fillText = function (text, x, y, ...rest) {
+            if (this.canvas?.classList?.contains('sigma-labels')) {
+                window.__wikiGraphLabels.set(String(text), { x, y });
+            }
+
+            return fillText.call(this, text, x, y, ...rest);
+        };
+    });
     await page.goto('/app/wiki/graph');
     await page.waitForTimeout(1200);
 
-    // Sigma renders nodes on canvas only (no per-node DOM elements, and node positions come
-    // from a Math.random()-seeded force-directed layout), so a blind grid of clicks over the
-    // canvas is unreliable — it can spend its whole budget landing between nodes. Instead,
-    // read the label canvas's own pixel data to find where a label was ACTUALLY drawn this
-    // run, then click just to its left: node labels always start at `data.x + data.size + 3`
-    // (see drawTruncatedNodeLabel in Graph.jsx), so the node's circle is reliably a short,
-    // known distance to the left of any drawn label pixel, at roughly the same height.
     const labelsCanvas = page.locator('canvas.sigma-labels');
     const canvasBox = await labelsCanvas.boundingBox();
     expect(canvasBox).not.toBeNull();
 
-    const candidates = await labelsCanvas.evaluate((canvas) => {
-        const ctx = canvas.getContext('2d');
-        const ratio = window.devicePixelRatio || 1;
-        const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const points = [];
-        for (let y = 0; y < height && points.length < 30; y += 4) {
-            for (let x = 0; x < width && points.length < 30; x += 4) {
-                if (data[(y * width + x) * 4 + 3] > 50) {
-                    points.push({ x: x / ratio, y: y / ratio });
-                    break; // leftmost drawn pixel on this row is enough — move to the next row
-                }
-            }
-        }
-        return points;
-    });
-    expect(candidates.length).toBeGreaterThan(0);
+    // The labels of the frame on screen: read twice until the camera has stopped moving.
+    const drawnLabels = () => page.evaluate(() => Array.from(window.__wikiGraphLabels, ([text, at]) => ({ text, ...at })));
+    let candidates = [];
+    await expect.poll(async () => {
+        const before = JSON.stringify(await drawnLabels());
+        await page.waitForTimeout(200);
+        candidates = await drawnLabels();
 
+        return candidates.length > 0 && JSON.stringify(candidates) === before;
+    }, { timeout: 10_000 }).toBe(true);
+
+    // Label baseline is data.y + 16 / 3 (NODE_LABEL_SIZE); the label starts 3 px right of the node.
+    const LABEL_SIZE = 16;
+    const INSIDE_NODE_PX = 3;
     const panelTitle = page.locator('p[title]').first();
     let opened = false;
-    for (const point of candidates) {
-        await page.mouse.click(canvasBox.x + point.x - 25, canvasBox.y + point.y - 5);
-        await page.waitForTimeout(30);
-        if (await panelTitle.isVisible().catch(() => false)) {
+    for (const label of candidates) {
+        const x = label.x - 3 - INSIDE_NODE_PX;
+        const y = label.y - LABEL_SIZE / 3;
+        if (x < 0 || y < 0 || x > canvasBox.width || y > canvasBox.height) {
+            continue;
+        }
+        await page.mouse.click(canvasBox.x + x, canvasBox.y + y);
+        if (await panelTitle.waitFor({ state: 'visible', timeout: 1000 }).then(() => true, () => false)) {
             opened = true;
             break;
         }

@@ -129,8 +129,10 @@ describe('the upload flow in Index.jsx', () => {
 
     test('a second selection cannot start a second upload mid-flight', () => {
         assert.match(handler, /if \(uploadForm\.processing\) \{\s*\n\s*return;/);
-        // The picker itself is also closed while the request is running.
-        assert.match(source, /disabled=\{uploadForm\.processing\}/);
+        // The picker itself is also closed while the request is running: it says so and refuses the
+        // click that would open the file dialog, but keeps focus (aria-disabled, not disabled, A11Y-156).
+        assert.match(source, /aria-disabled=\{uploadForm\.processing \|\| undefined\}\s*\n(?:\s*\/\/.*\n)*?\s*onClick=\{\(event\) => \{\s*\n\s*if \(uploadForm\.processing\) \{\s*\n\s*event\.preventDefault\(\);/);
+        assert.doesNotMatch(source, /[^-]disabled=\{uploadForm\.processing\}/);
     });
 
     /**

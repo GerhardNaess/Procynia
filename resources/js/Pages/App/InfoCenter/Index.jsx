@@ -282,7 +282,7 @@ function WikiTaskCard({ task, locale }) {
 
                     <div className="grid gap-3 sm:grid-cols-2">
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
                                 {isReview ? 'Sendt av' : 'Påstander'}
                             </div>
                             <div className="mt-1 text-sm font-medium text-slate-900">
@@ -292,7 +292,7 @@ function WikiTaskCard({ task, locale }) {
                             </div>
                         </div>
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
                                 {isReview ? 'Sendt inn' : 'Tildelt'}
                             </div>
                             <div className="mt-1 text-sm font-medium text-slate-900">
@@ -382,21 +382,21 @@ function InfoItemCard({ item, locale }) {
 
                     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Ansvarlig</div>
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">Ansvarlig</div>
                             <div className="mt-1 text-sm font-medium text-slate-900">{formatUser(item.owner)}</div>
                         </div>
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Opprettet av</div>
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">Opprettet av</div>
                             <div className="mt-1 text-sm font-medium text-slate-900">{formatUser(item.created_by)}</div>
                         </div>
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Oppfølgingsfrist</div>
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">Oppfølgingsfrist</div>
                             <div className="mt-1 text-sm font-medium text-slate-900">
                                 {item.response_due_at ? formatDate(item.response_due_at, locale) : '—'}
                             </div>
                         </div>
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Opprettet</div>
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">Opprettet</div>
                             <div className="mt-1 text-sm font-medium text-slate-900">
                                 {formatDate(item.created_at, locale, {
                                     hour: '2-digit',

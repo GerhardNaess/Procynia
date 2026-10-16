@@ -51,7 +51,7 @@ function RequirementItem({ item, tr }) {
 
 function RequirementItems({ rows, tr, testId }) {
     if (rows === null || rows === undefined) {
-        return <p className="py-3 text-base text-slate-600" role="status">{tr.register_view?.loading ?? 'Henter krav …'}</p>;
+        return <p className="py-3 text-base text-slate-600">{tr.register_view?.loading ?? 'Henter krav …'}</p>;
     }
 
     return (
@@ -76,7 +76,7 @@ function Group({ group, open, onToggle, tr }) {
                     onClick={onToggle}
                     aria-expanded={open}
                     aria-controls={panelId}
-                    className="flex min-h-11 w-full items-center justify-between gap-3 rounded-xl px-2 py-3 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                    className="flex min-h-11 w-full items-center justify-between gap-3 rounded-xl px-2 py-3 text-left hover:bg-slate-50"
                 >
                     <span className="flex min-w-0 items-center gap-2">
                         <Chevron open={open} />
@@ -100,6 +100,10 @@ function Group({ group, open, onToggle, tr }) {
 }
 
 /**
+ * The headings are an h3 per source and an h4 per chapter, under the register's h2 (A11Y-119). The
+ * buttons draw no focus ring of their own: the app-wide violet-600 outline is the indicator
+ * (A11Y-010; the violet-300 ring it replaced was under 3:1).
+ *
  * Gruppert: kravkilde → kapittel → krav, everything closed at first. The counts are the server's,
  * over the same search and filters as Liste; a source or chapter without matches is not shown. A
  * source without chapters — one registered by hand — lists its requirements directly.
@@ -119,7 +123,7 @@ export default function RegisterGroups({ sources, isOpen, onToggle, tr }) {
                                 onClick={() => onToggle(source.key)}
                                 aria-expanded={open}
                                 aria-controls={panelId}
-                                className="flex min-h-11 w-full items-center justify-between gap-3 rounded-2xl px-4 py-4 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                                className="flex min-h-11 w-full items-center justify-between gap-3 rounded-2xl px-4 py-4 text-left hover:bg-slate-50"
                             >
                                 <span className="flex min-w-0 items-center gap-2">
                                     <Chevron open={open} large />

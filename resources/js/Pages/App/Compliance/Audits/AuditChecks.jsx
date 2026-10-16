@@ -1,17 +1,22 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, router, useForm } from '@inertiajs/react';
+import { RequiredFieldsNote } from '../../../../Components/App/FormField';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
+import { BUSY_STYLE, refocusIfLost, submitWhenIdle } from '../../../../Support/focusManagement';
+import { ERROR, HINT, INPUT, LABEL } from '../../../../Support/formStyles';
 import { formatDay } from '../../Improvements/improvementStatus';
-import RequiredMark from '../../Risk/RequiredMark';
+import RequiredMark from '../RequiredMark';
+import FieldError from '../FieldError';
+import { fieldStateProps, groupStateProps, optionInvalid, removalFocusCandidates } from '../complianceA11y';
+import { focusInPageTarget, useFocusOnRejectedSubmit, usePanelSwitchFocus } from '../useComplianceFocus';
 import { FINDING_TYPE_TONES, checkFormData, countText, findingTypeLabel, requirementLabel } from './complianceAudit';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-base font-semibold text-slate-700';
-const HINT = 'mt-1 text-base text-slate-600';
-const ERROR = 'mt-1 text-base text-rose-700';
 const TERM = 'text-base font-semibold text-slate-600';
+const headingId = (id) => `compliance-check-heading-${id}`;
+const editId = (id) => `compliance-check-edit-${id}`;
+const deleteId = (id) => `compliance-check-delete-${id}`;
 
 /**
  * Hva skal kontrolleres: the requirements in scope, each with its origin and how many
@@ -57,6 +62,8 @@ function CheckForm({ auditId, check = null, scopeRequirements, onDone, ta }) {
     const tc = ta.checks ?? {};
     const form = useForm(checkFormData(check));
     const idPrefix = check ? `compliance-check-${check.id}` : 'compliance-check-new';
+    const formRef = useRef(null);
+    useFocusOnRejectedSubmit(form, formRef);
     const selected = form.data.requirement_ids;
     const toggle = (id) => form.setData('requirement_ids', selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id]);
 
@@ -72,7 +79,7 @@ function CheckForm({ auditId, check = null, scopeRequirements, onDone, ta }) {
     };
 
     return (
-        <form onSubmit={submit} className="mt-4 space-y-4 rounded-2xl border border-slate-200 p-4" data-testid="compliance-check-form">
+        <form ref={formRef} onSubmit={submitWhenIdle(form, submit)} className="mt-4 space-y-4 rounded-2xl border border-slate-200 p-4" data-testid="compliance-check-form" data-inline-panel={check ? `edit-${check.id}` : 'create'}>
             <h3 className="text-lg font-semibold text-slate-950">{check ? (tc.edit_heading ?? 'Rediger kontrollhandling') : (tc.create_heading ?? 'Ny kontrollhandling')}</h3>
 
             <div>
@@ -83,13 +90,13 @@ function CheckForm({ auditId, check = null, scopeRequirements, onDone, ta }) {
                     type="text"
                     required
                     aria-required="true"
-                    aria-describedby={`${idPrefix}-title-hint`}
+                    {...fieldStateProps(`${idPrefix}-title`, form.errors.title, [`${idPrefix}-title-hint`])}
                     maxLength={255}
                     value={form.data.title}
                     onChange={(event) => form.setData('title', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                {form.errors.title && <p className={ERROR}>{form.errors.title}</p>}
+                <FieldError field={`${idPrefix}-title`} message={form.errors.title} />
             </div>
 
             <div>
@@ -100,12 +107,12 @@ function CheckForm({ auditId, check = null, scopeRequirements, onDone, ta }) {
                     rows={4}
                     required
                     aria-required="true"
-                    aria-describedby={`${idPrefix}-observation-hint`}
+                    {...fieldStateProps(`${idPrefix}-observation`, form.errors.observation, [`${idPrefix}-observation-hint`])}
                     value={form.data.observation}
                     onChange={(event) => form.setData('observation', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                {form.errors.observation && <p className={ERROR}>{form.errors.observation}</p>}
+                <FieldError field={`${idPrefix}-observation`} message={form.errors.observation} />
             </div>
 
             <div>
@@ -114,17 +121,17 @@ function CheckForm({ auditId, check = null, scopeRequirements, onDone, ta }) {
                 <textarea
                     id={`${idPrefix}-evidence`}
                     rows={2}
-                    aria-describedby={`${idPrefix}-evidence-hint`}
+                    {...fieldStateProps(`${idPrefix}-evidence`, form.errors.evidence, [`${idPrefix}-evidence-hint`])}
                     value={form.data.evidence}
                     onChange={(event) => form.setData('evidence', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                {form.errors.evidence && <p className={ERROR}>{form.errors.evidence}</p>}
+                <FieldError field={`${idPrefix}-evidence`} message={form.errors.evidence} />
             </div>
 
-            <fieldset>
+            <fieldset {...groupStateProps(`${idPrefix}-requirements`, form.errors.requirement_ids, [`${idPrefix}-requirements-hint`])}>
                 <legend className={LABEL}>{tc.field_requirements ?? 'Relevante krav'}</legend>
-                <p className={HINT}>{tc.field_requirements_hint ?? 'Valgfritt, men anbefalt. Én kontrollhandling kan gjelde flere krav i omfanget.'}</p>
+                <p id={`${idPrefix}-requirements-hint`} className={HINT}>{tc.field_requirements_hint ?? 'Valgfritt, men anbefalt. Én kontrollhandling kan gjelde flere krav i omfanget.'}</p>
                 {scopeRequirements.length === 0 ? (
                     <p className="mt-2 text-base text-slate-700">{tc.requirements_none_in_scope ?? 'Ingen krav i omfanget ennå. Kontrollhandlingen kan registreres uten kravkobling.'}</p>
                 ) : (
@@ -136,6 +143,7 @@ function CheckForm({ auditId, check = null, scopeRequirements, onDone, ta }) {
                                         type="checkbox"
                                         checked={selected.includes(requirement.id)}
                                         onChange={() => toggle(requirement.id)}
+                                        aria-invalid={optionInvalid(form.errors.requirement_ids)}
                                         className="mt-1 h-5 w-5 shrink-0 rounded border-slate-300"
                                     />
                                     <span className="min-w-0 break-words font-semibold">{requirementLabel(requirement)}</span>
@@ -144,14 +152,16 @@ function CheckForm({ auditId, check = null, scopeRequirements, onDone, ta }) {
                         ))}
                     </ul>
                 )}
-                {form.errors.requirement_ids && <p className={ERROR}>{form.errors.requirement_ids}</p>}
+                <FieldError field={`${idPrefix}-requirements`} message={form.errors.requirement_ids} />
             </fieldset>
 
-            {form.errors.check && <p className={ERROR}>{form.errors.check}</p>}
+            {form.errors.check && <p className={ERROR} data-form-error-summary="">{form.errors.check}</p>}
+
+            <RequiredFieldsNote text={ta.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
 
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={() => { form.reset(); form.clearErrors(); onDone(); }} className={SECONDARY_ACTION}>{tc.cancel ?? 'Avbryt'}</button>
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY_STYLE}`}>
                     {form.processing ? (tc.saving ?? 'Lagrer...') : (tc.save ?? 'Lagre kontrollhandling')}
                 </button>
             </div>
@@ -164,7 +174,7 @@ function CheckForm({ auditId, check = null, scopeRequirements, onDone, ta }) {
  * origin, and the findings that came from it. «Registrer funn» opens Nytt funn with this check —
  * and its requirement, when it names exactly one — already chosen.
  */
-function CheckCard({ auditId, check, scopeRequirements, canRecordFindings, onNewFinding, panel, setPanel, ta }) {
+function CheckCard({ auditId, check, checkIds, scopeRequirements, canRecordFindings, onNewFinding, panel, setPanel, ta }) {
     const tc = ta.checks ?? {};
     const perms = check.permissions ?? {};
     const editing = panel === `edit-${check.id}`;
@@ -174,7 +184,9 @@ function CheckCard({ auditId, check, scopeRequirements, canRecordFindings, onNew
             return;
         }
 
-        router.delete(`/app/compliance/audits/${auditId}/checks/${check.id}`, { preserveScroll: true });
+        // Focus goes to the next check, the previous one, or Ny kontrollhandling (A11Y-014).
+        const candidates = removalFocusCandidates(checkIds, check.id, [editId, deleteId], ['compliance-checks-create', 'compliance-audit-checks-heading']);
+        router.delete(`/app/compliance/audits/${auditId}/checks/${check.id}`, { preserveScroll: true, onSuccess: () => refocusIfLost(candidates) });
     };
 
     if (editing) {
@@ -187,7 +199,7 @@ function CheckCard({ auditId, check, scopeRequirements, canRecordFindings, onNew
 
     return (
         <li id={`check-${check.id}`} className="space-y-3 py-4" data-testid="compliance-check">
-            <h3 className="break-words text-lg font-semibold text-slate-950">{check.title}</h3>
+            <h3 id={headingId(check.id)} className="break-words text-lg font-semibold text-slate-950">{check.title}</h3>
             <p className="whitespace-pre-line break-words text-base leading-7 text-slate-800" data-testid="compliance-check-observation">{check.observation}</p>
 
             <dl className="grid gap-3 sm:grid-cols-2">
@@ -222,7 +234,7 @@ function CheckCard({ auditId, check, scopeRequirements, canRecordFindings, onNew
                         {check.findings.map((finding) => (
                             <li key={finding.id} className="flex flex-wrap items-center gap-2 text-base">
                                 <StatusBadge tone={FINDING_TYPE_TONES[finding.finding_type] ?? 'slate'}>{findingTypeLabel(finding.finding_type, ta)}</StatusBadge>
-                                <a href={`#finding-${finding.id}`} className="break-words font-semibold text-violet-700 hover:text-violet-900">{finding.title}</a>
+                                <a href={`#finding-${finding.id}`} onClick={() => focusInPageTarget(`#finding-${finding.id}`)} className="break-words font-semibold text-violet-700 hover:text-violet-900">{finding.title}</a>
                             </li>
                         ))}
                     </ul>
@@ -238,13 +250,13 @@ function CheckCard({ auditId, check, scopeRequirements, canRecordFindings, onNew
             {panel === null && (canRecordFindings || perms.can_edit || perms.can_delete) && (
                 <div className="flex flex-wrap gap-2" data-testid="compliance-check-actions">
                     {canRecordFindings && (
-                        <button type="button" onClick={() => onNewFinding(check)} className={SECONDARY_ACTION}>{tc.new_finding ?? 'Registrer funn'}</button>
+                        <button id={`compliance-check-new-finding-${check.id}`} type="button" onClick={() => onNewFinding(check)} aria-describedby={headingId(check.id)} className={SECONDARY_ACTION}>{tc.new_finding ?? 'Registrer funn'}</button>
                     )}
                     {perms.can_edit && (
-                        <button type="button" onClick={() => setPanel(`edit-${check.id}`)} className={SECONDARY_ACTION}>{tc.edit ?? 'Rediger'}</button>
+                        <button id={editId(check.id)} type="button" onClick={() => setPanel(`edit-${check.id}`)} aria-describedby={headingId(check.id)} className={SECONDARY_ACTION}>{tc.edit ?? 'Rediger'}</button>
                     )}
                     {perms.can_delete && (
-                        <button type="button" onClick={destroy} className={DESTRUCTIVE_ACTION}>{tc.delete ?? 'Slett'}</button>
+                        <button id={deleteId(check.id)} type="button" onClick={destroy} aria-describedby={headingId(check.id)} className={DESTRUCTIVE_ACTION}>{tc.delete ?? 'Slett'}</button>
                     )}
                 </div>
             )}
@@ -262,16 +274,26 @@ export default function AuditChecks({ audit, checks = [], scopeRequirements = []
     // 'create', 'edit-<id>' or none.
     const [panel, setPanel] = useState(null);
     const locked = audit.status === 'completed' ? tc.locked_completed : audit.status === 'cancelled' ? tc.locked_cancelled : null;
+    const sectionRef = useRef(null);
+    const checkIds = checks.map((check) => check.id);
+
+    // A form opens in place of its button: focus goes into it, and back to the button (A11Y-014).
+    usePanelSwitchFocus(panel, {
+        containerRef: sectionRef,
+        returnTargets: (key) => (key === 'create'
+            ? ['compliance-checks-create', 'compliance-audit-checks-heading']
+            : [editId(key.replace('edit-', '')), headingId(key.replace('edit-', ''))]),
+    });
 
     return (
-        <section className={CARD} aria-labelledby="compliance-audit-checks-heading" data-testid="compliance-audit-checks">
+        <section ref={sectionRef} className={CARD} aria-labelledby="compliance-audit-checks-heading" data-testid="compliance-audit-checks">
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                     <h2 id="compliance-audit-checks-heading" className="text-xl font-semibold text-slate-950">{tc.heading ?? 'Kontrollhandlinger'}</h2>
                     <p className="mt-1 text-base text-slate-600">{tc.intro ?? 'Det revisor har undersøkt, hvordan og på hvilket grunnlag.'}</p>
                 </div>
                 {canRecord && panel === null && (
-                    <button type="button" onClick={() => setPanel('create')} className={PRIMARY_ACTION}>{tc.create ?? 'Ny kontrollhandling'}</button>
+                    <button id="compliance-checks-create" type="button" onClick={() => setPanel('create')} className={PRIMARY_ACTION}>{tc.create ?? 'Ny kontrollhandling'}</button>
                 )}
             </div>
 
@@ -292,6 +314,7 @@ export default function AuditChecks({ audit, checks = [], scopeRequirements = []
                             key={check.id}
                             auditId={audit.id}
                             check={check}
+                            checkIds={checkIds}
                             scopeRequirements={scopeRequirements}
                             canRecordFindings={canRecordFindings}
                             onNewFinding={onNewFinding}

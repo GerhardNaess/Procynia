@@ -1,13 +1,20 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { router, useForm, usePage } from '@inertiajs/react';
+import { RequiredFieldsNote } from '../../../Components/App/FormField';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { refocusIfLost, useFocusFirstError } from '../../../Support/focusManagement';
+import { fieldA11y } from '../../../Support/formFieldA11y';
+import { ERROR, INPUT } from '../../../Support/formStyles';
+import { rowErrorId, trackRowAction, useRowActionError } from '../../../Support/rowActionError';
 import RequiredMark from '../Risk/RequiredMark';
+import { removalFocusCandidates } from '../Risk/riskA11y';
+import useInlinePanelFocus from '../Risk/useInlinePanelFocus';
 import ImprovementActionForm from './ImprovementActionForm';
+import { actionButtonId, actionFocusCandidates } from './improvementA11y';
 import { ACTION_STATUS_TONES, VERIFICATION_RESULT_TONES, cancellationReason, describeActionHistoryEntry, formatDay, formatLongDate } from './improvementStatus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const TERM = 'text-base font-semibold text-slate-600';
 const VALUE = 'mt-1 break-words text-base text-slate-900';
 
@@ -22,27 +29,50 @@ const VALUE = 'mt-1 break-words text-base text-slate-900';
  */
 export default function ImprovementActions({ caseId, actions = [], canManage, ownerOptions = [], locale, tr }) {
     const t = tr.actions ?? {};
-    const { errors = {} } = usePage().props;
+    const { errors = {}, flash = {} } = usePage().props;
     // { id: action id or 'new', kind: 'create' | 'edit' | 'complete' | 'cancel' | 'reopen' | 'verify' }
     const [panel, setPanel] = useState(null);
     const [busy, setBusy] = useState(null);
     const close = () => setPanel(null);
     const base = `/app/improvements/${caseId}/actions`;
+    // «Nytt tiltak» is hidden while its form is open: focus in, and back to it (A11Y-014).
+    const newPanelRef = useRef(null);
+    useInlinePanelFocus(panel?.kind === 'create', { panelRef: newPanelRef, returnIds: ['improvement-action-create', 'improvement-actions-heading'] });
+    // Slett can be refused by the server (flash error): the refusal is shown at the button too (A11Y-137).
+    const rowError = useRowActionError(flash?.error);
 
     const start = (action) => {
+        // aria-disabled while starting, so the guard lives here.
+        if (busy === action.id) {
+            return;
+        }
+
         router.post(`${base}/${action.id}/start`, {}, {
             preserveScroll: true,
             onStart: () => setBusy(action.id),
             onFinish: () => setBusy(null),
+            // «Start tiltak» goes once it is under arbeid: focus to what the tiltak offers now.
+            onSuccess: () => refocusIfLost(actionFocusCandidates(action.id, 'start')),
         });
     };
 
+    // The deleted card and its buttons go: focus to the next tiltak, else the previous one, else
+    // «Nytt tiltak» or the heading — never the page (2.4.3, A11Y-014).
     const destroy = (action) => {
         if (! window.confirm(t.delete_confirm ?? 'Slett tiltaket? Bruk sletting bare for tiltak som er lagt inn ved en feil.')) {
             return;
         }
 
-        router.delete(`${base}/${action.id}`, { preserveScroll: true });
+        const candidates = removalFocusCandidates(
+            actions.map((item) => `improvement-action-${item.id}-title`),
+            `improvement-action-${action.id}-title`,
+            ['improvement-action-create', 'improvement-actions-heading'],
+        );
+
+        router.delete(`${base}/${action.id}`, trackRowAction(`improvement-action-delete-${action.id}`, {
+            preserveScroll: true,
+            onSuccess: () => refocusIfLost(candidates),
+        }));
     };
 
     return (
@@ -53,16 +83,16 @@ export default function ImprovementActions({ caseId, actions = [], canManage, ow
                     <p className="mt-1 text-base text-slate-600">{t.intro ?? 'Konkrete aktiviteter som skal gjøres, med ansvarlig og frist.'}</p>
                 </div>
                 {canManage && panel?.kind !== 'create' && (
-                    <button type="button" onClick={() => setPanel({ id: 'new', kind: 'create' })} className={PRIMARY_ACTION}>
+                    <button id="improvement-action-create" type="button" onClick={() => setPanel({ id: 'new', kind: 'create' })} className={PRIMARY_ACTION}>
                         {t.create ?? 'Nytt tiltak'}
                     </button>
                 )}
             </div>
 
-            {errors.action && <p className="mt-3 text-base text-rose-700" role="alert">{errors.action}</p>}
+            {errors.action && <p id="improvement-actions-error" className="mt-3 text-base text-rose-700" role="alert">{errors.action}</p>}
 
             {panel?.kind === 'create' && (
-                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div ref={newPanelRef} className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     <NewAction base={base} ownerOptions={ownerOptions} onDone={close} tr={tr} />
                 </div>
             )}
@@ -82,6 +112,7 @@ export default function ImprovementActions({ caseId, actions = [], canManage, ow
                             onStart={() => start(action)}
                             onDelete={() => destroy(action)}
                             starting={busy === action.id}
+                            deleteError={rowError(`improvement-action-delete-${action.id}`)}
                             ownerOptions={ownerOptions}
                             locale={locale}
                             tr={tr}
@@ -95,15 +126,18 @@ export default function ImprovementActions({ caseId, actions = [], canManage, ow
 
 function NewAction({ base, ownerOptions, onDone, tr }) {
     const form = useForm({ title: '', description: '', owner_user_id: '', due_date: '' });
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
 
     const submit = (event) => {
         event.preventDefault();
-        form.post(base, { preserveScroll: true, onSuccess: onDone });
+        form.post(base, { preserveScroll: true, onSuccess: onDone, onError: () => focusFirstError() });
     };
 
     return (
         <ImprovementActionForm
             form={form}
+            formRef={formRef}
             onSubmit={submit}
             onCancel={onDone}
             heading={tr.actions?.create_heading ?? 'Nytt tiltak'}
@@ -120,15 +154,18 @@ function EditAction({ action, base, ownerOptions, onDone, tr }) {
         owner_user_id: action.owner_user_id ? String(action.owner_user_id) : '',
         due_date: action.due_date ?? '',
     });
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
 
     const submit = (event) => {
         event.preventDefault();
-        form.patch(`${base}/${action.id}`, { preserveScroll: true, onSuccess: onDone });
+        form.patch(`${base}/${action.id}`, { preserveScroll: true, onSuccess: onDone, onError: () => focusFirstError() });
     };
 
     return (
         <ImprovementActionForm
             form={form}
+            formRef={formRef}
             onSubmit={submit}
             onCancel={onDone}
             heading={tr.actions?.edit_heading ?? 'Rediger tiltak'}
@@ -144,32 +181,40 @@ function EditAction({ action, base, ownerOptions, onDone, tr }) {
  */
 function ActionTextForm({ id, action, field, heading, intro, label, submit, onDone, tr }) {
     const form = useForm({ [field]: '' });
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+    const { errorId, controlProps } = fieldA11y({ id, hasError: Boolean(form.errors[field]), required: true });
 
     const send = (event) => {
         event.preventDefault();
-        form.post(action, { preserveScroll: true, onSuccess: onDone });
+
+        if (form.processing) {
+            return;
+        }
+
+        form.post(action, { preserveScroll: true, onSuccess: onDone, onError: () => focusFirstError() });
     };
 
     return (
-        <form onSubmit={send} className="space-y-4" aria-label={heading}>
+        <form ref={formRef} onSubmit={send} className="space-y-4" aria-label={heading}>
             <h3 className="text-lg font-semibold text-slate-950">{heading}</h3>
             <p className="text-base text-slate-600">{intro}</p>
             <div>
                 <label htmlFor={id} className="block text-base font-semibold text-slate-700">{label}<RequiredMark /></label>
                 <textarea
-                    id={id}
+                    {...controlProps}
                     rows={3}
                     required
-                    aria-required="true"
                     value={form.data[field]}
                     onChange={(event) => form.setData(field, event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                {form.errors[field] && <p className="mt-1 text-base text-rose-700">{form.errors[field]}</p>}
+                {form.errors[field] && <p id={errorId} className={ERROR}>{form.errors[field]}</p>}
             </div>
+            <RequiredFieldsNote text={tr.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                <button type="submit" aria-disabled={form.processing || undefined} className={PRIMARY_ACTION}>
                     {form.processing ? (tr.saving ?? 'Lagrer...') : submit}
                 </button>
             </div>
@@ -185,17 +230,26 @@ function VerifyForm({ action, onDone, tr }) {
     const t = tr.actions ?? {};
     const results = t.verification_results ?? {};
     const form = useForm({ result: '', note: '' });
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+    const resultErrorId = 'improvement-action-verify-result-error';
+    const note = fieldA11y({ id: 'improvement-action-verify-note', hasHint: true, hasError: Boolean(form.errors.note), required: true });
 
     const send = (event) => {
         event.preventDefault();
-        form.post(action, { preserveScroll: true, onSuccess: onDone });
+
+        if (form.processing) {
+            return;
+        }
+
+        form.post(action, { preserveScroll: true, onSuccess: onDone, onError: () => focusFirstError() });
     };
 
     return (
-        <form onSubmit={send} className="space-y-4" aria-label={t.verify ?? 'Verifiser effekt'}>
+        <form ref={formRef} onSubmit={send} className="space-y-4" aria-label={t.verify ?? 'Verifiser effekt'}>
             <h3 className="text-lg font-semibold text-slate-950">{t.verify ?? 'Verifiser effekt'}</h3>
             <p className="text-base text-slate-600">{t.verify_intro ?? 'Vurder om tiltaket faktisk ga ønsket resultat. En ny vurdering sletter ikke tidligere vurderinger.'}</p>
-            <fieldset>
+            <fieldset aria-describedby={form.errors.result ? resultErrorId : undefined}>
                 <legend className="text-base font-semibold text-slate-700">{t.verification_result_label ?? 'Resultat'}<RequiredMark /></legend>
                 <div className="mt-2 flex flex-wrap gap-x-6 gap-y-2">
                     {['effective', 'not_effective'].map((value) => (
@@ -214,26 +268,25 @@ function VerifyForm({ action, onDone, tr }) {
                         </label>
                     ))}
                 </div>
-                {form.errors.result && <p className="mt-1 text-base text-rose-700">{form.errors.result}</p>}
+                {form.errors.result && <p id={resultErrorId} className={ERROR}>{form.errors.result}</p>}
             </fieldset>
             <div>
                 <label htmlFor="improvement-action-verify-note" className="block text-base font-semibold text-slate-700">{t.verification_note_label ?? 'Kommentar'}<RequiredMark /></label>
-                <p id="improvement-action-verify-note-hint" className="text-base text-slate-600">{t.verification_note_hint ?? 'Hva bygger vurderingen på?'}</p>
+                <p id={note.hintId} className="text-base text-slate-600">{t.verification_note_hint ?? 'Hva bygger vurderingen på?'}</p>
                 <textarea
-                    id="improvement-action-verify-note"
+                    {...note.controlProps}
                     rows={3}
                     required
-                    aria-required="true"
-                    aria-describedby="improvement-action-verify-note-hint"
                     value={form.data.note}
                     onChange={(event) => form.setData('note', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                {form.errors.note && <p className="mt-1 text-base text-rose-700">{form.errors.note}</p>}
+                {form.errors.note && <p id={note.errorId} className={ERROR}>{form.errors.note}</p>}
             </div>
+            <RequiredFieldsNote text={tr.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                <button type="submit" aria-disabled={form.processing || undefined} className={PRIMARY_ACTION}>
                     {form.processing ? (tr.saving ?? 'Lagrer...') : (t.verify ?? 'Verifiser effekt')}
                 </button>
             </div>
@@ -313,7 +366,7 @@ function ActionVerification({ action, locale, tr }) {
     );
 }
 
-function ActionCard({ action, base, panel, openPanel, closePanel, onStart, onDelete, starting, ownerOptions, locale, tr }) {
+function ActionCard({ action, base, panel, openPanel, closePanel, onStart, onDelete, starting, deleteError = null, ownerOptions, locale, tr }) {
     const t = tr.actions ?? {};
     const statusLabels = t.statuses ?? {};
     const can = action.permissions ?? {};
@@ -321,11 +374,26 @@ function ActionCard({ action, base, panel, openPanel, closePanel, onStart, onDel
     const reason = cancellationReason(action);
     const anyAction = can.can_start || can.can_complete || can.can_verify || can.can_cancel || can.can_reopen || can.can_edit || can.can_delete;
     const url = `${base}/${action.id}`;
+    const titleId = `improvement-action-${action.id}-title`;
+    // The card's buttons give way to the panel they open. Focus goes into the panel and, when it
+    // closes, back to that button — or to what the tiltak offers now (A11Y-014).
+    const panelRef = useRef(null);
+    const lastPanel = useRef(panel);
+
+    if (panel !== null) {
+        lastPanel.current = panel;
+    }
+
+    useInlinePanelFocus(panel !== null, { panelRef, returnIds: actionFocusCandidates(action.id, lastPanel.current) });
+
+    // The same words on every card: each button is described by its tiltak's title (A11Y-109), and
+    // Slett also by a refusal from the server.
+    const buttonProps = (kind) => ({ id: actionButtonId(action.id, kind), 'aria-describedby': titleId });
 
     return (
         <li id={`improvement-action-${action.id}`} className="scroll-mt-6 rounded-2xl border border-slate-200 p-4" data-testid="improvement-action" aria-labelledby={`improvement-action-${action.id}-title`}>
             <div className="flex flex-wrap items-start justify-between gap-3">
-                <h3 id={`improvement-action-${action.id}-title`} className="min-w-0 break-words text-lg font-semibold text-slate-950">{action.title}</h3>
+                <h3 id={titleId} className="min-w-0 break-words text-lg font-semibold text-slate-950">{action.title}</h3>
                 <StatusBadge tone={ACTION_STATUS_TONES[action.status] ?? 'slate'}>{statusLabels[action.status] ?? action.status}</StatusBadge>
             </div>
 
@@ -376,31 +444,42 @@ function ActionCard({ action, base, panel, openPanel, closePanel, onStart, onDel
             {panel === null && anyAction && (
                 <div className="mt-4 flex flex-wrap gap-2">
                     {can.can_start && (
-                        <button type="button" onClick={onStart} disabled={starting} className={PRIMARY_ACTION}>{t.start ?? 'Start tiltak'}</button>
+                        <button type="button" {...buttonProps('start')} onClick={onStart} aria-disabled={starting || undefined} className={PRIMARY_ACTION}>{t.start ?? 'Start tiltak'}</button>
                     )}
                     {can.can_complete && (
-                        <button type="button" onClick={() => openPanel('complete')} className={can.can_start ? SECONDARY_ACTION : PRIMARY_ACTION}>{t.complete ?? 'Fullfør tiltak'}</button>
+                        <button type="button" {...buttonProps('complete')} onClick={() => openPanel('complete')} className={can.can_start ? SECONDARY_ACTION : PRIMARY_ACTION}>{t.complete ?? 'Fullfør tiltak'}</button>
                     )}
                     {can.can_verify && (
-                        <button type="button" onClick={() => openPanel('verify')} className={action.verification?.awaiting ? PRIMARY_ACTION : SECONDARY_ACTION}>{t.verify ?? 'Verifiser effekt'}</button>
+                        <button type="button" {...buttonProps('verify')} onClick={() => openPanel('verify')} className={action.verification?.awaiting ? PRIMARY_ACTION : SECONDARY_ACTION}>{t.verify ?? 'Verifiser effekt'}</button>
                     )}
                     {can.can_edit && (
-                        <button type="button" onClick={() => openPanel('edit')} className={SECONDARY_ACTION}>{t.edit ?? 'Rediger'}</button>
+                        <button type="button" {...buttonProps('edit')} onClick={() => openPanel('edit')} className={SECONDARY_ACTION}>{t.edit ?? 'Rediger'}</button>
                     )}
                     {can.can_cancel && (
-                        <button type="button" onClick={() => openPanel('cancel')} className={SECONDARY_ACTION}>{t.cancel_action ?? 'Avbryt tiltak'}</button>
+                        <button type="button" {...buttonProps('cancel')} onClick={() => openPanel('cancel')} className={SECONDARY_ACTION}>{t.cancel_action ?? 'Avbryt tiltak'}</button>
                     )}
                     {can.can_reopen && (
-                        <button type="button" onClick={() => openPanel('reopen')} className={SECONDARY_ACTION}>{t.reopen ?? 'Gjenåpne tiltak'}</button>
+                        <button type="button" {...buttonProps('reopen')} onClick={() => openPanel('reopen')} className={SECONDARY_ACTION}>{t.reopen ?? 'Gjenåpne tiltak'}</button>
                     )}
                     {can.can_delete && (
-                        <button type="button" onClick={onDelete} className={DESTRUCTIVE_ACTION}>{t.delete ?? 'Slett'}</button>
+                        <button
+                            type="button"
+                            {...buttonProps('delete')}
+                            aria-describedby={deleteError ? `${titleId} ${rowErrorId(`improvement-action-delete-${action.id}`)}` : titleId}
+                            onClick={onDelete}
+                            className={DESTRUCTIVE_ACTION}
+                        >
+                            {t.delete ?? 'Slett'}
+                        </button>
                     )}
                 </div>
             )}
+            {deleteError && panel === null && (
+                <p id={rowErrorId(`improvement-action-delete-${action.id}`)} className="mt-2 text-base text-rose-700">{deleteError}</p>
+            )}
 
             {panel !== null && (
-                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div ref={panelRef} className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     {panel === 'verify' && <VerifyForm action={`${url}/verify`} onDone={closePanel} tr={tr} />}
                     {panel === 'edit' && <EditAction action={action} base={base} ownerOptions={ownerOptions} onDone={closePanel} tr={tr} />}
                     {panel === 'complete' && (

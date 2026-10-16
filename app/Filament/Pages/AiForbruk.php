@@ -908,15 +908,15 @@ class AiForbruk extends Page
     public function trendClass(int $pct, bool $inverseGood = false): string
     {
         if ($pct === 0) {
-            return 'text-gray-500 bg-gray-100';
+            return 'text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-white/10';
         }
 
         $positive = $pct > 0;
         $good = $inverseGood ? ! $positive : $positive;
 
         return $good
-            ? 'text-emerald-700 bg-emerald-50'
-            : 'text-red-700 bg-red-50';
+            ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10'
+            : 'text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-500/10';
     }
 
     /**
@@ -925,22 +925,22 @@ class AiForbruk extends Page
     public function trendTextClass(int $pct, bool $inverseGood = false): string
     {
         if ($pct === 0) {
-            return 'text-gray-400';
+            return 'text-gray-600 dark:text-gray-400';
         }
 
         $positive = $pct > 0;
         $good = $inverseGood ? ! $positive : $positive;
 
-        return $good ? 'text-emerald-600' : 'text-red-500';
+        return $good ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-700 dark:text-red-400';
     }
 
     public function capacityStatusClass(string $status): string
     {
         return match ($status) {
-            'over' => 'text-red-700 bg-red-50 border-red-200',
-            'warning' => 'text-amber-700 bg-amber-50 border-amber-200',
-            'undefined' => 'text-gray-500 bg-gray-50 border-gray-200',
-            default => 'text-emerald-700 bg-emerald-50 border-emerald-200',
+            'over' => 'text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/30',
+            'warning' => 'text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30',
+            'undefined' => 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-white/5 border-gray-200 dark:border-white/10',
+            default => 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/30',
         };
     }
 

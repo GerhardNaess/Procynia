@@ -1,15 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, router, useForm } from '@inertiajs/react';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
-import RequiredMark from '../Risk/RequiredMark';
+import { refocusIfLost, useFocusFirstError } from '../../../Support/focusManagement';
+import { INPUT, TEXTAREA } from '../../../Support/formStyles';
+import SupplierField, { BUSY, FieldError, RequiredNote } from './SupplierField';
+import { removalFocusCandidates } from './supplierA11y';
+import { useFocusOnMount, useInlinePanelFocus } from './supplierFocus';
 import { RISK_LEVEL_TONES } from '../Risk/riskLevel';
 import { ownersForArea } from '../Risk/riskOwners';
 import { RISK_STATUS_TONES } from '../Risk/riskStatus';
 import { riskLevelText, riskOriginText, riskStatusLabel } from './supplierManagement';
 
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-base font-semibold text-slate-900';
 const HINT = 'mt-1 text-base text-slate-600';
 const ERROR = 'mt-1 text-base text-rose-700';
 const TERM = 'text-base font-semibold text-slate-600';
@@ -25,6 +27,9 @@ const DESCRIPTION_PARTS = [
  * «Opprett risiko»: a new risk in Risiko, with Risiko's own fields. Only the title starts as a
  * suggestion (the supplier's name); fagområde, årsak, hendelse, konsekvens and risikoeier are the
  * person's. Nothing is created before they press «Opprett risiko».
+ *
+ * It opens by being mounted — from «Opprett risiko» here or from an aktsomhetsvurdering on another
+ * tab — so on mount it scrolls in and puts focus on its first field (A11Y-014).
  */
 function CreateForm({ supplier, handoff, dueDiligence = null, onDone, formatDate, tr, trRisk }) {
     const r = tr.risks ?? {};
@@ -40,10 +45,9 @@ function CreateForm({ supplier, handoff, dueDiligence = null, onDone, formatDate
         owner_user_id: '',
     });
     const owners = ownersForArea(handoff.owner_options ?? [], form.data.business_area_id);
+    const focusError = useFocusFirstError(ref);
 
-    useEffect(() => {
-        ref.current?.scrollIntoView?.({ block: 'start' });
-    }, []);
+    useFocusOnMount(ref);
 
     const chooseArea = (value) => {
         const stillAllowed = ownersForArea(handoff.owner_options ?? [], value).some((owner) => String(owner.id) === String(form.data.owner_user_id));
@@ -52,7 +56,12 @@ function CreateForm({ supplier, handoff, dueDiligence = null, onDone, formatDate
 
     const submit = (event) => {
         event.preventDefault();
-        form.post(`/app/supplier-management/${supplier.id}/risks`, { preserveScroll: true, onSuccess: onDone });
+
+        if (form.processing) {
+            return;
+        }
+
+        form.post(`/app/supplier-management/${supplier.id}/risks`, { preserveScroll: true, onSuccess: onDone, onError: focusError });
     };
 
     return (
@@ -63,50 +72,45 @@ function CreateForm({ supplier, handoff, dueDiligence = null, onDone, formatDate
                 {dueDiligence && <p className={HINT} data-testid="risk-from-due-diligence">{riskOriginText({ origin: 'created_from_supplier', due_diligence_assessed_on: dueDiligence.assessed_on }, tr, formatDate)}</p>}
             </div>
 
-            <div>
-                <label htmlFor="supplier-risk-area" className={LABEL}>{trRisk.field_area ?? 'Fagområde'}<RequiredMark /></label>
-                <p id="supplier-risk-area-hint" className={HINT}>{r.area_hint ?? 'Fagområdet bestemmer hvem som kan se risikoen i Risiko.'}</p>
-                <select id="supplier-risk-area" required aria-required="true" aria-describedby="supplier-risk-area-hint" value={form.data.business_area_id} onChange={(event) => chooseArea(event.target.value)} className={`mt-1 ${INPUT}`}>
-                    <option value="">{trRisk.choose_area ?? 'Velg fagområde'}</option>
-                    {handoff.area_options.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
-                </select>
-                {form.errors.business_area_id && <p className={ERROR}>{form.errors.business_area_id}</p>}
-            </div>
+            <SupplierField id="supplier-risk-area" label={trRisk.field_area ?? 'Fagområde'} hint={r.area_hint ?? 'Fagområdet bestemmer hvem som kan se risikoen i Risiko.'} hintClassName={HINT} error={form.errors.business_area_id} errorClassName={ERROR} required>
+                {(field) => (
+                    <select {...field} required value={form.data.business_area_id} onChange={(event) => chooseArea(event.target.value)} className={`mt-1 ${INPUT}`}>
+                        <option value="">{trRisk.choose_area ?? 'Velg fagområde'}</option>
+                        {handoff.area_options.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+                    </select>
+                )}
+            </SupplierField>
 
             <p className="text-base text-slate-600">{r.prefill_hint ?? 'Tittelen er et forslag. Beskriv selv årsak, hendelse og konsekvens.'}</p>
 
-            <div>
-                <label htmlFor="supplier-risk-title" className={LABEL}>{trRisk.field_title ?? 'Tittel'}<RequiredMark /></label>
-                <input id="supplier-risk-title" type="text" required aria-required="true" maxLength={255} value={form.data.title} onChange={(event) => form.setData('title', event.target.value)} className={`mt-1 ${INPUT}`} />
-                {form.errors.title && <p className={ERROR}>{form.errors.title}</p>}
-            </div>
+            <SupplierField id="supplier-risk-title" label={trRisk.field_title ?? 'Tittel'} error={form.errors.title} errorClassName={ERROR} required>
+                {(field) => <input {...field} type="text" required maxLength={255} value={form.data.title} onChange={(event) => form.setData('title', event.target.value)} className={`mt-1 ${INPUT}`} />}
+            </SupplierField>
 
             <fieldset className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4">
                 <legend className="px-1 text-base font-semibold text-slate-950">{ts.heading ?? 'Risikobeskrivelse'}</legend>
                 {DESCRIPTION_PARTS.map(({ field, label, hint }) => (
-                    <div key={field}>
-                        <label htmlFor={`supplier-risk-${field}`} className={LABEL}>{ts[`field_${field}`] ?? label}<RequiredMark /></label>
-                        <p id={`supplier-risk-${field}-hint`} className={HINT}>{ts[`field_${field}_hint`] ?? hint}</p>
-                        <textarea id={`supplier-risk-${field}`} rows={2} required aria-required="true" aria-describedby={`supplier-risk-${field}-hint`} maxLength={1000} value={form.data[field]} onChange={(event) => form.setData(field, event.target.value)} className={`mt-1 ${INPUT}`} />
-                        {form.errors[field] && <p className={ERROR}>{form.errors[field]}</p>}
-                    </div>
+                    <SupplierField key={field} id={`supplier-risk-${field}`} label={ts[`field_${field}`] ?? label} hint={ts[`field_${field}_hint`] ?? hint} hintClassName={HINT} error={form.errors[field]} errorClassName={ERROR} required>
+                        {(control) => <textarea {...control} rows={2} required maxLength={1000} value={form.data[field]} onChange={(event) => form.setData(field, event.target.value)} className={`mt-1 ${TEXTAREA}`} />}
+                    </SupplierField>
                 ))}
             </fieldset>
 
-            <div>
-                <label htmlFor="supplier-risk-owner" className={LABEL}>{trRisk.field_owner ?? 'Risikoeier'}</label>
-                <p id="supplier-risk-owner-hint" className={HINT}>{r.owner_hint ?? 'Valgfritt. Bare personer som kan se risikoer i valgt fagområde, kan velges.'}</p>
-                <select id="supplier-risk-owner" aria-describedby="supplier-risk-owner-hint" disabled={form.data.business_area_id === ''} value={form.data.owner_user_id} onChange={(event) => form.setData('owner_user_id', event.target.value)} className={`mt-1 ${INPUT}`}>
-                    <option value="">{form.data.business_area_id === '' ? (r.choose_area_first ?? 'Velg fagområde først') : (trRisk.no_owner ?? 'Ingen eier valgt')}</option>
-                    {owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
-                </select>
-                {form.errors.owner_user_id && <p className={ERROR}>{form.errors.owner_user_id}</p>}
-            </div>
-            {form.errors.supplier_due_diligence_assessment_id && <p className={ERROR}>{form.errors.supplier_due_diligence_assessment_id}</p>}
+            <SupplierField id="supplier-risk-owner" label={trRisk.field_owner ?? 'Risikoeier'} hint={r.owner_hint ?? 'Valgfritt. Bare personer som kan se risikoer i valgt fagområde, kan velges.'} hintClassName={HINT} error={form.errors.owner_user_id} errorClassName={ERROR}>
+                {(field) => (
+                    <select {...field} disabled={form.data.business_area_id === ''} value={form.data.owner_user_id} onChange={(event) => form.setData('owner_user_id', event.target.value)} className={`mt-1 ${INPUT}`}>
+                        <option value="">{form.data.business_area_id === '' ? (r.choose_area_first ?? 'Velg fagområde først') : (trRisk.no_owner ?? 'Ingen eier valgt')}</option>
+                        {owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
+                    </select>
+                )}
+            </SupplierField>
+            <FieldError message={form.errors.supplier_due_diligence_assessment_id} className={ERROR} summary />
+
+            <RequiredNote tr={tr} />
 
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY}`}>
                     {form.processing ? (tr.saving ?? 'Lagrer...') : (r.submit ?? 'Opprett risiko')}
                 </button>
             </div>
@@ -118,14 +122,21 @@ function CreateForm({ supplier, handoff, dueDiligence = null, onDone, formatDate
 function LinkForm({ supplierId, options, onDone, tr }) {
     const r = tr.risks ?? {};
     const form = useForm({ risk_id: '' });
+    const formRef = useRef(null);
+    const focusError = useFocusFirstError(formRef);
 
     const submit = (event) => {
         event.preventDefault();
-        form.post(`/app/supplier-management/${supplierId}/risks/link`, { preserveScroll: true, onSuccess: onDone });
+
+        if (form.processing) {
+            return;
+        }
+
+        form.post(`/app/supplier-management/${supplierId}/risks/link`, { preserveScroll: true, onSuccess: onDone, onError: focusError });
     };
 
     return (
-        <form onSubmit={submit} className="mt-4 space-y-4 rounded-2xl border border-slate-200 p-4" data-testid="risk-link-form">
+        <form ref={formRef} id="supplier-risk-link-panel" onSubmit={submit} className="mt-4 space-y-4 rounded-2xl border border-slate-200 p-4" data-testid="risk-link-form">
             <div>
                 <h4 className="text-lg font-semibold text-slate-950">{r.link_heading ?? 'Koble til eksisterende risiko'}</h4>
                 <p className={HINT}>{r.link_intro ?? 'For en risiko som allerede er registrert i Risiko. Du kan velge blant risikoer du kan redigere.'}</p>
@@ -133,21 +144,22 @@ function LinkForm({ supplierId, options, onDone, tr }) {
             {options.length === 0 ? (
                 <p className="text-base text-slate-800">{r.no_link_options ?? 'Det finnes ingen andre risikoer du kan koble til.'}</p>
             ) : (
-                <div>
-                    <label htmlFor="supplier-risk-link" className={LABEL}>{r.link_risk ?? 'Risiko'}<RequiredMark /></label>
-                    <select id="supplier-risk-link" required aria-required="true" value={form.data.risk_id} onChange={(event) => form.setData('risk_id', event.target.value)} className={`mt-1 ${INPUT}`}>
-                        <option value="">{r.choose_risk ?? 'Velg risiko'}</option>
-                        {options.map((option) => (
-                            <option key={option.id} value={option.id}>{option.area_name ? `${option.title} (${option.area_name})` : option.title}</option>
-                        ))}
-                    </select>
-                    {form.errors.risk_id && <p className={ERROR}>{form.errors.risk_id}</p>}
-                </div>
+                <SupplierField id="supplier-risk-link" label={r.link_risk ?? 'Risiko'} error={form.errors.risk_id} errorClassName={ERROR} required>
+                    {(field) => (
+                        <select {...field} required value={form.data.risk_id} onChange={(event) => form.setData('risk_id', event.target.value)} className={`mt-1 ${INPUT}`}>
+                            <option value="">{r.choose_risk ?? 'Velg risiko'}</option>
+                            {options.map((option) => (
+                                <option key={option.id} value={option.id}>{option.area_name ? `${option.title} (${option.area_name})` : option.title}</option>
+                            ))}
+                        </select>
+                    )}
+                </SupplierField>
             )}
+            {options.length > 0 && <RequiredNote tr={tr} />}
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
                 {options.length > 0 && (
-                    <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>{r.link_submit ?? 'Koble til'}</button>
+                    <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY}`}>{r.link_submit ?? 'Koble til'}</button>
                 )}
             </div>
         </form>
@@ -166,6 +178,12 @@ export default function SupplierRisks({ supplier, risks, handoff, hasEditRight, 
     const r = tr.risks ?? {};
     // 'create', 'link' or null — one form at a time.
     const [panel, setPanel] = useState(null);
+    // «Opprett risiko» focuses itself on mount; both forms give focus back to their button (A11Y-014).
+    const rememberTrigger = useInlinePanelFocus(panel === 'link' ? 'link' : (panel === 'create' || fromDueDiligence !== null ? 'create' : null), {
+        panelId: 'supplier-risk-link-panel',
+        fallbackIds: ['supplier-risk-create', 'supplier-risk-link-button', 'supplier-risks-heading-toggle'],
+        focusOnOpen: panel === 'link',
+    });
 
     if (risks === null || risks === undefined) {
         return null;
@@ -181,11 +199,17 @@ export default function SupplierRisks({ supplier, risks, handoff, hasEditRight, 
             return;
         }
 
-        router.delete(`/app/supplier-management/${supplier.id}/risks/${entry.link_id}`, { preserveScroll: true });
+        // The row goes, and its button with it: the next row's, the previous one's, or the section's own button.
+        const order = risks.map((risk) => risk.link_id);
+
+        router.delete(`/app/supplier-management/${supplier.id}/risks/${entry.link_id}`, {
+            preserveScroll: true,
+            onSuccess: () => refocusIfLost(removalFocusCandidates(order, entry.link_id, (id) => `supplier-risk-unlink-${id}`, ['supplier-risk-link-button', 'supplier-risks-heading-toggle'])),
+        });
     };
 
     return (
-        <div data-testid="supplier-risks">
+        <div data-testid="supplier-risks" onClickCapture={rememberTrigger}>
             <p className="text-base text-slate-600">{r.intro ?? 'Risikoer i Risiko som gjelder leverandøren. Risikoen vurderes og behandles der – vurdering, tiltak, aksept og revurdering følges opp i Risiko.'}</p>
 
             {risks.length === 0 ? (
@@ -195,7 +219,7 @@ export default function SupplierRisks({ supplier, risks, handoff, hasEditRight, 
                     {risks.map((entry) => (
                         <li key={entry.id} className="rounded-xl border border-slate-200 px-4 py-3" data-testid="risk-entry">
                             <div className="flex flex-wrap items-start justify-between gap-2">
-                                <Link href={entry.url} className="min-w-0 break-words text-lg font-semibold text-violet-700 hover:text-violet-900">{entry.title}</Link>
+                                <Link href={entry.url} id={`supplier-risk-${entry.id}-title`} className="min-w-0 break-words text-lg font-semibold text-violet-700 hover:text-violet-900">{entry.title}</Link>
                                 <StatusBadge tone={RISK_STATUS_TONES[entry.status] ?? 'slate'}>{riskStatusLabel(entry.status, trRisk)}</StatusBadge>
                             </div>
                             <dl className="mt-2 grid gap-2 sm:grid-cols-2">
@@ -212,7 +236,7 @@ export default function SupplierRisks({ supplier, risks, handoff, hasEditRight, 
                             </dl>
                             <p className="mt-2 text-base text-slate-600">{riskOriginText(entry, tr, formatDate)}</p>
                             {fromSupplier && idle && entry.can_unlink && (
-                                <button type="button" onClick={() => unlink(entry)} className={`mt-3 ${DESTRUCTIVE_ACTION}`}>{r.unlink ?? 'Fjern koblingen'}</button>
+                                <button type="button" id={`supplier-risk-unlink-${entry.link_id}`} aria-describedby={`supplier-risk-${entry.id}-title`} onClick={() => unlink(entry)} className={`mt-3 ${DESTRUCTIVE_ACTION}`}>{r.unlink ?? 'Fjern koblingen'}</button>
                             )}
                         </li>
                     ))}
@@ -222,9 +246,9 @@ export default function SupplierRisks({ supplier, risks, handoff, hasEditRight, 
             {fromSupplier && idle && (
                 <div className="mt-4 flex flex-wrap gap-2">
                     {canCreate && (
-                        <button type="button" onClick={() => setPanel('create')} className={PRIMARY_ACTION}>{r.create ?? 'Opprett risiko'}</button>
+                        <button type="button" id="supplier-risk-create" data-panel-trigger="" onClick={() => setPanel('create')} className={PRIMARY_ACTION}>{r.create ?? 'Opprett risiko'}</button>
                     )}
-                    <button type="button" onClick={() => setPanel('link')} className={SECONDARY_ACTION}>{r.link ?? 'Koble til eksisterende risiko'}</button>
+                    <button type="button" id="supplier-risk-link-button" data-panel-trigger="" onClick={() => setPanel('link')} className={SECONDARY_ACTION}>{r.link ?? 'Koble til eksisterende risiko'}</button>
                 </div>
             )}
             {fromSupplier && ! canCreate && idle && (

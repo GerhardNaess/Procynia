@@ -1,15 +1,59 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import CustomerEnvironmentHeader from '../CustomerEnvironment/CustomerEnvironmentHeader';
 import AlertBox from '../../../Components/App/AlertBox';
 import DepartmentCheckboxGroup from '../../../Components/App/DepartmentCheckboxGroup';
 import FormButtonRow from '../../../Components/App/FormButtonRow';
 import InfoHint from '../../../Components/App/InfoHint';
+import FormField from '../../../Components/App/FormField';
+import { useFocusFirstError } from '../../../Support/focusManagement';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
+}
+
+/**
+ * A field on this page, wired through FormField (A11Y-001, A11Y-013): the label names the control by
+ * for/id, the «i» sits beside the label instead of inside it — inside, it took the label for itself and
+ * left the select without a name — and hint and error are tied to the control.
+ */
+function UserField({ span = 'md:col-span-2', ...props }) {
+    return (
+        <FormField
+            {...props}
+            className={`space-y-2 ${span}`}
+            labelClassName="text-sm font-medium text-slate-700"
+            controlClassName=""
+            hintClassName="text-xs text-slate-600"
+            errorClassName="text-sm text-rose-700"
+        />
+    );
+}
+
+/** A checkbox whose label has an «i» beside it — kept out of the <label> for the same reason. */
+function CheckboxWithInfo({ id, checked, onChange, label, info, error }) {
+    const errorId = `${id}-error`;
+
+    return (
+        <>
+            <div className="flex items-center gap-2.5">
+                <input
+                    id={id}
+                    type="checkbox"
+                    checked={checked}
+                    onChange={onChange}
+                    aria-invalid={error ? true : undefined}
+                    aria-describedby={error ? errorId : undefined}
+                    className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-300"
+                />
+                <label htmlFor={id} className="text-sm font-medium text-slate-700">{label}</label>
+                {info}
+            </div>
+            {error ? <p id={errorId} className="text-sm text-rose-700">{error}</p> : null}
+        </>
+    );
 }
 
 export default function UsersEdit({
@@ -53,6 +97,10 @@ export default function UsersEdit({
     const pageErrors = page.props.errors ?? {};
     const errors = Object.keys(form.errors).length > 0 ? form.errors : pageErrors;
     const firstError = Object.values(errors)[0] ?? null;
+    // This form posts natively: a rejected submit comes back as a fresh page carrying the errors, so
+    // that page load is the answer to the submit and focus goes to the first wrong field (A11Y-013).
+    const formRef = useRef(null);
+    useFocusFirstError(formRef, { errorsOnMount: errors });
     const csrfToken = typeof document !== 'undefined'
         ? document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? ''
         : '';
@@ -151,6 +199,7 @@ export default function UsersEdit({
 
                 <div className="mx-auto max-w-3xl">
                     <form
+                        ref={formRef}
                         method="post"
                         action={user.update_url}
                         className="space-y-6 rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:p-8"
@@ -175,59 +224,73 @@ export default function UsersEdit({
                         ) : null}
 
                         <div className="grid gap-5 md:grid-cols-2">
-                            <label className="space-y-2 md:col-span-2">
-                                <span className="text-sm font-medium text-slate-700">Navn</span>
-                                <input
-                                    type="text"
-                                    name="name"
-                                    value={form.data.name}
-                                    onChange={(event) => form.setData('name', event.target.value)}
-                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                />
-                                {errors.name ? <p className="text-sm text-rose-600">{errors.name}</p> : null}
-                            </label>
+                            <UserField
+                                id="user-name"
+                                label="Navn"
+                                error={errors.name}
+                                span="md:col-span-2"
+                            >
+                                {(field) => (
+                                    <input
+                                        {...field}
+                                        type="text"
+                                        name="name"
+                                        value={form.data.name}
+                                        onChange={(event) => form.setData('name', event.target.value)}
+                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                    />
+                                )}
+                            </UserField>
 
-                            <label className="space-y-2 md:col-span-2">
-                                <span className="text-sm font-medium text-slate-700">E-post</span>
-                                <input
-                                    type="email"
-                                    value={user.email}
-                                    disabled
-                                    className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-500 outline-none disabled:cursor-not-allowed"
-                                />
-                                <p className="text-xs text-slate-400">E-post redigeres ikke i denne fasen.</p>
-                            </label>
+                            <UserField
+                                id="user-email-readonly"
+                                label="E-post"
+                                hint="E-post redigeres ikke i denne fasen."
+                                span="md:col-span-2"
+                            >
+                                {(field) => (
+                                    <input
+                                        {...field}
+                                        type="email"
+                                        value={user.email}
+                                        disabled
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-500 outline-none disabled:cursor-not-allowed"
+                                    />
+                                )}
+                            </UserField>
 
                             {canEditRole ? (
-                                <label className="space-y-2 md:col-span-2">
-                                    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">
-                                        {usersFormText.field_role ?? 'Rolle'}
-                                        <InfoHint size="sm" label="Vis forklaring for Rolle" text={usersFormText.hint_role} />
-                                    </span>
-                                    <select
-                                        name="bid_role"
-                                        value={form.data.bid_role}
-                                        onChange={(event) => handleBidRoleChange(event.target.value)}
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                    >
-                                        {bidRoleOptions.map((option) => (
-                                            <option key={option.value} value={option.value}>
-                                                {option.label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <p className="text-xs text-slate-400">
-                                        System Owner kan endre roller på alle brukere. Bid Manager kan bare administrere Contributor og Viewer innenfor sitt ansvarsområde.
-                                    </p>
-                                    {errors.bid_role ? <p className="text-sm text-rose-600">{errors.bid_role}</p> : null}
-                                </label>
+                                <UserField
+                                    id="user-bid-role"
+                                    label={usersFormText.field_role ?? 'Rolle'}
+                                    info={<InfoHint size="sm" label="Vis forklaring for Rolle" text={usersFormText.hint_role} />}
+                                    hint="System Owner kan endre roller på alle brukere. Bid Manager kan bare administrere Contributor og Viewer innenfor sitt ansvarsområde."
+                                    error={errors.bid_role}
+                                    span="md:col-span-2"
+                                >
+                                    {(field) => (
+                                        <select
+                                            {...field}
+                                            name="bid_role"
+                                            value={form.data.bid_role}
+                                            onChange={(event) => handleBidRoleChange(event.target.value)}
+                                            className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        >
+                                            {bidRoleOptions.map((option) => (
+                                                <option key={option.value} value={option.value}>
+                                                    {option.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    )}
+                                </UserField>
                             ) : (
                                 <div className="space-y-2 md:col-span-2">
                                     <span className="text-sm font-medium text-slate-700">Rolle</span>
                                     <div className="flex min-h-11 items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-700">
                                         {user.bid_role_label}
                                     </div>
-                                    <p className="text-xs text-slate-400">
+                                    <p className="text-xs text-slate-600">
                                         Rollen kan ikke endres i denne konteksten.
                                     </p>
                                 </div>
@@ -244,45 +307,27 @@ export default function UsersEdit({
                             {canEditRole ? (
                                 <div className="space-y-2 md:col-span-2">
                                     <input type="hidden" name="is_qa" value={form.data.is_qa ? '1' : '0'} />
-                                    <label className="flex items-center gap-2.5 text-sm font-medium text-slate-700">
-                                        <input
-                                            type="checkbox"
-                                            checked={form.data.is_qa}
-                                            onChange={(event) => form.setData('is_qa', event.target.checked)}
-                                            className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-300"
-                                        />
-                                        <span className="inline-flex items-center gap-1.5">
-                                            {usersFormText.field_is_qa ?? 'QA (kvalitetssikring)'}
-                                            <InfoHint
-                                                size="sm"
-                                                label="Vis forklaring for QA"
-                                                text={usersFormText.hint_is_qa ?? 'Kan gå gjennom og godkjenne enkeltpåstander mot kildegrunnlaget. Gir ikke rett til å publisere Wiki-sider.'}
-                                            />
-                                        </span>
-                                    </label>
-                                    {errors.is_qa ? <p className="text-sm text-rose-600">{errors.is_qa}</p> : null}
+                                    <CheckboxWithInfo
+                                        id="user-is-qa"
+                                        checked={form.data.is_qa}
+                                        onChange={(event) => form.setData('is_qa', event.target.checked)}
+                                        label={usersFormText.field_is_qa ?? 'QA (kvalitetssikring)'}
+                                        info={<InfoHint size="sm" label="Vis forklaring for QA" text={usersFormText.hint_is_qa ?? 'Kan gå gjennom og godkjenne enkeltpåstander mot kildegrunnlaget. Gir ikke rett til å publisere Wiki-sider.'} />}
+                                        error={errors.is_qa}
+                                    />
 
                                     {/* Its own capability, not a second meaning for QA: vouching for
                                         a claim against its source and publishing a page are
                                         different decisions, and a user may hold either or both. */}
                                     <input type="hidden" name="is_wiki_approver" value={form.data.is_wiki_approver ? '1' : '0'} />
-                                    <label className="flex items-center gap-2.5 text-sm font-medium text-slate-700">
-                                        <input
-                                            type="checkbox"
-                                            checked={form.data.is_wiki_approver}
-                                            onChange={(event) => form.setData('is_wiki_approver', event.target.checked)}
-                                            className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-300"
-                                        />
-                                        <span className="inline-flex items-center gap-1.5">
-                                            {usersFormText.field_is_wiki_approver ?? 'Wiki-godkjenner'}
-                                            <InfoHint
-                                                size="sm"
-                                                label="Vis forklaring for Wiki-godkjenner"
-                                                text={usersFormText.hint_is_wiki_approver ?? 'Kan gjennomgå, godkjenne og publisere Wiki-sider som er sendt til gjennomgang.'}
-                                            />
-                                        </span>
-                                    </label>
-                                    {errors.is_wiki_approver ? <p className="text-sm text-rose-600">{errors.is_wiki_approver}</p> : null}
+                                    <CheckboxWithInfo
+                                        id="user-is-wiki-approver"
+                                        checked={form.data.is_wiki_approver}
+                                        onChange={(event) => form.setData('is_wiki_approver', event.target.checked)}
+                                        label={usersFormText.field_is_wiki_approver ?? 'Wiki-godkjenner'}
+                                        info={<InfoHint size="sm" label="Vis forklaring for Wiki-godkjenner" text={usersFormText.hint_is_wiki_approver ?? 'Kan gjennomgå, godkjenne og publisere Wiki-sider som er sendt til gjennomgang.'} />}
+                                        error={errors.is_wiki_approver}
+                                    />
                                 </div>
                             ) : (user.is_qa || user.is_wiki_approver) ? (
                                 <div className="flex flex-wrap gap-2 md:col-span-2">
@@ -300,35 +345,37 @@ export default function UsersEdit({
                             ) : null}
 
                             {isBidManager && canEditBidManagerScope ? (
-                                <label className="space-y-2 md:col-span-2">
-                                    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">
-                                        {usersFormText.admin_scope_label ?? 'Administrativt ansvarsområde'}
-                                        <InfoHint size="sm" label="Vis forklaring for Administrativt ansvarsområde" text={usersFormText.hint_admin_scope} />
-                                    </span>
-                                    <select
-                                        name="bid_manager_scope"
-                                        value={form.data.bid_manager_scope}
-                                        onChange={(event) => handleBidManagerScopeChange(event.target.value)}
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                    >
-                                        {bidManagerScopeOptions.map((option) => (
-                                            <option key={option.value} value={option.value}>
-                                                {option.label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <p className="text-xs text-slate-400">
-                                        Dette styrer hvilke avdelinger bid-manager kan administrere, og er separat fra hvilke avdelinger brukeren tilhører.
-                                    </p>
-                                    {errors.bid_manager_scope ? <p className="text-sm text-rose-600">{errors.bid_manager_scope}</p> : null}
-                                </label>
+                                <UserField
+                                    id="user-bid-manager-scope"
+                                    label={usersFormText.admin_scope_label ?? 'Administrativt ansvarsområde'}
+                                    info={<InfoHint size="sm" label="Vis forklaring for Administrativt ansvarsområde" text={usersFormText.hint_admin_scope} />}
+                                    hint="Dette styrer hvilke avdelinger bid-manager kan administrere, og er separat fra hvilke avdelinger brukeren tilhører."
+                                    error={errors.bid_manager_scope}
+                                    span="md:col-span-2"
+                                >
+                                    {(field) => (
+                                        <select
+                                            {...field}
+                                            name="bid_manager_scope"
+                                            value={form.data.bid_manager_scope}
+                                            onChange={(event) => handleBidManagerScopeChange(event.target.value)}
+                                            className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        >
+                                            {bidManagerScopeOptions.map((option) => (
+                                                <option key={option.value} value={option.value}>
+                                                    {option.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    )}
+                                </UserField>
                             ) : isBidManager ? (
                                 <div className="space-y-2 md:col-span-2">
                                     <span className="text-sm font-medium text-slate-700">Administrativt ansvarsområde</span>
                                     <div className="flex min-h-11 items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-700">
                                         {user.bid_manager_scope_label ?? 'Ikke satt'}
                                     </div>
-                                    <p className="text-xs text-slate-400">
+                                    <p className="text-xs text-slate-600">
                                         Administrativt ansvarsområde kan bare endres av systemeier.
                                     </p>
                                 </div>
@@ -339,9 +386,15 @@ export default function UsersEdit({
                                 addition hold any number of these. An inactive role is shown only
                                 when the user already holds it, and cannot be ticked on. */}
                             {canEditCustomerRoles ? (
-                                <div className="space-y-2 md:col-span-2">
+                                // A group of checkboxes under one question (A11Y-120): named by the question,
+                                // described by its hint and error, with the «i» beside the question, not inside it.
+                                <fieldset
+                                    className="space-y-2 md:col-span-2"
+                                    aria-labelledby="user-customer-roles-legend"
+                                    aria-describedby={['user-customer-roles-hint', errors.customer_role_ids ? 'user-customer-roles-error' : null].filter(Boolean).join(' ')}
+                                >
                                     <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">
-                                        {usersFormText.customer_roles_label ?? 'Egne roller'}
+                                        <span id="user-customer-roles-legend">{usersFormText.customer_roles_label ?? 'Egne roller'}</span>
                                         <InfoHint
                                             size="sm"
                                             label="Vis forklaring for Egne roller"
@@ -365,6 +418,7 @@ export default function UsersEdit({
                                                     >
                                                         <input
                                                             type="checkbox"
+                                                            aria-invalid={errors.customer_role_ids ? true : undefined}
                                                             name="customer_role_ids[]"
                                                             value={role.id}
                                                             checked={checked}
@@ -375,7 +429,7 @@ export default function UsersEdit({
                                                         <span>
                                                             {role.name}
                                                             {!role.is_active ? (
-                                                                <span className="ml-2 text-xs font-semibold text-slate-500">
+                                                                <span className="ml-2 text-xs font-semibold text-slate-600">
                                                                     ({usersFormText.customer_roles_inactive ?? 'Inaktiv'})
                                                                 </span>
                                                             ) : null}
@@ -389,13 +443,13 @@ export default function UsersEdit({
                                             {usersFormText.customer_roles_none ?? 'Dere har ingen egne roller ennå. Opprett dem under Kundemiljø → Tilganger.'}
                                         </div>
                                     )}
-                                    <p className="text-xs text-slate-400">
+                                    <p id="user-customer-roles-hint" className="text-xs text-slate-600">
                                         {usersFormText.customer_roles_hint ?? 'En inaktiv rolle beholder tildelingen sin, men gir ingen rettigheter.'}
                                     </p>
                                     {errors.customer_role_ids ? (
-                                        <p className="text-sm text-rose-600">{errors.customer_role_ids}</p>
+                                        <p id="user-customer-roles-error" className="text-sm text-rose-700">{errors.customer_role_ids}</p>
                                     ) : null}
-                                </div>
+                                </fieldset>
                             ) : (
                                 <div className="space-y-2 md:col-span-2">
                                     <span className="text-sm font-medium text-slate-700">
@@ -422,37 +476,49 @@ export default function UsersEdit({
                                             {usersFormText.customer_roles_empty ?? 'Ingen'}
                                         </div>
                                     )}
-                                    <p className="text-xs text-slate-400">
+                                    <p className="text-xs text-slate-600">
                                         {usersFormText.customer_roles_locked ?? 'Egne roller tildeles av systemeier.'}
                                     </p>
                                 </div>
                             )}
 
-                            <label className="space-y-2 md:col-span-1">
-                                <span className="text-sm font-medium text-slate-700">Nytt passord</span>
-                                <input
-                                    type="password"
-                                    name="password"
-                                    value={form.data.password}
-                                    onChange={(event) => form.setData('password', event.target.value)}
-                                    autoComplete="new-password"
-                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                />
-                                <p className="text-xs text-slate-400">La feltet stå tomt hvis passordet ikke skal endres.</p>
-                                {errors.password ? <p className="text-sm text-rose-600">{errors.password}</p> : null}
-                            </label>
+                            <UserField
+                                id="user-password"
+                                label="Nytt passord"
+                                hint="La feltet stå tomt hvis passordet ikke skal endres."
+                                error={errors.password}
+                                span="md:col-span-1"
+                            >
+                                {(field) => (
+                                    <input
+                                        {...field}
+                                        type="password"
+                                        name="password"
+                                        value={form.data.password}
+                                        onChange={(event) => form.setData('password', event.target.value)}
+                                        autoComplete="new-password"
+                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                    />
+                                )}
+                            </UserField>
 
-                            <label className="space-y-2 md:col-span-1">
-                                <span className="text-sm font-medium text-slate-700">Bekreft nytt passord</span>
-                                <input
-                                    type="password"
-                                    name="password_confirmation"
-                                    value={form.data.password_confirmation}
-                                    onChange={(event) => form.setData('password_confirmation', event.target.value)}
-                                    autoComplete="new-password"
-                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                />
-                            </label>
+                            <UserField
+                                id="user-password-confirmation"
+                                label="Bekreft nytt passord"
+                                span="md:col-span-1"
+                            >
+                                {(field) => (
+                                    <input
+                                        {...field}
+                                        type="password"
+                                        name="password_confirmation"
+                                        value={form.data.password_confirmation}
+                                        onChange={(event) => form.setData('password_confirmation', event.target.value)}
+                                        autoComplete="new-password"
+                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                    />
+                                )}
+                            </UserField>
 
                             <DepartmentCheckboxGroup
                                 label="Brukeren tilhører disse avdelingene"
@@ -497,53 +563,61 @@ export default function UsersEdit({
                                             Ingen avdelinger er valgt for administrativt ansvarsområde.
                                         </div>
                                     )}
-                                    <p className="text-xs text-slate-400">
+                                    <p className="text-xs text-slate-600">
                                         Administrativt ansvarsområde kan bare endres av systemeier.
                                     </p>
                                 </div>
                             ) : null}
 
-                            <label className="space-y-2 md:col-span-2">
-                                <span className="text-sm font-medium text-slate-700">Primær tilhørighet</span>
-                                <select
-                                    name="primary_affiliation_scope"
-                                    value={form.data.primary_affiliation_scope}
-                                    onChange={(event) => handlePrimaryAffiliationScopeChange(event.target.value)}
-                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                >
-                                    {primaryAffiliationScopeOptions.map((option) => (
-                                        <option key={option.value} value={option.value}>
-                                            {option.label}
-                                        </option>
-                                    ))}
-                                </select>
-                                <p className="text-xs text-slate-400">
-                                    Primær tilhørighet styrer brukerens normale organisatoriske hjemsted. Dette er separat fra bid-manager sitt administrative ansvarsområde.
-                                </p>
-                                {errors.primary_affiliation_scope ? <p className="text-sm text-rose-600">{errors.primary_affiliation_scope}</p> : null}
-                            </label>
-
-                            {isDepartmentPrimaryAffiliation ? (
-                                <label className="space-y-2 md:col-span-2">
-                                    <span className="text-sm font-medium text-slate-700">Primær avdeling</span>
+                            <UserField
+                                id="user-primary-affiliation-scope"
+                                label="Primær tilhørighet"
+                                hint="Primær tilhørighet styrer brukerens normale organisatoriske hjemsted. Dette er separat fra bid-manager sitt administrative ansvarsområde."
+                                error={errors.primary_affiliation_scope}
+                                span="md:col-span-2"
+                            >
+                                {(field) => (
                                     <select
-                                        name="primary_department_id"
-                                        value={form.data.primary_department_id}
-                                        onChange={(event) => form.setData('primary_department_id', event.target.value === '' ? '' : Number(event.target.value))}
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        {...field}
+                                        name="primary_affiliation_scope"
+                                        value={form.data.primary_affiliation_scope}
+                                        onChange={(event) => handlePrimaryAffiliationScopeChange(event.target.value)}
+                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                     >
-                                        <option value="">Velg primær avdeling</option>
-                                        {primaryDepartmentOptions.map((option) => (
+                                        {primaryAffiliationScopeOptions.map((option) => (
                                             <option key={option.value} value={option.value}>
                                                 {option.label}
                                             </option>
                                         ))}
                                     </select>
-                                    <p className="text-xs text-slate-400">
-                                        Primær avdeling må være blant brukerens operative avdelinger.
-                                    </p>
-                                    {errors.primary_department_id ? <p className="text-sm text-rose-600">{errors.primary_department_id}</p> : null}
-                                </label>
+                                )}
+                            </UserField>
+
+                            {isDepartmentPrimaryAffiliation ? (
+                                <UserField
+                                    id="user-primary-department-id"
+                                    label="Primær avdeling"
+                                    hint="Primær avdeling må være blant brukerens operative avdelinger."
+                                    error={errors.primary_department_id}
+                                    span="md:col-span-2"
+                                >
+                                    {(field) => (
+                                        <select
+                                            {...field}
+                                            name="primary_department_id"
+                                            value={form.data.primary_department_id}
+                                            onChange={(event) => form.setData('primary_department_id', event.target.value === '' ? '' : Number(event.target.value))}
+                                            className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        >
+                                            <option value="">Velg primær avdeling</option>
+                                            {primaryDepartmentOptions.map((option) => (
+                                                <option key={option.value} value={option.value}>
+                                                    {option.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    )}
+                                </UserField>
                             ) : null}
 
                             <div className="space-y-2 md:col-span-2">
@@ -573,7 +647,7 @@ export default function UsersEdit({
                                                 : 'Aktiver'}
                                     </button>
                                 </div>
-                                {user.is_self ? <p className="text-xs text-slate-400">Du kan ikke deaktivere din egen bruker.</p> : null}
+                                {user.is_self ? <p className="text-xs text-slate-600">Du kan ikke deaktivere din egen bruker.</p> : null}
                             </div>
                         </div>
 

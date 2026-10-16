@@ -35,7 +35,7 @@ export default function RiskTreatmentStrategy({ strategy, decision, onEdit = nul
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <h2 id="risk-treatment-strategy-heading" className="text-lg font-semibold text-slate-950">{tt.heading ?? 'Behandling'}</h2>
                 {onEdit && (
-                    <button type="button" onClick={onEdit} className={SECONDARY_ACTION}>
+                    <button id="risk-treatment-strategy-edit" type="button" onClick={onEdit} className={SECONDARY_ACTION}>
                         {tt.edit ?? 'Endre'}
                     </button>
                 )}

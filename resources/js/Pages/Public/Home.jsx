@@ -65,7 +65,7 @@ function Benefit({ icon: Icon, title, body }) {
             </div>
             <div>
                 <p className="text-base font-semibold text-slate-900">{title}</p>
-                <p className="mt-1 text-base leading-7 text-slate-500">{body}</p>
+                <p className="mt-1 text-base leading-7 text-slate-600">{body}</p>
             </div>
         </div>
     );
@@ -179,7 +179,7 @@ export default function Home() {
                                 <ArrowIcon className="h-4 w-4" />
                             </Link>
                         </div>
-                        <div className="mt-8 flex flex-wrap justify-center gap-6 text-base text-slate-500">
+                        <div className="mt-8 flex flex-wrap justify-center gap-6 text-base text-slate-600">
                             {checklist.map((item) => (
                                 <div key={item} className="flex items-center gap-2">
                                     <CheckIcon className="h-4 w-4 text-blue-500" />

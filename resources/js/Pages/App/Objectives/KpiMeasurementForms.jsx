@@ -1,6 +1,11 @@
+import { useRef } from 'react';
 import { useForm, usePage } from '@inertiajs/react';
+import FormField, { RequiredFieldsNote } from '../../../Components/App/FormField';
 import { PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
-import RequiredMark from '../Risk/RequiredMark';
+import { useFocusFirstError } from '../../../Support/focusManagement';
+import { fieldA11y } from '../../../Support/formFieldA11y';
+import { ERROR, INPUT, LABEL, TEXTAREA } from '../../../Support/formStyles';
+import { useTransitionAnnouncement } from '../../../Support/statusAnnouncement';
 import { existingValueFor } from './kpiStatus';
 import { unitProblem, unitProblemMessage } from './kpiTarget';
 import { kpiUnitSuffix } from './kpiUnitSuffix';
@@ -8,8 +13,7 @@ import UnitInput from './UnitInput';
 import { useKpiNumberFields } from './useKpiNumberFields';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-base font-semibold text-slate-700';
+const STAR = <span aria-hidden="true" className="ml-0.5 text-rose-700">*</span>;
 
 /**
  * Registrer måling. The period is chosen, never typed: an ended calendar period for a KPI with a
@@ -23,6 +27,10 @@ const LABEL = 'block text-base font-semibold text-slate-700';
  * becomes required. «Korriger» in the history opens the form on that row's period (initialChoice).
  * The value must fit the KPI's unit — a whole number of saker, a share up to 100 % — as the server
  * checks again (KpiUnitRules).
+ *
+ * Fields are tied to their hints and errors; a refused registration puts focus on the first field
+ * that is wrong (A11Y-013). The correction notice is said once when a choice turns the registration
+ * into a correction, and describes the period field so it is heard again from there (4.1.3).
  */
 export function KpiMeasurementForm({ baseUrl, kpi, options, onDone, tr, initialChoice = null }) {
     const form = useForm({
@@ -39,18 +47,26 @@ export function KpiMeasurementForm({ baseUrl, kpi, options, onDone, tr, initialC
     });
     const existing = existingValueFor(options, form.data);
     const correction = existing !== null;
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+    const correctionText = (tr.correction_notice ?? 'Denne perioden har allerede en registrert verdi på :value. Den nye målingen erstatter den som gjeldende verdi, men historikken beholdes.')
+        .replace(':value', existing);
+
+    useTransitionAnnouncement(correction ? `correction-${existing}` : 'new', (previous, next) => (next === 'new' ? null : { message: correctionText }));
 
     const submit = (event) => {
         event.preventDefault();
 
         if (! numbers.checkBeforeSubmit(['value'])) {
+            focusFirstError();
+
             return;
         }
 
-        form.post(`${baseUrl}/measurements`, { preserveScroll: true, onSuccess: onDone });
+        form.post(`${baseUrl}/measurements`, { preserveScroll: true, onSuccess: onDone, onError: focusFirstError });
     };
 
-    const error = (field, id = undefined) => form.errors[field] && <p id={id} className="mt-1 text-base text-rose-600">{form.errors[field]}</p>;
+    const comment = fieldA11y({ id: 'measurement-comment', hasHint: true, hasError: Boolean(form.errors.comment), required: correction });
 
     return (
         <section className={CARD} aria-labelledby="kpi-measure-heading">
@@ -60,92 +76,103 @@ export function KpiMeasurementForm({ baseUrl, kpi, options, onDone, tr, initialC
             <p className="mt-1 text-base text-slate-600">
                 {tr.register_intro ?? 'Målverdien som gjelder nå, lagres sammen med verdien, slik at historikken viser hva målverdien var.'}
             </p>
-            <form onSubmit={submit} className="mt-4 space-y-4">
+            <form ref={formRef} onSubmit={submit} className="mt-4 space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
                     {options.mode === 'period' ? (
-                        <div>
-                            <label htmlFor="measurement-period" className={LABEL}>{tr.field_period ?? 'Periode'}<RequiredMark /></label>
-                            <select
-                                id="measurement-period"
-                                required
-                                aria-required="true"
-                                value={form.data.period}
-                                onChange={(event) => form.setData('period', event.target.value)}
-                                className={`mt-1 ${INPUT}`}
-                            >
-                                {(options.period_options ?? []).map((option) => (
-                                    <option key={option.key} value={option.key}>
-                                        {option.label}
-                                        {option.key === options.suggested_key ? ` (${tr.suggested ?? 'foreslått'})` : ''}
-                                        {option.current_value_display ? ` – ${tr.has_value ?? 'har verdi'} ${option.current_value_display}` : ''}
-                                    </option>
-                                ))}
-                            </select>
-                            {error('period')}
-                        </div>
+                        <FormField
+                            id="measurement-period"
+                            label={tr.field_period ?? 'Periode'}
+                            error={form.errors.period}
+                            required
+                            describedBy={correction ? ['measurement-correction-notice'] : []}
+                        >
+                            {(field) => (
+                                <select
+                                    {...field}
+                                    required
+                                    value={form.data.period}
+                                    onChange={(event) => form.setData('period', event.target.value)}
+                                    className={INPUT}
+                                >
+                                    {(options.period_options ?? []).map((option) => (
+                                        <option key={option.key} value={option.key}>
+                                            {option.label}
+                                            {option.key === options.suggested_key ? ` (${tr.suggested ?? 'foreslått'})` : ''}
+                                            {option.current_value_display ? ` – ${tr.has_value ?? 'har verdi'} ${option.current_value_display}` : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                            )}
+                        </FormField>
                     ) : (
-                        <div>
-                            <label htmlFor="measurement-date" className={LABEL}>{tr.field_measured_on ?? 'Dato'}<RequiredMark /></label>
-                            <input
-                                id="measurement-date"
-                                type="date"
-                                required
-                                aria-required="true"
-                                max={options.today}
-                                value={form.data.measured_on}
-                                onChange={(event) => form.setData('measured_on', event.target.value)}
-                                className={`mt-1 ${INPUT}`}
-                            />
-                            {error('measured_on')}
-                        </div>
+                        <FormField
+                            id="measurement-date"
+                            label={tr.field_measured_on ?? 'Dato'}
+                            error={form.errors.measured_on}
+                            required
+                            describedBy={correction ? ['measurement-correction-notice'] : []}
+                        >
+                            {(field) => (
+                                <input
+                                    {...field}
+                                    type="date"
+                                    required
+                                    max={options.today}
+                                    value={form.data.measured_on}
+                                    onChange={(event) => form.setData('measured_on', event.target.value)}
+                                    className={INPUT}
+                                />
+                            )}
+                        </FormField>
                     )}
 
-                    <div>
-                        <label htmlFor="measurement-value" className={LABEL}>{tr.field_value ?? 'Verdi'}<RequiredMark /></label>
-                        <UnitInput
-                            id="measurement-value"
-                            suffix={kpiUnitSuffix(kpi, tr, form.data.value)}
-                            required
-                            aria-required="true"
-                            describedBy={form.errors.value ? 'measurement-value-hint measurement-value-error' : 'measurement-value-hint'}
-                            {...numbers.bind('value')}
-                            className="mt-1"
-                        />
-                        <p id="measurement-value-hint" className="mt-1 text-base text-slate-500">
-                            {kpi.unit_display} · {tr.detail_target ?? 'Målverdi'} {kpi.target_display}
-                        </p>
-                        {error('value', 'measurement-value-error')}
-                    </div>
+                    <FormField
+                        id="measurement-value"
+                        label={tr.field_value ?? 'Verdi'}
+                        hint={`${kpi.unit_display} · ${tr.detail_target ?? 'Målverdi'} ${kpi.target_display}`}
+                        error={form.errors.value}
+                        required
+                    >
+                        {(field) => (
+                            <UnitInput
+                                id={field.id}
+                                suffix={kpiUnitSuffix(kpi, tr, form.data.value)}
+                                required
+                                aria-required={field['aria-required']}
+                                describedBy={field['aria-describedby'] ?? null}
+                                {...numbers.bind('value')}
+                            />
+                        )}
+                    </FormField>
                 </div>
 
                 {correction && (
-                    <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base text-amber-900" role="status" data-testid="measurement-correction">
-                        {(tr.correction_notice ?? 'Denne perioden har allerede en registrert verdi på :value. Den nye målingen erstatter den som gjeldende verdi, men historikken beholdes.')
-                            .replace(':value', existing)}
+                    <p id="measurement-correction-notice" className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base text-amber-900" data-testid="measurement-correction">
+                        {correctionText}
                     </p>
                 )}
 
                 <div>
                     <label htmlFor="measurement-comment" className={LABEL}>
-                        {tr.field_comment ?? 'Kommentar'}{correction && <RequiredMark />}
+                        {tr.field_comment ?? 'Kommentar'}{correction && STAR}
                     </label>
-                    <p id="measurement-comment-hint" className="text-base text-slate-600">
+                    <p id={comment.hintId} className="text-base text-slate-600">
                         {correction
                             ? (tr.comment_required_hint ?? 'Påkrevd ved korrigering: forklar hvorfor verdien endres.')
                             : (tr.comment_hint ?? 'Valgfritt.')}
                     </p>
                     <textarea
-                        id="measurement-comment"
+                        {...comment.controlProps}
                         rows={2}
                         required={correction}
-                        aria-required={correction ? 'true' : undefined}
-                        aria-describedby="measurement-comment-hint"
                         value={form.data.comment}
                         onChange={(event) => form.setData('comment', event.target.value)}
-                        className={`mt-1 ${INPUT}`}
+                        className={`mt-1 ${TEXTAREA}`}
                     />
-                    {error('comment')}
+                    {form.errors.comment && <p id={comment.errorId} className={ERROR}>{form.errors.comment}</p>}
                 </div>
+
+                <RequiredFieldsNote text={tr.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
 
                 <div className="flex flex-wrap justify-end gap-3">
                     <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
@@ -164,33 +191,35 @@ export function KpiMeasurementForm({ baseUrl, kpi, options, onDone, tr, initialC
 export function KpiWithdrawForm({ baseUrl, measurement, onDone, tr }) {
     const form = useForm({ reason: '' });
     const id = `withdraw-reason-${measurement.id}`;
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
 
     const submit = (event) => {
         event.preventDefault();
-        form.post(`${baseUrl}/measurements/${measurement.id}/withdraw`, { preserveScroll: true, onSuccess: onDone });
+        form.post(`${baseUrl}/measurements/${measurement.id}/withdraw`, { preserveScroll: true, onSuccess: onDone, onError: focusFirstError });
     };
 
     return (
-        <form onSubmit={submit} className="mt-3 space-y-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+        <form ref={formRef} onSubmit={submit} className="mt-3 space-y-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
             <p className="text-base font-semibold text-slate-900">
                 {tr.withdraw_heading ?? 'Trekk tilbake måling'}: {measurement.period_label}, {measurement.value_display}
             </p>
             <p className="text-base text-slate-700">
                 {tr.withdraw_intro ?? 'Målingen blir stående i historikken som tilbaketrukket og teller ikke lenger. Dette kan ikke angres.'}
             </p>
-            <div>
-                <label htmlFor={id} className={LABEL}>{tr.withdraw_reason_label ?? 'Begrunnelse'}<RequiredMark /></label>
-                <textarea
-                    id={id}
-                    rows={2}
-                    required
-                    aria-required="true"
-                    value={form.data.reason}
-                    onChange={(event) => form.setData('reason', event.target.value)}
-                    className={`mt-1 ${INPUT}`}
-                />
-                {form.errors.reason && <p className="mt-1 text-base text-rose-600">{form.errors.reason}</p>}
-            </div>
+            <FormField id={id} label={tr.withdraw_reason_label ?? 'Begrunnelse'} error={form.errors.reason} required>
+                {(field) => (
+                    <textarea
+                        {...field}
+                        rows={2}
+                        required
+                        value={form.data.reason}
+                        onChange={(event) => form.setData('reason', event.target.value)}
+                        className={TEXTAREA}
+                    />
+                )}
+            </FormField>
+            <RequiredFieldsNote text={tr.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-700" />
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
                 <button type="submit" disabled={form.processing} className={WARNING_ACTION}>
