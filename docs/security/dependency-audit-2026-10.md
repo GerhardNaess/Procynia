@@ -565,3 +565,93 @@ gjelder bare hvis rå brukertekst sendes direkte til `Markdown::parse()`. Det sk
   Babel-treet som produksjon. Det påvirker ikke Docker-bygget (`npm ci` uten `--omit=dev`).
 - **Vertsmaskinens Node:** lokal standard-Node er 18. Bygging og tester må kjøres med Node 22.
 - **Gjenstår etter runde 4:** den samlede regresjonen (§9) og CI-kjøring på branchen.
+
+### Sluttkontroll — samlet regresjon (17.10.2026)
+
+Kjørt på `70a16926`, branch `fix/dependency-security-2026-10`. Branchen har fem commits over `main` (`b4e14566`):
+`dc8f08ed`, `aefefc15`, `aad16db3`, `dae4ff99` og `70a16926`. Det ble ikke gjort nye avhengighetsoppgraderinger.
+
+**[Observert] Wiki-testrettelsen** (`70a16926`, `test(e2e): stabilize wiki focus page selector`)
+
+- **Endring:** `page.getByLabel('Fokusside')` er byttet ut med `page.locator('#graph-focus-page')` på linje 167 og 185 i
+  `tests/e2e/a11y-wiki.spec.js`. Påstandene er uendret, og produksjonskoden er ikke rørt.
+- **Id-en er entydig:** `graph-focus-page` finnes bare på `<select>` i `Graph.jsx:710`, og `<label htmlFor>` peker dit.
+- **Linje 167** hadde samme lokator. Den feilet ikke, fordi lista ikke finnes ennå når linjen kjøres, men den er
+  byttet for at begge stegene skal treffe samme kontroll.
+- **Stabilitet:** `a11y-wiki.spec.js --repeat-each=5` ga 60 av 60 bestått. Testen besto også i den fulle E2E-kjøringen.
+
+**[Observert] Resultater**
+
+| Kontroll | Kommando | Resultat |
+|---|---|---|
+| PHP, full suite | `php -d memory_limit=-1 vendor/bin/phpunit` i `procynia-app` (PHP 8.4.23) | 7733 tester, 48 404 assertions: **7727 bestått, 3 feilet, 3 hoppet over**, 30:44 |
+| Frontend-enhetstester | `npm run test:unit` (Node 22.23.2) | **2081 bestått, 0 feilet, 0 hoppet over** |
+| Tilgjengelighetslint | `npm run lint:a11y` | ingen funn |
+| Build | `npm ci` + `npm run build` | OK, med samme assets-hash som før runde 4 |
+| E2E, full suite | `npx playwright test` (Chromium, 1 worker, nybygde assets) | **398 bestått, 0 feilet, 0 hoppet over**, 50,5 min |
+| `composer audit` | | «No security vulnerability advisories found» |
+| `npm audit` | | «found 0 vulnerabilities» |
+
+- **Miljø:** PHP og E2E kjørte etter hverandre, ikke samtidig. `public/hot` var flyttet midlertidig til side under
+  E2E-kjøringen og ble lagt tilbake etterpå. Vite-dev-serveren ble ikke stoppet.
+
+**[Observert] De 3 PHP-feilene er en eksisterende testfeil, ikke en regresjon**
+
+- **Feilen:** alle tre er i `Tests\Feature\App\Wiki\WikiSecondaryNavigationOrderTest`. Testen leser kildeteksten i
+  `CustomerAppLayout.jsx` og leter etter blokken `if (activeMainArea === 'wiki') {`. Den blokken ble fjernet i
+  `6b0f13cb` (feat(navigation): unify sidebar navigation and breadcrumbs, 12.10.2026).
+- **Branchen har ikke rørt filene:** den endrer ingen filer under `resources/`, `app/`, `lang/` eller
+  `tests/Feature`.
+- **Baseline:** `main` `b4e14566` ble kjørt med sin egen vendor i en midlertidig git worktree, med
+  Laravel v13.29.0, Filament v5.7.6, CommonMark 2.10.0 og http-foundation v8.1.5. Den ga samme resultat:
+  7733 tester, 48 404 assertions, de samme 3 feilene og 3 hoppet over.
+- **Ikke rettet her:** en retting ville vært en kodeendring utover den avtalte Wiki-testrettelsen.
+
+**[Observert] Testmiljøet: minne og tidsavbrudd**
+
+- **`composer test` fullfører ikke** hele suiten i dette miljøet, og det gjelder også `main`:
+  - Composer stopper skriptet etter 300 s (`process-timeout`), mens suiten tar 25–30 min.
+  - Med `COMPOSER_PROCESS_TIMEOUT=0` stopper PHPUnit-prosessen på `memory_limit=512M`. Det skjer etter
+    7138 beståtte tester, i `Tests\Feature\Filament`.
+- **Toppminne for hele kjøringen** (`memory_get_peak_usage`): HEAD 541 MB og `main` 535 MB. Sikkerhetsoppdateringene
+  står for omtrent 6 MB (~1 %). Overskridelsen skyldes at suiten har vokst: 7124 tester ved merge-porten 08.10.2026,
+  7733 nå.
+- **[Vurdering]** Dette gjelder bare testprosessen, der alle testene kjører i én PHP-prosess. Én forespørsel eller jobb
+  bruker rundt 48 MB (`docs/azure-workload-sizing.md`).
+- **Anbefalt egen commit:** legg til `<ini name="memory_limit" value="1G"/>` i `<php>`-blokken i `phpunit.xml`.
+  `php artisan test` sender ikke `-d` videre til PHPUnit-prosessen, så verdien må settes der. Legg også til
+  `"process-timeout": 0` under `config` i `composer.json`.
+
+**[Observert] Sikkerhetsstatus**
+
+| Advisory | Pakke | Før → etter | Status |
+|---|---|---|---|
+| CVE-2026-108082 (ReDoS, `Cache-Control`) | `symfony/http-foundation` | v8.1.5 → v8.1.9 | lukket |
+| GHSA-3q6v-r5mr-hxv8, GHSA-97jj-33gv-5xf9 | `league/commonmark` | 2.10.0 → 2.10.3 | begge lukket |
+| CVE-2026-102279 / GHSA-jh5r-qr3c-85q8 | `laravel/framework` | v13.29.0 → v13.30.1 | lukket |
+| CVE-2026-104181 / GHSA-7m6h-rg42-m449 | `filament/filament` | v5.7.6 → v5.8.4 | lukket |
+| GHSA-pqg4-j6r4-53mv, GHSA-c83g-rgw3-j3cx, GHSA-73wf-gq98-2v4g, GHSA-68fv-2mgg-jv7q, GHSA-w5vr-8v7q-w6rv | `shell-quote`, `concurrently`, `browserslist`, `source-map-js`, `baseline-browser-mapping` | se runde 4 | lukket |
+
+Begge audits gir null kjente funn 17.10.2026. Ingen nye avhengigheter og ingen nye advisories har kommet til siden
+kartleggingen.
+
+**Gjenværende tekniske observasjoner** (ingen av dem blokkerer merge)
+
+- `WikiSecondaryNavigationOrderTest` bruker en utdatert kildetekst-sjekk (3 tester). Den bør skrives om mot gjeldende
+  navigasjonskode i en egen commit.
+- Minnegrensen og tidsavbruddet for `composer test`, se over.
+- `@vitejs/plugin-react` står under `dependencies` (se runde 4).
+- Vertsmaskinens standard-Node er 18, mens prosjektet krever 22.
+- Sju ubrukte Inter-fonter fra Filament (se runde 3).
+- Modal-funnet i `a11y-admin` fra runde 3 kom ikke igjen. `a11y-admin` besto 39 av 39 i runde 4 og i den fulle
+  E2E-kjøringen.
+
+**Status for merge**
+
+- **Lokalt klar for merge:** alle planlagte advisories er lukket, begge audits er rene, og den samlede regresjonen viser
+  ingen regresjon.
+- **Ikke pushet. CI på GitHub er ikke kjørt** for denne branchen, og er derfor ikke verifisert grønn.
+- **Gjenstår før merge:** push og CI-kjøring av `.github/workflows/dependency-audit.yml`. Den har to jobber:
+  - «Composer advisories» kjører `composer audit`.
+  - «npm advisories» kjører `npm ci`, enhetstester, a11y-lint og `npm audit`.
+  Begge er lokalt grønne med samme lockfiler. CI kjører ikke PHP-testsuiten, så minnegrensen påvirker ikke CI.
