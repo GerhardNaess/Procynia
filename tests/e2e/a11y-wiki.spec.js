@@ -164,7 +164,7 @@ test.describe.serial('WCAG Fase 5 — Enterprise Wiki', () => {
 
         await page.getByRole('group', { name: 'Grafmodus' }).getByRole('button', { name: 'Fokus', exact: true }).click();
         await page.getByRole('button', { name: 'Liste', exact: true }).click();
-        await page.getByLabel('Fokusside').selectOption({ label: 'Leverandørsikkerhet' });
+        await page.locator('#graph-focus-page').selectOption({ label: 'Leverandørsikkerhet' });
 
         const focusList = page.getByRole('region', { name: 'Sider i fokusvisningen' });
 
@@ -182,7 +182,7 @@ test.describe.serial('WCAG Fase 5 — Enterprise Wiki', () => {
 
             // «Fokuser på denne siden» makes a neighbour the next focus, like the card on the canvas.
             await focusList.getByRole('button', { name: 'Fokuser på denne siden' }).first().click();
-            await expect(page.getByLabel('Fokusside')).not.toHaveValue('');
+            await expect(page.locator('#graph-focus-page')).not.toHaveValue('');
             await expect(focusList.getByRole('heading', { name: 'Fokusside' })).toBeVisible();
         } else {
             await expect(page.locator('#procynia-live-assertive')).toHaveText('Fokusvisningen er ikke tilgjengelig.');
