@@ -71,6 +71,8 @@ class EnterpriseWikiIngestRunPage extends Model
         'claims_extracted_at',
         'claims_claimed_at',
         'claims_claim_token',
+        'link_assessment',
+        'links_assessed_at',
     ];
 
     protected function casts(): array
@@ -82,6 +84,8 @@ class EnterpriseWikiIngestRunPage extends Model
             'generation_completed_at' => 'datetime',
             'claims_extracted_at' => 'datetime',
             'claims_claimed_at' => 'datetime',
+            'link_assessment' => 'array',
+            'links_assessed_at' => 'datetime',
         ];
     }
 

@@ -124,6 +124,8 @@ return [
         'wiki.revise_semantics' => ['model' => 'gpt-5', 'estimate' => ['input_tokens' => 30000, 'output_tokens' => 4000]],
         'wiki.revise_links' => ['model' => 'gpt-5', 'estimate' => ['input_tokens' => 30000, 'output_tokens' => 3000]],
         'wiki.review_links' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 20000, 'output_tokens' => 1000]],
+        // Relink v2 (D8): picks a block and an anchor for one inbound link; never writes content.
+        'wiki.propose_inbound_links' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 8000, 'output_tokens' => 200]],
         'wiki.review_semantics' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 20000, 'output_tokens' => 1500]],
         'wiki.classify_cross_page_consistency' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 10000, 'output_tokens' => 700]],
         // Legacy section-by-section ingest (app/Jobs/Ai/Wiki).

@@ -16,6 +16,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
 use App\Services\EnterpriseWiki\EnterpriseWikiQaSnapshotService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\MarksWikiLinkAssessmentComplete;
 use Tests\TestCase;
 
 /**
@@ -38,6 +39,7 @@ use Tests\TestCase;
  */
 class EnterpriseWikiQaSnapshotServiceTest extends TestCase
 {
+    use MarksWikiLinkAssessmentComplete;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -415,6 +417,8 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
      */
     private function markStepsComplete(EnterpriseWikiIngestRun $run): void
     {
+        $this->markLinkAssessmentComplete($run);
+
         EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_ingest_run_id', $run->id)
             ->update([

@@ -66,6 +66,7 @@ class EnterpriseWikiPatchApplicationService
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
         private readonly EnterpriseWikiPageContentBlockService $contentBlockService,
         private readonly EnterpriseWikiPublicationSettlementService $publicationSettlement,
+        private readonly EnterpriseWikiLinkAssessmentRecorder $linkAssessmentRecorder,
     ) {}
 
     /**
@@ -310,6 +311,11 @@ class EnterpriseWikiPatchApplicationService
                     'generated_page_version_id' => $written->id,
                     'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
                     'generation_completed_at' => now(),
+                    // Untouched blocks keep their links byte-identical; new patch substance gets no
+                    // link assessment of its own (a known limitation, §6.3). Assessed once the
+                    // continuation has materialized the patched page's links.
+                    'link_assessment' => $this->linkAssessmentRecorder->forPatchedPage(),
+                    'links_assessed_at' => null,
                 ],
             );
 

@@ -584,9 +584,15 @@ class EnterpriseWikiMaintainerDecisionPrompt
                     'type' => 'object',
                     'properties' => [
                         'page_title' => ['type' => 'string'],
+                        // D5 (docs/enterprise-wiki-knowledge-integration-plan.md §6.1): the stable id
+                        // of an EXISTING page from the wiki index, or null for a page planned in this
+                        // run. A suggestion only — the backend validates it before it ever reaches the
+                        // link catalog (EnterpriseWikiRelatedPageReferenceResolver), and an invalid id
+                        // is discarded while the free-text guidance is kept.
+                        'page_id' => ['type' => ['integer', 'null']],
                         'relationship' => ['type' => 'string'],
                     ],
-                    'required' => ['page_title', 'relationship'],
+                    'required' => ['page_title', 'page_id', 'relationship'],
                     'additionalProperties' => false,
                 ],
             ],
@@ -1561,6 +1567,10 @@ class EnterpriseWikiMaintainerDecisionPrompt
             $errors = array_merge($errors, self::validateNoControlCharacters($entry[$field], "{$ctx}.{$field}"));
         }
 
+        // page_id is deliberately NOT validated here. It is optional (stored decisions predating D5
+        // have none) and, when present, only a suggestion: whether it names a real, eligible page of
+        // this customer is decided against the database at catalog time, where an invalid id is
+        // dropped without failing the decision or costing a repair round.
         return $errors;
     }
 

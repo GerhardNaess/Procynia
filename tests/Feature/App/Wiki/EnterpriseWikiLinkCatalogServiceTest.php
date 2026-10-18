@@ -7,6 +7,7 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
@@ -149,20 +150,198 @@ class EnterpriseWikiLinkCatalogServiceTest extends TestCase
         $this->assertSame(1, $result['run_page_count']);
     }
 
-    public function test_catalog_entries_do_not_include_content_markdown(): void
+    public function test_catalog_entries_carry_a_bounded_excerpt_but_never_content_markdown(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
         $article = $this->createPage($customer, 'artikkel', 'Artikkel');
         $run = $this->createAppliedRun($customer, $document, [$article]);
-        $this->createExistingPage($customer, 'business-case', 'Business Case');
+        $existing = $this->createExistingPage($customer, 'business-case', 'Business Case');
+        EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $existing->id)->update([
+            'content_markdown' => "# Business Case\n\n".str_repeat('Lønnsomhet og gevinster vurderes [[annen-side|samlet]]. ', 40),
+        ]);
 
         $result = $this->service()->buildForPage($run, $article);
 
         $this->assertNotEmpty($result['catalog']);
         foreach ($result['catalog'] as $entry) {
-            $this->assertSame(['page_id', 'slug', 'title', 'page_type'], array_keys($entry));
+            $this->assertSame(['page_id', 'slug', 'title', 'page_type', 'excerpt', 'tier'], array_keys($entry));
+            $this->assertArrayNotHasKey('content_markdown', $entry);
         }
+
+        $entry = collect($result['catalog'])->firstWhere('page_id', $existing->id);
+        $this->assertLessThanOrEqual(EnterpriseWikiLinkCatalogService::EXCERPT_MAX_LENGTH + 1, mb_strlen($entry['excerpt']));
+        $this->assertStringNotContainsString('[[', $entry['excerpt'], 'link syntax never reaches the model through an excerpt');
+    }
+
+    public function test_a_planned_older_page_is_included_even_when_far_outside_the_most_recent_pages(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, 'leverandorkontroll', 'Leverandørkontroll');
+        $older = $this->createExistingPage($customer, 'leverandorvurdering', 'Leverandørvurdering');
+        EnterpriseWikiPage::query()->whereKey($older->id)->update(['updated_at' => now()->subYears(2)]);
+
+        for ($i = 0; $i < EnterpriseWikiLinkCatalogService::MAX_OTHER_PAGES + 15; $i++) {
+            $this->createExistingPage($customer, "nyere-side-{$i}", "Nyere side {$i}");
+        }
+
+        $run = $this->createAppliedRun($customer, $document, [$article], $this->decisionWithGuidance([
+            ['page_title' => 'Leverandørvurdering', 'page_id' => $older->id, 'relationship' => 'Lenk for vurderingsmetoden.'],
+        ]));
+
+        $result = $this->service()->buildForPage($run, $article);
+        $entry = collect($result['catalog'])->firstWhere('page_id', $older->id);
+
+        $this->assertNotNull($entry, 'the planner named it, so recency can never push it out');
+        $this->assertSame(EnterpriseWikiLinkCatalogService::TIER_PLANNED, $entry['tier']);
+        $this->assertSame([$older->id], $result['planned_references']['page_ids']);
+        $this->assertSame(1, $result['tier_counts']['planned']);
+        $this->assertSame(EnterpriseWikiLinkCatalogService::MAX_OTHER_PAGES, $result['tier_counts']['planned'] + $result['tier_counts']['neighbour'] + $result['tier_counts']['recent']);
+    }
+
+    public function test_without_planner_references_the_catalog_still_offers_recent_pages(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, 'artikkel', 'Artikkel');
+        $existing = $this->createExistingPage($customer, 'business-case', 'Business Case');
+        $run = $this->createAppliedRun($customer, $document, [$article]);
+
+        $result = $this->service()->buildForPage($run, $article);
+
+        $this->assertSame(EnterpriseWikiLinkCatalogService::TIER_RECENT, collect($result['catalog'])->firstWhere('page_id', $existing->id)['tier']);
+        $this->assertSame(['page_ids' => [], 'rejected' => []], $result['planned_references']);
+    }
+
+    public function test_invalid_planner_page_ids_are_discarded_with_a_reason_and_never_offered(): void
+    {
+        $customer = $this->createCustomer();
+        $other = $this->createCustomer('Annen AS');
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, 'artikkel', 'Artikkel');
+        $foreign = $this->createExistingPage($other, 'fremmed', 'Fremmed side');
+        $archived = $this->createExistingPage($customer, 'arkivert', 'Arkivert side');
+        $archived->update(['status' => EnterpriseWikiPage::STATUS_ARCHIVED]);
+        $superseded = $this->createExistingPage($customer, 'erstattet', 'Erstattet side');
+        $superseded->update(['status' => EnterpriseWikiPage::STATUS_SUPERSEDED]);
+        $shell = $this->createPage($customer, 'skall', 'Skall uten innhold');
+        $valid = $this->createExistingPage($customer, 'gyldig', 'Gyldig side');
+
+        $run = $this->createAppliedRun($customer, $document, [$article], $this->decisionWithGuidance([
+            ['page_title' => 'Fremmed side', 'page_id' => $foreign->id, 'relationship' => 'x'],
+            ['page_title' => 'Arkivert side', 'page_id' => $archived->id, 'relationship' => 'x'],
+            ['page_title' => 'Erstattet side', 'page_id' => $superseded->id, 'relationship' => 'x'],
+            ['page_title' => 'Skall uten innhold', 'page_id' => $shell->id, 'relationship' => 'x'],
+            ['page_title' => 'Artikkel', 'page_id' => $article->id, 'relationship' => 'x'],
+            ['page_title' => 'Finnes ikke', 'page_id' => 999999, 'relationship' => 'x'],
+            ['page_title' => 'Gyldig side', 'page_id' => $valid->id, 'relationship' => 'x'],
+            ['page_title' => 'Gyldig side', 'page_id' => $valid->id, 'relationship' => 'igjen'],
+        ]));
+
+        $result = $this->service()->buildForPage($run, $article);
+        $ids = array_column($result['catalog'], 'page_id');
+
+        $this->assertSame([$valid->id], $result['planned_references']['page_ids']);
+        $reasons = collect($result['planned_references']['rejected'])->mapWithKeys(fn (array $r) => [$r['page_id'] => $r['reason']])->all();
+        $this->assertSame('cross_customer', $reasons[$foreign->id]);
+        $this->assertSame('inactive_status', $reasons[$archived->id]);
+        $this->assertSame('inactive_status', $reasons[$superseded->id]);
+        $this->assertSame('no_content', $reasons[$shell->id]);
+        $this->assertSame('self', $reasons[$article->id]);
+        $this->assertSame('not_found', $reasons[999999]);
+        $this->assertSame('duplicate', $reasons[$valid->id]);
+
+        foreach ([$foreign->id, $archived->id, $superseded->id, $shell->id, $article->id] as $neverOffered) {
+            $this->assertNotContains($neverOffered, $ids);
+        }
+        $this->assertSame(count($ids), count(array_unique($ids)), 'no page is offered twice');
+    }
+
+    public function test_a_legacy_guidance_title_without_page_id_resolves_by_exact_title_only(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, 'artikkel', 'Artikkel');
+        $exact = $this->createExistingPage($customer, 'risikovurdering', 'Risikovurdering');
+        $this->createExistingPage($customer, 'risikovurdering-av-leverandorer', 'Risikovurdering av leverandører');
+
+        $run = $this->createAppliedRun($customer, $document, [$article], $this->decisionWithGuidance([
+            ['page_title' => 'risikovurdering', 'relationship' => 'Legacy uten page_id.'],
+            ['page_title' => 'Risiko', 'relationship' => 'Ingen eksakt match — aldri gjettet.'],
+        ]));
+
+        $result = $this->service()->buildForPage($run, $article);
+
+        $this->assertSame([$exact->id], $result['planned_references']['page_ids']);
+    }
+
+    public function test_one_hop_neighbours_of_planned_pages_are_offered_before_recent_pages(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, 'artikkel', 'Artikkel');
+        $planned = $this->createExistingPage($customer, 'planlagt', 'Planlagt');
+        $neighbour = $this->createExistingPage($customer, 'nabo', 'Nabo');
+        $archivedNeighbour = $this->createExistingPage($customer, 'arkivert-nabo', 'Arkivert nabo');
+        $archivedNeighbour->update(['status' => EnterpriseWikiPage::STATUS_ARCHIVED]);
+
+        foreach ([$neighbour, $archivedNeighbour] as $to) {
+            EnterpriseWikiPageLink::query()->create([
+                'customer_id' => $customer->id,
+                'from_page_id' => $to->id,
+                'to_page_id' => $planned->id,
+                'link_type' => EnterpriseWikiPageLink::LINK_TYPE_WIKILINK,
+                'source' => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
+                'confidence' => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
+            ]);
+        }
+
+        $run = $this->createAppliedRun($customer, $document, [$article], $this->decisionWithGuidance([
+            ['page_title' => 'Planlagt', 'page_id' => $planned->id, 'relationship' => 'x'],
+        ]));
+
+        $catalog = collect($this->service()->buildForPage($run, $article)['catalog']);
+
+        $this->assertSame(EnterpriseWikiLinkCatalogService::TIER_NEIGHBOUR, $catalog->firstWhere('page_id', $neighbour->id)['tier']);
+        $this->assertNull($catalog->firstWhere('page_id', $archivedNeighbour->id));
+    }
+
+    public function test_archived_and_superseded_pages_are_never_offered_in_any_tier(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, 'artikkel', 'Artikkel');
+        $archived = $this->createExistingPage($customer, 'arkivert', 'Arkivert');
+        $archived->update(['status' => EnterpriseWikiPage::STATUS_ARCHIVED]);
+        $superseded = $this->createExistingPage($customer, 'erstattet', 'Erstattet');
+        $superseded->update(['status' => EnterpriseWikiPage::STATUS_SUPERSEDED]);
+        $run = $this->createAppliedRun($customer, $document, [$article]);
+
+        $ids = array_column($this->service()->buildForPage($run, $article)['catalog'], 'page_id');
+
+        $this->assertNotContains($archived->id, $ids);
+        $this->assertNotContains($superseded->id, $ids);
+        $this->assertNotContains($archived->id, array_column($this->service()->buildForCustomer($customer->id)['catalog'], 'page_id'));
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $guidance
+     * @return array<string, mixed>
+     */
+    private function decisionWithGuidance(array $guidance): array
+    {
+        return [
+            'source_article' => [
+                'action' => 'create',
+                'title' => 'Artikkel',
+                'proposed_slug' => 'artikkel',
+                'reason' => 'Test.',
+                'related_page_guidance' => $guidance,
+            ],
+            'concept_pages' => [],
+            'entity_pages' => [],
+        ];
     }
 
     private function service(): EnterpriseWikiLinkCatalogService
@@ -238,7 +417,7 @@ class EnterpriseWikiLinkCatalogServiceTest extends TestCase
         return $page;
     }
 
-    private function createAppliedRun(Customer $customer, EnterpriseWikiDocument $document, array $pages): EnterpriseWikiIngestRun
+    private function createAppliedRun(Customer $customer, EnterpriseWikiDocument $document, array $pages, ?array $decision = null): EnterpriseWikiIngestRun
     {
         $run = EnterpriseWikiIngestRun::query()->create([
             'uuid' => Str::uuid()->toString(),
@@ -249,6 +428,7 @@ class EnterpriseWikiLinkCatalogServiceTest extends TestCase
             'status' => EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES,
             'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
             'maintainer_decision_generated_at' => now(),
+            'maintainer_decision_json' => $decision,
         ]);
 
         foreach ($pages as $page) {

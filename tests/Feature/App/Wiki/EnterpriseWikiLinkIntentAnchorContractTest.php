@@ -10,6 +10,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiLinkAssessmentJournal;
 use App\Services\EnterpriseWiki\EnterpriseWikiLinkIntentMaterializer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -31,8 +32,10 @@ use Tests\TestCase;
  * now a structured field, the markdown carries no link syntax at all, and the backend inserts the
  * canonical link itself. A structured string cannot be malformed.
  *
- * What these tests hold: identity stays server-authoritative, the slug stays canonical, unknown /
- * self / cross-customer targets still hard-fail, and no internal syntax can reach a persisted page.
+ * What these tests hold: identity stays server-authoritative, the slug stays canonical, an unknown /
+ * self / cross-customer / archived / out-of-catalog target is never written — rejected individually
+ * and recorded, while the rest of the response is kept (arbeidspakke B, §6.3) — and a broken
+ * contract or internal syntax still fails the page.
  */
 class EnterpriseWikiLinkIntentAnchorContractTest extends TestCase
 {
@@ -218,44 +221,106 @@ class EnterpriseWikiLinkIntentAnchorContractTest extends TestCase
     }
 
     // =========================================================================
-    // Fail-closed: identity is never negotiable
+    // Identity is never negotiable: an unusable target is never written
     // =========================================================================
 
-    public function test_an_unknown_target_fails_the_page(): void
+    public function test_an_unknown_target_is_rejected_and_recorded_without_failing_the_page(): void
     {
         [$run, $source, $target] = $this->scenario();
+        $journal = new EnterpriseWikiLinkAssessmentJournal;
 
-        $this->expectException(EnterpriseWikiInvalidWikilinksException::class);
-        $this->expectExceptionMessage('rejected_unknown_target');
-
-        $this->materialize($run, $source, [
+        $blocks = $this->materialize($run, $source, [
             $this->block('Hendelser følger fastsatt prosess.', [$this->intent('l1', $target->id, 'fastsatt prosess')]),
-        ], []);
+        ], [], $journal);
+
+        $this->assertSame('Hendelser følger fastsatt prosess.', $blocks[0]['markdown'], 'prose untouched, no link written');
+        $this->assertSame([], $blocks[0]['link_intents']);
+        $this->assertSame([['target_page_id' => $target->id, 'intent_id' => 'l1', 'outcome' => 'rejected_not_in_catalog']], $journal->rejected());
+        $this->assertSame(1, $journal->proposed());
     }
 
-    public function test_a_self_link_fails_the_page(): void
+    public function test_a_deleted_target_is_recorded_as_unknown(): void
+    {
+        [$run, $source, $target] = $this->scenario();
+        $entry = $this->catalogEntry($target);
+        $target->delete();
+        $journal = new EnterpriseWikiLinkAssessmentJournal;
+
+        $blocks = $this->materialize($run, $source, [
+            $this->block('Hendelser følger fastsatt prosess.', [$this->intent('l1', $entry['page_id'], 'fastsatt prosess')]),
+        ], [$entry], $journal);
+
+        $this->assertStringNotContainsString('[[', $blocks[0]['markdown']);
+        $this->assertSame('rejected_unknown_target', $journal->rejected()[0]['outcome']);
+    }
+
+    public function test_a_self_link_is_rejected_and_recorded(): void
     {
         [$run, $source] = $this->scenario();
+        $journal = new EnterpriseWikiLinkAssessmentJournal;
 
-        $this->expectException(EnterpriseWikiInvalidWikilinksException::class);
-        $this->expectExceptionMessage('rejected_self_link');
-
-        $this->materialize($run, $source, [
+        $blocks = $this->materialize($run, $source, [
             $this->block('Denne siden omtaler seg selv.', [$this->intent('l1', $source->id, 'Denne siden')]),
-        ], [$this->catalogEntry($source)]);
+        ], [$this->catalogEntry($source)], $journal);
+
+        $this->assertStringNotContainsString('[[', $blocks[0]['markdown']);
+        $this->assertSame('rejected_self_link', $journal->rejected()[0]['outcome']);
     }
 
-    public function test_a_cross_customer_target_fails_the_page(): void
+    public function test_a_cross_customer_target_is_rejected_and_never_written(): void
     {
         [$run, $source] = $this->scenario();
         $foreign = $this->createPage($this->createCustomer('Annen AS')->id, 'Fremmed', 'fremmed-ab1c2d');
+        $journal = new EnterpriseWikiLinkAssessmentJournal;
 
-        $this->expectException(EnterpriseWikiInvalidWikilinksException::class);
-        $this->expectExceptionMessage('rejected_cross_customer');
-
-        $this->materialize($run, $source, [
+        $blocks = $this->materialize($run, $source, [
             $this->block('Se fremmed side.', [$this->intent('l1', $foreign->id, 'fremmed side')]),
-        ], [$this->catalogEntry($foreign)]);
+        ], [$this->catalogEntry($foreign)], $journal);
+
+        $this->assertStringNotContainsString('fremmed-ab1c2d', $blocks[0]['markdown']);
+        $this->assertSame('rejected_cross_customer', $journal->rejected()[0]['outcome']);
+    }
+
+    public function test_an_archived_or_superseded_target_is_rejected_even_when_listed_in_the_catalog(): void
+    {
+        [$run, $source, $target] = $this->scenario();
+        $superseded = $this->createPage($run->customer_id, 'Erstattet', 'erstattet-ab1c2d');
+        $target->update(['status' => EnterpriseWikiPage::STATUS_ARCHIVED]);
+        $superseded->update(['status' => EnterpriseWikiPage::STATUS_SUPERSEDED]);
+        $journal = new EnterpriseWikiLinkAssessmentJournal;
+
+        $blocks = $this->materialize($run, $source, [
+            $this->block('Fastsatt prosess og erstattet rutine.', [
+                $this->intent('l1', $target->id, 'Fastsatt prosess'),
+                $this->intent('l2', $superseded->id, 'erstattet rutine'),
+            ]),
+        ], [$this->catalogEntry($target), $this->catalogEntry($superseded)], $journal);
+
+        $this->assertStringNotContainsString('[[', $blocks[0]['markdown']);
+        $this->assertSame(['rejected_inactive_target', 'rejected_inactive_target'], array_column($journal->rejected(), 'outcome'));
+    }
+
+    public function test_valid_intents_survive_next_to_rejected_ones_in_the_same_response(): void
+    {
+        [$run, $source, $target] = $this->scenario();
+        $foreign = $this->createPage($this->createCustomer('Annen AS')->id, 'Fremmed', 'fremmed-ab1c2d');
+        $journal = new EnterpriseWikiLinkAssessmentJournal;
+
+        $blocks = $this->materialize($run, $source, [
+            $this->block('Vi følger driftsprosessen. Se også fremmed side.', [
+                $this->intent('ok', $target->id, 'driftsprosessen'),
+                $this->intent('foreign', $foreign->id, 'fremmed side'),
+                $this->intent('ghost', 999999, 'Se også'),
+            ]),
+            $this->block('Ankeret finnes ikke her.', [$this->intent('missing', $target->id, 'ikke i teksten')]),
+        ], [$this->catalogEntry($target), $this->catalogEntry($foreign)], $journal);
+
+        $this->assertSame("Vi følger [[{$target->slug}|driftsprosessen]]. Se også fremmed side.", $blocks[0]['markdown']);
+        $this->assertSame(['ok'], array_column($blocks[0]['link_intents'], 'intent_id'));
+        $this->assertSame([], $blocks[1]['link_intents']);
+        $this->assertSame(4, $journal->proposed());
+        $this->assertSame(['rejected_cross_customer', 'rejected_unknown_target'], array_column($journal->rejected(), 'outcome'));
+        $this->assertSame([['target_page_id' => $target->id, 'intent_id' => 'missing']], $journal->skippedAnchorNotFound());
     }
 
     public function test_a_duplicate_intent_id_fails_the_page(): void
@@ -348,9 +413,9 @@ class EnterpriseWikiLinkIntentAnchorContractTest extends TestCase
      * @param  list<array<string, mixed>>  $catalog
      * @return list<array<string, mixed>>
      */
-    private function materialize(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $source, array $blocks, array $catalog): array
+    private function materialize(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $source, array $blocks, array $catalog, ?EnterpriseWikiLinkAssessmentJournal $journal = null): array
     {
-        return app(EnterpriseWikiLinkIntentMaterializer::class)->materializeBlocks($run, $source, $blocks, $catalog);
+        return app(EnterpriseWikiLinkIntentMaterializer::class)->materializeBlocks($run, $source, $blocks, $catalog, $journal);
     }
 
     /** @return array<string, mixed> */

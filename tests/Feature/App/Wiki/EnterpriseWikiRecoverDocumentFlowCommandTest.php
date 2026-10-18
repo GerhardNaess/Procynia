@@ -631,6 +631,9 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
             'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
             'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
             'claims_extracted_at' => $stepsComplete ? now() : null,
+            // The relation step is part of a finished run since arbeidspakke B: QA escalates a generated page with no link assessment.
+            'link_assessment' => ['schema' => 1, 'outcome' => 'no_relevant_links'],
+            'links_assessed_at' => now(),
         ]);
         EnterpriseWikiIngestRunPage::query()->create([
             'enterprise_wiki_ingest_run_id' => $run->id,
@@ -638,6 +641,9 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
             'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
             'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
             'claims_extracted_at' => $stepsComplete ? now() : null,
+            // The relation step is part of a finished run since arbeidspakke B: QA escalates a generated page with no link assessment.
+            'link_assessment' => ['schema' => 1, 'outcome' => 'no_relevant_links'],
+            'links_assessed_at' => now(),
         ]);
 
         $articleVersion = EnterpriseWikiPageVersion::query()->create([
@@ -717,6 +723,9 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
                 'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
                 'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
                 'claims_extracted_at' => now(),
+                // The relation step is part of a finished run since arbeidspakke B: QA escalates a generated page with no link assessment.
+                'link_assessment' => ['schema' => 1, 'outcome' => 'no_relevant_links'],
+                'links_assessed_at' => now(),
             ]);
         }
 

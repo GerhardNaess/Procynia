@@ -89,6 +89,7 @@ class EnterpriseWikiPostIngestQaService
         private readonly EnterpriseWikiCoverageService $coverageService,
         private readonly EnterpriseWikiQaSnapshotService $snapshotService,
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
+        private readonly EnterpriseWikiLinkIntegrationCheckService $linkIntegrationCheck,
     ) {}
 
     /**
@@ -210,7 +211,7 @@ class EnterpriseWikiPostIngestQaService
      *     incomplete_steps: list<string>,
      *     critical_defects: list<string>,
      *     claim_qa_signals: list<string>,
-     *     checks: array{article_exists: bool, summary_exists: bool, article_has_content: bool, summary_has_content: bool},
+     *     checks: array{article_exists: bool, summary_exists: bool, article_has_content: bool, summary_has_content: bool, link_integration?: array<string, mixed>},
      * }
      */
     public function evaluate(EnterpriseWikiIngestRun $run): array
@@ -234,7 +235,14 @@ class EnterpriseWikiPostIngestQaService
 
         $pageIds = $pivotRows->pluck('enterprise_wiki_page_id');
 
-        $incompleteSteps = $this->findIncompleteSteps($pivotRows, $pageIds);
+        // Arbeidspakke B (§7.1): the run's relations must be technically consistent with its text
+        // before it may complete. Recorded whatever the verdict, so a result view can show it.
+        $checks['link_integration'] = $this->linkIntegrationCheck->check($run);
+
+        $incompleteSteps = [
+            ...$this->findIncompleteSteps($pivotRows, $pageIds),
+            ...$this->findIncompleteLinkSteps($checks['link_integration']),
+        ];
 
         if ($incompleteSteps !== []) {
             return [
@@ -480,6 +488,35 @@ class EnterpriseWikiPostIngestQaService
 
         if ((clone $claimsQuery)->whereNull('verified_at')->exists()) {
             $reasons[] = 'verification_incomplete';
+        }
+
+        return $reasons;
+    }
+
+    /**
+     * Relation work that is unfinished or inconsistent is never a content defect, so it escalates
+     * — it is never reported as failed, and never as passed (§3.2):
+     *
+     * - link_assessment_incomplete: a generated page has no recorded link assessment, or its links
+     *   were never materialized into rows for its current content;
+     * - link_integration_mismatch: markdown and stored relations disagree.
+     *
+     * A page whose proposed links were all rejected (rejected_only) does not escalate the run — it
+     * is reported in checks.link_integration as needs_followup, never as "checked".
+     *
+     * @param  array<string, mixed>  $linkIntegration
+     * @return list<string>
+     */
+    private function findIncompleteLinkSteps(array $linkIntegration): array
+    {
+        $reasons = [];
+
+        if (($linkIntegration['assessment_missing'] ?? []) !== []) {
+            $reasons[] = 'link_assessment_incomplete';
+        }
+
+        if (($linkIntegration['mismatches'] ?? []) !== []) {
+            $reasons[] = 'link_integration_mismatch';
         }
 
         return $reasons;

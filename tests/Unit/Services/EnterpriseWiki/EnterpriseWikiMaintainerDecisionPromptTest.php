@@ -67,7 +67,9 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
     {
         $relatedPageGuidanceItems = $this->schemaProps()['source_article']['properties']['related_page_guidance']['items'];
 
-        $this->assertSame(['page_title', 'relationship'], $relatedPageGuidanceItems['required']);
+        $this->assertSame(['page_title', 'page_id', 'relationship'], $relatedPageGuidanceItems['required']);
+        // D5: a stable id of an existing page, or null for a page planned in this run.
+        $this->assertSame(['integer', 'null'], $relatedPageGuidanceItems['properties']['page_id']['type']);
     }
 
     // =========================================================================

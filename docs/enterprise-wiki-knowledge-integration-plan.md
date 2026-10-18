@@ -4,10 +4,11 @@ Status (2026-10-18):
 
 | Del | Arkitektur | Implementering | Tester |
 |---|---|---|---|
-| Arbeidspakke A – robust generering | Godkjent (D1, D3, D7 og publiseringsrettelsen) | Implementert, ikke committet (§16) | Testet (§16.3) |
-| Arbeidspakke B – kunnskapskobling | Akseptert som planleggingsretning, ikke godkjent for implementering | Ikke påbegynt | – |
+| Arbeidspakke A – robust generering | Godkjent (D1, D3, D7 og publiseringsrettelsen) | Implementert og merget til `main` (PR #6) | Testet (§16.3) |
+| Arbeidspakke B – kunnskapskobling | Godkjent for implementering (D4, D5, D6, D8) | Implementert på `feat/wiki-knowledge-integration`, ikke committet (§17) | Testet (§17.6) |
 | Arbeidspakke C – varsler og resultatvisning | Akseptert som planleggingsretning, ikke godkjent for implementering | Ikke påbegynt | – |
-| Test med ekte AI (D11) | Inngår i strategien | Ikke gjennomført, ikke godkjent for kjøring | – |
+| Test med ekte AI (D11) | Inngår i strategien, plan i §17.8 | Ikke gjennomført, ikke godkjent for kjøring | – |
+
 Bindende rammer: `AGENTS.md` (Enterprise Wiki architecture invariants) og
 `docs/enterprise-wiki-architecture.md`. Forslaget er sjekket mot design-sjekklisten i §J der (se §14).
 
@@ -1007,18 +1008,18 @@ Rekkefølge: **A → B → C**, som anbefalt i oppdraget.
 
 ## 15. Åpne beslutninger
 
-Status per 2026-10-18: **D1, D3, D7 og publiseringsrettelsen (§3.3) er godkjent for arbeidspakke A og implementert.** D2, D4–D6 og D8–D11 er akseptert som planleggingsretning, men gir ikke tillatelse til å implementere B eller C eller til å kjøre tester med ekte AI. Klarsignal gis per beslutning.
+Status per 2026-10-18: **D1, D3, D7 og publiseringsrettelsen (§3.3) er godkjent for arbeidspakke A og implementert.** **D4, D5, D6 og D8 er godkjent for arbeidspakke B og implementert (§17).** D2, D9 og D10 (arbeidspakke C) og D11 (ekte AI) er fortsatt bare planleggingsretning. Klarsignal gis per beslutning.
 
 | # | Beslutning | Type | Anbefaling | Status |
 |---|---|---|---|---|
 | D1 | Strategi for delvis feil | Arkitektur | **B** med målrettet retry for forbigående feil (§4.2). Publiseringsinvarianten er verifisert (§3.3). | Godkjent – implementert i A |
 | D2 | Mottaker av sluttvarsel | Arkitektur (datamodell) | Initiativtaker → dokumenteier → opplaster. Én mottaker. Ny kolonne `initiated_by_user_id`. Kravene til mottaker står i §9.2. | Akseptert som retning – ikke godkjent for implementering |
 | D3 | Deterministiske plandefekter (som kjøring 26) | Produkt og arkitektur | Ingen automatisk retry. Vises som «Ufullstendig» med årsak. Planlegging av én side på nytt utsettes til egen sak. | Godkjent – implementert i A |
-| D4 | Inngående lenke i en godkjent eller publisert side | Arkitektur (styring) | Behold eksisterende regel: ny utkastversjon til ordinær review, publisert versjon vises fortsatt. Alternativ: bare forslag i resultatet, uten ny versjon. | Akseptert som retning – ikke godkjent for implementering |
-| D5 | `page_id` i `related_page_guidance` (prompt og schema) | Arkitektur (AI-kontrakt) | Ja, med backend-validering etter §6.1 | Akseptert som retning – ikke godkjent for implementering |
-| D6 | Modellens begrunnelse for «ingen lenker» | Arkitektur (prinsipp) | Nei, hold vurderingen deterministisk | Akseptert som retning – ikke godkjent for implementering |
+| D4 | Inngående lenke i en godkjent eller publisert side | Arkitektur (styring) | Behold eksisterende regel: ny utkastversjon til ordinær review, publisert versjon vises fortsatt. Alternativ: bare forslag i resultatet, uten ny versjon. | Godkjent – implementert i B (§17.1, B3) |
+| D5 | `page_id` i `related_page_guidance` (prompt og schema) | Arkitektur (AI-kontrakt) | Ja, med backend-validering etter §6.1 | Godkjent – implementert i B (§17.1, B1) |
+| D6 | Modellens begrunnelse for «ingen lenker» | Arkitektur (prinsipp) | Nei, hold vurderingen deterministisk | Godkjent – implementert i B (ingen slik begrunnelse, §17.1, B4) |
 | D7 | Utsatt concept/entity-bølge når en artikkel feilet | Implementeringsdetalj med synlig effekt | Kjør bølgen | Godkjent – implementert i A |
-| D8 | Relink v2 (kontrakt med kun blokker) og utløser for `article` | Arkitektur (AI-kontrakt) | Ja, i den rekkefølgen | Akseptert som retning – ikke godkjent for implementering |
+| D8 | Relink v2 (kontrakt med kun blokker) og utløser for `article` | Arkitektur (AI-kontrakt) | Ja, i den rekkefølgen | Godkjent – implementert i B (§17.1, B3) |
 | D9 | Backfill av øyeblikksbilder for historiske kjøringer og sidene 102/104/106 | Operasjonell | Ingen backfill. Egen operatørkommando for 102/104/106 vurderes etter B. | Akseptert som retning – ikke godkjent for implementering |
 | D10 | Varsel ved `cancelled` | Produkt (implementeringsdetalj) | Nei. Avbrudd er en brukerhandling og vises allerede i Kjøringer. | Akseptert som retning – ikke godkjent for implementering |
 | D11 | Ekte-AI-evaluering (§11.2): testkunde, budsjett, tidspunkt | Operasjonell | Godkjennes separat etter B. Inngår i strategien, men kjøring er ikke godkjent. | Akseptert som retning – ikke godkjent for implementering |
@@ -1152,3 +1153,207 @@ Branch `feat/wiki-robust-generation` (fra `main` `ae0673d9`). **Ikke committet.*
 - **Test med ekte AI (§11.2):** ikke gjennomført og ikke godkjent.
 
 **5. Status:** A1–A5 er implementert og sluttkontrollert. Arbeidspakke B og C er ikke påbegynt. Endringene er ikke committet.
+
+---
+
+## 17. Implementeringsstatus – arbeidspakke B (2026-10-18)
+
+Branch `feat/wiki-knowledge-integration` (fra `main` `66ab2496`). **Ikke committet.** Arbeidspakke C er ikke påbegynt. Test med ekte AI er ikke gjennomført.
+
+§2.4 beskriver tilstanden *før* B. §6 og §7 er gjennomført slik denne seksjonen beskriver; der den avviker fra forslaget, står det i §17.3.
+
+### 17.1 Implementert
+
+| Del | Hva | Hvor |
+|---|---|---|
+| B1 | **Stabile side-ID-er (D5).** `related_page_guidance` har feltet `page_id` (heltall eller null, påkrevd i det strenge schemaet). Planleggerprompten (både hel og delt planlegging) ber om indeksens `id` for eksisterende sider og `null` for sider som planlegges i kjøringen. Wiki-indeksen har fått `has_content`, slik at skall ikke ser ut som eksisterende kunnskap. | `EnterpriseWikiMaintainerDecisionPrompt`, `…AiClient`, `…SplitCoordinator`, `EnterpriseWikiIndexContextService` |
+| B1 | **Backend-validering av referansene.** En ID godtas bare når siden finnes, tilhører kjøringens kunde, ikke er arkivert eller erstattet, har innhold (eller er en side i samme kjøring) og ikke er siden selv. Duplikater forkastes. En ugyldig ID forkastes med maskinell årsak (`not_found`, `cross_customer`, `inactive_status`, `no_content`, `self`, `duplicate`); fritekstveiledningen beholdes og beslutningen feiler ikke. Eldre beslutninger uten ID løses mot eksakt tittel eller slug, bare når nøyaktig én side treffer. `patch_targets` regnes også som planlagte referanser. | `EnterpriseWikiRelatedPageReferenceResolver` (ny) |
+| B1 | **Prioritert lenkekatalog.** Lag: kjøringens sider (utenfor budsjettet), planlagte sider, én-hopps naboer (maks 20), nylig endrede sider. Felles budsjett på 60 oppføringer utenfor kjøringen. Alle lag filtrerer kunde, status (ikke arkivert/erstattet) og innhold. Hver oppføring har et utdrag på 160 tegn uten lenkesyntaks. Modellen får `page_id`, tittel, slug, type og utdrag; laget brukes bare internt. | `EnterpriseWikiLinkCatalogService`, `WikiPageContentAiClient::promptCatalog()` |
+| B2 | **Robuste `link_intents`.** Et ubrukelig *mål* avvises enkeltvis og registreres: `rejected_unknown_target`, `rejected_self_link`, `rejected_cross_customer` (logges i tillegg som sikkerhetshendelse), `rejected_inactive_target`, `rejected_not_in_catalog`. Gyldige intensjoner i samme svar materialiseres. Kontraktsbrudd (ikke-objekt, ugyldig/duplisert `intent_id`, tomt anker, utgått markørsyntaks) feiler fortsatt siden. Det finnes ingen reserve-mål. | `EnterpriseWikiLinkIntentMaterializer`, `EnterpriseWikiLinkAssessmentJournal` (ny) |
+| B3 | **Relink v2 (D8).** Ny AI-operasjon `wiki.propose_inbound_links` (gpt-4.1-mini). Modellen får eksisterende sides blokker (hele blokker, aldri avkortet, inntil 20 000 tegn) og returnerer bare `decision`, `block_key`, `anchor_text` og `reason`. Backend setter inn `[[slug\|anker]]` og beviser mekanisk at bare lenkemarkup er lagt til (§17.4). Brukerens eller en annen prosess' nyere versjon overskrives aldri (`stale_candidate_version`). Gjeldende publiseringsregel brukes (D4): publisert side får nytt utkast, publisert versjon vises fortsatt. | `WikiInboundLinkProposalAiClient` (ny), `EnterpriseWikiInboundLinkInserter` (ny), `EnterpriseWikiIncrementalRelinkService` |
+| B3 | **Utvidede utløsere og grenser.** Nye artikler (`action=created`) utløser nå inngående relinking, i tillegg til concept/entity som før. Kandidater: planleggerens validerte referanser først, deretter sider som nevner tittelen. Maks 5 per utløser, 15 per kjøring, 1 ny inngående lenke per kandidat per kjøring. Sider i `pending_review`, arkiverte og erstattede sider, sider uten innhold og kjøringens egne sider er aldri kandidater. | `EnterpriseWikiIncrementalRelinkService` |
+| B4 | **Etterprøvbar vurdering.** Pivoten har `link_assessment` (JSON) og `links_assessed_at`. Vurderingen skrives i samme transaksjon som sideversjonen og utledes av katalogen, journalen og de lagrede blokkene. `links_assessed_at` settes først når lenkeradene er materialisert for sidens gjeldende versjon. Patchede sider får `unchanged_by_patch`. | `EnterpriseWikiLinkAssessmentRecorder` (ny), `EnterpriseWikiGenerateAppliedPagesService`, `EnterpriseWikiBuildPageLinksService`, `EnterpriseWikiPatchApplicationService` |
+| B5 | **Teknisk lenkekontroll.** `checkLinkIntegration` sammenligner materialiserbare lenker i gjeldende markdown med lenkeradene som graf-API-et leser, for kjøringens sider og for eksisterende sider kjøringen ga en inngående lenke. Resultatet lagres i `qa_result.checks.link_integration`. Mangler vurderingen, gir QA `link_assessment_incomplete`; avviker radene, gir QA `link_integration_mismatch`. Begge gir **escalated**, aldri failed eller passed. | `EnterpriseWikiLinkIntegrationCheckService` (ny), `EnterpriseWikiPostIngestQaService` |
+| B6 | **Ende-til-ende-test med `link_intents`** fra eksisterende kunnskap til graf-API, med negative tester (§17.6). | `EnterpriseWikiKnowledgeIntegrationEndToEndTest` m.fl. |
+
+### 17.2 AI-kontraktene (presisert)
+
+- **`wiki.maintainer_decision` (planlegger):** `related_page_guidance[]` = `{page_title, page_id, relationship}`. `page_id` er et forslag. Backend validerer det mot databasen når katalogen bygges, ikke når beslutningen lagres. Gyldigheten avhenger av tidspunktet: en side kan arkiveres mellom planlegging og generering. Beslutningen lagres derfor slik AI-en returnerte den.
+- **`wiki.generate_page` (generator):** Schemaet er uendret. Katalogen i prompten har nå utdrag, og instruksen sier at det bare skal lenkes der sidens innhold faktisk henger sammen med målet slik utdraget beskriver det. Schema-enumen for `target_page_id` er fortsatt katalogens ID-er.
+- **`wiki.propose_inbound_links` (ny):** strengt schema `{decision: link\|no_link, block_key: enum(sendte blokker)\|null, anchor_text, reason}`. Ingen innholdsfelt finnes i svaret. `no_link` er et normalt svar.
+- **`wiki.revise_links`** brukes nå bare av semantisk lenkereparasjon. Den får samme prioriterte katalogutvalg som generatoren, men i den opprinnelige minimale formen, uten utdrag. Promptformen er altså uendret.
+- **Ingen** AI-operasjon erklærer at relasjonsarbeidet er «verifisert» eller begrunner «ingen lenker» (D6).
+
+### 17.3 Avvik fra planen (bevisste)
+
+1. **Validering av `page_id`** skjer i `EnterpriseWikiRelatedPageReferenceResolver` ved katalogbygging og relink, ikke når beslutningen lagres (se §17.2). Er ID-en ugyldig, prøves eksakt tittel innen kundens egne sider. En fremmed ID kan derfor aldri trekke inn en fremmed side via tittelen. Treffer tittelen en side som allerede er godtatt, registreres treffet som `duplicate`.
+2. **Utfall ved delvis avvisning.** Planen hadde fem utfall. En side med både materialiserte og avviste lenker får `outcome=linked` og `has_rejections=true`, ikke et eget utfall. Avvisningene ligger i `rejected` og `skipped_anchor_not_found`.
+3. **`I ⊆ M`** (materialiserte intensjoner må finnes som lenker i markdown) rapporteres som diagnostikk (`intent_without_materialized_link`), ikke som avvik. En senere tekstendring i samme kjøring (semantisk reparasjon, duplikatfjerning) kan legitimt fjerne en lenke uten å rydde intensjonen. Relasjonssettet (markdown mot rader) er fortsatt konsistent. Å eskalere på dette ville gitt falske «Krever oppfølging».
+4. **Neo4j verifiseres ikke.** Graf-API-et (`/app/wiki/graph-data`) leser `enterprise_wiki_page_links` synkront, og det er dette kontrollen beviser. Neo4j-projeksjonen er asynkron, valgfri og brukes bare av fokusvisningen. Den lagrer ingen tilstand per side, så «i kø» og «feilet» kan ikke skilles fra hverandre. Kontrollen sier det eksplisitt med `neo4j_projection: not_verified`, i stedet for å påstå eller benekte noe.
+5. **Eldre sider uten lagrede blokker** kan få inngående lenke. Avsnittene adresseres da som blokker, og bare markdown endres. Det oppfinnes ingen blokk-JSON, og begrunnelsen lagres derfor ikke for slike sider (kjent begrensning).
+6. **Relink-avvisninger** lagres som `reason = invalid_revision:<årsak>` (for eksempel `invalid_revision:ambiguous_anchor`). Eksisterende kolonne og status brukes, og det kommer ingen ny kolonne.
+7. **Utløsere:** concept/entity utløser for alle handlinger som før. `article` utløser bare ved `created`. Summary utløser aldri.
+8. **Kapasitetsestimat og katalogbudsjett.** Kapasitetsplanen i `WikiPageContentAiClient` brukes til to ting. Ingen av dem styrer antall sider eller hvor mye genereringsarbeid som gjøres.
+   - **Output-tak (`max_output_tokens`):** beregnes nå fra prompten *uten* lenkekatalogen, fordi katalogen aldri rettferdiggjør mer output. En eksisterende test dokumenterte allerede denne kontrakten. Taket er en øvre grense og ikke et forbruk, og det er fortsatt begrenset av modellens og operasjonens maksimum.
+   - **Timeout (og logget inputstørrelse):** beregnes fra *hele* prompten, katalogen inkludert, fordi modellen må lese den. Dette ble rettet i sluttkontrollen: en første versjon tok katalogen ut av begge beregningene og ga dermed en timeout som var kortere enn forespørselen tilsa. Test: `WikiPageContentAiClientTest::test_the_link_catalog_is_read_time_for_the_timeout_but_never_output_budget`.
+   - **Katalogens eget budsjett:** det håndheves i `EnterpriseWikiLinkCatalogService`. Det er høyst 60 oppføringer utenfor kjøringen, hver med et utdrag på høyst 160 tegn, pluss kjøringens egne sider, som er begrenset av beslutningen. Det gir cirka 4 000 ekstra input-tokens per sidegenerering, langt under modellens kontekstgrense.
+9. **Gjenopptak.** `link_assessment_incomplete` og `link_integration_mismatch` er ikke lagt til i `EnterpriseWikiEscalatedRunRecoveryService::RESUMABLE_INCOMPLETE_STEPS`. Hadde de vært det, ville den planlagte vedlikeholdssyklusen kunnet gjenoppta eldre kjøringer uten vurdering i en løkke, uten at noe ble bedre. I ordinær flyt materialiseres lenker før claims, så en kjøring som eskalerer på verifisering, har allerede vurderingen.
+10. **`EnterpriseWikiLinkCatalogService::buildForCustomer`** filtrerer nå også bort arkiverte og erstattede sider, i tråd med materializeren. Metoden har ingen kallere i dag.
+
+### 17.4 Nye invarianter
+
+1. En lenke materialiseres bare når målet både står i katalogen og er en gyldig, aktiv side hos kjøringens kunde. Planleggerens og generatorens valg gir bare kandidatstatus.
+2. Ett ugyldig lenkemål feiler aldri en ellers gyldig side. Et kontraktsbrudd gjør det fortsatt.
+3. Inngående relinking endrer ingen tegn utenfor `[[slug|anker]]`. Dette kontrolleres mekanisk på tre måter:
+   - Fjernes markupen, er den gamle markdownen tilbake byte for byte.
+   - Synlig tekst uten wikilinks er identisk.
+   - Alle andre blokker er byte-identiske.
+
+   Ved brudd skrives ingen versjon.
+4. Et anker plasseres aldri i en overskrift, en tabellrad, en kodeblokk eller inline-kode, en eksisterende lenke, et bilde eller en HTML-tag, og aldri inne i et ord. Et anker som forekommer mer enn én gang, avvises.
+5. `link_assessment` er alltid utledet av backend og aldri selvrapportert av AI. Den erstattes ved regenerering og akkumuleres aldri.
+6. En kjøring der en generert side mangler vurdering eller har rader i utakt med teksten, blir aldri `completed`.
+7. «Teknisk kontrollert» (`link_integration.status = checked`) betyr bare at lagret struktur stemmer med teksten. Null lenker betyr aldri at «ingen faglige relasjoner finnes»: utfallene heter `no_relevant_links` (vurdert, ingen foreslått) og `no_candidates` (ingenting å vurdere mot). Faglig godkjenning skjer fortsatt bare gjennom review av sideversjonen.
+
+### 17.5 Datamodell
+
+Én migrasjon, `2026_10_18_000001_add_link_assessment_to_enterprise_wiki_ingest_run_pages_table`, legger til `link_assessment` (json, nullable) og `links_assessed_at` (timestamp, nullable) på `enterprise_wiki_ingest_run_pages`. Migrasjonen er additiv og reverserbar. Ingen nye tabeller er opprettet, og eldre rader backfilles ikke (D9).
+
+- Testdatabasen er migrert.
+- Utviklingsdatabasen er **ikke** migrert. Det trengs før en kjøring i utviklingsmiljøet. Køarbeiderne må også restartes, fordi de kjører gammel kode.
+
+### 17.6 Testet
+
+**Nye tester:**
+- `EnterpriseWikiKnowledgeIntegrationEndToEndTest` (§11.1, B6). OpenAI mockes på klientnivå, slik at ekte schema, prompt, parser, materializer, relink-innsetter, lint, QA og graf-API kjøres. Scenario: kunde A har *Leverandørvurdering* (publisert) og *Risikovurdering*, begge to år gamle og begravd under 65 nyere sider, pluss en arkivert side. Kunde B har en side med samme slug. Et nytt dokument om leverandørkontroll ingestes. Testen beviser:
+  - Begge relevante sider havner i schema-enumen og prompten, med utdrag. Arkivert side og B-side gjør det ikke.
+  - Planleggerens ugyldige ID-er blir forkastet med årsak.
+  - Modellens fire `link_intents` gir to materialiserte lenker og to avviste, registrerte forslag, uten at siden feiler.
+  - Lenkene ligger i lagret markdown og i lenkeradene.
+  - Den publiserte eksisterende siden får én inngående lenke som nytt utkast, med uendret tekst og uendret `published_version_id`.
+  - En continuation som kjøres på nytt (claims-steget er opptatt første gang), gir ingen duplikater av rader, versjoner, relink-forsøk eller vurderinger.
+  - QA ender `passed`, og `link_integration.status = checked`.
+  - Graf-API-et returnerer nøyaktig de fem forventede kantene med lagrede begrunnelser.
+  - Kunde B ser ingenting.
+
+  En mutasjonskontroll (planlagt-laget slått av) gjør at testen feiler, som forventet. En egen test i samme fil viser at manglende rader, foreldede rader, manglende vurdering og `rejected_only` aldri rapporteres som `checked`.
+- `EnterpriseWikiLinkAssessmentLifecycleTest`:
+  - Sjekkpunktet settes bare for genererte sider med materialiserte rader, og er idempotent.
+  - Manglende vurdering gir escalated.
+  - Avvik mellom tekst og rader gir escalated.
+  - `rejected_only` gir passed, men `needs_followup`.
+  - Regenerering erstatter vurderingen.
+  - Et feilet relasjonssteg gir en feilet kjøring og ingen vurdering.
+- `EnterpriseWikiInboundLinkInserterTest`: invariantene og alle beskyttede kontekster.
+- `EnterpriseWikiLinkAssessmentRecorderTest`: alle utfall.
+- `WikiInboundLinkProposalAiClientTest`: kontrakten. Hele blokker sendes, schemaet er strengt og har ikke noe innholdsfelt, og et ugyldig svar gir feil.
+- Utvidet `EnterpriseWikiLinkCatalogServiceTest`, som dekker:
+  - en eldre planlagt side utenfor de 60 nyeste
+  - ugyldige ID-er med årsak
+  - tittelfallback
+  - naboer
+  - arkiverte og erstattede sider
+  - budsjett
+  - duplikater
+  - utdrag uten lenkesyntaks
+- Ny test i `WikiPageContentAiClientTest`: en full katalog med utdrag når modellen uten å endre budsjettet.
+
+**Eksisterende tester oppdatert der atferden er endret med vilje:**
+- `EnterpriseWikiIncrementalRelinkServiceTest`: skrevet om for relink v2.
+- `EnterpriseWikiLinkIntentAnchorContractTest` og `EnterpriseWikiGeneratePageWikilinkValidationTest`: ugyldige mål avvises nå enkeltvis i stedet for å feile siden.
+- `EnterpriseWikiMaintainerDecisionPromptTest`: `page_id` i schemaet.
+- Fixturer som bygger en «ferdig» kjøring for hånd, markerer nå også relasjonssteget som ferdig (ny trait `MarksWikiLinkAssessmentComplete`, eller felt direkte). Det gjelder 15 testfiler.
+- `EnterpriseWikiCrossPageKnowledgeConsistencyTest` hadde en lenkerad uten tilhørende `[[lenke]]` i teksten. Lenkekontrollen fant avviket, og fixturen er rettet slik at teksten faktisk lenker. Testen er ikke svekket.
+
+**Resultater (sluttkontroll):**
+
+| Testsett | Bestått | Feilet |
+|---|---|---|
+| `tests/Feature/App/Wiki` + `tests/Unit/Services/EnterpriseWiki` + `tests/Unit/Services/Ai` | 3768 | 3 (kjent, `WikiSecondaryNavigationOrderTest`, ikke endret, se §16.3) |
+| 50 Wiki- og AI-katalogrelaterte testfiler utenfor disse katalogene | 1004 | 0 |
+| E2E: `wiki-graph-focus`, `wiki-graph-filters`, `wiki-runs-readability`, `wiki-runs-retry-failed-pages`, `a11y-wiki` | 74 | 0 |
+| Pint (`--test`) på berørte filer | 49 av 50 rene | 1 eksisterende avvik (§17.7) |
+
+JS-enhetstester og `npm run build` er ikke kjørt, fordi ingen frontendkode er endret.
+
+**Test med ekte AI (§11.2, §17.8):** ikke gjennomført og ikke godkjent.
+
+### 17.7 Begrensninger og åpne forhold
+
+**Blokkere for B:** ingen kjente.
+
+**Kjente begrensninger (meldes, ikke skjult):**
+- Ny substans i en *patch* får ingen egen lenkevurdering. Patchede sider får `unchanged_by_patch`.
+- Eldre sider uten blokk-JSON får inngående lenke uten lagret begrunnelse (§17.3 punkt 5).
+- Semantisk lenkereparasjon (`wiki.revise_links`) bruker fortsatt kontrakten der hele markdownen returneres. Den bør på sikt over på samme plasseringskontrakt som relink v2.
+- Neo4j-projeksjonen verifiseres ikke (§17.3 punkt 4).
+- Planleggerindeksen har fortsatt ikke noe tak (§6.2). Den er uendret i B, bortsett fra `has_content`.
+- Lint-avviket i `EnterpriseWikiIndexContextService` (`concat_space`, `binary_operator_spaces`) finnes allerede i `main` og er ikke rettet.
+
+**Hører til C:**
+- resultatbilde (`result_snapshot`)
+- varsler og mottaker
+- panelet «Resultat»
+- indikatoren «Kunnskapskobling» i UI-et
+
+B leverer datagrunnlaget: `link_assessment`, `links_assessed_at`, `qa_result.checks.link_integration` og `reason` på inngående lenker.
+
+**Utenfor oppdraget (som før):**
+- `RequirementWikiCatalogBuilder` sorterer etter `page_id`.
+- `WikiController::updateWorkingVersion` materialiserer ikke lenkene på nytt. Kontrollen i B5 vil nå *vise* dette som `link_integration_mismatch` dersom det skjer midt i en kjøring.
+- `EnterpriseWikiSemanticRepairService` kan etterlate rader i utakt.
+- Wiki-varsler er hardkodet norsk.
+
+### 17.8 Plan for kontrollert test med ekte AI (D11 – venter på godkjenning)
+
+Planen presiserer §11.2. **Ingenting er kjørt.**
+
+**Isolasjon**
+- En egen testkunde, «Wiki-evaluering (intern)», med Wiki-modul og én System Owner.
+- Kunde-ID-en føres i en konfigliste over evalueringskunder. Operatørkommandoen nekter alle andre kunder.
+- Ingen reelle kunders data leses eller skrives. Alle spørringer i flyten er kundeskopet.
+
+**Forutsetninger**
+- Utviklingsdatabasen er migrert (§17.5).
+- Køarbeiderne er restartet med koden fra denne branchen.
+- AI-kapasitetstaket for testkunden er satt i `CustomerAiCapacityService`.
+
+**Eksisterende artikler (ingestes og fullføres først)**
+1. *Leverandørvurdering – policy*. Dokumentet inneholder et avsnitt om løpende oppfølging av leverandører og et forsettlig urelatert avsnitt om reiseregninger.
+2. *Risikovurdering – metode*.
+
+**Nytt dokument:** *Leverandørkontroll – prosedyre*. Det bruker delvis andre begreper («årlig kontroll», «oppfølgingsmøte»), slik at testen måler semantikk og ikke ordlikhet.
+
+**Forventede relasjoner (gullstandard i fixture-JSON)**
+- Påkrevd: leverandørkontroll → leverandørvurdering
+- Påkrevd: leverandørkontroll → risikovurdering
+- Ønsket, inngående: leverandørvurdering → leverandørkontroll
+
+**Regnes som feil**
+- Enhver lenke til eller fra reiseregningsinnholdet.
+- Enhver lenke til en arkivert side eller en side fra en annen kunde.
+- En inngående lenke som endrer tekst utenfor ankeret. Invarianten skal gjøre dette umulig, men det kontrolleres.
+- Påstand om «Teknisk kontrollert» når `link_integration.status ≠ checked`.
+
+**Vurdering**
+- Presisjon og dekning mot gullstandarden.
+- Utfall per side (`link_assessment.outcome`) og avviste forslag med årsak.
+- `qa_result.checks.link_integration`.
+- Manuell faglig gjennomlesing av hver `reason`.
+
+Bestått betyr alle påkrevde lenker og ingen lenker som regnes som feil.
+
+**Kostnad og tokenbruk**
+- Høyst 3 fulle kjøringer per evaluering.
+- Tokens og varighet per fase leses fra `ai_usage_attempts` og kjøringens tidsstempler.
+- Kostnaden (`cost_estimate_nok`) rapporteres etter første kjøring, før en eventuell ny runde.
+- Forventet tillegg fra B per sidegenerering er cirka 4 000 input-tokens (katalogutdrag). Inngående relinking er høyst 15 kall til gpt-4.1-mini per kjøring, mot tidligere opptil 10 kall til gpt-5.
+
+**Opprydding**
+- `EnterpriseWikiDocumentDeletionService` kjøres per dokument hos testkunden.
+- Deretter kjøres `wiki:graph-project --customer=<id>`.
+- Testkunden kan beholdes for senere evalueringer.
+
+### 17.9 Status
+
+B1–B6 er implementert og teknisk kontrollert. Alle obligatoriske akseptansekriterier i §13 (arbeidspakke B) er oppfylt. Arbeidspakke C er ikke implementert. Endringene er ikke committet.
