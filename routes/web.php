@@ -768,6 +768,7 @@ Route::prefix('app')
             Route::get('/runs/{run}/findings', [WikiController::class, 'runFindings'])->name('runs.findings');
             Route::patch('/runs/{run}/cancel', [WikiController::class, 'cancelRun'])->name('runs.cancel');
             Route::patch('/runs/{run}/retry-maintainer-decision', [WikiController::class, 'retryMaintainerDecision'])->name('runs.retry-maintainer-decision');
+            Route::patch('/runs/{run}/retry-failed-pages', [WikiController::class, 'retryFailedPages'])->name('runs.retry-failed-pages');
             Route::patch('/{slug}/claims/{claim}/manual-block-edit', [WikiController::class, 'updateManualMixedBlockEdit'])->name('claims.manual-block-edit.update');
             // Ordinary manual editing of a page's working version. Page-addressed on purpose: the
             // claims/{claim}/manual-block-edit route above is claim repair, with claim-approval

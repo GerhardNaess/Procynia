@@ -84,6 +84,7 @@ class EnterpriseWikiGenerateAppliedPagesService
         private readonly EnterpriseWikiPlannedFigureCoverageValidator $figureCoverageValidator,
         private readonly EnterpriseWikiPageVersionWriter $versionWriter,
         private readonly EnterpriseWikiBestPracticeReviewReconciler $reviewReconciler,
+        private readonly EnterpriseWikiPublicationSettlementService $publicationSettlement,
     ) {}
 
     /**
@@ -891,6 +892,13 @@ class EnterpriseWikiGenerateAppliedPagesService
 
             $version = $this->writeNewCurrentVersion($page->id, $markdown, $contentBlocks, $bestPracticeReview);
             $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($page->id);
+
+            // A regenerated page is a machine-produced working version like any other automated
+            // content change: a published page returns to draft so the new version can be sent
+            // for review, while published_version_id keeps serving the approved one. Never
+            // publishes; a page in review or never published is left alone. Inside this
+            // transaction, so a generation that fails before this point changes nothing.
+            $this->publicationSettlement->afterAutomatedContentChange((int) $page->id);
 
             $pivot->update([
                 'generated_page_version_id' => $version->id,

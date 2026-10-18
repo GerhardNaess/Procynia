@@ -235,8 +235,9 @@ class EnterpriseWikiRecoverDocumentFlow extends Command
     private function executeResumeContinuation(EnterpriseWikiIngestRun $run, array $evaluation): void
     {
         $wasStaleQaClaim = $run->qa_status === EnterpriseWikiIngestRun::QA_STATUS_RUNNING;
+        $previousQaStatus = $run->qa_status;
 
-        $updates = [
+        $run->update([
             'status' => EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING,
             'finished_at' => null,
             'error_message' => null,
@@ -245,16 +246,11 @@ class EnterpriseWikiRecoverDocumentFlow extends Command
             // that is no longer failed.
             'failed_phase' => null,
             'transient_failure' => null,
-        ];
-
-        if ($wasStaleQaClaim) {
-            // qa_status=running with the owning run already marked failed means the worker
-            // that claimed QA died before it could reach a terminal state — that claim is
-            // stale and must be released so a fresh continuation can reclaim it.
-            $updates['qa_status'] = EnterpriseWikiIngestRun::QA_STATUS_PENDING;
-        }
-
-        $run->update($updates);
+            // qa_status=running with the owning run already marked failed means the worker that
+            // claimed QA died before it could reach a terminal state — that claim is released. A
+            // recorded verdict is cleared, or the resumed flow would finalize from it again.
+            'qa_status' => $run->qaStatusForResumedContinuation(),
+        ]);
 
         ContinueEnterpriseWikiDocumentFlowAfterPages::dispatch($run->id);
 
@@ -262,6 +258,7 @@ class EnterpriseWikiRecoverDocumentFlow extends Command
             'run_id' => $run->id,
             'customer_id' => $run->customer_id,
             'stale_qa_claim_released' => $wasStaleQaClaim,
+            'previous_qa_status' => $previousQaStatus,
             'incomplete_steps' => $evaluation['incomplete_steps'],
         ]);
 

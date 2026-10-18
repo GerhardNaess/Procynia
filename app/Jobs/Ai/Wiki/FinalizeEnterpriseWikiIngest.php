@@ -10,6 +10,7 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\Ai\Wiki\WikiArticleAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentWikiAnswerStalenessService;
+use App\Services\EnterpriseWiki\EnterpriseWikiRunTerminalTransition;
 use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -91,8 +92,7 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
             $failedCount = $sections->where('status', EnterpriseWikiIngestSection::STATUS_FAILED)->count();
 
             if ($failedCount > 0) {
-                $run->update([
-                    'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+                app(EnterpriseWikiRunTerminalTransition::class)->fail($run->id, [
                     'error_message' => sprintf(
                         '%d of %d section(s) failed. See section error_message fields for details.',
                         $failedCount,
@@ -106,8 +106,7 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
 
             // All sections completed — assemble wiki content from stored claims.
             if (! $run->enterprise_wiki_page_id) {
-                $run->update([
-                    'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+                app(EnterpriseWikiRunTerminalTransition::class)->fail($run->id, [
                     'error_message' => 'Draft wiki page ID missing on run record.',
                     'finished_at' => now(),
                 ]);
@@ -121,8 +120,7 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
                 ->first();
 
             if (! $pageVersion instanceof EnterpriseWikiPageVersion) {
-                $run->update([
-                    'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+                app(EnterpriseWikiRunTerminalTransition::class)->fail($run->id, [
                     'error_message' => 'Draft wiki page version (version_number=1) not found during finalize.',
                     'finished_at' => now(),
                 ]);
@@ -146,8 +144,7 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
                 ->all();
 
             if (empty($claimsData)) {
-                $run->update([
-                    'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+                app(EnterpriseWikiRunTerminalTransition::class)->fail($run->id, [
                     'error_message' => 'No claims were stored for this ingest run. Cannot generate article.',
                     'finished_at' => now(),
                 ]);
@@ -159,8 +156,7 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
             // fail the run cleanly inside the transaction rather than relying on
             // a RuntimeException + failed() to recover.
             if (! WikiArticleAiClient::isAvailable()) {
-                $run->update([
-                    'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+                app(EnterpriseWikiRunTerminalTransition::class)->fail($run->id, [
                     'error_message' => 'Enterprise wiki article generation is disabled (ENTERPRISE_WIKI_AI_ENABLED=false).',
                     'finished_at' => now(),
                 ]);
@@ -194,8 +190,7 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
                 ->where('id', $run->enterprise_wiki_page_id)
                 ->update(['status' => EnterpriseWikiPage::STATUS_DRAFT]);
 
-            $run->update([
-                'status' => EnterpriseWikiIngestRun::STATUS_COMPLETED,
+            app(EnterpriseWikiRunTerminalTransition::class)->complete($run->id, [
                 'finished_at' => now(),
             ]);
 
@@ -213,8 +208,7 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
         $run = EnterpriseWikiIngestRun::query()->find($this->runId);
 
         if ($run && ! $run->isTerminal()) {
-            $run->update([
-                'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+            app(EnterpriseWikiRunTerminalTransition::class)->fail($run->id, [
                 'error_message' => mb_substr($exception->getMessage(), 0, 1000),
                 'finished_at' => now(),
             ]);

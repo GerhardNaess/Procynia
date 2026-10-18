@@ -12,7 +12,10 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiEscalatedRunRecoveryService;
+use App\Services\EnterpriseWiki\EnterpriseWikiExtractPageClaimsService;
+use App\Services\EnterpriseWiki\EnterpriseWikiLinkSemanticRepairService;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunRecoveryResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -29,6 +32,8 @@ use Tests\TestCase;
 class EnterpriseWikiEscalatedRunRecoveryServiceTest extends TestCase
 {
     use RefreshDatabase;
+
+    private const STALE_QA_ERROR = 'Run has unfinished continuation step(s) or an active reservation: verification_incomplete.';
 
     // =========================================================================
     // Resumable happy path (run-585 shape)
@@ -257,6 +262,98 @@ class EnterpriseWikiEscalatedRunRecoveryServiceTest extends TestCase
     }
 
     // =========================================================================
+    // The recorded QA verdict after a resume
+    // =========================================================================
+
+    /**
+     * The verdict recorded before the resume describes work that was still unfinished. Kept as
+     * qa_status, the continuation's QA claim refuses it and the flow finalizes from it unchanged —
+     * the resumed run escalated again even though its verification had since completed.
+     */
+    public function test_a_resumed_run_is_finalized_from_a_new_qa_verdict_not_the_stale_one(): void
+    {
+        Queue::fake();
+        $this->mockAiBackedContinuationStages();
+
+        $run = $this->createEscalatedRun($this->createCustomer(), unverifiedClaims: 2, qaLastError: self::STALE_QA_ERROR);
+        $run->update(['qa_result' => ['incomplete_steps' => ['verification_incomplete']]]);
+        $article = $this->pageOfType($run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $publishedVersionId = $this->publish($article);
+
+        $result = $this->service()->attempt($run->id, caller: 'test');
+        $this->assertSame(EnterpriseWikiRunRecoveryResult::OUTCOME_RESUMED, $result->outcome);
+
+        $resumed = $run->fresh();
+        $this->assertNull($resumed->qa_status, 'the stale verdict must not be reused by the resumed flow');
+        $this->assertSame(['incomplete_steps' => ['verification_incomplete']], $resumed->qa_result, 'history stays until replaced');
+        $this->assertSame(self::STALE_QA_ERROR, $resumed->qa_last_error);
+        $this->assertSame(1, $resumed->qa_attempt_count);
+
+        // The resumed continuation runs; the verification it was resumed for completes.
+        (new ContinueEnterpriseWikiDocumentFlowAfterPages($run->id))->handle(app(EnterpriseWikiDocumentFlowService::class));
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS, $run->fresh()->status);
+        EnterpriseWikiClaim::query()->whereNull('verified_at')->update(['verified_at' => now()]);
+        app(EnterpriseWikiDocumentFlowService::class)->continueAfterClaimVerification($run->id);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
+        $this->assertSame(2, $run->qa_attempt_count, 'QA ran again');
+        $this->assertNotContains('verification_incomplete', (array) data_get($run->qa_result, 'incomplete_steps'));
+
+        // The page that was already approved and published is untouched.
+        $this->assertSame($publishedVersionId, $article->fresh()->published_version_id);
+        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $article->fresh()->status);
+    }
+
+    public function test_a_recovery_that_resumes_nothing_keeps_the_recorded_verdict(): void
+    {
+        Queue::fake();
+
+        // Nothing is incomplete any more: stale_state, no resume.
+        $stale = $this->createEscalatedRun($this->createCustomer(), unverifiedClaims: 0, qaLastError: self::STALE_QA_ERROR);
+        // Another worker holds the verification lease: already_running, no resume.
+        $leased = $this->createEscalatedRun($this->createCustomer('Lease AS'), unverifiedClaims: 1, leaseActiveOnClaim: true);
+        // A permanent QA error: not_recoverable, no resume.
+        $permanent = $this->createEscalatedRun(
+            $this->createCustomer('Permanent AS'),
+            qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED,
+            qaLastError: 'Schema validation failed: missing required field.',
+        );
+
+        foreach ([$stale, $leased, $permanent] as $run) {
+            $before = $run->fresh();
+            $result = $this->service()->attempt($run->id, caller: 'test');
+
+            $this->assertFalse($result->isResumed());
+            $after = $run->fresh();
+            $this->assertSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $after->status);
+            $this->assertSame($before->qa_status, $after->qa_status);
+            $this->assertSame($before->qa_last_error, $after->qa_last_error);
+            $this->assertSame($before->qa_attempt_count, $after->qa_attempt_count);
+        }
+
+        Queue::assertNothingPushed();
+    }
+
+    public function test_a_repeated_attempt_does_not_reset_the_verdict_of_the_resumed_flow_again(): void
+    {
+        Queue::fake();
+
+        $run = $this->createEscalatedRun($this->createCustomer(), unverifiedClaims: 1);
+
+        $this->service()->attempt($run->id, caller: 'test');
+        // The resumed flow has reached QA and claimed it.
+        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_QA, 'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_RUNNING]);
+
+        $second = $this->service()->attempt($run->id, caller: 'test');
+
+        $this->assertSame(EnterpriseWikiRunRecoveryResult::OUTCOME_ALREADY_RUNNING, $second->outcome);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_RUNNING, $run->fresh()->qa_status);
+        Queue::assertPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class, 1);
+    }
+
+    // =========================================================================
     // evaluate() is read-only
     // =========================================================================
 
@@ -281,6 +378,42 @@ class EnterpriseWikiEscalatedRunRecoveryServiceTest extends TestCase
     private function service(): EnterpriseWikiEscalatedRunRecoveryService
     {
         return app(EnterpriseWikiEscalatedRunRecoveryService::class);
+    }
+
+    /**
+     * The continuation's AI-backed stages. The fixture's pages already carry their claims
+     * checkpoint; extraction and semantic repair are no-ops here, as they are on a real resume
+     * that finds nothing new to extract or repair.
+     */
+    private function mockAiBackedContinuationStages(): void
+    {
+        $this->mock(EnterpriseWikiExtractPageClaimsService::class)
+            ->shouldReceive('extract')
+            ->andReturn(['pages' => 2, 'claims' => 0, 'skipped' => 0]);
+
+        $this->mock(EnterpriseWikiLinkSemanticRepairService::class)
+            ->shouldReceive('repairForRun')
+            ->andReturn(['pages_reviewed' => 2, 'applied' => 0, 'skipped' => 2, 'failed' => 0]);
+    }
+
+    private function pageOfType(EnterpriseWikiIngestRun $run, string $pageType): EnterpriseWikiPage
+    {
+        return EnterpriseWikiPage::query()
+            ->whereIn('id', EnterpriseWikiIngestRunPage::query()->where('enterprise_wiki_ingest_run_id', $run->id)->pluck('enterprise_wiki_page_id'))
+            ->where('page_type', $pageType)
+            ->firstOrFail();
+    }
+
+    private function publish(EnterpriseWikiPage $page): int
+    {
+        $versionId = (int) EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->where('is_current', true)
+            ->value('id');
+
+        $page->update(['status' => EnterpriseWikiPage::STATUS_APPROVED, 'published_version_id' => $versionId]);
+
+        return $versionId;
     }
 
     private function createCustomer(string $name = 'Recovery Test AS'): Customer

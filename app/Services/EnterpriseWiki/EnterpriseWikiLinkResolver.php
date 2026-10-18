@@ -3,6 +3,7 @@
 namespace App\Services\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageVersion;
 
 /**
  * Resolves parsed wikilink occurrences (see EnterpriseWikiLinkParser) against a
@@ -95,6 +96,37 @@ class EnterpriseWikiLinkResolver
 
             return ['link' => $link, 'status' => self::STATUS_VALID, 'target_page' => $targetPage];
         }, $parsedLinks);
+    }
+
+    /**
+     * The resolved targets a wikilink row may be materialized for: those whose page has a
+     * current version. A page without one is an incomplete shell — typically a page whose
+     * generation failed in a partially completed run — and is not yet a knowledge node a
+     * relation can point at. The [[link]] stays in the text and renders; its row (and with it
+     * the graph edge) appears once the target is generated and the source page is
+     * re-materialized. Shared by EnterpriseWikiBuildPageLinksService (writes rows) and
+     * EnterpriseWikiAppliedRunLintService (checks rows against the text), so the two can never
+     * disagree about which links should have a row.
+     *
+     * @param  list<array{to_page: EnterpriseWikiPage, anchor_text: string}>  $resolved
+     * @return list<array{to_page: EnterpriseWikiPage, anchor_text: string}>
+     */
+    public function materializableTargets(array $resolved): array
+    {
+        if ($resolved === []) {
+            return [];
+        }
+
+        $withCurrentVersion = EnterpriseWikiPageVersion::query()
+            ->where('is_current', true)
+            ->whereIn('enterprise_wiki_page_id', array_map(fn (array $target): int => $target['to_page']->id, $resolved))
+            ->pluck('enterprise_wiki_page_id')
+            ->flip();
+
+        return array_values(array_filter(
+            $resolved,
+            fn (array $target): bool => $withCurrentVersion->has($target['to_page']->id),
+        ));
     }
 
     private function fetchPagesBySlug(int $customerId, array $slugs): \Illuminate\Support\Collection

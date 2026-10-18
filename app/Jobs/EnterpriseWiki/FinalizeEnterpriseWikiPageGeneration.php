@@ -8,6 +8,8 @@ use App\Models\EnterpriseWikiPage;
 use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
 use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionPrompt;
+use App\Services\EnterpriseWiki\EnterpriseWikiRunTerminalTransition;
+use App\Services\EnterpriseWiki\EnterpriseWikiTransientFailureClassifier;
 use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -183,18 +185,28 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
 
         $failed = $this->failedPivots($pivots);
 
-        if ($failed->isNotEmpty()) {
+        // Controlled partial completion (docs/enterprise-wiki-knowledge-integration-plan.md §4.2,
+        // decision D1): one failed page no longer stops the pages that did generate from being
+        // linked, claim-checked and QA'd. Only a wave where NOTHING generated has no valid page
+        // to carry forward, and fails the run here. A partial wave carries on; its failed
+        // pivots stay generation_status=failed, so post-ingest QA reports
+        // page_generation_incomplete and the run ends escalated — never completed.
+        if ($failed->isNotEmpty() && $this->completedPivots($pivots)->isEmpty()) {
             $this->markRunFailed($run, $failed, $pivots->count(), 'initial');
 
             return ['outcome' => 'failed'];
         }
 
-        // Article and summary pages exist and generated successfully before any later flow stage
-        // runs — this is the exact, single, guaranteed-once point to build the structural
-        // article<->summary link graph (co-membership, not content-derived — see
-        // EnterpriseWikiBuildPageLinksService::buildArticleSummaryLinks()). Deliberately narrower
-        // than build(): concept/entity combinatoric linking stays an explicit, opt-in operation
-        // (wiki:build-page-links), unaffected by this automatic step.
+        if ($failed->isNotEmpty()) {
+            $this->logPartialFailure($failed, $pivots->count(), 'initial');
+        }
+
+        // The initial wave is settled — this is the exact, single, guaranteed-once point to build
+        // the structural article<->summary link graph (co-membership, not content-derived — see
+        // EnterpriseWikiBuildPageLinksService::buildArticleSummaryLinks(), which pairs only pages
+        // that actually have a version). Deliberately narrower than build(): concept/entity
+        // combinatoric linking stays an explicit, opt-in operation (wiki:build-page-links),
+        // unaffected by this automatic step.
         $buildPageLinksService->buildArticleSummaryLinks($run);
 
         $deferredPageIds = $this->deferredConceptEntityPivots($run)
@@ -213,8 +225,9 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
             return ['outcome' => 'completed'];
         }
 
-        // All initial-wave pages are done — this is the single atomic claim that guarantees
-        // deferred concept/entity jobs are dispatched exactly once: a concurrent invocation
+        // The initial wave is settled — this is the single atomic claim that guarantees deferred
+        // concept/entity jobs are dispatched exactly once (decision D7: also after a failed
+        // article — concept and entity pages are pages in their own right): a concurrent invocation
         // blocks on the row lock, then sees status !== generating_pages and returns
         // 'already_advanced' above instead of dispatching a second wave.
         $run->update(['status' => EnterpriseWikiIngestRun::STATUS_GENERATING_CONCEPT_ENTITY_PAGES]);
@@ -241,10 +254,17 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
 
         $failed = $this->failedPivots($pivots);
 
-        if ($failed->isNotEmpty()) {
+        // Same partial-completion rule as phase 1, judged over the whole run: the initial wave
+        // already produced at least one page (or it would have failed the run), so a failed
+        // concept/entity page only fails the run when no page of the run generated at all.
+        if ($failed->isNotEmpty() && $this->completedPivots($this->allRunPivots())->isEmpty()) {
             $this->markRunFailed($run, $failed, $pivots->count(), 'concept/entity');
 
             return ['outcome' => 'failed'];
+        }
+
+        if ($failed->isNotEmpty()) {
+            $this->logPartialFailure($failed, $pivots->count(), 'concept/entity');
         }
 
         // Same single-claim guarantee as phase 1: this transition out of
@@ -390,17 +410,36 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
         return $pivots->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED);
     }
 
-    private function markRunFailed(EnterpriseWikiIngestRun $run, Collection $failed, int $total, string $phaseLabel): void
+    private function completedPivots(Collection $pivots): Collection
     {
-        $titles = $failed
-            ->map(fn (EnterpriseWikiIngestRunPage $p) => $p->page?->title ?? "page #{$p->enterprise_wiki_page_id}")
-            ->implode(', ');
+        return $pivots->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED);
+    }
 
+    private function allRunPivots(): Collection
+    {
+        return EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $this->runId)
+            ->get();
+    }
+
+    private function logPartialFailure(Collection $failed, int $total, string $phaseLabel): void
+    {
+        Log::warning('[WIKI_PAGE_GENERATION_FINALIZE] Some applied pages failed to generate — continuing with the pages that did; the run cannot complete.', [
+            'run_id' => $this->runId,
+            'phase' => $phaseLabel,
+            'failed_pages' => $failed->count(),
+            'total_pages' => $total,
+            'details' => $this->failureDetails($failed),
+        ]);
+    }
+
+    private function failureDetails(Collection $failed): string
+    {
         // Per-page detail (title, page_type, and the concrete reason — which already carries
         // its original exception type, e.g. "[EnterpriseWikiInvalidWikilinksException] ...",
         // via GenerateEnterpriseWikiAppliedPage::markPivotFailed()) so the run-level
         // error_message is understandable without a stacktrace or queue log lookup.
-        $details = $failed
+        return $failed
             ->map(function (EnterpriseWikiIngestRunPage $p) {
                 $title = $p->page?->title ?? "page #{$p->enterprise_wiki_page_id}";
                 $pageType = $p->page?->page_type ?? 'unknown';
@@ -409,9 +448,26 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
                 return "{$title} ({$pageType}): {$reason}";
             })
             ->implode(' | ');
+    }
 
-        $run->update([
-            'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+    private function markRunFailed(EnterpriseWikiIngestRun $run, Collection $failed, int $total, string $phaseLabel): void
+    {
+        $titles = $failed
+            ->map(fn (EnterpriseWikiIngestRunPage $p) => $p->page?->title ?? "page #{$p->enterprise_wiki_page_id}")
+            ->implode(', ');
+
+        $details = $this->failureDetails($failed);
+
+        app(EnterpriseWikiRunTerminalTransition::class)->fail($run->id, [
+            // The phase the run was in — generating_pages or generating_concept_entity_pages —
+            // so the run list shows which step failed, like every other failure path.
+            'failed_phase' => EnterpriseWikiIngestRun::isValidFailedPhase($run->status) ? $run->status : null,
+            // Transient only when every failed page failed for a documented-transient reason
+            // (EnterpriseWikiTransientFailureClassifier's allow-list); a single unknown or
+            // permanent page failure makes the whole run non-transient.
+            'transient_failure' => $failed->every(
+                fn (EnterpriseWikiIngestRunPage $p): bool => EnterpriseWikiTransientFailureClassifier::isTransient($p->generation_error)
+            ),
             'error_message' => mb_substr(sprintf(
                 '%d of %d %s page(s) failed to generate: %s. Details — %s',
                 $failed->count(),
@@ -437,8 +493,7 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
         $run = EnterpriseWikiIngestRun::query()->find($this->runId);
 
         if ($run instanceof EnterpriseWikiIngestRun && ! $run->isTerminal()) {
-            EnterpriseWikiIngestRun::query()->whereKey($run->id)->nonTerminal()->update([
-                'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+            app(EnterpriseWikiRunTerminalTransition::class)->fail($run->id, [
                 'error_message' => mb_substr($exception->getMessage(), 0, 1000),
                 'finished_at' => now(),
             ]);

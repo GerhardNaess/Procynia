@@ -71,6 +71,8 @@ class EnterpriseWikiGraphDataService
             ->whereIn('status', $visibleStatuses)
             ->get();
 
+        [$pages, $incompleteCount] = $this->withoutIncompleteShells($pages);
+
         $pageIds = $pages->pluck('id')->all();
 
         // Only edges whose both endpoints survived the status filter above — a link may
@@ -82,7 +84,7 @@ class EnterpriseWikiGraphDataService
             ->whereIn('to_page_id', $pageIds)
             ->get();
 
-        return $this->assemble($pages, $links, $customerId, 'customer', null, null);
+        return $this->assemble($pages, $links, $customerId, 'customer', null, null, $incompleteCount);
     }
 
     private function buildRunScoped(int $customerId, int $runId, array $visibleStatuses): array
@@ -113,6 +115,8 @@ class EnterpriseWikiGraphDataService
             ->whereIn('status', $visibleStatuses)
             ->get();
 
+        [$pages, $incompleteCount] = $this->withoutIncompleteShells($pages);
+
         $actualPageIds = $pages->pluck('id')->all();
 
         // Only edges whose both endpoints are within the run's (visible) page set
@@ -123,7 +127,7 @@ class EnterpriseWikiGraphDataService
             ->whereIn('to_page_id', $actualPageIds)
             ->get();
 
-        return $this->assemble($pages, $links, $customerId, 'run', $runId, null);
+        return $this->assemble($pages, $links, $customerId, 'run', $runId, null, $incompleteCount);
     }
 
     private function buildNeighborhood(int $customerId, int $pageId, array $visibleStatuses): array
@@ -158,6 +162,10 @@ class EnterpriseWikiGraphDataService
             ->whereIn('status', $visibleStatuses)
             ->get();
 
+        // The requested page stays even when it is a shell — the viewer asked for it by id —
+        // but no shell is added around it as a neighbour.
+        [$pages, $incompleteCount] = $this->withoutIncompleteShells($pages, keepPageId: $pageId);
+
         $actualPageIds = $pages->pluck('id')->all();
 
         // All edges between any two pages in the (visible) neighborhood
@@ -168,7 +176,36 @@ class EnterpriseWikiGraphDataService
             ->whereIn('to_page_id', $actualPageIds)
             ->get();
 
-        return $this->assemble($pages, $links, $customerId, 'page', null, $pageId);
+        return $this->assemble($pages, $links, $customerId, 'page', null, $pageId, $incompleteCount);
+    }
+
+    /**
+     * A page without a current version is an incomplete shell — typically one whose generation
+     * failed in a partially completed run (docs/enterprise-wiki-knowledge-integration-plan.md §5) —
+     * not a knowledge node. It is left out of the graph rather than drawn as an ordinary, empty,
+     * orphaned page; how many were left out is reported in summary.incomplete_count so the graph
+     * never hides that they exist. Nothing is deleted, and wikilink rows are never materialized to
+     * a shell (EnterpriseWikiLinkResolver::materializableTargets()), so no edge is lost here.
+     *
+     * @return array{0: Collection<int, EnterpriseWikiPage>, 1: int}
+     */
+    private function withoutIncompleteShells(Collection $pages, ?int $keepPageId = null): array
+    {
+        if ($pages->isEmpty()) {
+            return [$pages, 0];
+        }
+
+        $withCurrentVersion = EnterpriseWikiPageVersion::query()
+            ->whereIn('enterprise_wiki_page_id', $pages->pluck('id'))
+            ->where('is_current', true)
+            ->pluck('enterprise_wiki_page_id')
+            ->flip();
+
+        $kept = $pages
+            ->filter(fn (EnterpriseWikiPage $page): bool => $withCurrentVersion->has($page->id) || $page->id === $keepPageId)
+            ->values();
+
+        return [$kept, $pages->count() - $kept->count()];
     }
 
     // =========================================================================
@@ -182,6 +219,7 @@ class EnterpriseWikiGraphDataService
         string $scopeType,
         ?int $scopeRunId,
         ?int $scopePageId,
+        int $incompleteCount = 0,
     ): array {
         $pageIds = $pages->pluck('id')->all();
 
@@ -318,6 +356,7 @@ class EnterpriseWikiGraphDataService
             'lint_error_count' => (int) $nodesCol->sum('lint_error_count'),
             'lint_warning_count' => (int) $nodesCol->sum('lint_warning_count'),
             'orphan_count' => $orphanCount,
+            'incomplete_count' => $incompleteCount,
         ];
 
         return [

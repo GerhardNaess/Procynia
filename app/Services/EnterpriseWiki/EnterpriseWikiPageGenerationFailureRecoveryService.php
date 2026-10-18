@@ -2,6 +2,7 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
@@ -35,6 +36,14 @@ use Illuminate\Support\Facades\Log;
  *    own generatePageForRun() claim (skips a pivot whose generated_page_version_id is already set)
  *    is a second, independent layer of protection against a genuine duplicate dispatch.
  *
+ * Since controlled partial completion (docs/enterprise-wiki-knowledge-integration-plan.md §4.2,
+ * decisions D1/D3) it also resumes an escalated, partially completed run. It never retries a plan
+ * defect such as planned_section_no_evidence (Wiki run 26): that repeats on every attempt, and is
+ * refused with EnterpriseWikiRunRecoveryResult::CODE_PLAN_DEFECT for the UI to explain. A transient
+ * or unrecognised failure (failureKind()) may be retried — but only by a person ("Prøv igjen for
+ * feilede sider"). No scheduler calls this service: no attempt limit exists that would bound an
+ * automatic retry of a persistently "transient" failure.
+ *
  * Resuming never touches a completed pivot: only the failed pivot(s) are reset to
  * generation_status=pending (clearing generation_started_at/generation_completed_at/
  * generation_error back to their original at-creation defaults) and re-dispatched. Once those jobs
@@ -44,11 +53,36 @@ use Illuminate\Support\Facades\Log;
  */
 class EnterpriseWikiPageGenerationFailureRecoveryService
 {
+    /**
+     * Failure markers that can only repeat on a retry, because the cause is in the plan or the
+     * source, not in the attempt: a planned section with no source evidence (Wiki run 26), or an
+     * existing page the decision may only patch. Matched against the pivot's generation_error,
+     * which carries the original exception class (GenerateEnterpriseWikiAppliedPage::markPivotFailed()).
+     */
+    private const PLAN_DEFECT_MARKERS = [
+        'EnterpriseWikiPlannedSectionEvidenceMissingException',
+        'planned_section_no_evidence',
+        'EnterpriseWikiPatchTargetRegenerationBlockedException',
+    ];
+
+    public const FAILURE_PLAN_DEFECT = 'plan_defect';
+
+    public const FAILURE_TRANSIENT = 'transient';
+
+    public const FAILURE_UNKNOWN = 'unknown';
+
+    /** The page-generation crash sentinel interval (FinalizeEnterpriseWikiPageGeneration). */
+    private const FINALIZE_SENTINEL_DELAY_SECONDS = 60;
+
     private const INITIAL_WAVE_TYPES = [
         EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
         EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
         EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
     ];
+
+    public function __construct(
+        private readonly EnterpriseWikiGenerateAppliedPagesService $generateAppliedPagesService,
+    ) {}
 
     /**
      * Read-only preview of what attempt() would do, without locking, mutating, or dispatching
@@ -125,7 +159,6 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
         if (in_array($run->status, [
             EnterpriseWikiIngestRun::STATUS_COMPLETED,
             EnterpriseWikiIngestRun::STATUS_CANCELLED,
-            EnterpriseWikiIngestRun::STATUS_ESCALATED,
             EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL,
             EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
         ], true)) {
@@ -137,10 +170,13 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
             ];
         }
 
-        if ($run->status !== EnterpriseWikiIngestRun::STATUS_FAILED) {
+        // failed: every page of a wave failed. escalated: a partially completed run
+        // (docs/enterprise-wiki-knowledge-integration-plan.md §4.2) — the pages that generated went
+        // through the rest of the flow and the failed ones are what keeps it from completing.
+        if (! in_array($run->status, [EnterpriseWikiIngestRun::STATUS_FAILED, EnterpriseWikiIngestRun::STATUS_ESCALATED], true)) {
             return [
                 'result' => EnterpriseWikiRunRecoveryResult::notRecoverable(
-                    "Run [{$run->id}] has status [{$run->status}] — only status=failed is handled by this service."
+                    "Run [{$run->id}] has status [{$run->status}] — only status=failed or escalated is handled by this service."
                 ),
                 'failedPivots' => $none,
             ];
@@ -176,9 +212,19 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
             fn (EnterpriseWikiIngestRunPage $p): bool => $p->generation_status === EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED
         );
 
-        if ($others->contains(
-            fn (EnterpriseWikiIngestRunPage $p): bool => $p->generation_status !== EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED
-        )) {
+        $decisionJson = (array) ($run->maintainer_decision_json ?? []);
+        $failedHasInitialWavePage = $failed->contains(
+            fn (EnterpriseWikiIngestRunPage $p): bool => $this->isInitialWavePage($p->page, $decisionJson)
+        );
+
+        // Every other page must be settled. The one legitimate exception: when the whole initial
+        // wave failed, the deferred concept/entity pages were never dispatched and are still
+        // pending — the ordinary finalizer dispatches them once the retried initial wave settles.
+        if ($others->contains(fn (EnterpriseWikiIngestRunPage $p): bool => ! $this->isSettledOrAwaitingDeferredDispatch(
+            $p,
+            $failedHasInitialWavePage,
+            $decisionJson,
+        ))) {
             return [
                 'result' => EnterpriseWikiRunRecoveryResult::notRecoverable(
                     "Run [{$run->id}] has page(s) still pending or running generation — refusing to retry while ".
@@ -198,17 +244,15 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
             ];
         }
 
-        $decisionJson = (array) ($run->maintainer_decision_json ?? []);
-        $failedPhases = $failed
-            ->map(fn (EnterpriseWikiIngestRunPage $p): string => $this->isInitialWavePage($p->page, $decisionJson) ? 'initial' : 'deferred')
-            ->unique()
-            ->values();
-
-        if ($failedPhases->count() > 1) {
+        // Decision D3: never offer a retry that can only repeat a known plan defect. A transient or
+        // unrecognised failure may be retried — by a person only (see the class docblock); the UI
+        // says which of the two it is (failureKind()).
+        if ($failed->contains(fn (EnterpriseWikiIngestRunPage $p): bool => self::failureKind($p->generation_error) === self::FAILURE_PLAN_DEFECT)) {
             return [
                 'result' => EnterpriseWikiRunRecoveryResult::notRecoverable(
-                    "Run [{$run->id}] has failed page(s) across both initial and deferred generation phases — ".
-                    'refusing to retry a mixed-phase failure because it could duplicate deferred dispatch.'
+                    "Run [{$run->id}] has a page that failed on a plan defect — retrying would repeat it.",
+                    [],
+                    EnterpriseWikiRunRecoveryResult::CODE_PLAN_DEFECT,
                 ),
                 'failedPivots' => $none,
             ];
@@ -216,12 +260,47 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
 
         return [
             'result' => EnterpriseWikiRunRecoveryResult::resumed(
-                "Run [{$run->id}] has {$failed->count()} failed page-generation job(s) with every other page ".
-                'already completed — safe to re-dispatch only the failed page(s), reusing the same run_id, '.
+                "Run [{$run->id}] has {$failed->count()} failed page-generation job(s) with no plan defect and every ".
+                'other page settled — safe to re-dispatch only the failed page(s), reusing the same run_id, '.
                 'document_id, and page_id(s).'
             ),
             'failedPivots' => $failed,
         ];
+    }
+
+    /**
+     * What a recorded page-generation error says about a retry: a plan defect repeats by
+     * construction; a transient failure is one EnterpriseWikiTransientFailureClassifier's
+     * allow-list recognises; anything else is unknown — never assumed to be either.
+     *
+     * @return self::FAILURE_*
+     */
+    public static function failureKind(?string $generationError): string
+    {
+        foreach (self::PLAN_DEFECT_MARKERS as $marker) {
+            if ($generationError !== null && str_contains($generationError, $marker)) {
+                return self::FAILURE_PLAN_DEFECT;
+            }
+        }
+
+        return EnterpriseWikiTransientFailureClassifier::isTransient($generationError)
+            ? self::FAILURE_TRANSIENT
+            : self::FAILURE_UNKNOWN;
+    }
+
+    /**
+     * @param  array<string, mixed>  $decisionJson
+     */
+    private function isSettledOrAwaitingDeferredDispatch(EnterpriseWikiIngestRunPage $pivot, bool $failedHasInitialWavePage, array $decisionJson): bool
+    {
+        if ($pivot->generation_status === EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED) {
+            return true;
+        }
+
+        return $failedHasInitialWavePage
+            && $pivot->generation_status === EnterpriseWikiIngestRunPage::GENERATION_STATUS_PENDING
+            && $pivot->generation_dispatched_at === null
+            && ! $this->isInitialWavePage($pivot->page, $decisionJson);
     }
 
     /**
@@ -237,17 +316,35 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
     private function resume(EnterpriseWikiIngestRun $run, Collection $failedPivots): void
     {
         $decisionJson = (array) ($run->maintainer_decision_json ?? []);
-        $targetStatus = $failedPivots->contains(
+        $initialWaveFailed = $failedPivots->filter(
             fn (EnterpriseWikiIngestRunPage $p): bool => $this->isInitialWavePage($p->page, $decisionJson)
-        )
+        );
+
+        // Failures in both waves: only the initial wave is retried directly. The deferred
+        // concept/entity pages are reset to pending and dispatched by
+        // FinalizeEnterpriseWikiPageGeneration once the initial wave settles — the same, single
+        // dispatch point a first attempt uses, so no deferred page is ever enqueued twice.
+        $targetStatus = $initialWaveFailed->isNotEmpty()
             ? EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES
             : EnterpriseWikiIngestRun::STATUS_GENERATING_CONCEPT_ENTITY_PAGES;
+        $dispatchNow = $initialWaveFailed->isNotEmpty() ? $initialWaveFailed : $failedPivots;
 
-        $run->update([
+        $runUpdate = [
             'status' => $targetStatus,
             'finished_at' => null,
             'error_message' => null,
-        ]);
+            'failed_phase' => null,
+            'transient_failure' => null,
+        ];
+
+        // A partially completed run already carries a QA verdict for a page set that is about to
+        // change. Clearing it lets the resumed flow run QA again, exactly as on a first attempt;
+        // qa_result and qa_last_error stay until that new verdict replaces them.
+        if ($run->qa_status !== null) {
+            $runUpdate['qa_status'] = null;
+        }
+
+        $run->update($runUpdate);
 
         foreach ($failedPivots as $pivot) {
             $pivot->update([
@@ -259,9 +356,17 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
                 'generation_completed_at' => null,
                 'generation_error' => null,
             ]);
-
-            GenerateEnterpriseWikiAppliedPage::dispatch($run->id, $pivot->enterprise_wiki_page_id);
         }
+
+        foreach ($dispatchNow as $pivot) {
+            // Same atomic reservation every other dispatch goes through.
+            if ($this->generateAppliedPagesService->reservePageForDispatch($run->id, $pivot->enterprise_wiki_page_id)) {
+                GenerateEnterpriseWikiAppliedPage::dispatch($run->id, $pivot->enterprise_wiki_page_id);
+            }
+        }
+
+        // The same crash sentinel a first attempt starts with.
+        FinalizeEnterpriseWikiPageGeneration::dispatch($run->id, true)->delay(now()->addSeconds(self::FINALIZE_SENTINEL_DELAY_SECONDS));
     }
 
     /**

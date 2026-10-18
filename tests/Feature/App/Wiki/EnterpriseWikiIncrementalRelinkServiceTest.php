@@ -260,7 +260,9 @@ class EnterpriseWikiIncrementalRelinkServiceTest extends TestCase
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
-        $trigger = $this->createPage($customer, 'business-case', 'Business Case', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        // A wikilink row is only materialized to a page that has a current version (a generated
+        // trigger always does) — see EnterpriseWikiLinkResolver::materializableTargets().
+        $trigger = $this->createVersionedPage($customer, 'business-case', 'Business Case', EnterpriseWikiPage::PAGE_TYPE_CONCEPT, '# Business Case');
         $article = $this->createVersionedPage($customer, 'artikkel', 'Artikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'This discusses Business Case here.');
         $run = $this->createAppliedRun($customer, $document, [$trigger]);
 
@@ -284,7 +286,9 @@ class EnterpriseWikiIncrementalRelinkServiceTest extends TestCase
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
-        $trigger = $this->createPage($customer, 'business-case', 'Business Case', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        // A wikilink row is only materialized to a page that has a current version (a generated
+        // trigger always does) — see EnterpriseWikiLinkResolver::materializableTargets().
+        $trigger = $this->createVersionedPage($customer, 'business-case', 'Business Case', EnterpriseWikiPage::PAGE_TYPE_CONCEPT, '# Business Case');
         $article = $this->createVersionedPage($customer, 'artikkel', 'Artikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'This discusses Business Case here.');
         $run = $this->createAppliedRun($customer, $document, [$trigger]);
 

@@ -7,6 +7,7 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\EnterpriseWiki\EnterpriseWikiLinkCatalogService;
@@ -54,7 +55,7 @@ class EnterpriseWikiLinkCatalogServiceTest extends TestCase
         $article = $this->createPage($customer, 'artikkel', 'Artikkel');
         $run = $this->createAppliedRun($customer, $document, [$article]);
 
-        $existing = $this->createPage($customer, 'eksisterende-side', 'Eksisterende side');
+        $existing = $this->createExistingPage($customer, 'eksisterende-side', 'Eksisterende side');
 
         $result = $this->service()->buildForPage($run, $article);
 
@@ -91,7 +92,7 @@ class EnterpriseWikiLinkCatalogServiceTest extends TestCase
 
         // More "other" customer pages than the cap, to prove the cap only trims these.
         for ($i = 0; $i < EnterpriseWikiLinkCatalogService::MAX_OTHER_PAGES + 10; $i++) {
-            $this->createPage($customer, "other-page-{$i}", "Other page {$i}");
+            $this->createExistingPage($customer, "other-page-{$i}", "Other page {$i}");
         }
 
         $result = $this->service()->buildForPage($run, $article);
@@ -104,7 +105,48 @@ class EnterpriseWikiLinkCatalogServiceTest extends TestCase
         }
 
         $this->assertSame(5, $result['run_page_count']);
-        $this->assertLessThanOrEqual(5 + EnterpriseWikiLinkCatalogService::MAX_OTHER_PAGES, count($catalogSlugs));
+        $this->assertSame(5 + EnterpriseWikiLinkCatalogService::MAX_OTHER_PAGES, count($catalogSlugs));
+    }
+
+    public function test_an_incomplete_shell_from_another_run_is_never_offered_as_a_link_target(): void
+    {
+        // Arbeidspakke A5 (docs/enterprise-wiki-knowledge-integration-plan.md §5).
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, 'artikkel', 'Artikkel');
+        $run = $this->createAppliedRun($customer, $document, [$article]);
+        $existing = $this->createExistingPage($customer, 'leverandorstyring', 'Leverandørstyring');
+        $shell = $this->createPage($customer, 'feilet-artikkel', 'Feilet artikkel');
+
+        $result = $this->service()->buildForPage($run, $article);
+        $slugs = array_column($result['catalog'], 'slug');
+
+        $this->assertContains($existing->slug, $slugs);
+        $this->assertNotContains($shell->slug, $slugs);
+        $this->assertNotContains($shell->slug, array_column($this->service()->buildForCustomer($customer->id)['catalog'], 'slug'));
+    }
+
+    public function test_a_run_page_that_failed_to_generate_is_dropped_but_a_pending_one_stays(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $summary = $this->createPage($customer, 'sammendrag', 'Sammendrag', EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
+        $failedArticle = $this->createPage($customer, 'artikkel', 'Artikkel');
+        $pendingConcept = $this->createPage($customer, 'konsept', 'Konsept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $run = $this->createAppliedRun($customer, $document, [$summary, $failedArticle, $pendingConcept]);
+        EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $failedArticle->id)
+            ->update(['generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED]);
+
+        $result = $this->service()->buildForPage($run, $summary);
+        $slugs = array_column($result['catalog'], 'slug');
+
+        // The deferred concept is still to be written and must stay linkable; the failed
+        // article is an empty shell.
+        $this->assertContains($pendingConcept->slug, $slugs);
+        $this->assertNotContains($failedArticle->slug, $slugs);
+        $this->assertSame(1, $result['run_page_count']);
     }
 
     public function test_catalog_entries_do_not_include_content_markdown(): void
@@ -113,10 +155,11 @@ class EnterpriseWikiLinkCatalogServiceTest extends TestCase
         $document = $this->createDocument($customer);
         $article = $this->createPage($customer, 'artikkel', 'Artikkel');
         $run = $this->createAppliedRun($customer, $document, [$article]);
-        $this->createPage($customer, 'business-case', 'Business Case');
+        $this->createExistingPage($customer, 'business-case', 'Business Case');
 
         $result = $this->service()->buildForPage($run, $article);
 
+        $this->assertNotEmpty($result['catalog']);
         foreach ($result['catalog'] as $entry) {
             $this->assertSame(['page_id', 'slug', 'title', 'page_type'], array_keys($entry));
         }
@@ -176,6 +219,23 @@ class EnterpriseWikiLinkCatalogServiceTest extends TestCase
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('hash', 64, '0'),
         ]);
+    }
+
+    /**
+     * An existing Wiki page outside the run: it has a current version, as every real one does.
+     */
+    private function createExistingPage(Customer $customer, string $slug, string $title): EnterpriseWikiPage
+    {
+        $page = $this->createPage($customer, $slug, $title);
+
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# '.$title,
+        ]);
+
+        return $page;
     }
 
     private function createAppliedRun(Customer $customer, EnterpriseWikiDocument $document, array $pages): EnterpriseWikiIngestRun
