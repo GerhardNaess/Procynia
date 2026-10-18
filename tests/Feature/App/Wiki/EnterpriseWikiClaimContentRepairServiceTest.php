@@ -1001,6 +1001,9 @@ class EnterpriseWikiClaimContentRepairServiceTest extends TestCase
             'generation_started_at' => now()->subMinute(),
             'generation_completed_at' => now(),
             'claims_extracted_at' => $extracted ? now() : null,
+            // The relation step is part of a finished run since arbeidspakke B: QA escalates a generated page with no link assessment.
+            'link_assessment' => ['schema' => 1, 'outcome' => 'no_relevant_links'],
+            'links_assessed_at' => now(),
         ]);
     }
 

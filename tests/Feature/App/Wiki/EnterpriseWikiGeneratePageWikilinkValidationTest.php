@@ -164,7 +164,7 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         $this->assertStringNotContainsString('[[service-improvement|Service Improvement]]', $version->content_markdown);
     }
 
-    public function test_unknown_structured_target_is_rejected_before_persistence(): void
+    public function test_unknown_structured_target_is_rejected_and_recorded_without_failing_the_page(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
@@ -180,10 +180,10 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         ]]);
 
         Queue::fake();
-        $this->assertGenerationFails($run, $generated);
+        $this->assertTargetRejectedWithoutFailing($run, $generated, 'rejected_unknown_target');
     }
 
-    public function test_structured_self_link_is_rejected_before_persistence(): void
+    public function test_structured_self_link_is_rejected_and_recorded_without_failing_the_page(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
@@ -198,10 +198,10 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         ]]);
 
         Queue::fake();
-        $this->assertGenerationFails($run, $generated);
+        $this->assertTargetRejectedWithoutFailing($run, $generated, 'rejected_self_link');
     }
 
-    public function test_cross_customer_structured_target_is_rejected_before_persistence(): void
+    public function test_cross_customer_structured_target_is_rejected_and_recorded_without_failing_the_page(): void
     {
         $customer = $this->createCustomer();
         $otherCustomer = $this->createCustomer('Other Customer');
@@ -218,7 +218,7 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         ]]);
 
         Queue::fake();
-        $this->assertGenerationFails($run, $generated);
+        $this->assertTargetRejectedWithoutFailing($run, $generated, 'rejected_cross_customer');
     }
 
     public function test_valid_intent_whose_anchor_is_absent_is_dropped_without_changing_prose(): void
@@ -538,6 +538,28 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
     private function service(): EnterpriseWikiGenerateAppliedPagesService
     {
         return app(EnterpriseWikiGenerateAppliedPagesService::class);
+    }
+
+    /**
+     * An unusable link target is rejected on its own (arbeidspakke B, §6.3): the page is written
+     * without the link, and the rejection is recorded on the pivot with its machine-readable outcome.
+     */
+    private function assertTargetRejectedWithoutFailing(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page, string $outcome): void
+    {
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $page->id))->handle($this->service());
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $page->id)->where('is_current', true)->firstOrFail();
+        $this->assertStringNotContainsString('[[', $version->content_markdown);
+
+        $pivot = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->firstOrFail();
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED, $pivot->generation_status);
+        $this->assertSame('rejected_only', $pivot->link_assessment['outcome']);
+        $this->assertSame([$outcome], array_column($pivot->link_assessment['rejected'], 'outcome'));
+        $this->assertSame([], $pivot->link_assessment['materialized']);
+        $this->assertNull($pivot->links_assessed_at, 'assessed only once the continuation materialized the rows');
     }
 
     private function assertGenerationFails(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): void

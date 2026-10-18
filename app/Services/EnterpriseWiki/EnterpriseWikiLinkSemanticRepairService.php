@@ -194,6 +194,14 @@ class EnterpriseWikiLinkSemanticRepairService
         }
 
         $catalogResult = $this->linkCatalogService->buildForPage($run, $page);
+        // Same, prioritised selection as page generation, in the minimal entry shape these two
+        // prompts were written for: excerpts and catalog tiers belong to the generation contract.
+        $catalogResult['catalog'] = array_map(static fn (array $entry): array => [
+            'page_id' => $entry['page_id'],
+            'slug' => $entry['slug'],
+            'title' => $entry['title'],
+            'page_type' => $entry['page_type'],
+        ], $catalogResult['catalog']);
 
         try {
             if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {

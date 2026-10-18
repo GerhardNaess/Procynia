@@ -24,9 +24,19 @@ use Illuminate\Support\Facades\Log;
  * guarded against.
  *
  * What is unchanged, deliberately: page identity is server-authoritative (target_page_id must be in
- * the run's catalog), the slug is always the stored canonical one, and unknown/self/cross-customer
- * targets are hard rejections that fail the page. An intent whose anchor cannot be found is DROPPED
- * with a log, never guessed at — the same treatment a valid intent with no marker already had.
+ * the run's catalog) and the slug is always the stored canonical one. An intent whose anchor cannot
+ * be found is DROPPED with a log, never guessed at.
+ *
+ * Two kinds of defect are told apart (docs/enterprise-wiki-knowledge-integration-plan.md §6.3):
+ *
+ * - An unusable TARGET — unknown, deleted, the page itself, another customer's page, an archived or
+ *   superseded page, or a page outside the catalog — rejects that one intent. It is recorded with a
+ *   machine-readable outcome in the caller's EnterpriseWikiLinkAssessmentJournal, never written, and
+ *   the rest of the response is still used. One hallucinated or since-deleted page id no longer
+ *   fails an otherwise valid page. Nothing replaces the rejected link: there is no fallback target.
+ * - A broken CONTRACT — an intent that is not an object, a missing/malformed/duplicated intent_id,
+ *   an empty anchor, the retired marker syntax — still throws: the response as a whole cannot be
+ *   trusted, and the page fails exactly as before.
  */
 class EnterpriseWikiLinkIntentMaterializer
 {
@@ -45,8 +55,13 @@ class EnterpriseWikiLinkIntentMaterializer
      * @param  list<array{page_id: int, slug: string, title: string, page_type: string}>  $catalog
      * @return list<array<string, mixed>>
      */
-    public function materializeBlocks(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $sourcePage, array $blocks, array $catalog): array
-    {
+    public function materializeBlocks(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $sourcePage,
+        array $blocks,
+        array $catalog,
+        ?EnterpriseWikiLinkAssessmentJournal $journal = null,
+    ): array {
         return $this->materialize(
             [
                 'customer_id' => (int) $run->customer_id,
@@ -56,6 +71,7 @@ class EnterpriseWikiLinkIntentMaterializer
             ],
             $blocks,
             $catalog,
+            $journal ?? new EnterpriseWikiLinkAssessmentJournal,
         );
     }
 
@@ -67,7 +83,7 @@ class EnterpriseWikiLinkIntentMaterializer
      * get its own link syntax for that reason: the model writing [[...]] itself is exactly the
      * failure class the intent contract removed. The guarantees that matter are unchanged — page
      * identity is server-authoritative, the slug is always the stored canonical one, and a target
-     * outside the catalog or outside the customer is a hard rejection. Only the self-link check
+     * outside the catalog or outside the customer is never written. Only the self-link check
      * drops out, because there is no self to link to yet.
      *
      * @param  list<array<string, mixed>>  $blocks
@@ -85,6 +101,7 @@ class EnterpriseWikiLinkIntentMaterializer
             ],
             $blocks,
             $catalog,
+            new EnterpriseWikiLinkAssessmentJournal,
         );
     }
 
@@ -94,7 +111,7 @@ class EnterpriseWikiLinkIntentMaterializer
      * @param  list<array{page_id: int, slug: string, title: string, page_type: string}>  $catalog
      * @return list<array<string, mixed>>
      */
-    private function materialize(array $context, array $blocks, array $catalog): array
+    private function materialize(array $context, array $blocks, array $catalog, EnterpriseWikiLinkAssessmentJournal $journal): array
     {
         $catalogByPageId = [];
         foreach ($catalog as $entry) {
@@ -120,7 +137,8 @@ class EnterpriseWikiLinkIntentMaterializer
                 continue;
             }
 
-            $resolvedIntents = $this->validateIntents($context, $intents, $catalogByPageId);
+            $journal->recordProposed(count($intents));
+            $resolvedIntents = $this->validateIntents($context, $intents, $catalogByPageId, $journal);
 
             // Model-authored [[...]] markup is neutralised BEFORE anchors are placed: its target is
             // discarded (only this class may choose a slug) and its visible text becomes ordinary
@@ -150,6 +168,7 @@ class EnterpriseWikiLinkIntentMaterializer
                         'canonical_target_slug' => $resolvedIntent['target_page']->slug,
                         'outcome' => 'skipped_anchor_not_found',
                     ]);
+                    $journal->recordAnchorNotFound((int) $resolvedIntent['target_page']->id, (string) $intentId);
 
                     continue;
                 }
@@ -235,14 +254,18 @@ class EnterpriseWikiLinkIntentMaterializer
     }
 
     /**
+     * Contract checks throw; a target that cannot be linked is recorded and skipped, so the other
+     * intents of the same response are still materialized.
+     *
      * @param  array{customer_id: int, run_id: ?int, source_page_id: ?int, source_page_type: ?string}  $context
      * @param  list<array<string, mixed>>  $intents
      * @param  array<int, array{page_id: int, slug: string, title: string, page_type: string}>  $catalogByPageId
      * @return array<string, array{intent: array<string, mixed>, target_page: EnterpriseWikiPage}>
      */
-    private function validateIntents(array $context, array $intents, array $catalogByPageId): array
+    private function validateIntents(array $context, array $intents, array $catalogByPageId, EnterpriseWikiLinkAssessmentJournal $journal): array
     {
         $resolved = [];
+        $seenIntentIds = [];
 
         foreach ($intents as $intent) {
             if (! is_array($intent)) {
@@ -250,35 +273,93 @@ class EnterpriseWikiLinkIntentMaterializer
             }
 
             $intentId = trim((string) ($intent['intent_id'] ?? ''));
-            if ($intentId === '' || ! preg_match('/^[A-Za-z0-9_-]+$/', $intentId) || isset($resolved[$intentId])) {
+            if ($intentId === '' || ! preg_match('/^[A-Za-z0-9_-]+$/', $intentId) || isset($seenIntentIds[$intentId])) {
                 $this->reject($context, null, null, 'rejected_invalid_intent', 'intent_id was missing, malformed, or duplicated');
             }
+            $seenIntentIds[$intentId] = true;
 
             $targetPageId = $intent['target_page_id'] ?? null;
-            if (! is_int($targetPageId)) {
-                $this->reject($context, null, null, 'rejected_unknown_target', 'target_page_id was not an integer');
-            }
+            $outcome = $this->targetRejection($context, $targetPageId, $catalogByPageId);
 
-            if ($context['source_page_id'] !== null && $targetPageId === $context['source_page_id']) {
-                $this->reject($context, $targetPageId, null, 'rejected_self_link', 'target_page_id selected the source page');
-            }
+            if ($outcome !== null) {
+                $this->recordRejectedTarget($context, $journal, is_int($targetPageId) ? $targetPageId : null, $intentId, $outcome);
 
-            $targetPage = EnterpriseWikiPage::query()->find($targetPageId);
-            if ($targetPage !== null && (int) $targetPage->customer_id !== $context['customer_id']) {
-                $this->reject($context, $targetPageId, $targetPage->slug, 'rejected_cross_customer', 'target page belongs to another customer');
-            }
-
-            if ($targetPage === null || ! array_key_exists($targetPageId, $catalogByPageId)) {
-                $this->reject($context, $targetPageId, $targetPage?->slug, 'rejected_unknown_target', 'target page is not in the allowed catalog');
+                continue;
             }
 
             $resolved[$intentId] = [
                 'intent' => $intent,
-                'target_page' => $targetPage,
+                'target_page' => EnterpriseWikiPage::query()->find($targetPageId),
             ];
         }
 
         return $resolved;
+    }
+
+    /**
+     * Why this target may not be linked, or null when it may. Re-checked here even though the
+     * catalog already applied the same rules: the model's choice is a suggestion, and the page may
+     * have changed between catalog and materialization.
+     *
+     * @param  array{customer_id: int, run_id: ?int, source_page_id: ?int, source_page_type: ?string}  $context
+     * @param  array<int, array<string, mixed>>  $catalogByPageId
+     */
+    private function targetRejection(array $context, mixed $targetPageId, array $catalogByPageId): ?string
+    {
+        if (! is_int($targetPageId)) {
+            return 'rejected_unknown_target';
+        }
+
+        if ($context['source_page_id'] !== null && $targetPageId === $context['source_page_id']) {
+            return 'rejected_self_link';
+        }
+
+        $targetPage = EnterpriseWikiPage::query()->find($targetPageId);
+
+        if ($targetPage === null) {
+            return 'rejected_unknown_target';
+        }
+
+        if ((int) $targetPage->customer_id !== $context['customer_id']) {
+            return 'rejected_cross_customer';
+        }
+
+        if (in_array($targetPage->status, EnterpriseWikiRelatedPageReferenceResolver::INACTIVE_STATUSES, true)) {
+            return 'rejected_inactive_target';
+        }
+
+        if (! array_key_exists($targetPageId, $catalogByPageId)) {
+            return 'rejected_not_in_catalog';
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array{customer_id: int, run_id: ?int, source_page_id: ?int, source_page_type: ?string}  $context
+     */
+    private function recordRejectedTarget(array $context, EnterpriseWikiLinkAssessmentJournal $journal, ?int $targetPageId, string $intentId, string $outcome): void
+    {
+        $journal->recordRejected($targetPageId, $intentId, $outcome);
+
+        Log::warning('[WIKI_LINK_MATERIALIZATION] AI link intent rejected.', [
+            'run_id' => $context['run_id'],
+            'source_page_id' => $context['source_page_id'],
+            'selected_target_page_id' => $targetPageId,
+            'intent_id' => $intentId,
+            'outcome' => $outcome,
+        ]);
+
+        // Impossible while the schema enum holds the catalog's ids — so if it ever happens, it is a
+        // security-relevant event in its own right, not just a rejected suggestion.
+        if ($outcome === 'rejected_cross_customer') {
+            Log::warning('[WIKI_LINK_MATERIALIZATION] AI link intent targeted another customer\'s page.', [
+                'run_id' => $context['run_id'],
+                'source_page_id' => $context['source_page_id'],
+                'customer_id' => $context['customer_id'],
+                'selected_target_page_id' => $targetPageId,
+            ]);
+        }
     }
 
     /**

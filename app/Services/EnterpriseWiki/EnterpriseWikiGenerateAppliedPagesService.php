@@ -85,7 +85,27 @@ class EnterpriseWikiGenerateAppliedPagesService
         private readonly EnterpriseWikiPageVersionWriter $versionWriter,
         private readonly EnterpriseWikiBestPracticeReviewReconciler $reviewReconciler,
         private readonly EnterpriseWikiPublicationSettlementService $publicationSettlement,
+        private readonly EnterpriseWikiLinkAssessmentRecorder $linkAssessmentRecorder,
     ) {}
+
+    /**
+     * The journal of the page currently being generated: every AI response for that page (first
+     * generation, section repair, figure repair) is materialized through materializeLinkIntents(),
+     * so the page's link_assessment sees all of them. Reset at the start of each page.
+     */
+    private ?EnterpriseWikiLinkAssessmentJournal $linkJournal = null;
+
+    /**
+     * @param  list<array<string, mixed>>  $blocks
+     * @param  list<array<string, mixed>>  $catalog
+     * @return list<array<string, mixed>>
+     */
+    private function materializeLinkIntents(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page, array $blocks, array $catalog): array
+    {
+        $this->linkJournal ??= new EnterpriseWikiLinkAssessmentJournal;
+
+        return $this->linkIntentMaterializer->materializeBlocks($run, $page, $blocks, $catalog, $this->linkJournal);
+    }
 
     /**
      * Appends a genuine, deterministic "table" block (never AI-authored) for each Word table
@@ -507,6 +527,7 @@ class EnterpriseWikiGenerateAppliedPagesService
                 $this->sourceElementService->inspect($document)['elements'],
             );
             $catalogResult = $this->linkCatalogService->buildForPage($run, $page);
+            $this->linkJournal = new EnterpriseWikiLinkAssessmentJournal;
             $plannedSections = $this->plannedSectionContractForGeneration($run, $page, $sourceElements);
 
             if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
@@ -524,7 +545,7 @@ class EnterpriseWikiGenerateAppliedPagesService
                 plannedSections: $plannedSections,
             );
 
-            $generated['blocks'] = $this->linkIntentMaterializer->materializeBlocks($run, $page, $generated['blocks'], $catalogResult['catalog']);
+            $generated['blocks'] = $this->materializeLinkIntents($run, $page, $generated['blocks'], $catalogResult['catalog']);
             $generated['blocks'] = array_map(function (array $block) use ($catalogResult): array {
                 $block['markdown'] = $this->wikilinkCanonicalizer->canonicalize((string) $block['markdown'], $catalogResult['catalog']);
 
@@ -564,6 +585,10 @@ class EnterpriseWikiGenerateAppliedPagesService
                 $contentBlocks,
                 (string) $page->page_type,
             ));
+            $row->update([
+                'link_assessment' => $this->linkAssessmentRecorder->forGeneratedPage($catalogResult, $this->linkJournal, $contentBlocks),
+                'links_assessed_at' => null,
+            ]);
             $counts[$page->page_type]++;
         }
 
@@ -595,6 +620,7 @@ class EnterpriseWikiGenerateAppliedPagesService
                 $this->sourceElementService->inspect($document)['elements'],
             );
             $catalogResult = $this->linkCatalogService->buildForPage($run, $page);
+            $this->linkJournal = new EnterpriseWikiLinkAssessmentJournal;
             $plannedSections = $this->plannedSectionContractForGeneration($run, $page, $sourceElements);
 
             if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
@@ -612,7 +638,7 @@ class EnterpriseWikiGenerateAppliedPagesService
                 plannedSections: $plannedSections,
             );
 
-            $generated['blocks'] = $this->linkIntentMaterializer->materializeBlocks($run, $page, $generated['blocks'], $catalogResult['catalog']);
+            $generated['blocks'] = $this->materializeLinkIntents($run, $page, $generated['blocks'], $catalogResult['catalog']);
             $generated['blocks'] = array_map(function (array $block) use ($catalogResult): array {
                 $block['markdown'] = $this->wikilinkCanonicalizer->canonicalize((string) $block['markdown'], $catalogResult['catalog']);
 
@@ -648,6 +674,10 @@ class EnterpriseWikiGenerateAppliedPagesService
                 $conceptBlocks,
                 (string) $page->page_type,
             ));
+            $row->update([
+                'link_assessment' => $this->linkAssessmentRecorder->forGeneratedPage($catalogResult, $this->linkJournal, $conceptBlocks),
+                'links_assessed_at' => null,
+            ]);
             $counts[$page->page_type]++;
         }
 
@@ -779,6 +809,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             : $this->buildArticleSummaryContextForRun($run, $page);
 
         $catalogResult = $this->linkCatalogService->buildForPage($run, $page);
+        $this->linkJournal = new EnterpriseWikiLinkAssessmentJournal;
 
         $sourceElements = $this->contentBlockService->sourceElementsForGeneration(
             $document,
@@ -801,7 +832,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             plannedSections: $plannedSections,
         );
 
-        $generated['blocks'] = $this->linkIntentMaterializer->materializeBlocks($run, $page, $generated['blocks'], $catalogResult['catalog']);
+        $generated['blocks'] = $this->materializeLinkIntents($run, $page, $generated['blocks'], $catalogResult['catalog']);
 
         // Deterministically rewrite unambiguous near-miss wikilinks (e.g. the model writing a
         // page's title instead of its differently-cased slug) to their canonical form before
@@ -867,7 +898,9 @@ class EnterpriseWikiGenerateAppliedPagesService
             (string) $page->page_type,
         );
 
-        DB::transaction(function () use ($run, $page, $token, $markdown, $contentBlocks, $bestPracticeReview): void {
+        $linkAssessment = $this->linkAssessmentRecorder->forGeneratedPage($catalogResult, $this->linkJournal, $contentBlocks);
+
+        DB::transaction(function () use ($run, $page, $token, $markdown, $contentBlocks, $bestPracticeReview, $linkAssessment): void {
             $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
 
             if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
@@ -908,6 +941,11 @@ class EnterpriseWikiGenerateAppliedPagesService
                 'generation_claim_token' => null,
                 'generation_completed_at' => now(),
                 'generation_error' => null,
+                // Replaced, never accumulated: a regenerated page (A4 retry) gets the assessment of
+                // THIS generation, and its links count as assessed only once the continuation has
+                // materialized them again (EnterpriseWikiBuildPageLinksService).
+                'link_assessment' => $linkAssessment,
+                'links_assessed_at' => null,
             ]);
         });
     }
@@ -1141,7 +1179,7 @@ class EnterpriseWikiGenerateAppliedPagesService
                 continue;
             }
 
-            $sectionBlocks = $this->linkIntentMaterializer->materializeBlocks($run, $page, $section['blocks'], $catalogResult['catalog']);
+            $sectionBlocks = $this->materializeLinkIntents($run, $page, $section['blocks'], $catalogResult['catalog']);
             $sectionBlocks = array_map(function (array $block) use ($catalogResult): array {
                 $block['markdown'] = $this->wikilinkCanonicalizer->canonicalize((string) $block['markdown'], $catalogResult['catalog']);
 
@@ -1523,7 +1561,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             sourceElements: $sourceElements,
         );
 
-        $repaired['blocks'] = $this->linkIntentMaterializer->materializeBlocks($run, $page, $repaired['blocks'], $catalogResult['catalog']);
+        $repaired['blocks'] = $this->materializeLinkIntents($run, $page, $repaired['blocks'], $catalogResult['catalog']);
         $repaired['blocks'] = array_map(function (array $block) use ($catalogResult): array {
             $block['markdown'] = $this->wikilinkCanonicalizer->canonicalize((string) $block['markdown'], $catalogResult['catalog']);
 

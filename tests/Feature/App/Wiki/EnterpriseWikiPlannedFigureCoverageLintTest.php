@@ -15,6 +15,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\MarksWikiLinkAssessmentComplete;
 use Tests\TestCase;
 
 /**
@@ -27,6 +28,7 @@ use Tests\TestCase;
  */
 class EnterpriseWikiPlannedFigureCoverageLintTest extends TestCase
 {
+    use MarksWikiLinkAssessmentComplete;
     use RefreshDatabase;
 
     public function test_lint_creates_a_blocking_finding_for_a_missing_required_figure(): void
@@ -814,6 +816,8 @@ class EnterpriseWikiPlannedFigureCoverageLintTest extends TestCase
 
     private function markStepsComplete(EnterpriseWikiIngestRun $run): void
     {
+        $this->markLinkAssessmentComplete($run);
+
         EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_ingest_run_id', $run->id)
             ->update([

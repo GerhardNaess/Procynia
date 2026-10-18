@@ -12,11 +12,10 @@ use RuntimeException;
  * catalog, and a task-specific instruction, decides whether the content's inline
  * [[wikilinks]] should change — and if so, produces the revised markdown.
  *
- * Shared by two callers with different instructions but an identical contract:
- * - EnterpriseWikiIncrementalRelinkService (8I-5): "a new/updated concept or entity page now
- *   exists — link to it here if this content naturally refers to it."
- * - EnterpriseWikiLinkSemanticRepairService (8I-6): "these specific link defects were found —
- *   fix only these."
+ * Used by EnterpriseWikiLinkSemanticRepairService (8I-6): "these specific link defects were
+ * found — fix only these." Inbound relinking no longer uses this whole-markdown contract: since
+ * relink v2 (D8) it goes through WikiInboundLinkProposalAiClient, which returns a placement only.
+ * Moving link semantic repair to the same placement contract is noted as follow-up work.
  *
  * The model must decide `changed` itself — this client never assumes a change was made.
  * The caller is responsible for validating any returned markdown's wikilinks against the

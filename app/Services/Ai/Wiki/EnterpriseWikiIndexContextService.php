@@ -24,6 +24,7 @@ class EnterpriseWikiIndexContextService
      *   page_type: string,
      *   status: string,
      *   excerpt: string|null,
+     *   has_content: bool,
      *   open_lint_count: int,
      *   updated_at: string|null,
      * }>
@@ -47,13 +48,21 @@ class EnterpriseWikiIndexContextService
             'slug'           => $page->slug,
             'page_type'      => $page->page_type,
             'status'         => $page->status,
-            'excerpt'        => $this->extractExcerpt($page->currentVersion?->content_markdown),
+            'excerpt'        => self::excerpt($page->currentVersion?->content_markdown),
+            // A page without a current version is an incomplete shell (a failed generation in a
+            // partially completed run), not existing knowledge the planner may build on or point
+            // related_page_guidance.page_id at.
+            'has_content'    => trim((string) ($page->currentVersion?->content_markdown ?? '')) !== '',
             'open_lint_count' => (int) ($page->open_lint_count ?? 0),
             'updated_at'     => $page->updated_at?->toIso8601String(),
         ])->all();
     }
 
-    private function extractExcerpt(?string $markdown): ?string
+    /**
+     * A short plain-text excerpt of page markdown. Shared with EnterpriseWikiLinkCatalogService so
+     * the planner's index and the generator's link catalog describe a page the same way.
+     */
+    public static function excerpt(?string $markdown, int $maxLength = self::EXCERPT_MAX_LENGTH): ?string
     {
         if ($markdown === null || trim($markdown) === '') {
             return null;
@@ -67,6 +76,10 @@ class EnterpriseWikiIndexContextService
         $text = preg_replace('/_([^_]+)_/', '$1', $text);
         $text = preg_replace('/`{1,3}[^`]*`{1,3}/', '', $text);
         $text = preg_replace('/\[([^\]]+)\]\([^)]+\)/', '$1', $text);
+        // Wikilinks become their visible text: an excerpt is a description of the page, and raw
+        // [[slug|text]] syntax in it would invite a model to copy link markup it must never write.
+        $text = preg_replace('/\[\[[^\]|]+\|([^\]]+)\]\]/u', '$1', $text);
+        $text = preg_replace('/\[\[([^\]]+)\]\]/u', '$1', $text);
         $text = preg_replace('/^\s*[-*+>]\s+/m', '', $text);
         $text = preg_replace('/\s+/', ' ', $text);
         $text = trim((string) $text);
@@ -75,10 +88,10 @@ class EnterpriseWikiIndexContextService
             return null;
         }
 
-        if (mb_strlen($text) <= self::EXCERPT_MAX_LENGTH) {
+        if (mb_strlen($text) <= $maxLength) {
             return $text;
         }
 
-        return mb_substr($text, 0, self::EXCERPT_MAX_LENGTH) . '…';
+        return mb_substr($text, 0, $maxLength) . '…';
     }
 }

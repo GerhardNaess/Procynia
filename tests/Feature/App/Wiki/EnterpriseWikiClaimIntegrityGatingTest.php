@@ -24,6 +24,7 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Concerns\GrantsWikiPermissions;
+use Tests\Concerns\MarksWikiLinkAssessmentComplete;
 use Tests\TestCase;
 
 /**
@@ -41,6 +42,7 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
 {
     use DatabaseTransactions;
     use GrantsWikiPermissions;
+    use MarksWikiLinkAssessmentComplete;
 
     protected function setUp(): void
     {
@@ -613,6 +615,8 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
 
     private function markStepsComplete(EnterpriseWikiIngestRun $run): void
     {
+        $this->markLinkAssessmentComplete($run);
+
         EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_ingest_run_id', $run->id)
             ->update([

@@ -165,12 +165,17 @@ class WikiPageContentAiClient
         ], 'enterprise_wiki_ai_request_input');
         $languageName = $this->languageName($languageCode);
         $generationPromptText = $this->userPrompt($pageTitle, $sourceText, $additionalContext, $linkCatalog, $sourceElements, $plannedSections);
+        // Two sizes on purpose. The OUTPUT budget is sized off the prompt without the link catalog:
+        // the catalog is bounded reference material (EnterpriseWikiLinkCatalogService) that never
+        // justifies the model writing more. The TIMEOUT (and the logged input size) use the full
+        // prompt, catalog included, because the model still has to read it.
         $inputSizeChars = mb_strlen($generationPromptText);
+        $contentSizeChars = mb_strlen($this->userPrompt($pageTitle, $sourceText, $additionalContext, [], $sourceElements, $plannedSections));
 
         $decoded = $this->capacityRetryExecutor->execute(
             'WikiPageContentAiClient',
             $inputSizeChars,
-            fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity($pageType, $inputSizeChars, $retryAttempt),
+            fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity($pageType, $contentSizeChars, $retryAttempt),
             fn (int $maxOutputTokens): array => $this->buildPayload($pageType, $languageName, $generationPromptText, $plannedSections, $linkCatalog, $maxOutputTokens),
             fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolve(new AiTimeoutRequest(
                 operationType: self::CAPACITY_OPERATION_TYPE,
@@ -261,7 +266,9 @@ class WikiPageContentAiClient
             ? $this->requestedPlannedTopics($issues)
             : $this->plannedTopicsFromContract($plannedSections);
         $repairPromptText = $this->repairUserPrompt($pageTitle, $existingMarkdown, $issues, $requestedPlannedTopics, $sourceText, $additionalContext, $linkCatalog, $sourceElements, $plannedSections, $sectionStatuses);
+        // Output budget without the link catalog, timeout with it — see generatePageFromSource().
         $inputSizeChars = mb_strlen($repairPromptText);
+        $contentSizeChars = mb_strlen($this->repairUserPrompt($pageTitle, $existingMarkdown, $issues, $requestedPlannedTopics, $sourceText, $additionalContext, [], $sourceElements, $plannedSections, $sectionStatuses));
         // Wiki run-6: each missing/empty/link-only planned section is sized as one "candidate" —
         // repairing 2 sections at once (run 6's article page) must get a materially larger budget
         // than repairing 1, instead of sharing the exact same flat ceiling.
@@ -270,7 +277,7 @@ class WikiPageContentAiClient
         $decoded = $this->capacityRetryExecutor->execute(
             'WikiPageContentAiClient(repair)',
             $inputSizeChars,
-            fn (int $retryAttempt): AiCapacityPlan => $this->planSectionRepairCapacity($inputSizeChars, $sectionsToRepair, $retryAttempt),
+            fn (int $retryAttempt): AiCapacityPlan => $this->planSectionRepairCapacity($contentSizeChars, $sectionsToRepair, $retryAttempt),
             fn (int $maxOutputTokens): array => $this->buildRepairPayload($pageType, $languageName, $repairPromptText, $requestedPlannedTopics, $linkCatalog, $maxOutputTokens),
             fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolveForBatch(new AiTimeoutRequest(
                 operationType: self::CAPACITY_OPERATION_TYPE,
@@ -348,12 +355,14 @@ class WikiPageContentAiClient
         // main page-content capacity profile — sized here off the actual built prompt (which
         // echoes the whole existing page back), not just the raw source text.
         $figureRepairPromptText = $this->figureRepairUserPrompt($pageTitle, $existingMarkdown, $issues, $sourceText, $additionalContext, $linkCatalog, $sourceElements);
+        // Output budget without the link catalog, timeout with it — see generatePageFromSource().
         $inputSizeChars = mb_strlen($figureRepairPromptText);
+        $contentSizeChars = mb_strlen($this->figureRepairUserPrompt($pageTitle, $existingMarkdown, $issues, $sourceText, $additionalContext, [], $sourceElements));
 
         $decoded = $this->capacityRetryExecutor->execute(
             'WikiPageContentAiClient(figure_repair)',
             $inputSizeChars,
-            fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity($pageType, $inputSizeChars, $retryAttempt),
+            fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity($pageType, $contentSizeChars, $retryAttempt),
             fn (int $maxOutputTokens): array => $this->buildFigureRepairPayload($pageType, $languageName, $figureRepairPromptText, $linkCatalog, $maxOutputTokens),
             fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolve(new AiTimeoutRequest(
                 operationType: self::CAPACITY_OPERATION_TYPE,
@@ -848,7 +857,7 @@ class WikiPageContentAiClient
         if ($linkCatalog !== []) {
             $parts[] = 'Choose target_page_id only from this catalog when a visible link is useful. Give the intent an intent_id and an anchor_text copied verbatim from your own markdown for this block; write no link syntax yourself.';
             $parts[] = '';
-            $parts[] = (string) json_encode($linkCatalog, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $parts[] = (string) json_encode(self::promptCatalog($linkCatalog), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         } else {
             $parts[] = 'No other pages available to link to.';
         }
@@ -1161,7 +1170,7 @@ class WikiPageContentAiClient
         if ($linkCatalog !== []) {
             $parts[] = 'Choose target_page_id only from this catalog when a visible link is useful. Give the intent an intent_id and an anchor_text copied verbatim from your own markdown for this block; write no link syntax yourself.';
             $parts[] = '';
-            $parts[] = (string) json_encode($linkCatalog, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $parts[] = (string) json_encode(self::promptCatalog($linkCatalog), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         } else {
             $parts[] = 'No other pages available to link to.';
         }
@@ -1482,9 +1491,9 @@ class WikiPageContentAiClient
         if ($linkCatalog !== []) {
             $parts[] = 'Choose target_page_id only from this catalog when a visible link is useful. Keep its natural anchor in markdown and return it in link_intents; do not write [[...]] markup or a slug.';
             $parts[] = '';
-            $parts[] = 'Full catalog (page_id, title, canonical slug, page_type):';
+            $parts[] = 'Full catalog (page_id, title, canonical slug, page_type, and a short excerpt of the page\'s current content when it has one). Link only where this page\'s own content genuinely relates to the target page as the excerpt describes it — a shared word in a title is not a reason to link:';
             $parts[] = '';
-            $parts[] = (string) json_encode($linkCatalog, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $parts[] = (string) json_encode(self::promptCatalog($linkCatalog), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         } else {
             $parts[] = 'No other pages available to link to.';
         }
@@ -1502,6 +1511,32 @@ class WikiPageContentAiClient
             : 'The authoritative per-section evidence above is the complete source context for this planned generation. Cite only source_element_keys assigned to the matching section.';
 
         return implode("\n", $parts);
+    }
+
+    /**
+     * The catalog exactly as the model sees it. Internal bookkeeping (the catalog tier a page was
+     * selected through) stays out of the prompt; an entry built without an excerpt — a page of this
+     * run not generated yet, or a caller passing the minimal shape — simply carries none.
+     *
+     * @param  list<array<string, mixed>>  $linkCatalog
+     * @return list<array<string, mixed>>
+     */
+    private static function promptCatalog(array $linkCatalog): array
+    {
+        return array_values(array_map(static function (array $entry): array {
+            $promptEntry = [
+                'page_id' => $entry['page_id'] ?? null,
+                'title' => $entry['title'] ?? null,
+                'slug' => $entry['slug'] ?? null,
+                'page_type' => $entry['page_type'] ?? null,
+            ];
+
+            if (is_string($entry['excerpt'] ?? null) && $entry['excerpt'] !== '') {
+                $promptEntry['excerpt'] = $entry['excerpt'];
+            }
+
+            return $promptEntry;
+        }, $linkCatalog));
     }
 
     /**

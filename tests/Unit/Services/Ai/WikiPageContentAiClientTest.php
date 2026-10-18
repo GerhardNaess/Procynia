@@ -366,6 +366,62 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertStringContainsString('Generate exactly one substantial ## section', $developerPrompt);
     }
 
+    public function test_a_full_prioritised_catalog_with_excerpts_reaches_the_model_without_changing_its_budget(): void
+    {
+        $catalog = [];
+        for ($i = 1; $i <= 60; $i++) {
+            $catalog[] = [
+                'page_id' => 1000 + $i,
+                'slug' => "side-{$i}",
+                'title' => "Side {$i}",
+                'page_type' => 'article',
+                'excerpt' => str_repeat("Utdrag {$i} ", 16),
+                'tier' => $i === 1 ? 'planned' : 'recent',
+            ];
+        }
+
+        $payloadWithoutCatalog = $this->capturePayload();
+        $payloadWithCatalog = $this->capturePayload(linkCatalog: $catalog);
+        $userPrompt = $this->userPromptTextFromPayload($payloadWithCatalog);
+
+        $this->assertSame($payloadWithoutCatalog['max_output_tokens'], $payloadWithCatalog['max_output_tokens'], 'the catalog never sizes the output budget');
+        $this->assertStringContainsString('Utdrag 1 Utdrag 1', $userPrompt, 'each entry carries its excerpt');
+        $this->assertStringNotContainsString('"tier"', $userPrompt, 'internal catalog bookkeeping stays out of the prompt');
+        $this->assertSame(
+            array_column($catalog, 'page_id'),
+            data_get($payloadWithCatalog, 'text.format.schema.properties.page.properties.blocks.items.properties.link_intents.items.properties.target_page_id.enum'),
+        );
+    }
+
+    public function test_the_link_catalog_is_read_time_for_the_timeout_but_never_output_budget(): void
+    {
+        $catalog = [];
+        for ($i = 1; $i <= 60; $i++) {
+            $catalog[] = ['page_id' => 2000 + $i, 'slug' => "side-{$i}", 'title' => "Side {$i}", 'page_type' => 'article', 'excerpt' => str_repeat('x', 160)];
+        }
+
+        $timeouts = [];
+        $outputBudgets = [];
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')->twice()->andReturnUsing(function (array $payload, int $timeoutSeconds = 120) use (&$timeouts, &$outputBudgets): array {
+            $timeouts[] = $timeoutSeconds;
+            $outputBudgets[] = $payload['max_output_tokens'];
+
+            return [
+                'status' => 'completed',
+                'output_text' => json_encode(['page' => ['blocks' => [$this->sourceBasedBlock("# Test Page\n\nGenerert innhold.")]]], JSON_UNESCAPED_UNICODE),
+            ];
+        });
+
+        $client = app(WikiPageContentAiClient::class);
+        $client->generatePageFromSource(pageTitle: 'Test Page', pageType: 'article', sourceText: 'Noe kildetekst.', languageCode: 'no');
+        $client->generatePageFromSource(pageTitle: 'Test Page', pageType: 'article', sourceText: 'Noe kildetekst.', languageCode: 'no', linkCatalog: $catalog);
+
+        $this->assertSame($outputBudgets[0], $outputBudgets[1], 'the catalog never raises the output budget');
+        $this->assertGreaterThan($timeouts[0], $timeouts[1], 'the model still has to read the catalog, so it counts toward the timeout');
+    }
+
     public function test_adding_a_link_catalog_does_not_change_the_model_token_reasoning_or_store_contract(): void
     {
         $catalog = [['page_id' => 101, 'slug' => 'business-case', 'title' => 'Business Case', 'page_type' => 'concept']];

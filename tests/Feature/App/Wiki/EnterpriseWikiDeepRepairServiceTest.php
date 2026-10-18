@@ -576,6 +576,9 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
             // already complete, which post-ingest QA's deterministic step-completeness check
             // now verifies explicitly.
             'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+            // The relation step is part of a finished run since arbeidspakke B: QA escalates a generated page with no link assessment.
+            'link_assessment' => ['schema' => 1, 'outcome' => 'no_relevant_links'],
+            'links_assessed_at' => now(),
         ]);
 
         // Gives any claim the default extractClaims mock produces (excerpt "Excerpt A") a

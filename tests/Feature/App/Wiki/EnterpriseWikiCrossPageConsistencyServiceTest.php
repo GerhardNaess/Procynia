@@ -763,6 +763,9 @@ class EnterpriseWikiCrossPageConsistencyServiceTest extends TestCase
                     'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
                     'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
                     'claims_extracted_at' => now(),
+                    // The relation step is part of a finished run since arbeidspakke B: QA escalates a generated page with no link assessment.
+                    'link_assessment' => ['schema' => 1, 'outcome' => 'no_relevant_links'],
+                    'links_assessed_at' => now(),
                 ]);
             }
 

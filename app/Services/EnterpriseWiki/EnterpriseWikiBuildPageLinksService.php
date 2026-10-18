@@ -261,12 +261,11 @@ class EnterpriseWikiBuildPageLinksService
             ];
         }
 
-        $pages = EnterpriseWikiIngestRunPage::query()
+        $pivots = EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_ingest_run_id', $run->id)
             ->with('page')
             ->get()
-            ->pluck('page')
-            ->filter();
+            ->filter(fn (EnterpriseWikiIngestRunPage $pivot): bool => $pivot->page !== null);
 
         $aggregate = [
             'pages_processed' => 0,
@@ -279,12 +278,14 @@ class EnterpriseWikiBuildPageLinksService
             'stale_links_removed' => 0,
         ];
 
-        foreach ($pages as $page) {
+        foreach ($pivots as $pivot) {
             if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
                 break;
             }
 
+            $page = $pivot->page;
             $result = $this->materializeWikilinksForPage($page, $run->id);
+            $this->markLinksAssessed($pivot);
 
             $aggregate['pages_processed']++;
             $aggregate['occurrences_found'] += $result['occurrences_found'];
@@ -416,6 +417,44 @@ class EnterpriseWikiBuildPageLinksService
         $this->dispatchGraphProjectionAfterCommit($page->id);
 
         return $result;
+    }
+
+    /**
+     * The links_assessed_at checkpoint (docs/enterprise-wiki-knowledge-integration-plan.md §6.3):
+     * set only for a page whose generation completed, whose current version exists, and whose rows
+     * were just made to match that version. A page whose generation failed, is still pending, or was
+     * skipped because the run turned terminal is never marked — its links were not processed.
+     *
+     * Idempotent: a repeat materialization (a retried continuation) refreshes the timestamp but
+     * never touches link_assessment, so nothing is counted twice.
+     */
+    private function markLinksAssessed(EnterpriseWikiIngestRunPage $pivot): void
+    {
+        if ($pivot->generation_status !== EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED) {
+            return;
+        }
+
+        $hasCurrentVersion = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $pivot->enterprise_wiki_page_id)
+            ->where('is_current', true)
+            ->exists();
+
+        if (! $hasCurrentVersion) {
+            return;
+        }
+
+        DB::transaction(function () use ($pivot): void {
+            $run = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($pivot->enterprise_wiki_ingest_run_id);
+
+            if (! $run instanceof EnterpriseWikiIngestRun || $run->isTerminal()) {
+                return;
+            }
+
+            EnterpriseWikiIngestRunPage::query()
+                ->whereKey($pivot->id)
+                ->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED)
+                ->update(['links_assessed_at' => now()]);
+        });
     }
 
     private function dispatchGraphProjectionAfterCommit(int $pageId): void

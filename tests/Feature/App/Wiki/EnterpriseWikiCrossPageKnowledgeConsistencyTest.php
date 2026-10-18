@@ -497,14 +497,15 @@ class EnterpriseWikiCrossPageKnowledgeConsistencyTest extends TestCase
     {
         $customer = $this->createCustomer();
 
-        // PAGE A — canonical operational owner of the concrete value.
+        // PAGE A — canonical operational owner of the concrete value. Its version is written once
+        // E exists, because A's text links to E (see below).
         $ownerA = $this->createPage($customer, 'Nimbus Capacity Procedure', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
-        $this->createVersion($ownerA, [
+        $ownerAVersionParts = [
             '# Nimbus Capacity Procedure',
             'This procedure governs how capacity is provisioned and approved for the platform.',
             '## Capacity limits',
             self::OWNED_SENTENCE_A.' Requests beyond the supported limit require an approved exception.',
-        ]);
+        ];
 
         // PAGE B — concept/reference page. Explains the topic, owns no concrete value.
         $conceptB = $this->createPage($customer, 'Capacity Management', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
@@ -554,6 +555,12 @@ class EnterpriseWikiCrossPageKnowledgeConsistencyTest extends TestCase
             '# Backup Retention Policy',
             'Backups are retained according to the agreed schedule.',
         ]);
+
+        // Rows are a projection of text (arbeidspakke B checks that they agree), so A's own text
+        // carries the link its A -> E row stands for.
+        $ownerAVersionParts[1] = 'This procedure governs how capacity is provisioned and approved for the '
+            ."[[{$ownerE->slug}|Nimbus Platform]].";
+        $this->createVersion($ownerA, $ownerAVersionParts);
 
         $this->link($customer, $conceptB, $ownerA);
         $this->link($customer, $ownerA, $ownerE);
@@ -912,6 +919,9 @@ class EnterpriseWikiCrossPageKnowledgeConsistencyTest extends TestCase
                 'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
                 'claims_extracted_at' => now(),
                 'claims_claimed_at' => null,
+                // The relation step is part of a finished run since arbeidspakke B: QA escalates a generated page with no link assessment.
+                'link_assessment' => json_encode(['schema' => 1, 'outcome' => 'no_relevant_links']),
+                'links_assessed_at' => now(),
             ]);
     }
 
