@@ -384,9 +384,88 @@ class EnterpriseWikiWikilinkMaterializationTest extends TestCase
         $this->assertSame($run->id, $link->enterprise_wiki_ingest_run_id);
     }
 
+    /**
+     * Run 962 regression (plan §18, P1-1): an inbound relink gave three existing pages a new
+     * version, and re-materialization re-stamped their September links with run 962. Existing
+     * relations keep the run that created them; only the relation the new version adds gets the
+     * new run. Version pointers still follow the current versions.
+     */
+    public function test_rematerialization_keeps_first_seen_run_and_attributes_only_new_relations(): void
+    {
+        $customer = $this->createCustomer();
+        $source = $this->createPageWithVersion($customer, 'irt', 'Se [[business-case]].');
+        $existingTarget = $this->createPageWithVersion($customer, 'business-case', '# Business case');
+        $newTarget = $this->createPageWithVersion($customer, 'post-incident-review', '# PIR');
+
+        $historicRun = $this->createRun($customer);
+        $this->service()->materializeWikilinksForPage($source, $historicRun->id);
+
+        $historic = EnterpriseWikiPageLink::query()->where('to_page_id', $existingTarget->id)->firstOrFail();
+        $this->travel(5)->minutes();
+
+        // A later run inserts one inbound link: new current version of the source page.
+        EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $source->id)->update(['is_current' => false]);
+        $newVersion = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $source->id,
+            'version_number' => 2,
+            'is_current' => true,
+            'content_markdown' => 'Se [[business-case]] og [[post-incident-review|gjennomgangen]].',
+            'generated_by_model' => 'gpt-4.1-mini/inbound-relink',
+        ]);
+
+        $laterRun = $this->createRun($customer);
+        $result = $this->service()->materializeWikilinksForPage($source, $laterRun->id);
+        // Retry of the same step is idempotent.
+        $retry = $this->service()->materializeWikilinksForPage($source, $laterRun->id);
+        // A caller without a run (claim controller, repair services) never wipes provenance.
+        $this->service()->materializeWikilinksForPage($source);
+
+        $this->assertSame(1, $result['created']);
+        $this->assertSame(1, $result['updated']);
+        $this->assertSame(0, $retry['created']);
+
+        $historicAfter = EnterpriseWikiPageLink::query()->where('to_page_id', $existingTarget->id)->firstOrFail();
+        $this->assertSame($historic->id, $historicAfter->id);
+        $this->assertSame($historicRun->id, $historicAfter->enterprise_wiki_ingest_run_id);
+        $this->assertTrue($historic->created_at->equalTo($historicAfter->created_at));
+        $this->assertSame($newVersion->id, $historicAfter->from_page_version_id);
+
+        $added = EnterpriseWikiPageLink::query()->where('to_page_id', $newTarget->id)->firstOrFail();
+        $this->assertSame($laterRun->id, $added->enterprise_wiki_ingest_run_id);
+        $this->assertSame('gjennomgangen', $added->metadata['anchor_text']);
+
+        $this->assertSame(2, EnterpriseWikiPageLink::query()->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)->count());
+        $this->assertSame(
+            [$newTarget->id],
+            EnterpriseWikiPageLink::query()->where('enterprise_wiki_ingest_run_id', $laterRun->id)->pluck('to_page_id')->all(),
+        );
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================
+
+    private function createRun(Customer $customer): EnterpriseWikiIngestRun
+    {
+        $document = \App\Models\EnterpriseWikiDocument::query()->create([
+            'customer_id' => $customer->id,
+            'original_filename' => 'source.docx',
+            'file_path' => 'customers/'.$customer->id.'/wiki/'.Str::random(8).'.docx',
+            'file_hash_sha256' => hash('sha256', Str::random(32)),
+            'extracted_text' => 'irrelevant',
+            'document_status' => \App\Models\EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+        ]);
+
+        return EnterpriseWikiIngestRun::query()->create([
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+        ]);
+    }
 
     private function service(): EnterpriseWikiBuildPageLinksService
     {

@@ -1,0 +1,404 @@
+[
+  {
+    "claim_id": 427,
+    "page_id": 2540,
+    "block_key": "block-0002",
+    "run962_content_origin": "source_based",
+    "run962_deterministic_reason": null,
+    "claim_text": "En etterhendelsesgjennomgang er den strukturerte aktiviteten som omsetter læring fra en håndtert sikkerhetshendelse til varig forbedring. Den utfyller hendelsesrapporten ved å gå utover beskrivelsen av forløpet og rette oppmerksomheten mot forklaring og forbedring.",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-1",
+        "source_element_type": "paragraph",
+        "source_excerpt": "En etterhendelsesgjennomgang (Post Incident Review, ofte kalt «hot washup» når den gjennomføres kort tid etter stabilisering) er den strukturerte aktiviteten som gjør en håndtert sikkerhetshendelse om til varig forbedring. Hendelsesrapporten beskriver hva som skjedde. Gjennomgangen skal i tillegg forklare hvorfor det skjedde, hvorfor det ble oppdaget når det ble oppdaget, og hva som må endres for at det ikke skal skje igjen."
+      }
+    ]
+  },
+  {
+    "claim_id": 428,
+    "page_id": 2540,
+    "block_key": "block-0004",
+    "run962_content_origin": "unsupported_generated_content",
+    "run962_deterministic_reason": "negation_mismatch",
+    "claim_text": "En etterhendelsesgjennomgang (ofte kalt «hot washup» når den skjer kort tid etter stabilisering) gjør en håndtert hendelse om til konkret forbedring ved å forklare hvorfor hendelsen skjedde, hvorfor den ble oppdaget når den ble oppdaget, og hva som må endres for å hindre gjentakelse. Hendelsesrapporten beskriver hva som skjedde; gjennomgangen etablerer årsak, deteksjonstidspunktets forklaring og nødvendige endringer.",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-1",
+        "source_element_type": "paragraph",
+        "source_excerpt": "En etterhendelsesgjennomgang (Post Incident Review, ofte kalt «hot washup» når den gjennomføres kort tid etter stabilisering) er den strukturerte aktiviteten som gjør en håndtert sikkerhetshendelse om til varig forbedring. Hendelsesrapporten beskriver hva som skjedde. Gjennomgangen skal i tillegg forklare hvorfor det skjedde, hvorfor det ble oppdaget når det ble oppdaget, og hva som må endres for at det ikke skal skje igjen."
+      }
+    ]
+  },
+  {
+    "claim_id": 429,
+    "page_id": 2540,
+    "block_key": "block-0006",
+    "run962_content_origin": "source_based",
+    "run962_deterministic_reason": null,
+    "claim_text": "Ikke alle hendelser krever en full gjennomgang; det anbefales å bruke uttrykkelige kriterier som utløsende for en slik prosess. Hendelser som ikke oppfyller kriteriene, behandles med en forenklet gjennomgang: en kort vurdering i saken av om hendelsen avdekket et forbedringsbehov, og denne vurderingen skal dokumenteres slik at mønstre på tvers av mange mindre hendelser kan fanges opp over tid.",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-3",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Ikke alle hendelser krever en full gjennomgang. Følgende kriterier anbefales som utløsende:"
+      },
+      {
+        "source_element_key": "paragraph-4",
+        "source_element_type": "paragraph",
+        "source_excerpt": "For hendelser som ikke oppfyller kriteriene, er en forenklet gjennomgang tilstrekkelig: en kort vurdering i saken av om hendelsen avdekket et forbedringsbehov. Den forenklede vurderingen skal likevel dokumenteres, slik at mønstre på tvers av mange mindre hendelser kan fanges opp over tid."
+      }
+    ]
+  },
+  {
+    "claim_id": 430,
+    "page_id": 2540,
+    "block_key": "block-0008",
+    "run962_content_origin": "source_based",
+    "run962_deterministic_reason": null,
+    "claim_text": "Gjennomgangen bygger på en etterprøvbar tidslinje satt sammen fra tre kilder, og ikke på deltakernes hukommelse. Selve gjennomføringen skjer etter et skyldfritt prinsipp der fokus er på hvilke forhold som gjorde en feil mulig eller sannsynlig, ikke på hvem som gjorde feilen, slik at deltakerne kan dele den informasjonen som forklarer forløpet.",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-7",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Gjennomgangen bygger på en etterprøvbar tidslinje, ikke på hukommelse. Tidslinjen settes sammen av tre kilder:"
+      },
+      {
+        "source_element_key": "paragraph-10",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Gjennomgangen gjennomføres etter et skyldfritt prinsipp. Spørsmålet er hvilke forhold som gjorde en feil mulig eller sannsynlig, ikke hvem som gjorde feilen. Erfaring viser at deltakere ellers holder tilbake nettopp den informasjonen som forklarer forløpet."
+      }
+    ]
+  },
+  {
+    "claim_id": 431,
+    "page_id": 2540,
+    "block_key": "block-0010",
+    "run962_content_origin": "source_based",
+    "run962_deterministic_reason": null,
+    "claim_text": "Hvert forbedringstiltak fra gjennomgangen klassifiseres som én av tre typer. Et tiltak lukkes først når effekten er påvist i henhold til definert akseptkriterium: for nye deteksjoner skal regelen være testet mot en kontrollert simulering av teknikken og gi alarm, for [[sarbarhetsstyring|sårbarheter]] skal en ny skanning bekrefte at den er lukket, og for prosessendringer skal endringen være tatt i bruk og ha fungert i minst én reell eller øvd situasjon.",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-15",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Hvert tiltak klassifiseres som én av tre typer:"
+      },
+      {
+        "source_element_key": "paragraph-17",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Et tiltak lukkes ikke når det er gjennomført, men når effekten er påvist i henhold til akseptkriteriet. For en ny deteksjon betyr det at regelen er testet mot en kontrollert simulering av teknikken og har gitt alarm. For en sårbarhet betyr det at ny skanning bekrefter at den er lukket. For en prosessendring betyr det at endringen er tatt i bruk og har fungert i minst én reell eller øvd situasjon."
+      }
+    ]
+  },
+  {
+    "claim_id": 432,
+    "page_id": 2538,
+    "block_key": "block-0004",
+    "run962_content_origin": "source_based",
+    "run962_deterministic_reason": null,
+    "claim_text": "En etterhendelsesgjennomgang, også omtalt som «hot washup» når den skjer kort tid etter stabilisering, er den strukturerte aktiviteten som gjør en håndtert sikkerhetshendelse om til varig forbedring. Hendelsesrapporten beskriver hva som skjedde, mens gjennomgangen skal forklare hvorfor det skjedde, hvorfor det ble oppdaget når det ble oppdaget, og hva som må endres for at det ikke skal skje igjen. Perioden som omfattes er fra hendelsen er stabilisert til forbedringstiltakene er verifisert; selve håndteringen omtales kun der den gir grunnlag for læring, og frister for rapport og gjennomgang følger av den enkelte avtalen og fastsettes ikke her.",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-1",
+        "source_element_type": "paragraph",
+        "source_excerpt": "En etterhendelsesgjennomgang (Post Incident Review, ofte kalt «hot washup» når den gjennomføres kort tid etter stabilisering) er den strukturerte aktiviteten som gjør en håndtert sikkerhetshendelse om til varig forbedring. Hendelsesrapporten beskriver hva som skjedde. Gjennomgangen skal i tillegg forklare hvorfor det skjedde, hvorfor det ble oppdaget når det ble oppdaget, og hva som må endres for at det ikke skal skje igjen."
+      },
+      {
+        "source_element_key": "paragraph-2",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Notatet dekker perioden fra hendelsen er stabilisert til forbedringstiltakene er verifisert. Selve håndteringen av hendelsen – skadebegrensning, fjerning av trusselaktør og gjenoppretting – omtales bare der den gir grunnlag for læring. Frister for hendelsesrapport og gjennomgang følger av den enkelte avtalen og fastsettes ikke her."
+      }
+    ]
+  },
+  {
+    "claim_id": 433,
+    "page_id": 2538,
+    "block_key": "block-0007",
+    "run962_content_origin": "source_based",
+    "run962_deterministic_reason": null,
+    "claim_text": "Ikke alle hendelser krever en full gjennomgang. Full gjennomgang utløses når [[incident-response-team-irt|hendelseslaget for alvorlige hendelser]] er aktivert, eller når hendelsen er klassifisert i et av de to høyeste alvorlighetsnivåene selv om den ble løst uten eskalering. For øvrige hendelser er en forenklet gjennomgang tilstrekkelig i form av en kort vurdering i saken av om hendelsen avdekket et forbedringsbehov, og denne vurderingen skal dokumenteres slik at mønstre på tvers av mange mindre hendelser kan fanges opp over tid.",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-3",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Ikke alle hendelser krever en full gjennomgang. Følgende kriterier anbefales som utløsende:"
+      },
+      {
+        "source_element_key": "listitem-0",
+        "source_element_type": "list_item",
+        "source_excerpt": "Hendelsen førte til aktivering av hendelsesteamet for alvorlige hendelser."
+      },
+      {
+        "source_element_key": "listitem-1",
+        "source_element_type": "list_item",
+        "source_excerpt": "Hendelsen ble klassifisert til et av de to høyeste alvorlighetsnivåene, selv om den ble løst uten eskalering."
+      },
+      {
+        "source_element_key": "paragraph-4",
+        "source_element_type": "paragraph",
+        "source_excerpt": "For hendelser som ikke oppfyller kriteriene, er en forenklet gjennomgang tilstrekkelig: en kort vurdering i saken av om hendelsen avdekket et forbedringsbehov. Den forenklede vurderingen skal likevel dokumenteres, slik at mønstre på tvers av mange mindre hendelser kan fanges opp over tid."
+      }
+    ]
+  },
+  {
+    "claim_id": 434,
+    "page_id": 2538,
+    "block_key": "block-0008",
+    "run962_content_origin": "source_based",
+    "run962_deterministic_reason": null,
+    "claim_text": "Gjennomgangen skal bygge på en etterprøvbar tidslinje satt sammen av tre kilder, ikke på hukommelse. Det viktigste analytiske grepet er å sammenligne tidspunktet for første tekniske spor med tidspunktet for første alarm og tidspunktet for [[mtta-mean-time-to-acknowledge|første bekreftede oppfølging]]. Avstanden mellom de to første viser et [[deteksjonsgap-og-responsgap|deteksjonsgap]], mens avstanden mellom de to siste viser et [[deteksjonsgap-og-responsgap|responsgap]]; de to gapene har ulike årsaker og krever ulike tiltak, og bør derfor ikke slås sammen til ett tall.",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-7",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Gjennomgangen bygger på en etterprøvbar tidslinje, ikke på hukommelse. Tidslinjen settes sammen av tre kilder:"
+      },
+      {
+        "source_element_key": "paragraph-8",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Det viktigste analytiske grepet er å sammenligne tidspunktet for første tekniske spor med tidspunktet for første alarm og tidspunktet for første bekreftede oppfølging. Avstanden mellom de to første viser et deteksjonsgap. Avstanden mellom de to siste viser et responsgap. De to gapene har ulike årsaker og krever ulike tiltak, og bør derfor aldri slås sammen til ett tall."
+      }
+    ]
+  },
+  {
+    "claim_id": 435,
+    "page_id": 2538,
+    "block_key": "block-0010",
+    "run962_content_origin": "source_based",
+    "run962_deterministic_reason": null,
+    "claim_text": "Gjennomføringen skjer etter et skyldfritt prinsipp der analysen retter seg mot forholdene som gjorde feilen mulig eller sannsynlig, ikke hvem som gjorde feilen, for å sikre at relevant informasjon ikke holdes tilbake. Observerte angrepsteknikker kartlegges mot det felles [[mitre-attck|rammeverket for taktikker og teknikker]] som brukes i deteksjonsarbeidet; for hver teknikk avgjøres om den ble oppdaget, om den kunne vært oppdaget med eksisterende data, eller om datagrunnlaget manglet, og resultatet føres direkte inn i dekningsmatrisen slik at hendelsen påvirker prioriteringen av ny deteksjonsutvikling.",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-10",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Gjennomgangen gjennomføres etter et skyldfritt prinsipp. Spørsmålet er hvilke forhold som gjorde en feil mulig eller sannsynlig, ikke hvem som gjorde feilen. Erfaring viser at deltakere ellers holder tilbake nettopp den informasjonen som forklarer forløpet."
+      },
+      {
+        "source_element_key": "paragraph-12",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Observerte angrepsteknikker kartlegges mot det felles rammeverket for taktikker og teknikker som brukes i deteksjonsarbeidet. For hver teknikk avgjøres det om den ble oppdaget, om den kunne ha blitt oppdaget med eksisterende data, eller om datagrunnlaget manglet. Resultatet føres direkte inn i dekningsmatrisen, slik at hendelsen påvirker prioriteringen av ny deteksjonsutvikling."
+      }
+    ]
+  },
+  {
+    "claim_id": 436,
+    "page_id": 2538,
+    "block_key": "block-0011",
+    "run962_content_origin": "source_based",
+    "run962_deterministic_reason": null,
+    "claim_text": "Hvert forbedringstiltak klassifiseres som én av tre typer. Alle tiltak skal ha én navngitt eier, en frist, et akseptkriterium som beskriver hvordan effekten skal påvises, og en egen saksreferanse for ordinær oppfølging; tiltak i kundens miljø eies av kunden, og tiltak i leverandørens tjeneste og prosesser eies av leverandøren. Dersom kunden velger ikke å gjennomføre et anbefalt tiltak, dokumenteres dette som en bevisst risikoaksept med begrunnelse, ikke som et åpent tiltak.",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-15",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Hvert tiltak klassifiseres som én av tre typer:"
+      },
+      {
+        "source_element_key": "paragraph-16",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Hvert tiltak skal ha én navngitt eier, en frist, et akseptkriterium som beskriver hvordan effekten skal påvises, og en egen saksreferanse slik at det kan følges opp på samme måte som andre saker. Tiltak som ligger i kundens miljø, eies av kunden. Leverandøren eier tiltak i egen tjeneste og egne prosesser. Dersom kunden velger ikke å gjennomføre et anbefalt tiltak, dokumenteres dette som en bevisst risikoaksept med begrunnelse, ikke som et åpent tiltak."
+      }
+    ]
+  },
+  {
+    "claim_id": 437,
+    "page_id": 2538,
+    "block_key": "block-0012",
+    "run962_content_origin": "unsupported_generated_content",
+    "run962_deterministic_reason": "modality_mismatch",
+    "claim_text": "Et tiltak lukkes når effekten er påvist i henhold til akseptkriteriet. For en ny deteksjon innebærer dette at regelen er testet mot en kontrollert simulering av teknikken og har gitt alarm; for en [[sarbarhetsstyring|sårbarhet]] innebærer det at ny skanning bekrefter at den er lukket; for en prosessendring innebærer det at endringen er tatt i bruk og har fungert i minst én reell eller øvd situasjon. Forbedringssløyfen måles som en egen prosess, ikke bare gjennom operative responstider.",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-17",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Et tiltak lukkes ikke når det er gjennomført, men når effekten er påvist i henhold til akseptkriteriet. For en ny deteksjon betyr det at regelen er testet mot en kontrollert simulering av teknikken og har gitt alarm. For en sårbarhet betyr det at ny skanning bekrefter at den er lukket. For en prosessendring betyr det at endringen er tatt i bruk og har fungert i minst én reell eller øvd situasjon."
+      },
+      {
+        "source_element_key": "paragraph-21",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Forbedringssløyfen bør måles som en egen prosess, ikke bare gjennom de operative responstidene. Anbefalte indikatorer er:"
+      }
+    ]
+  },
+  {
+    "claim_id": 438,
+    "page_id": 2541,
+    "block_key": "block-0002",
+    "run962_content_origin": "unsupported_generated_content",
+    "run962_deterministic_reason": "modality_mismatch",
+    "claim_text": "Deteksjonsgap og responsgap er to adskilte tidsintervaller som oppstår ved sammenligning av hendelsens første tekniske spor, første alarm og første bekreftede oppfølging. Deteksjonsgapet er tiden fra første tekniske spor til første alarm, mens responsgapet er tiden fra første alarm til første bekreftede oppfølging. De to gapene har ulike årsaker, krever ulike tiltak og skal ikke slås sammen til ett tall.",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-8",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Det viktigste analytiske grepet er å sammenligne tidspunktet for første tekniske spor med tidspunktet for første alarm og tidspunktet for første bekreftede oppfølging. Avstanden mellom de to første viser et deteksjonsgap. Avstanden mellom de to siste viser et responsgap. De to gapene har ulike årsaker og krever ulike tiltak, og bør derfor aldri slås sammen til ett tall."
+      }
+    ]
+  },
+  {
+    "claim_id": 439,
+    "page_id": 2541,
+    "block_key": "block-0004",
+    "run962_content_origin": "unsupported_generated_content",
+    "run962_deterministic_reason": "modality_mismatch",
+    "claim_text": "Beregn deteksjonsgap ved å måle tidsavstanden mellom tidspunktet for første tekniske spor og tidspunktet for første alarm. Beregn responsgap ved å måle tidsavstanden mellom tidspunktet for første alarm og tidspunktet for første bekreftede oppfølging. De to gapene skal behandles separat fordi de har ulike bakenforliggende årsaker og krever forskjellige forbedringstiltak, og de skal derfor ikke aggregeres til ett samlet tall.",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-8",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Det viktigste analytiske grepet er å sammenligne tidspunktet for første tekniske spor med tidspunktet for første alarm og tidspunktet for første bekreftede oppfølging. Avstanden mellom de to første viser et deteksjonsgap. Avstanden mellom de to siste viser et responsgap. De to gapene har ulike årsaker og krever ulike tiltak, og bør derfor aldri slås sammen til ett tall."
+      }
+    ]
+  },
+  {
+    "claim_id": 440,
+    "page_id": 2541,
+    "block_key": "block-0006",
+    "run962_content_origin": "unsupported_generated_content",
+    "run962_deterministic_reason": "modality_mismatch",
+    "claim_text": "Forbedringssløyfen rundt deteksjon og respons skal måles som en egen prosess, ikke kun gjennom operative responstider, og det finnes anbefalte indikatorer som støtter dette. Ved tolkning av indikatorer skal den siste indikatoren sees i sammenheng med kvitteringstid og andelen falske positiver; et kortere responsgap er kun en reell forbedring dersom reduksjonen ikke skyldes at flere reelle hendelser blir klassifisert lavere.",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-21",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Forbedringssløyfen bør måles som en egen prosess, ikke bare gjennom de operative responstidene. Anbefalte indikatorer er:"
+      },
+      {
+        "source_element_key": "paragraph-22",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Den siste indikatoren må ses sammen med kvitteringstid og andelen falske positiver. Et kortere responsgap er bare en forbedring dersom det ikke skyldes at flere reelle hendelser er klassifisert lavere."
+      }
+    ]
+  },
+  {
+    "claim_id": 441,
+    "page_id": 2539,
+    "block_key": "block-0002",
+    "run962_content_origin": "unsupported_generated_content",
+    "run962_deterministic_reason": "subject_mismatch",
+    "claim_text": "En [[etterhendelsesgjennomgang-post-incident-review|Etterhendelsesgjennomgang]] er den strukturerte aktiviteten som omsetter en håndtert sikkerhetshendelse til varig forbedring ved å forklare hvorfor hendelsen skjedde, hvorfor den ble oppdaget når den ble oppdaget, og hva som må endres for å hindre gjentakelse. Beskrivelsen angir anbefalt fagpraksis for sikkerhetsovervåking og hendelseshåndtering, gjelder fra hendelsen er stabilisert til forbedringstiltak er verifisert, og fastsetter ikke frister for rapport eller gjennomgang.",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-1",
+        "source_element_type": "paragraph",
+        "source_excerpt": "En etterhendelsesgjennomgang (Post Incident Review, ofte kalt «hot washup» når den gjennomføres kort tid etter stabilisering) er den strukturerte aktiviteten som gjør en håndtert sikkerhetshendelse om til varig forbedring. Hendelsesrapporten beskriver hva som skjedde. Gjennomgangen skal i tillegg forklare hvorfor det skjedde, hvorfor det ble oppdaget når det ble oppdaget, og hva som må endres for at det ikke skal skje igjen."
+      },
+      {
+        "source_element_key": "paragraph-0",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Fagnotat med generell metodebeskrivelse for Post Incident Review i en leveranse av sikkerhetsovervåking og hendelseshåndtering. Notatet beskriver anbefalt fagpraksis og er ikke en beskrivelse av rutiner, krav eller beslutninger i en bestemt virksomhet."
+      },
+      {
+        "source_element_key": "paragraph-2",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Notatet dekker perioden fra hendelsen er stabilisert til forbedringstiltakene er verifisert. Selve håndteringen av hendelsen – skadebegrensning, fjerning av trusselaktør og gjenoppretting – omtales bare der den gir grunnlag for læring. Frister for hendelsesrapport og gjennomgang følger av den enkelte avtalen og fastsettes ikke her."
+      }
+    ]
+  },
+  {
+    "claim_id": 442,
+    "page_id": 2539,
+    "block_key": "block-0003",
+    "run962_content_origin": "unsupported_generated_content",
+    "run962_deterministic_reason": "modality_mismatch",
+    "claim_text": "Kjernen er en etterprøvbar tidslinje satt sammen av systemtidsstempler, hendelsesloggen fra Scribe og tekniske spor fra loggkilder og endepunkter. Analysen sammenligner første tekniske spor, første alarm og første bekreftede oppfølging for å skille tydelig mellom [[deteksjonsgap-og-responsgap|Deteksjonsgap og responsgap]], som ikke skal slås sammen. Rekonstruksjonen krever at rådata fortsatt finnes; nær utløp av lagringstid sikres relevante logger og bevis med dokumentert forvaringskjede, og perioder med kildenedetid markeres. Dette plasserer arbeidet i en styrt praksis for [[dataretensjon-for-sikkerhetslogger|Dataretensjon for sikkerhetslogger]].",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-7",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Gjennomgangen bygger på en etterprøvbar tidslinje, ikke på hukommelse. Tidslinjen settes sammen av tre kilder:"
+      },
+      {
+        "source_element_key": "listitem-5",
+        "source_element_type": "list_item",
+        "source_excerpt": "Systemgenererte tidsstempler i sakssystemet for registrering, start av analyse, reklassifisering, varsling og tiltak."
+      },
+      {
+        "source_element_key": "listitem-6",
+        "source_element_type": "list_item",
+        "source_excerpt": "Hendelsesloggen ført av Scribe, med beslutninger og begrunnelser."
+      },
+      {
+        "source_element_key": "listitem-7",
+        "source_element_type": "list_item",
+        "source_excerpt": "Tekniske spor fra loggkilder og endepunkter som viser når trusselaktøren faktisk var aktiv."
+      },
+      {
+        "source_element_key": "paragraph-8",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Det viktigste analytiske grepet er å sammenligne tidspunktet for første tekniske spor med tidspunktet for første alarm og tidspunktet for første bekreftede oppfølging. Avstanden mellom de to første viser et deteksjonsgap. Avstanden mellom de to siste viser et responsgap. De to gapene har ulike årsaker og krever ulike tiltak, og bør derfor aldri slås sammen til ett tall."
+      },
+      {
+        "source_element_key": "paragraph-9",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Rekonstruksjonen forutsetter at rådata fortsatt finnes. Dersom gjennomgangen ligger nær utløpet av ordinær lagringstid, må relevante logger og bevismateriale sikres særskilt etter kundens instruks og med dokumentert forvaringskjede. Perioder der en loggkilde har vært ute av drift, markeres eksplisitt i tidslinjen, slik at manglende spor ikke tolkes som fravær av aktivitet."
+      }
+    ]
+  },
+  {
+    "claim_id": 443,
+    "page_id": 2539,
+    "block_key": "block-0004",
+    "run962_content_origin": "unsupported_generated_content",
+    "run962_deterministic_reason": "modality_mismatch",
+    "claim_text": "Forbedringssløyfen måles som en egen prosess med indikatorer som gjennomføringsgrad innen frist, andel tiltak lukket med verifisert effekt, alder på åpne tiltak, gjentakelser av samme rotårsak og utviklingen i [[deteksjonsgap-og-responsgap|Deteksjonsgap og responsgap]] over tid. Den siste indikatoren vurderes sammen med kvitteringstid og andelen falske positiver, og resultatene rapporteres i ordinær tjenesterapportering som dokumentasjon på systematisk avviks- og tiltakshåndtering og at læringsfasen i standardisert hendelseshåndtering faktisk gjennomføres.",
+    "block_content_origin": "source_based",
+    "source_elements": [
+      {
+        "source_element_key": "paragraph-21",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Forbedringssløyfen bør måles som en egen prosess, ikke bare gjennom de operative responstidene. Anbefalte indikatorer er:"
+      },
+      {
+        "source_element_key": "listitem-14",
+        "source_element_type": "list_item",
+        "source_excerpt": "andel gjennomganger gjennomført innen avtalt frist"
+      },
+      {
+        "source_element_key": "listitem-15",
+        "source_element_type": "list_item",
+        "source_excerpt": "andel tiltak lukket med verifisert effekt, ikke bare gjennomført"
+      },
+      {
+        "source_element_key": "listitem-16",
+        "source_element_type": "list_item",
+        "source_excerpt": "gjennomsnittlig alder på åpne forbedringstiltak"
+      },
+      {
+        "source_element_key": "listitem-17",
+        "source_element_type": "list_item",
+        "source_excerpt": "antall hendelser med samme rotårsak som en tidligere gjennomgått hendelse"
+      },
+      {
+        "source_element_key": "listitem-18",
+        "source_element_type": "list_item",
+        "source_excerpt": "utvikling i deteksjonsgap og responsgap over tid"
+      },
+      {
+        "source_element_key": "paragraph-22",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Den siste indikatoren må ses sammen med kvitteringstid og andelen falske positiver. Et kortere responsgap er bare en forbedring dersom det ikke skyldes at flere reelle hendelser er klassifisert lavere."
+      },
+      {
+        "source_element_key": "paragraph-23",
+        "source_element_type": "paragraph",
+        "source_excerpt": "Indikatorene rapporteres i den ordinære tjenesterapporteringen. De gir dokumentasjon for at avvik og korrigerende tiltak håndteres systematisk i styringssystemet for informasjonssikkerhet. De viser også at læringsfasen i standarden for hendelseshåndtering faktisk gjennomføres, ikke bare beskrives."
+      }
+    ]
+  }
+]

@@ -303,7 +303,8 @@ class EnterpriseWikiBuildPageLinksService
     /**
      * Materialize link_type=wikilink rows for a single source page from its current
      * content_markdown. Safe to call repeatedly for the same page (idempotent) and
-     * independently of any run — the $ingestRunId is stored only as provenance.
+     * independently of any run — the $ingestRunId is stored only as provenance, and only
+     * on rows this call creates: an existing relation keeps the run that first created it.
      *
      * current content_markdown = complete truth for this page's wikilink relations:
      * links no longer present in the text are removed; links newly present are
@@ -371,22 +372,28 @@ class EnterpriseWikiBuildPageLinksService
             foreach ($resolution['resolved'] as $target) {
                 $toPage = $target['to_page'];
 
-                $link = EnterpriseWikiPageLink::query()->updateOrCreate(
-                    [
-                        'customer_id' => $page->customer_id,
-                        'from_page_id' => $page->id,
-                        'to_page_id' => $toPage->id,
-                        'link_type' => EnterpriseWikiPageLink::LINK_TYPE_WIKILINK,
-                    ],
-                    [
-                        'enterprise_wiki_ingest_run_id' => $ingestRunId,
-                        'from_page_version_id' => $currentVersion?->id,
-                        'to_page_version_id' => $targetCurrentVersionsByPageId->get($toPage->id)?->id,
-                        'source' => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
-                        'confidence' => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
-                        'metadata' => ['anchor_text' => $target['anchor_text']],
-                    ],
-                );
+                $link = EnterpriseWikiPageLink::query()->firstOrNew([
+                    'customer_id' => $page->customer_id,
+                    'from_page_id' => $page->id,
+                    'to_page_id' => $toPage->id,
+                    'link_type' => EnterpriseWikiPageLink::LINK_TYPE_WIKILINK,
+                ]);
+
+                // Provenance is first-seen: the run that created the relation keeps it. A later
+                // re-materialization (relink, repair, claim edit) only refreshes the version
+                // pointers and anchor — it never re-attributes an existing relation to itself
+                // (docs/enterprise-wiki-knowledge-integration-plan.md §18, P1-1).
+                if (! $link->exists) {
+                    $link->enterprise_wiki_ingest_run_id = $ingestRunId;
+                }
+
+                $link->fill([
+                    'from_page_version_id' => $currentVersion?->id,
+                    'to_page_version_id' => $targetCurrentVersionsByPageId->get($toPage->id)?->id,
+                    'source' => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
+                    'confidence' => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
+                    'metadata' => ['anchor_text' => $target['anchor_text']],
+                ])->save();
 
                 $link->wasRecentlyCreated ? $created++ : $updated++;
             }

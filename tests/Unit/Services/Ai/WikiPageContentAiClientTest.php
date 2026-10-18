@@ -654,6 +654,27 @@ class WikiPageContentAiClientTest extends TestCase
         // A repaired section is source_based content too — it must not reintroduce unstated additions.
         $this->assertStringContainsString('the whole material assertion of a source_based block must be supported by the source elements it cites', $developerPrompt);
         $this->assertStringContainsString('no added purpose or intended effect', $developerPrompt);
+        // Plan §18 (P0-2): a repair must not turn "bør" into "skal" either.
+        $this->assertStringContainsString('keep the normative force of every source statement exactly', $developerPrompt);
+        $this->assertStringContainsString('a source_based block keeps the normative force of its source exactly', $developerPrompt);
+    }
+
+    /**
+     * Run 962 (plan §18, P0-2): the "finished agreement text" house style and the best_practice
+     * "skal" style were read as licence to turn source recommendations into requirements. The
+     * prompt now states, for every page type, that normative force is kept sentence by sentence
+     * and that the "skal" style belongs to best_practice only.
+     */
+    public function test_developer_prompt_preserves_normative_force_of_source_based_content(): void
+    {
+        foreach (['article', 'summary', 'concept', 'entity'] as $pageType) {
+            $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload(pageType: $pageType)));
+
+            $this->assertStringContainsString('keep the normative force of every source statement exactly, sentence by sentence', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('never turn "bør" into "skal", "bør ikke"/"bør aldri" into "skal ikke", or "kan" into an unconditional requirement', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('a list item introduced by "følgende kriterier anbefales:" is a recommendation too', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('the normative "skal" style below applies to best_practice blocks only', $developerPrompt, "page type: {$pageType}");
+        }
     }
 
     /**

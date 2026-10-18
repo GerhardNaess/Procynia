@@ -10032,6 +10032,14 @@ return [
         'claim_finding_action_undocumented_or_incorrect_claim' => 'Check the claim against the source. Approve it if it still holds, reject it if it is wrong, or keep/remove the blocking as you see fit.',
         'claim_finding_action_possible_content_deviation' => 'Compare the claim with the source text. The deviation is not confirmed — assess whether it is real before deciding.',
         'claim_finding_action_technical_uncertainty' => 'This is a technical linking uncertainty, not a confirmed content error. Review the page, and keep or remove the blocking as you see fit.',
+        'modality_class' => [
+            'obligation' => 'requirement',
+            'prohibition' => 'prohibition',
+            'recommendation' => 'recommendation',
+            'negative_recommendation' => 'advice against',
+            'permission' => 'possibility',
+            'descriptive' => 'description',
+        ],
         'claim_finding' => [
             'stale_version' => [
                 'title' => 'Stale page link',
@@ -10064,6 +10072,11 @@ return [
             'actor_mismatch' => [
                 'title' => 'Wrong actor',
                 'explanation' => 'The claim attributes the action to the wrong actor compared with the source.',
+            ],
+            'normative_strengthening' => [
+                'title' => 'Stricter than the source',
+                'explanation' => 'The text turns a recommendation or possibility in the source into a requirement or prohibition.',
+                'explanation_detailed' => 'The source says ":source" (:source_class), but the text says ":claim" (:claim_class). The text must carry the same obligation as the source.',
             ],
             'modality_mismatch' => [
                 'title' => 'Stronger than the source',
@@ -10616,6 +10629,12 @@ return [
         'runs_findings_explanation_has_blocking' => '{1} The run has one open blocking technical finding, and could therefore not complete without further handling.|[2,*] The run has :count open blocking technical findings, and could therefore not complete without further handling.',
         'runs_findings_explanation_inconsistent_passed' => '{1} The run has one open blocking technical finding, but is shown as passed. The status needs to be resynced.|[2,*] The run has :count open blocking technical findings, but is shown as passed. The status needs to be resynced.',
         'runs_findings_explanation_qa_review_open' => '{1} The run is complete and the Wiki is available. One professional QA point is open for voluntary review.|[2,*] The run is complete and the Wiki is available. :count professional QA points are open for voluntary review.',
+        'runs_findings_explanation_quality' => [
+            'control_not_completed_semantic_link_qa' => 'The run needs follow-up: the semantic review of the links could not be completed on at least one page. A control that did not run is not counted as passed.',
+            'control_not_completed_source_coverage' => 'The run needs follow-up: the check of whether the source document\'s content is covered could not be completed.',
+            'normative_strengthening' => 'The run needs follow-up: at least one text is stricter than its source, for example "shall" where the source says "should". Review the claims marked "Stricter than the source".',
+            'source_section_uncovered' => 'The run needs follow-up: at least one part of the source document was not placed on any Wiki page and was not deliberately left out.',
+        ],
         'runs_findings_explanation_needs_resync' => 'No open blocking technical findings remain, but the run status has not been updated yet.',
         'runs_findings_explanation_verification_incomplete_auto' => 'The run was interrupted before all claims were verified. The system will attempt to resume processing automatically.',
         'runs_findings_explanation_verification_incomplete_manual' => 'The run was interrupted before all claims were verified and requires new processing.',

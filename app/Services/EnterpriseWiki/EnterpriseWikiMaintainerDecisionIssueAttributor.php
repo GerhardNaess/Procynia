@@ -171,6 +171,17 @@ class EnterpriseWikiMaintainerDecisionIssueAttributor
             }
         }
 
+        // An explicit `{object:<id>}` marker names a singleton slot (`source_article`) that the
+        // bracket form cannot. Source-coverage issues use it: removing the article would make the
+        // gap larger, not resolve it, so differential attribution could never place them.
+        if (preg_match_all('/\{object:(?<id>[a-z_]+(?:\[\d+\])?)\}/', $issue, $markers, PREG_SET_ORDER) > 0) {
+            foreach ($markers as $marker) {
+                if (EnterpriseWikiMaintainerDecisionObjectIndex::exists($decision, $marker['id'])) {
+                    $ids[$marker['id']] = true;
+                }
+            }
+        }
+
         return array_keys($ids);
     }
 

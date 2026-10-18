@@ -88,6 +88,9 @@ class EnterpriseWikiClaimFindingExplainer
      * EnterpriseWikiVerifyPageClaimsService — the most concrete, highest-confidence explanation
      * available, since these are plain deterministic text comparisons, not an AI judgment call.
      */
+    /** Plan §18 (P0-2): set by the verifier's sentence-level normative check. */
+    public const NORMATIVE_STRENGTHENING_REASON = 'normative_strengthening';
+
     private const DETERMINISTIC_REASON_KEYS = [
         'actor_mismatch', 'modality_mismatch', 'negation_mismatch', 'scope_mismatch',
         'number_mismatch', 'currency_mismatch', 'subject_mismatch',
@@ -171,6 +174,13 @@ class EnterpriseWikiClaimFindingExplainer
         }
 
         $deterministicReason = (string) ($meta['deterministic_reason'] ?? '');
+
+        // Plan §18 (P0-2): a sentence-aligned normative strengthening is a proven content defect,
+        // not one of the diagnostic signals below — it is the one deterministic reason the user
+        // must see, and the QA gate escalates on it.
+        if ($deterministicReason === self::NORMATIVE_STRENGTHENING_REASON) {
+            return true;
+        }
 
         if (in_array($deterministicReason, self::DETERMINISTIC_REASON_KEYS, true)) {
             return false;
@@ -353,6 +363,10 @@ class EnterpriseWikiClaimFindingExplainer
 
         $deterministicReason = (string) ($meta['deterministic_reason'] ?? '');
 
+        if ($deterministicReason === self::NORMATIVE_STRENGTHENING_REASON) {
+            return $this->explainNormativeStrengthening($meta);
+        }
+
         if (in_array($deterministicReason, self::DETERMINISTIC_REASON_KEYS, true)) {
             return $this->buildContentFinding(
                 self::CATEGORY_UNDOCUMENTED_OR_INCORRECT_CLAIM,
@@ -485,6 +499,35 @@ class EnterpriseWikiClaimFindingExplainer
             'suggested_blocking' => false,
             'has_confident_source' => false,
         ];
+    }
+
+    /**
+     * Names both sentences and both classes, so the reviewer can see exactly what changed
+     * without opening the source.
+     *
+     * @param  array<string, mixed>  $meta
+     * @return array<string, mixed>
+     */
+    private function explainNormativeStrengthening(array $meta): array
+    {
+        $normative = (array) ($meta['normative_check'] ?? []);
+        $sourceSentence = trim((string) ($normative['source_sentence'] ?? ''));
+        $claimSentence = trim((string) ($normative['claim_sentence'] ?? ''));
+
+        $explanation = $sourceSentence !== '' && $claimSentence !== ''
+            ? __('procynia.wiki.claim_finding.normative_strengthening.explanation_detailed', [
+                'source' => $sourceSentence,
+                'source_class' => __('procynia.wiki.modality_class.'.($normative['source_class'] ?? 'descriptive')),
+                'claim' => $claimSentence,
+                'claim_class' => __('procynia.wiki.modality_class.'.($normative['claim_class'] ?? 'descriptive')),
+            ])
+            : __('procynia.wiki.claim_finding.normative_strengthening.explanation');
+
+        return $this->buildContentFinding(
+            self::CATEGORY_UNDOCUMENTED_OR_INCORRECT_CLAIM,
+            __('procynia.wiki.claim_finding.normative_strengthening.title'),
+            $explanation,
+        );
     }
 
     private function buildContentFinding(string $category, string $title, string $explanation): array

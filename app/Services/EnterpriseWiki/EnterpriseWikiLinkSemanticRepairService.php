@@ -208,7 +208,16 @@ class EnterpriseWikiLinkSemanticRepairService
                 return EnterpriseWikiPageLinkQaAttempt::STATUS_SKIPPED;
             }
 
-            $diagnosis = $this->qaClient->review($markdown, $page->page_type, $catalogResult['catalog'], $languageCode);
+            $diagnosis = $this->reviewWithOneRetry($run, $page, $markdown, $catalogResult['catalog'], $languageCode);
+
+            if (($diagnosis['rejected_missing_link_slugs'] ?? []) !== []) {
+                Log::info('[WIKI_LINK_SEMANTIC_REPAIR] Suggested link targets outside the catalog were discarded.', [
+                    'run_id' => $run->id,
+                    'page_id' => $page->id,
+                    'rejected_slugs' => $diagnosis['rejected_missing_link_slugs'],
+                    'kept_slugs' => $diagnosis['missing_link_slugs'],
+                ]);
+            }
 
             if ($diagnosis['assessment'] !== 'repair_recommended'
                 || (empty($diagnosis['missing_link_slugs']) && empty($diagnosis['remove_link_slugs']))
@@ -285,6 +294,29 @@ class EnterpriseWikiLinkSemanticRepairService
             ]);
 
             return $this->finalize($run, $page, EnterpriseWikiPageLinkQaAttempt::STATUS_FAILED, 'ai_error');
+        }
+    }
+
+    /**
+     * Plan §18 (P0-3): a failed review is a control that did not run, and QA escalates on it. One
+     * failed call must not be enough for that — a single bounded retry separates a transient
+     * failure from a persistent one, at the cost of at most one extra small-model call per page.
+     *
+     * @param  list<array<string, mixed>>  $catalog
+     * @return array<string, mixed>
+     */
+    private function reviewWithOneRetry(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page, string $markdown, array $catalog, string $languageCode): array
+    {
+        try {
+            return $this->qaClient->review($markdown, $page->page_type, $catalog, $languageCode);
+        } catch (Throwable $e) {
+            Log::warning('[WIKI_LINK_SEMANTIC_REPAIR] Link review failed — retrying once.', [
+                'run_id' => $run->id,
+                'page_id' => $page->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $this->qaClient->review($markdown, $page->page_type, $catalog, $languageCode);
         }
     }
 

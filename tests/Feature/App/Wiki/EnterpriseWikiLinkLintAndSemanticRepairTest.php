@@ -519,6 +519,49 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         $this->assertSame(1, $this->currentVersion($article)->version_number);
     }
 
+    /**
+     * Plan §18 (P0-3): QA escalates on a review that did not complete, so one failed call is
+     * retried once before the attempt is recorded as failed.
+     */
+    public function test_a_transient_review_failure_is_retried_once_and_does_not_fail_the_attempt(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createVersionedPage($customer, 'artikkel', 'Artikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'This content is fine as-is.');
+        $run = $this->createAppliedRun($customer, $document, [$article]);
+        $calls = 0;
+
+        $this->mock(WikiLinkSemanticQaAiClient::class)->shouldReceive('review')->twice()
+            ->andReturnUsing(function () use (&$calls): array {
+                if (++$calls === 1) {
+                    throw new \RuntimeException('timeout');
+                }
+
+                return ['assessment' => 'no_change', 'missing_link_slugs' => [], 'remove_link_slugs' => [], 'rejected_missing_link_slugs' => [], 'critique' => '', 'model' => 'test'];
+            });
+
+        $result = $this->repairService()->repairForRun($run);
+
+        $this->assertSame(0, $result['failed']);
+        $this->assertSame(EnterpriseWikiPageLinkQaAttempt::STATUS_SKIPPED, EnterpriseWikiPageLinkQaAttempt::query()->where('enterprise_wiki_page_id', $article->id)->value('status'));
+    }
+
+    public function test_a_persistent_review_failure_is_recorded_as_failed(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createVersionedPage($customer, 'artikkel', 'Artikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'This content is fine as-is.');
+        $run = $this->createAppliedRun($customer, $document, [$article]);
+
+        $this->mock(WikiLinkSemanticQaAiClient::class)->shouldReceive('review')->twice()->andThrow(new \RuntimeException('timeout'));
+
+        $result = $this->repairService()->repairForRun($run);
+
+        $this->assertSame(1, $result['failed']);
+        $attempt = EnterpriseWikiPageLinkQaAttempt::query()->where('enterprise_wiki_page_id', $article->id)->firstOrFail();
+        $this->assertSame([EnterpriseWikiPageLinkQaAttempt::STATUS_FAILED, 'ai_error'], [$attempt->status, $attempt->reason]);
+    }
+
     public function test_changed_repair_creates_exactly_one_version_and_rematerializes(): void
     {
         $customer = $this->createCustomer();

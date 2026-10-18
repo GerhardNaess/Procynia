@@ -87,9 +87,15 @@ class EnterpriseWikiPlannedSectionEvidenceResolver
             }
 
             $binding = $plannedKeys !== [] ? self::BINDING_PLANNER : self::BINDING_LEGACY_KEYWORD;
-            $matches = $plannedKeys !== []
-                ? $this->plannerBoundElements($plannedKeys, $elementsByKey)
-                : $this->matchingElements($topic, $sourceElements);
+            $omittedKeys = [];
+
+            if ($plannedKeys !== []) {
+                $bound = $this->bindPlannedElements($plannedKeys, $sourceElements);
+                $matches = $bound['elements'];
+                $omittedKeys = $bound['omitted_keys'];
+            } else {
+                $matches = $this->matchingElements($topic, $sourceElements);
+            }
             $evidenceChars = array_sum(array_map(
                 static fn (array $element): int => mb_strlen((string) ($element['reference_text'] ?? $element['display_text'] ?? '')),
                 $matches,
@@ -109,6 +115,9 @@ class EnterpriseWikiPlannedSectionEvidenceResolver
                 'evidence_char_count' => $evidenceChars,
                 'required' => true,
                 'evidence_binding' => $binding,
+                // Plan §18 (P0-1): what this section was meant to carry but could not — never
+                // cut silently. EnterpriseWikiSourceCoverageValidator counts these as uncovered.
+                'omitted_source_element_keys' => $omittedKeys,
             ];
         }
 
@@ -147,39 +156,186 @@ class EnterpriseWikiPlannedSectionEvidenceResolver
      * time validation already rejects keys outside the catalog, so reaching this with an unresolvable
      * key means the document itself changed under the decision — which must fail, not degrade.
      *
+     * Plan §18 (P0-1): a list belongs to the paragraph that introduces it. Run 962 planned
+     * "Følgende kriterier anbefales som utløsende:" without its five criteria, so the page said
+     * "three sources" and "three types" without naming them. A planned lead-in paragraph (one that
+     * ends with ":") now brings the list items that directly follow it in the same section, and a
+     * planned list item brings its lead-in, which carries the item's normative context. These
+     * companions do not count against MAX_ELEMENTS_PER_SECTION — the planner named one unit — but
+     * they do count against the character budget, and a companion that does not fit whole is
+     * reported in omitted_keys rather than cut. So is every planned key past either limit.
+     *
+     * Public so EnterpriseWikiSourceCoverageValidator measures coverage on exactly what generation
+     * will receive.
+     *
      * @param  list<string>  $plannedKeys
-     * @param  array<string, array<string, mixed>>  $elementsByKey
-     * @return list<array<string, mixed>>
+     * @param  list<array<string, mixed>>  $sourceElements  in document order
+     * @return array{elements: list<array<string, mixed>>, omitted_keys: list<string>}
      */
-    private function plannerBoundElements(array $plannedKeys, array $elementsByKey): array
+    public function bindPlannedElements(array $plannedKeys, array $sourceElements): array
     {
+        $ordered = array_values(array_filter(
+            $sourceElements,
+            static fn (mixed $element): bool => is_array($element) && trim((string) ($element['source_element_key'] ?? '')) !== '',
+        ));
+        $positionByKey = [];
+
+        foreach ($ordered as $position => $element) {
+            $positionByKey[trim((string) $element['source_element_key'])] = $position;
+        }
+
         $selected = [];
+        $selectedKeys = [];
+        $omitted = [];
+        $plannerCount = 0;
         $remainingChars = self::MAX_EVIDENCE_CHARS_PER_SECTION;
 
         foreach (array_values(array_unique($plannedKeys)) as $key) {
-            if (count($selected) >= self::MAX_ELEMENTS_PER_SECTION || $remainingChars <= 0) {
-                break;
-            }
+            $position = $positionByKey[$key] ?? null;
 
-            $element = $elementsByKey[$key] ?? null;
-
-            if ($element === null) {
+            if ($position === null || isset($selectedKeys[$key])) {
                 continue;
             }
 
-            $referenceText = trim((string) ($element['reference_text'] ?? $element['display_text'] ?? ''));
+            if ($plannerCount >= self::MAX_ELEMENTS_PER_SECTION || $remainingChars <= 0) {
+                $omitted[] = $key;
+
+                continue;
+            }
+
+            $referenceText = trim((string) ($ordered[$position]['reference_text'] ?? $ordered[$position]['display_text'] ?? ''));
 
             if ($referenceText === '') {
                 continue;
             }
 
+            $leadIn = $this->leadInPosition($ordered, $position);
+
+            if ($leadIn !== null) {
+                $this->addCompanion($ordered[$leadIn], $selected, $selectedKeys, $omitted, $remainingChars);
+            }
+
+            $element = $ordered[$position];
             $element['reference_text'] = mb_substr($referenceText, 0, $remainingChars);
             $element['display_text'] = mb_substr((string) ($element['display_text'] ?? $referenceText), 0, min(700, $remainingChars));
             $remainingChars -= mb_strlen($element['reference_text']);
             $selected[] = $element;
+            $selectedKeys[$key] = true;
+            $plannerCount++;
+
+            foreach ($this->listItemPositions($ordered, $position) as $itemPosition) {
+                $this->addCompanion($ordered[$itemPosition], $selected, $selectedKeys, $omitted, $remainingChars);
+            }
         }
 
-        return $selected;
+        return [
+            'elements' => $selected,
+            'omitted_keys' => array_values(array_unique(array_diff($omitted, array_keys($selectedKeys)))),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $element
+     * @param  list<array<string, mixed>>  $selected
+     * @param  array<string, true>  $selectedKeys
+     * @param  list<string>  $omitted
+     */
+    private function addCompanion(array $element, array &$selected, array &$selectedKeys, array &$omitted, int &$remainingChars): void
+    {
+        $key = trim((string) $element['source_element_key']);
+
+        if (isset($selectedKeys[$key])) {
+            return;
+        }
+
+        $text = trim((string) ($element['reference_text'] ?? $element['display_text'] ?? ''));
+
+        if ($text === '') {
+            return;
+        }
+
+        if (mb_strlen($text) > $remainingChars) {
+            $omitted[] = $key;
+
+            return;
+        }
+
+        $element['reference_text'] = $text;
+        $element['display_text'] = mb_substr((string) ($element['display_text'] ?? $text), 0, 700);
+        $remainingChars -= mb_strlen($text);
+        $selected[] = $element;
+        $selectedKeys[$key] = true;
+    }
+
+    /**
+     * The list items directly following a lead-in paragraph ("...:") in the same section.
+     *
+     * @param  list<array<string, mixed>>  $ordered
+     * @return list<int>
+     */
+    public function listItemPositions(array $ordered, int $position): array
+    {
+        if (! self::isLeadIn($ordered[$position])) {
+            return [];
+        }
+
+        $positions = [];
+
+        for ($next = $position + 1; $next < count($ordered); $next++) {
+            if (! self::isListItem($ordered[$next]) || ! self::sameSection($ordered[$position], $ordered[$next])) {
+                break;
+            }
+
+            $positions[] = $next;
+        }
+
+        return $positions;
+    }
+
+    /**
+     * The lead-in paragraph of a list item, if the list it belongs to has one.
+     *
+     * @param  list<array<string, mixed>>  $ordered
+     */
+    public function leadInPosition(array $ordered, int $position): ?int
+    {
+        if (! self::isListItem($ordered[$position])) {
+            return null;
+        }
+
+        for ($previous = $position - 1; $previous >= 0; $previous--) {
+            if (self::isListItem($ordered[$previous]) && self::sameSection($ordered[$previous], $ordered[$position])) {
+                continue;
+            }
+
+            return self::isLeadIn($ordered[$previous]) && self::sameSection($ordered[$previous], $ordered[$position])
+                ? $previous
+                : null;
+        }
+
+        return null;
+    }
+
+    /** @param array<string, mixed> $element */
+    public static function isLeadIn(array $element): bool
+    {
+        return ($element['source_element_type'] ?? null) === 'paragraph'
+            && str_ends_with(rtrim((string) ($element['reference_text'] ?? $element['display_text'] ?? '')), ':');
+    }
+
+    /** @param array<string, mixed> $element */
+    public static function isListItem(array $element): bool
+    {
+        return in_array($element['source_element_type'] ?? null, ['list_item', 'listitem'], true);
+    }
+
+    /**
+     * @param  array<string, mixed>  $a
+     * @param  array<string, mixed>  $b
+     */
+    private static function sameSection(array $a, array $b): bool
+    {
+        return EnterpriseWikiDocumentSectionMap::sectionLabel($a) === EnterpriseWikiDocumentSectionMap::sectionLabel($b);
     }
 
     /**

@@ -1,0 +1,588 @@
+{
+  "source_article": {
+    "action": "create",
+    "title": "wiki-knowledge-integration-test-source",
+    "proposed_slug": "wiki-knowledge-integration-test-source-3a9f1",
+    "reason": "Nytt kildedokument med metode for etterhendelsesgjennomgang og forbedringssløyfe; ingen eksisterende artikkel dekker denne kilden.",
+    "owned_topics": [
+      {
+        "topic": "Formål og avgrensning",
+        "source_element_keys": [
+          "paragraph-1",
+          "paragraph-2"
+        ]
+      },
+      {
+        "topic": "Når og hvordan gjennomføre gjennomgangen",
+        "source_element_keys": [
+          "paragraph-3",
+          "listitem-0",
+          "listitem-1",
+          "paragraph-4",
+          "paragraph-7",
+          "paragraph-8"
+        ]
+      },
+      {
+        "topic": "Analytisk metode og oppfølging",
+        "source_element_keys": [
+          "paragraph-10",
+          "paragraph-12",
+          "paragraph-15",
+          "paragraph-16",
+          "paragraph-17",
+          "paragraph-21"
+        ]
+      }
+    ],
+    "reference_only_topics": [
+      "MITRE ATT&CK",
+      "Threat Hunting",
+      "Incident Commander",
+      "Incident Response Team (IRT)",
+      "Trusseletterretning (Threat Intelligence)",
+      "Dataretensjon for sikkerhetslogger",
+      "Automatisert respons (SOAR)"
+    ],
+    "excluded_topics": [],
+    "related_page_guidance": [
+      {
+        "page_title": "MITRE ATT&CK",
+        "page_id": 73,
+        "relationship": "Referer for rammeverk til teknikker – ikke beskriv ATT&CK i detalj her."
+      },
+      {
+        "page_title": "Threat Hunting",
+        "page_id": 71,
+        "relationship": "Lenk hit for proaktiv/retrospektiv jakt – ikke gjenta metoder."
+      },
+      {
+        "page_title": "Incident Commander",
+        "page_id": 69,
+        "relationship": "Lenk for rollebeskrivelse; ikke dupliser rolleansvar."
+      },
+      {
+        "page_title": "Incident Response Team (IRT)",
+        "page_id": 68,
+        "relationship": "Lenk for hendelseshåndtering og rapportfrister; artikkelen dekker læringsfasen."
+      },
+      {
+        "page_title": "Trusseletterretning (Threat Intelligence)",
+        "page_id": 72,
+        "relationship": "Lenk for prosess rundt vurdering av indikatorer og trusselbilde."
+      },
+      {
+        "page_title": "Dataretensjon for sikkerhetslogger",
+        "page_id": 90,
+        "relationship": "Lenk for prinsipper om lagringstid og sikring av rådata."
+      },
+      {
+        "page_title": "Automatisert respons (SOAR)",
+        "page_id": 81,
+        "relationship": "Lenk for rammer rundt forhåndsgodkjente/automatiserte tiltak."
+      }
+    ],
+    "planned_figures": []
+  },
+  "source_summary": {
+    "action": "create",
+    "title": "wiki-knowledge-integration-test-source – Sammendrag",
+    "proposed_slug": "wiki-knowledge-integration-test-source-sammendrag-7de42",
+    "reason": "Kort oversikt og hovedpoenger for samme kilde, atskilt fra detaljert artikkel.",
+    "owned_topics": [
+      {
+        "topic": "Hva dokumentet etablerer",
+        "source_element_keys": [
+          "paragraph-1",
+          "paragraph-10"
+        ]
+      },
+      {
+        "topic": "Kjerneprinsipper for tidslinje og måling",
+        "source_element_keys": [
+          "paragraph-7",
+          "paragraph-8",
+          "paragraph-21"
+        ]
+      }
+    ],
+    "reference_only_topics": [
+      "Detaljer om metode og oppfølging"
+    ],
+    "excluded_topics": [],
+    "related_page_guidance": [
+      {
+        "page_title": "wiki-knowledge-integration-test-source",
+        "page_id": null,
+        "relationship": "Pek hit for full metode, kriterier og oppfølging."
+      }
+    ],
+    "planned_figures": []
+  },
+  "concept_candidates": [
+    {
+      "name": "Etterhendelsesgjennomgang (Post Incident Review)",
+      "concept_type": "prosess/metodikk",
+      "independent_reason": "Egen, gjenbrukbar prosess for å omsette hendelser til læring.",
+      "mentioned_context": "tittel/innledning og hele dokumentet",
+      "existing_page_title": null,
+      "decision": "create",
+      "justification": "Ingen eksisterende side eier PIR-prosessen spesifikt.",
+      "owning_page_title": null,
+      "necessary_for_article": true,
+      "has_separate_source_evidence": true,
+      "has_reuse_value": true,
+      "relationship": "independent_new_topic",
+      "existing_owner_page_id": null,
+      "considered_existing_page_ids": [
+        68,
+        67
+      ],
+      "considered_rejection_reason": "IRT/SOC dekker håndtering, ikke metodikken for etterhendelsesgjennomgang."
+    },
+    {
+      "name": "Deteksjonsgap og responsgap",
+      "concept_type": "måleparametere/analytiske begreper",
+      "independent_reason": "Egne mål/analytiske størrelser som brukes på tvers av sider.",
+      "mentioned_context": "forberedelse/rekonstruksjon og måling",
+      "existing_page_title": null,
+      "decision": "create",
+      "justification": "Begrepene defineres og måles særskilt i kilden.",
+      "owning_page_title": null,
+      "necessary_for_article": false,
+      "has_separate_source_evidence": true,
+      "has_reuse_value": true,
+      "relationship": "independent_new_topic",
+      "existing_owner_page_id": null,
+      "considered_existing_page_ids": [
+        84,
+        67
+      ],
+      "considered_rejection_reason": "MTTA er annet målepunkt; SOC er overordnet tjenestebeskrivelse."
+    },
+    {
+      "name": "Hot washup",
+      "concept_type": "synonym/begrep",
+      "independent_reason": "Er kun et synonym for tidlig PIR-møte.",
+      "mentioned_context": "formål og avgrensning",
+      "existing_page_title": null,
+      "decision": "reference_only",
+      "justification": "Hører som begrepsvariant under PIR, ikke egen side.",
+      "owning_page_title": "Etterhendelsesgjennomgang (Post Incident Review)",
+      "necessary_for_article": false,
+      "has_separate_source_evidence": false,
+      "has_reuse_value": false,
+      "relationship": "topic_specialized",
+      "existing_owner_page_id": null,
+      "considered_existing_page_ids": [],
+      "considered_rejection_reason": null
+    },
+    {
+      "name": "Korrigerende/forebyggende tiltak og kapabilitetsforbedringer",
+      "concept_type": "klassifisering av tiltak",
+      "independent_reason": "Del av PIR-rammeverket, ikke egen uavhengig praksis her.",
+      "mentioned_context": "klassifisering av tiltak",
+      "existing_page_title": null,
+      "decision": "reference_only",
+      "justification": "Naturlig seksjon under PIR-siden.",
+      "owning_page_title": "Etterhendelsesgjennomgang (Post Incident Review)",
+      "necessary_for_article": true,
+      "has_separate_source_evidence": true,
+      "has_reuse_value": true,
+      "relationship": "topic_specialized",
+      "existing_owner_page_id": null,
+      "considered_existing_page_ids": [
+        68
+      ],
+      "considered_rejection_reason": "IRT omtaler håndtering, ikke klassifisering i læringsfasen."
+    },
+    {
+      "name": "Verifisering av effekt",
+      "concept_type": "oppfølgingspraksis",
+      "independent_reason": "Delprosess i PIR-oppfølging.",
+      "mentioned_context": "verifisering av effekt",
+      "existing_page_title": null,
+      "decision": "reference_only",
+      "justification": "Plasseres som seksjon under PIR-siden.",
+      "owning_page_title": "Etterhendelsesgjennomgang (Post Incident Review)",
+      "necessary_for_article": true,
+      "has_separate_source_evidence": true,
+      "has_reuse_value": true,
+      "relationship": "topic_specialized",
+      "existing_owner_page_id": null,
+      "considered_existing_page_ids": [],
+      "considered_rejection_reason": null
+    },
+    {
+      "name": "Threat Hunting (trusseljakt)",
+      "concept_type": "praksis/metodikk",
+      "independent_reason": "Allerede etablert side for praksisen.",
+      "mentioned_context": "verifisering/retrospektiv jakt",
+      "existing_page_title": "Threat Hunting",
+      "decision": "reuse",
+      "justification": "Eksisterende side dekker praksisen.",
+      "owning_page_title": null,
+      "necessary_for_article": false,
+      "has_separate_source_evidence": false,
+      "has_reuse_value": true,
+      "relationship": "reference_only",
+      "existing_owner_page_id": 71,
+      "considered_existing_page_ids": [
+        71
+      ],
+      "considered_rejection_reason": null
+    },
+    {
+      "name": "Trusseletterretning (Threat Intelligence)",
+      "concept_type": "funksjon/praksis",
+      "independent_reason": "Eksisterende side for TI-funksjonen.",
+      "mentioned_context": "tilbakeføring til kunnskap",
+      "existing_page_title": "Trusseletterretning (Threat Intelligence)",
+      "decision": "reuse",
+      "justification": "Lenk til eksisterende konsept.",
+      "owning_page_title": null,
+      "necessary_for_article": false,
+      "has_separate_source_evidence": false,
+      "has_reuse_value": true,
+      "relationship": "reference_only",
+      "existing_owner_page_id": 72,
+      "considered_existing_page_ids": [
+        72
+      ],
+      "considered_rejection_reason": null
+    },
+    {
+      "name": "MITRE ATT&CK",
+      "concept_type": "rammeverk",
+      "independent_reason": "Eksisterende side for ATT&CK-rammeverket.",
+      "mentioned_context": "kartlegging av teknikker",
+      "existing_page_title": "MITRE ATT&CK",
+      "decision": "reuse",
+      "justification": "Lenk til eksisterende rammeverksside.",
+      "owning_page_title": null,
+      "necessary_for_article": false,
+      "has_separate_source_evidence": false,
+      "has_reuse_value": true,
+      "relationship": "reference_only",
+      "existing_owner_page_id": 73,
+      "considered_existing_page_ids": [
+        73
+      ],
+      "considered_rejection_reason": null
+    },
+    {
+      "name": "Incident Commander",
+      "concept_type": "rolle",
+      "independent_reason": "Rolle eksisterer allerede.",
+      "mentioned_context": "roller i gjennomgangen",
+      "existing_page_title": "Incident Commander",
+      "decision": "reuse",
+      "justification": "Lenk til eksisterende rollebeskrivelse.",
+      "owning_page_title": null,
+      "necessary_for_article": false,
+      "has_separate_source_evidence": false,
+      "has_reuse_value": true,
+      "relationship": "reference_only",
+      "existing_owner_page_id": 69,
+      "considered_existing_page_ids": [
+        69
+      ],
+      "considered_rejection_reason": null
+    },
+    {
+      "name": "Incident Response Team (IRT)",
+      "concept_type": "kapabilitet/prosess",
+      "independent_reason": "Eksisterende side for IRT.",
+      "mentioned_context": "overgang fra håndtering til læring",
+      "existing_page_title": "Incident Response Team (IRT)",
+      "decision": "reuse",
+      "justification": "Lenk til eksisterende side for hendelseshåndtering.",
+      "owning_page_title": null,
+      "necessary_for_article": false,
+      "has_separate_source_evidence": false,
+      "has_reuse_value": true,
+      "relationship": "reference_only",
+      "existing_owner_page_id": 68,
+      "considered_existing_page_ids": [
+        68
+      ],
+      "considered_rejection_reason": null
+    },
+    {
+      "name": "Forvaringskjede (chain of custody)",
+      "concept_type": "forensics-praksis",
+      "independent_reason": "Berøres kort, men eies av IRT/forensics-kontekst.",
+      "mentioned_context": "forberedelse og sikring av bevis",
+      "existing_page_title": "Incident Response Team (IRT)",
+      "decision": "reference_only",
+      "justification": "Henvis til IRT for forvaringskjedeprosedyrer.",
+      "owning_page_title": "Incident Response Team (IRT)",
+      "necessary_for_article": false,
+      "has_separate_source_evidence": false,
+      "has_reuse_value": true,
+      "relationship": "topic_specialized",
+      "existing_owner_page_id": 68,
+      "considered_existing_page_ids": [
+        68
+      ],
+      "considered_rejection_reason": null
+    },
+    {
+      "name": "Dataretensjon for sikkerhetslogger",
+      "concept_type": "policy/prinsipp",
+      "independent_reason": "Eksisterende side dekker dette allerede.",
+      "mentioned_context": "sikring av rådata ved rekonstruksjon",
+      "existing_page_title": "Dataretensjon for sikkerhetslogger",
+      "decision": "reuse",
+      "justification": "Lenk til eksisterende side for retensjonsregler.",
+      "owning_page_title": null,
+      "necessary_for_article": false,
+      "has_separate_source_evidence": false,
+      "has_reuse_value": true,
+      "relationship": "reference_only",
+      "existing_owner_page_id": 90,
+      "considered_existing_page_ids": [
+        90
+      ],
+      "considered_rejection_reason": null
+    },
+    {
+      "name": "Automatisert respons (SOAR)",
+      "concept_type": "teknologipraksis",
+      "independent_reason": "Eksisterende sider dekker SOAR.",
+      "mentioned_context": "vurdering av automatiserte tiltak",
+      "existing_page_title": "Automatisert respons (SOAR)",
+      "decision": "reuse",
+      "justification": "Lenk til eksisterende SOAR-side.",
+      "owning_page_title": null,
+      "necessary_for_article": false,
+      "has_separate_source_evidence": false,
+      "has_reuse_value": true,
+      "relationship": "reference_only",
+      "existing_owner_page_id": 81,
+      "considered_existing_page_ids": [
+        81,
+        74
+      ],
+      "considered_rejection_reason": null
+    },
+    {
+      "name": "Sårbarhetsstyring",
+      "concept_type": "praksis",
+      "independent_reason": "Eksisterende side for praksisen.",
+      "mentioned_context": "vurdering av kjente sårbarheter",
+      "existing_page_title": "Sårbarhetsstyring",
+      "decision": "reuse",
+      "justification": "Lenk til eksisterende konseptside.",
+      "owning_page_title": null,
+      "necessary_for_article": false,
+      "has_separate_source_evidence": false,
+      "has_reuse_value": true,
+      "relationship": "reference_only",
+      "existing_owner_page_id": 83,
+      "considered_existing_page_ids": [
+        83
+      ],
+      "considered_rejection_reason": null
+    },
+    {
+      "name": "TLP (Traffic Light Protocol)",
+      "concept_type": "delingsprotokoll",
+      "independent_reason": "Eksisterende side for TLP.",
+      "mentioned_context": "deling av læringspunkter",
+      "existing_page_title": "TLP (Traffic Light Protocol)",
+      "decision": "reuse",
+      "justification": "Lenk til eksisterende TLP-side.",
+      "owning_page_title": null,
+      "necessary_for_article": false,
+      "has_separate_source_evidence": false,
+      "has_reuse_value": true,
+      "relationship": "reference_only",
+      "existing_owner_page_id": 86,
+      "considered_existing_page_ids": [
+        86
+      ],
+      "considered_rejection_reason": null
+    }
+  ],
+  "concept_pages": [
+    {
+      "action": "create",
+      "page_id": null,
+      "title": "Etterhendelsesgjennomgang (Post Incident Review)",
+      "proposed_slug": "etterhendelsesgjennomgang-post-incident-review",
+      "reason": "Selvstendig, gjenbrukbar prosess/metodikk som beskrives inngående i kilden og mangler i indeksen.",
+      "owned_topics": [
+        {
+          "topic": "Definisjon og formål",
+          "source_element_keys": [
+            "paragraph-1"
+          ]
+        },
+        {
+          "topic": "Kriterier for når gjennomgangen skal gjennomføres",
+          "source_element_keys": [
+            "paragraph-3",
+            "paragraph-4"
+          ]
+        },
+        {
+          "topic": "Prosessramme: tidslinje og skyldfritt prinsipp",
+          "source_element_keys": [
+            "paragraph-7",
+            "paragraph-10"
+          ]
+        },
+        {
+          "topic": "Klassifisering av tiltak og verifisering av effekt",
+          "source_element_keys": [
+            "paragraph-15",
+            "paragraph-17"
+          ]
+        }
+      ],
+      "reference_only_topics": [
+        "MITRE ATT&CK",
+        "Threat Hunting",
+        "Incident Commander",
+        "Incident Response Team (IRT)",
+        "Forvaringskjede",
+        "Dataretensjon for sikkerhetslogger",
+        "Automatisert respons (SOAR)"
+      ],
+      "excluded_topics": [],
+      "related_page_guidance": [
+        {
+          "page_title": "MITRE ATT&CK",
+          "page_id": 73,
+          "relationship": "Lenk for kartlegging av teknikker."
+        },
+        {
+          "page_title": "Threat Hunting",
+          "page_id": 71,
+          "relationship": "Lenk for proaktiv/retrospektiv jakt."
+        },
+        {
+          "page_title": "Incident Commander",
+          "page_id": 69,
+          "relationship": "Lenk for rolle; ikke dupliser ansvar."
+        },
+        {
+          "page_title": "Incident Response Team (IRT)",
+          "page_id": 68,
+          "relationship": "Lenk for håndteringsprosessen og forensics."
+        },
+        {
+          "page_title": "Dataretensjon for sikkerhetslogger",
+          "page_id": 90,
+          "relationship": "Lenk for retensjon og sikring av logger."
+        },
+        {
+          "page_title": "Automatisert respons (SOAR)",
+          "page_id": 81,
+          "relationship": "Lenk for rammer rundt automatisering og fullmakter."
+        }
+      ],
+      "planned_figures": []
+    },
+    {
+      "action": "create",
+      "page_id": null,
+      "title": "Deteksjonsgap og responsgap",
+      "proposed_slug": "deteksjonsgap-og-responsgap",
+      "reason": "Begreper med selvstendig gjenbruksverdi for analyse og måling i flere sider.",
+      "owned_topics": [
+        {
+          "topic": "Definisjon og beregning",
+          "source_element_keys": [
+            "paragraph-8"
+          ]
+        },
+        {
+          "topic": "Bruk i måling og forbedring",
+          "source_element_keys": [
+            "paragraph-21",
+            "paragraph-22"
+          ]
+        }
+      ],
+      "reference_only_topics": [
+        "MTTA (Mean Time to Acknowledge)",
+        "Security Operations Center (SOC)"
+      ],
+      "excluded_topics": [],
+      "related_page_guidance": [
+        {
+          "page_title": "MTTA (Mean Time to Acknowledge)",
+          "page_id": 84,
+          "relationship": "Lenk for definisjon av MTTA; ikke bland begrepene."
+        },
+        {
+          "page_title": "Security Operations Center (SOC)",
+          "page_id": 67,
+          "relationship": "Lenk for tjenestekontekst; ikke gjenta prosessbeskrivelse."
+        }
+      ],
+      "planned_figures": []
+    }
+  ],
+  "entity_pages": [],
+  "patch_targets": [
+    {
+      "target_page_id": 69,
+      "target_page_title": "Incident Commander",
+      "target_page_type": "concept",
+      "target_topic": "Rolle i etterhendelsesgjennomgang",
+      "target_heading": "Rolle og ansvar",
+      "relationship": "reference_only",
+      "operation": "preserve",
+      "superseded_substance": null,
+      "replacement_substance": null,
+      "source_element_keys": [],
+      "preserve_topics": [
+        "Ledelse og koordinering av hendelser",
+        "Kontaktpunkt mot kunden"
+      ],
+      "reason": "Kilden beskriver eierskap/fasilitering av gjennomgang uten å endre eksisterende rollebeskrivelse eller tidsmål."
+    },
+    {
+      "target_page_id": 68,
+      "target_page_title": "Incident Response Team (IRT)",
+      "target_page_type": "concept",
+      "target_topic": "Post Incident Review omtale",
+      "target_heading": "Operativ prosess og rapportering",
+      "relationship": "reference_only",
+      "operation": "preserve",
+      "superseded_substance": null,
+      "replacement_substance": null,
+      "source_element_keys": [],
+      "preserve_topics": [
+        "Frister for rapporter og PIR",
+        "Operativ arbeidsløype"
+      ],
+      "reason": "Kilden gir generell metode for læringsfasen og står ikke i konflikt med eksisterende beskrivelse/SLAs."
+    },
+    {
+      "target_page_id": 67,
+      "target_page_title": "Security Operations Center (SOC)",
+      "target_page_type": "concept",
+      "target_topic": "Henvisninger til roller og prosesser",
+      "target_heading": "Tjenestebeskrivelse og leveransemodell",
+      "relationship": "reference_only",
+      "operation": "preserve",
+      "superseded_substance": null,
+      "replacement_substance": null,
+      "source_element_keys": [],
+      "preserve_topics": [
+        "Leveransemodell og henvisninger til IRT/IC/DO"
+      ],
+      "reason": "Kilden endrer ikke SOC-beskrivelsen; kun tilgrensende læringsprosess etter hendelser."
+    }
+  ],
+  "no_action_reason": null,
+  "warnings": [],
+  "cross_page_reconciliation": {
+    "derived_patch_targets": [],
+    "unresolved": []
+  }
+}

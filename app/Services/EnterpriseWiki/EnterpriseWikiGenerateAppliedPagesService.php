@@ -1712,6 +1712,8 @@ class EnterpriseWikiGenerateAppliedPagesService
             'source_element_count' => (int) ($section['source_element_count'] ?? 0),
             'evidence_chars' => (int) ($section['evidence_char_count'] ?? 0),
             'evidence_binding' => (string) ($section['evidence_binding'] ?? ''),
+            // Plan §18 (P0-1): planned evidence that did not fit this section's limits.
+            'omitted_source_element_keys' => (array) ($section['omitted_source_element_keys'] ?? []),
         ], $sections);
     }
 

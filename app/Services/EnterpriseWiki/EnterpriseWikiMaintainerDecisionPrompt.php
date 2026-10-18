@@ -625,8 +625,27 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 'title' => ['type' => 'string'],
                 'proposed_slug' => ['type' => 'string'],
                 'reason' => ['type' => 'string'],
-            ], self::responsibilityProperties()),
-            'required' => ['action', 'title', 'proposed_slug', 'reason', 'owned_topics', 'reference_only_topics', 'excluded_topics', 'related_page_guidance', 'planned_figures'],
+            ], self::responsibilityProperties(), [
+                // Plan §18, P0-1: the only legitimate way for a material source section to have no
+                // page. Meaningful on source_article (the default owner of the document's
+                // knowledge); always [] on source_summary. Checked by
+                // EnterpriseWikiSourceCoverageValidator — never trusted as given.
+                'excluded_sections' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'section_key' => ['type' => 'string'],
+                            'reason' => ['type' => 'string', 'enum' => EnterpriseWikiSourceCoverageValidator::EXCLUSION_REASONS],
+                            'justification' => ['type' => 'string'],
+                            'existing_page_id' => ['type' => ['integer', 'null']],
+                        ],
+                        'required' => ['section_key', 'reason', 'justification', 'existing_page_id'],
+                        'additionalProperties' => false,
+                    ],
+                ],
+            ]),
+            'required' => ['action', 'title', 'proposed_slug', 'reason', 'owned_topics', 'reference_only_topics', 'excluded_topics', 'related_page_guidance', 'planned_figures', 'excluded_sections'],
             'additionalProperties' => false,
         ];
     }
@@ -1362,6 +1381,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
         }
 
         $errors = array_merge($errors, self::validateOwnedTopics($entry, $ctx));
+        $errors = array_merge($errors, self::validateExcludedSections($entry, $ctx));
 
         if (array_key_exists('related_page_guidance', $entry)) {
             if (! is_array($entry['related_page_guidance'])) {
@@ -1380,6 +1400,57 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 foreach ($entry['planned_figures'] as $i => $item) {
                     $errors = array_merge($errors, self::validatePlannedFigureEntry($item, "{$ctx}.planned_figures[{$i}]"));
                 }
+            }
+        }
+
+        return $errors;
+    }
+
+    /**
+     * Shape only — whether the section exists, the reason is honest and the justification is
+     * usable is EnterpriseWikiSourceCoverageValidator's job, since that needs the document. Absent
+     * on every decision stored before plan §18, which keeps parsing.
+     *
+     * @param  array<string, mixed>  $entry
+     * @return string[]
+     */
+    private static function validateExcludedSections(array $entry, string $ctx): array
+    {
+        if (! array_key_exists('excluded_sections', $entry)) {
+            return [];
+        }
+
+        if (! is_array($entry['excluded_sections'])) {
+            return ["{$ctx}.excluded_sections must be an array."];
+        }
+
+        $errors = [];
+
+        foreach ($entry['excluded_sections'] as $i => $item) {
+            $itemCtx = "{$ctx}.excluded_sections[{$i}]";
+
+            if (! is_array($item)) {
+                $errors[] = "{$itemCtx} must be an object.";
+
+                continue;
+            }
+
+            if (! is_string($item['section_key'] ?? null) || trim($item['section_key']) === '') {
+                $errors[] = "{$itemCtx}.section_key is required and must be a non-empty string.";
+            }
+
+            if (! in_array($item['reason'] ?? null, EnterpriseWikiSourceCoverageValidator::EXCLUSION_REASONS, true)) {
+                $errors[] = "{$itemCtx}.reason must be one of: ".implode(', ', EnterpriseWikiSourceCoverageValidator::EXCLUSION_REASONS).'.';
+            }
+
+            if (! is_string($item['justification'] ?? null)) {
+                $errors[] = "{$itemCtx}.justification must be a string.";
+            } else {
+                $errors = array_merge($errors, self::validateNoControlCharacters($item['justification'], "{$itemCtx}.justification"));
+            }
+
+            if (array_key_exists('existing_page_id', $item) && $item['existing_page_id'] !== null && ! is_int($item['existing_page_id'])) {
+                $errors[] = "{$itemCtx}.existing_page_id must be an integer or null.";
             }
         }
 

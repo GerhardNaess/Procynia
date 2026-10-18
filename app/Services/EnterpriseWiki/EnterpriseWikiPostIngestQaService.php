@@ -3,10 +3,12 @@
 namespace App\Services\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageLinkQaAttempt;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -59,6 +61,28 @@ use Illuminate\Support\Facades\Log;
  */
 class EnterpriseWikiPostIngestQaService
 {
+    /** Plan §18 (P0-3): escalating quality findings, in qa_result.quality_findings. */
+    public const FINDING_CONTROL_NOT_COMPLETED_SEMANTIC_LINK_QA = 'control_not_completed:semantic_link_qa';
+
+    public const FINDING_CONTROL_NOT_COMPLETED_SOURCE_COVERAGE = 'control_not_completed:source_coverage';
+
+    public const FINDING_NORMATIVE_STRENGTHENING = 'normative_strengthening';
+
+    public const FINDING_SOURCE_SECTION_UNCOVERED = 'source_section_uncovered';
+
+    public const QUALITY_FINDINGS = [
+        self::FINDING_CONTROL_NOT_COMPLETED_SEMANTIC_LINK_QA,
+        self::FINDING_CONTROL_NOT_COMPLETED_SOURCE_COVERAGE,
+        self::FINDING_NORMATIVE_STRENGTHENING,
+        self::FINDING_SOURCE_SECTION_UNCOVERED,
+    ];
+
+    private const CONTROL_COMPLETED = 'completed';
+
+    private const CONTROL_NOT_RUN = 'not_run';
+
+    private const CONTROL_NOT_COMPLETED = 'not_completed';
+
     /**
      * Main-flow `status` values that mean a run is still actively owned by
      * RunEnterpriseWikiDocumentFlow / ContinueEnterpriseWikiDocumentFlowAfterPages — i.e.
@@ -90,6 +114,8 @@ class EnterpriseWikiPostIngestQaService
         private readonly EnterpriseWikiQaSnapshotService $snapshotService,
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
         private readonly EnterpriseWikiLinkIntegrationCheckService $linkIntegrationCheck,
+        private readonly EnterpriseWikiSourceCoverageValidator $sourceCoverageValidator,
+        private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
     ) {}
 
     /**
@@ -273,17 +299,214 @@ class EnterpriseWikiPostIngestQaService
         // verified_at !== null at this point (findIncompleteSteps above already escalated any run
         // with a claim still pending verification), so every claim has a final content_origin —
         // findOpenClaimQaSignals() reports open QA-review opportunities purely as informational
-        // data for the voluntary QA workflow. It NEVER changes the verdict: a technically sound
-        // run always passes, regardless of how many open claim QA signals exist.
+        // data for the voluntary QA workflow. It does not change the verdict on its own; the
+        // three narrow quality rules below (plan §18) are the only content-level exceptions.
         $claimQaSignals = $this->findOpenClaimQaSignals($pageIds);
 
+        // Plan §18 (P0-3): "passed" means every mandatory control ran and none found a serious
+        // defect. A control that could not run is not a control that passed, a recommendation
+        // turned into a requirement is not a faithful page, and knowledge that never reached a
+        // page is not covered — each escalates (a person decides), none fails (the content exists).
+        $checks['semantic_link_qa'] = $this->semanticLinkQaCheck($run, $pageIds);
+        $checks['normative_fidelity'] = $this->normativeFidelityCheck($pageIds);
+        $checks['source_coverage'] = $this->sourceCoverageCheck($run);
+
+        [$qualityFindings, $qualityNotes] = $this->qualityFindings($checks);
+
         return [
-            'verdict' => EnterpriseWikiIngestRun::QA_STATUS_PASSED,
-            'reason' => null,
+            'verdict' => $qualityFindings === []
+                ? EnterpriseWikiIngestRun::QA_STATUS_PASSED
+                : EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+            'reason' => $qualityFindings === []
+                ? null
+                : 'Quality finding(s) need a decision: '.implode(', ', $qualityFindings).'.',
             'incomplete_steps' => [],
             'critical_defects' => [],
             'claim_qa_signals' => $claimQaSignals,
+            'quality_findings' => $qualityFindings,
+            'quality_notes' => $qualityNotes,
             'checks' => $checks,
+        ];
+    }
+
+    /**
+     * Escalating codes and non-escalating notes, both derived only from the checks above.
+     *
+     * @param  array<string, mixed>  $checks
+     * @return array{0: list<string>, 1: list<string>}
+     */
+    private function qualityFindings(array $checks): array
+    {
+        $findings = [];
+        $notes = [];
+
+        if ($checks['semantic_link_qa']['status'] === self::CONTROL_NOT_COMPLETED) {
+            $findings[] = self::FINDING_CONTROL_NOT_COMPLETED_SEMANTIC_LINK_QA;
+        } elseif ($checks['semantic_link_qa']['status'] === self::CONTROL_NOT_RUN) {
+            $notes[] = 'semantic_link_qa_not_run';
+        }
+
+        if ($checks['normative_fidelity']['open_strengthened_claim_ids'] !== []) {
+            $findings[] = self::FINDING_NORMATIVE_STRENGTHENING;
+        }
+
+        if ($checks['normative_fidelity']['ambiguous_claim_ids'] !== []) {
+            $notes[] = 'normative_alignment_uncertain';
+        }
+
+        $coverageStatus = $checks['source_coverage']['status'];
+
+        if ($coverageStatus === EnterpriseWikiSourceCoverageValidator::STATUS_INCOMPLETE) {
+            $findings[] = self::FINDING_SOURCE_SECTION_UNCOVERED;
+        } elseif ($coverageStatus === EnterpriseWikiSourceCoverageValidator::STATUS_PARTIAL) {
+            $notes[] = 'source_coverage_partial';
+        } elseif ($coverageStatus === self::CONTROL_NOT_COMPLETED) {
+            $findings[] = self::FINDING_CONTROL_NOT_COMPLETED_SOURCE_COVERAGE;
+        }
+
+        return [$findings, $notes];
+    }
+
+    /**
+     * Reads EnterpriseWikiPageLinkQaAttempt — the per-page record of the semantic link review —
+     * and tells four situations apart: the review ran (applied, or no change / a declined change),
+     * it was not run because it does not apply (AI disabled, empty page, no record for a page the
+     * step never covers), or it was attempted and did not finish (failed after its retry, or a
+     * reservation left behind by a crashed worker). Only the last is "not completed".
+     *
+     * @return array{status: string, failed_page_ids: list<int>, pages: array<int, string>}
+     */
+    private function semanticLinkQaCheck(EnterpriseWikiIngestRun $run, Collection $pageIds): array
+    {
+        $attempts = EnterpriseWikiPageLinkQaAttempt::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->whereIn('enterprise_wiki_page_id', $pageIds)
+            ->get(['enterprise_wiki_page_id', 'status', 'reason']);
+
+        if ($attempts->isEmpty()) {
+            return ['status' => self::CONTROL_NOT_RUN, 'failed_page_ids' => [], 'pages' => []];
+        }
+
+        $pages = [];
+        $failed = [];
+
+        foreach ($attempts as $attempt) {
+            $outcome = match (true) {
+                $attempt->status === EnterpriseWikiPageLinkQaAttempt::STATUS_FAILED
+                    && $attempt->reason !== EnterpriseWikiPageLinkQaAttempt::REASON_INVALID_REVISION => self::CONTROL_NOT_COMPLETED,
+                $attempt->status === EnterpriseWikiPageLinkQaAttempt::STATUS_SKIPPED && $attempt->reason === 'reserved' => self::CONTROL_NOT_COMPLETED,
+                $attempt->status === EnterpriseWikiPageLinkQaAttempt::STATUS_SKIPPED
+                    && in_array($attempt->reason, [EnterpriseWikiPageLinkQaAttempt::REASON_AI_UNAVAILABLE, 'empty_content'], true) => self::CONTROL_NOT_RUN,
+                default => self::CONTROL_COMPLETED,
+            };
+
+            $pages[(int) $attempt->enterprise_wiki_page_id] = $outcome;
+
+            if ($outcome === self::CONTROL_NOT_COMPLETED) {
+                $failed[] = (int) $attempt->enterprise_wiki_page_id;
+            }
+        }
+
+        return [
+            'status' => match (true) {
+                $failed !== [] => self::CONTROL_NOT_COMPLETED,
+                in_array(self::CONTROL_COMPLETED, $pages, true) => self::CONTROL_COMPLETED,
+                default => self::CONTROL_NOT_RUN,
+            },
+            'failed_page_ids' => $failed,
+            'pages' => $pages,
+        ];
+    }
+
+    /**
+     * Open (undecided) claims on the run's current pages whose source_based text was proven, sentence
+     * against sentence, to be stricter than its source (plan §18, P0-2). Decided claims — kept,
+     * edited, removed, or explicitly marked not blocking — no longer count, through the same
+     * blockingState() the publication gate uses, so QA and publication never disagree.
+     *
+     * @return array{open_strengthened_claim_ids: list<int>, ambiguous_claim_ids: list<int>}
+     */
+    private function normativeFidelityCheck(Collection $pageIds): array
+    {
+        $currentVersionIds = DB::table('enterprise_wiki_page_versions')
+            ->whereIn('enterprise_wiki_page_id', $pageIds)
+            ->where('is_current', true)
+            ->pluck('id');
+
+        $strengthened = [];
+        $ambiguous = [];
+
+        $claims = $currentVersionIds->isEmpty() ? collect() : EnterpriseWikiClaim::query()
+            ->whereIn('enterprise_wiki_page_version_id', $currentVersionIds)
+            ->get();
+
+        foreach ($claims as $claim) {
+            $meta = (array) ($claim->review_metadata ?? []);
+
+            if (($meta['deterministic_reason'] ?? null) === EnterpriseWikiClaimFindingExplainer::NORMATIVE_STRENGTHENING_REASON
+                && $claim->isPending()
+                && $this->claimFindingExplainer->blockingState($claim)['blocks_gate']
+            ) {
+                $strengthened[] = (int) $claim->id;
+            } elseif ((($meta['normative_check'] ?? [])['status'] ?? null) === EnterpriseWikiClaimCanonicalizationService::NORMATIVE_STATUS_AMBIGUOUS) {
+                $ambiguous[] = (int) $claim->id;
+            }
+        }
+
+        return ['open_strengthened_claim_ids' => $strengthened, 'ambiguous_claim_ids' => $ambiguous];
+    }
+
+    /**
+     * Source-to-plan coverage of the decision this run applied (plan §18, P0-1), re-evaluated from
+     * the stored decision and the document's own elements. Not applicable to runs without a
+     * document source or a decision article. A failure to read the document is a control that
+     * did not complete, never "covered".
+     *
+     * @return array<string, mixed>
+     */
+    private function sourceCoverageCheck(EnterpriseWikiIngestRun $run): array
+    {
+        $decision = (array) ($run->maintainer_decision_json ?? []);
+
+        if ($run->source_type !== EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT
+            || ! is_array($decision['source_article'] ?? null)
+        ) {
+            return ['status' => EnterpriseWikiSourceCoverageValidator::STATUS_NOT_APPLICABLE];
+        }
+
+        $document = EnterpriseWikiDocument::query()->find($run->source_id);
+
+        if ($document === null) {
+            return ['status' => EnterpriseWikiSourceCoverageValidator::STATUS_NOT_APPLICABLE];
+        }
+
+        try {
+            $elements = $this->sourceElementService->inspect($document)['elements'];
+        } catch (\Throwable $e) {
+            Log::warning('[WIKI_POST_INGEST_QA] Source coverage could not be evaluated.', [
+                'run_id' => $run->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return ['status' => self::CONTROL_NOT_COMPLETED];
+        }
+
+        $report = $this->sourceCoverageValidator->evaluate($decision, $elements);
+
+        return [
+            'status' => $report['status'],
+            'uncovered_section_keys' => $report['uncovered_section_keys'],
+            'partial_section_keys' => $report['partial_section_keys'],
+            'excluded_section_keys' => $report['excluded_section_keys'],
+            'material_element_count' => $report['material_element_count'],
+            'covered_element_count' => $report['covered_element_count'],
+            'invalid_exclusions' => $report['invalid_exclusions'],
+            'sections' => array_map(static fn (array $section): array => [
+                'section_key' => $section['section_key'],
+                'label' => $section['label'],
+                'status' => $section['status'],
+                'uncovered_element_keys' => $section['uncovered_element_keys'],
+            ], $report['sections']),
         ];
     }
 
@@ -407,6 +630,8 @@ class EnterpriseWikiPostIngestQaService
             'incomplete_steps' => $evaluation['incomplete_steps'],
             'critical_defects' => $evaluation['critical_defects'],
             'claim_qa_signals' => $evaluation['claim_qa_signals'],
+            'quality_findings' => $evaluation['quality_findings'] ?? [],
+            'quality_notes' => $evaluation['quality_notes'] ?? [],
         ];
 
         return DB::transaction(function () use ($run, $evaluation, $result): ?array {

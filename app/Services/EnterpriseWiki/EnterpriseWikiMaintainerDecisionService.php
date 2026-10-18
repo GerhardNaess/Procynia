@@ -54,6 +54,7 @@ class EnterpriseWikiMaintainerDecisionService
         private readonly EnterpriseWikiPlannedPageSlotValidator $plannedPageSlotValidator,
         private readonly EnterpriseWikiMaintainerDecisionIssueAttributor $issueAttributor,
         private readonly EnterpriseWikiMaintainerDecisionDeltaMerger $deltaMerger,
+        private readonly EnterpriseWikiSourceCoverageValidator $sourceCoverageValidator,
     ) {}
 
     /**
@@ -125,7 +126,17 @@ class EnterpriseWikiMaintainerDecisionService
         // against ids the model was free to invent. Resolving them here is free in practice: every
         // planning path already rendered this exact list, and the context memoises it.
         $existingPageCandidateIds = $this->existingPageCandidateIds($planning);
-        $issues = $this->findAllIssues($decision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId, $existingPageCandidateIds);
+        // Plan §18 (P0-1): source-to-plan coverage joins the same validation and bounded repair as
+        // every other rule, but as SOFT issues — see the end of this method.
+        $coverage = fn (array $candidate): array => $this->sourceCoverageValidator->findIssues(
+            $candidate,
+            $planning->elements,
+            $this->knownPageIds($indexContext, $existingPageCandidateIds),
+        );
+        $issues = array_merge(
+            $this->findAllIssues($decision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId, $existingPageCandidateIds),
+            $coverage($decision),
+        );
 
         if ($issues === []) {
             Log::info('[WIKI_MAINTAINER_DECISION] Consistency validation completed.', [
@@ -141,7 +152,10 @@ class EnterpriseWikiMaintainerDecisionService
         [$normalizedDecision, $normalizations] = $this->normalizeMaintainerDecisionStructure($decision);
 
         if ($normalizations !== []) {
-            $normalizedIssues = $this->findAllIssues($normalizedDecision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId, $existingPageCandidateIds);
+            $normalizedIssues = array_merge(
+                $this->findAllIssues($normalizedDecision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId, $existingPageCandidateIds),
+                $coverage($normalizedDecision),
+            );
 
             if ($normalizedIssues === []) {
                 Log::info('[WIKI_MAINTAINER_DECISION] Consistency validation completed.', [
@@ -174,12 +188,22 @@ class EnterpriseWikiMaintainerDecisionService
             $attribution = $this->issueAttributor->attribute(
                 $decision,
                 $remainingIssues,
-                fn (array $candidateDecision): array => $this->findPureIssues($candidateDecision, $indexContext, $validFigureKeys, $validSourceElementKeys, $existingPageCandidateIds),
+                fn (array $candidateDecision): array => array_merge(
+                    $this->findPureIssues($candidateDecision, $indexContext, $validFigureKeys, $validSourceElementKeys, $existingPageCandidateIds),
+                    $coverage($candidateDecision),
+                ),
             );
 
             // An issue nobody can attribute to a specific object cannot be repaired within a
             // bounded contract, and the alternative — handing the model the whole decision again —
             // is the unbounded pass this flow exists to remove. Fail closed with the issue intact.
+            // A coverage issue that cannot be placed (no source_article to extend) is still soft:
+            // it is left for QA rather than failing an otherwise consistent decision.
+            $attribution['unattributed'] = array_values(array_filter(
+                $attribution['unattributed'],
+                static fn (string $issue): bool => ! self::isCoverageIssue($issue),
+            ));
+
             if ($attribution['unattributed'] !== []) {
                 Log::error('[WIKI_MAINTAINER_DECISION] Issue could not be attributed to a decision object — no bounded repair possible.', [
                     'customer_id' => $customerId,
@@ -241,7 +265,10 @@ class EnterpriseWikiMaintainerDecisionService
             // An undocumented create then read as repaired, the loop broke on an empty issue list,
             // and the fail-closed gate below never fired: the decision was returned with the very
             // create it was supposed to stop.
-            $remainingIssues = $this->findAllIssues($decision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId, $existingPageCandidateIds);
+            $remainingIssues = array_merge(
+                $this->findAllIssues($decision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId, $existingPageCandidateIds),
+                $coverage($decision),
+            );
 
             Log::info('[WIKI_MAINTAINER_DECISION] Repair delta merged.', [
                 'customer_id' => $customerId,
@@ -273,6 +300,21 @@ class EnterpriseWikiMaintainerDecisionService
         $repaired = $decision;
         $this->logHeadingRepairOutcome($context->runId, $originalDecision, $repaired, $remainingIssues);
 
+        // Coverage gaps the bounded rounds could not close never fail the run: the plan is still
+        // consistent, it is only incomplete, and that is a quality finding for a person, not a
+        // technical failure. QA re-evaluates the stored decision and escalates on it
+        // (EnterpriseWikiPostIngestQaService, checks.source_coverage).
+        $coverageGaps = array_values(array_filter($remainingIssues, self::isCoverageIssue(...)));
+        $remainingIssues = array_values(array_diff($remainingIssues, $coverageGaps));
+
+        if ($coverageGaps !== []) {
+            Log::warning('[WIKI_MAINTAINER_DECISION] Source coverage still incomplete after bounded repair — left for QA.', [
+                'customer_id' => $customerId,
+                'document_id' => $document->id,
+                'issues' => $coverageGaps,
+            ]);
+        }
+
         if ($remainingIssues !== []) {
             Log::error('[WIKI_MAINTAINER_DECISION] Decision still inconsistent after bounded repair rounds.', [
                 'customer_id' => $customerId,
@@ -303,6 +345,29 @@ class EnterpriseWikiMaintainerDecisionService
      *
      * @return list<int>
      */
+    private static function isCoverageIssue(string $issue): bool
+    {
+        return str_starts_with($issue, EnterpriseWikiSourceCoverageValidator::ISSUE_PREFIX);
+    }
+
+    /**
+     * Every existing page the planner could have named: the wiki index plus the candidate set.
+     *
+     * @param  array<int, array<string, mixed>>  $indexContext
+     * @param  list<int>  $existingPageCandidateIds
+     * @return list<int>
+     */
+    private function knownPageIds(array $indexContext, array $existingPageCandidateIds): array
+    {
+        return array_values(array_unique(array_merge(
+            $existingPageCandidateIds,
+            array_values(array_filter(array_map(
+                static fn (mixed $entry): int => is_array($entry) ? (int) ($entry['id'] ?? 0) : 0,
+                $indexContext,
+            ))),
+        )));
+    }
+
     private function existingPageCandidateIds(EnterpriseWikiPlanningContext $planning): array
     {
         return array_values(array_filter(array_map(

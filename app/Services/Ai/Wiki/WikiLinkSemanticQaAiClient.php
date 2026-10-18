@@ -56,6 +56,7 @@ class WikiLinkSemanticQaAiClient
      *   assessment: string,
      *   missing_link_slugs: list<string>,
      *   remove_link_slugs: list<string>,
+     *   rejected_missing_link_slugs: list<string>,
      *   critique: string,
      *   model: string,
      * }
@@ -80,10 +81,19 @@ class WikiLinkSemanticQaAiClient
 
         $this->validateResult($decoded, $linkCatalog);
 
+        // Plan §18 (P0-3): a suggested target outside the catalog is rejected on its own, exactly
+        // like an invalid link_intent (plan §17.4 invariant 2). Run 962 lost the whole review of
+        // two pages because the model guessed "deteksjonsgap" for a page whose slug is
+        // "deteksjonsgap-og-responsgap" — one bad suggestion must never void a valid assessment.
+        $catalogSlugs = array_column($linkCatalog, 'slug');
+        $missing = array_values(array_unique((array) $decoded['missing_link_slugs']));
+        $valid = array_values(array_intersect($missing, $catalogSlugs));
+
         return [
             'assessment' => (string) $decoded['assessment'],
-            'missing_link_slugs' => array_values((array) $decoded['missing_link_slugs']),
+            'missing_link_slugs' => $valid,
             'remove_link_slugs' => array_values((array) $decoded['remove_link_slugs']),
+            'rejected_missing_link_slugs' => array_values(array_diff($missing, $valid)),
             'critique' => (string) $decoded['critique'],
             'model' => self::model().'/'.self::PROMPT_VERSION,
         ];
@@ -106,15 +116,6 @@ class WikiLinkSemanticQaAiClient
                 || array_filter($decoded[$field], static fn (mixed $v): bool => ! is_string($v)) !== []) {
                 throw new RuntimeException("WikiLinkSemanticQaAiClient: response field [{$field}] must be an array of strings.");
             }
-        }
-
-        $catalogSlugs = array_column($linkCatalog, 'slug');
-        $invented = array_diff($decoded['missing_link_slugs'], $catalogSlugs);
-
-        if ($invented !== []) {
-            throw new RuntimeException(
-                'WikiLinkSemanticQaAiClient: missing_link_slugs contains slug(s) outside the allowed catalog: '.implode(', ', $invented).'.'
-            );
         }
 
         if (! is_string($decoded['critique'])) {

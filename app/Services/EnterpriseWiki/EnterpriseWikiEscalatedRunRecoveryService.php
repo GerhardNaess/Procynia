@@ -195,6 +195,17 @@ class EnterpriseWikiEscalatedRunRecoveryService
             }
         }
 
+        // Plan §18 (P0-3): a quality finding (a control that did not run, a normative
+        // strengthening, uncovered source knowledge) is a decision for a person. It is neither a
+        // stale status to re-finalize nor a step automatic recovery could resume.
+        $qualityFindings = (array) ($evaluation['quality_findings'] ?? []);
+
+        if ($incompleteSteps === [] && $criticalDefects === [] && $qualityFindings !== []) {
+            return EnterpriseWikiRunRecoveryResult::notRecoverable(
+                "Run [{$run->id}] needs a human decision on quality finding(s): ".implode(', ', $qualityFindings).'.',
+            );
+        }
+
         if ($incompleteSteps === [] && $criticalDefects === []) {
             return EnterpriseWikiRunRecoveryResult::staleState(
                 "Run [{$run->id}] has no incomplete steps and no critical defects anymore — status is stale, ".

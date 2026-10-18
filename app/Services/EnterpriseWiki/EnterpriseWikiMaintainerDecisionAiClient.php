@@ -557,7 +557,16 @@ class EnterpriseWikiMaintainerDecisionAiClient
             'from exactly those elements, so an unrelated key produces an ungrounded section. A page with',
             'fewer, genuinely supported topics is the correct outcome.',
             '',
+            'For a [source_coverage] issue: the named source section, or the named elements of it, reach no',
+            'planned page. Add an owned topic to source_article that binds them (or extend one of its',
+            'topics within the key limit). Only when the section is genuinely an example, front matter, a',
+            'duplicate of an existing page or out of scope, add it to source_article.excluded_sections',
+            'instead, with a concrete justification. Never create a new page just to cover a section, and',
+            'never exclude a section to make the issue disappear.',
+            '',
             ...self::ownedTopicEvidenceRules(),
+            '',
+            ...self::sourceCoverageRules(),
             '',
             ...self::existingPageSlotRules(),
             '',
@@ -647,10 +656,12 @@ class EnterpriseWikiMaintainerDecisionAiClient
             '  where cross-page repetition AND unbounded page breadth can both be prevented before any',
             '  page content is written. Three tiers, not a single list:',
             ...self::ownedTopicEvidenceRules(),
+            ...self::sourceCoverageRules(),
             '  owned_topics: what THIS page, and only this page, explains in depth. This defines the',
             '  page\'s FULL scope — nothing beyond it. Keep it SHORT and proportional to what the source',
             '  document itself actually supports or requires to be understood — typically 1-3 items for',
-            '  an article/summary, 1-3 for a concept/entity page. A page is not required, and is not',
+            '  a summary or a concept/entity page. The source_article is different: it owns one topic for',
+            '  every material section no other planned page owns (see SOURCE COVERAGE). A page is not required, and is not',
             '  expected, to become a complete textbook treatment of its subject just because the subject',
             '  is broad — it should cover only what this specific source material needs.',
             '  reference_only_topics: topics this page may mention in passing (at most one short',
@@ -1005,6 +1016,34 @@ class EnterpriseWikiMaintainerDecisionAiClient
             '  A page you CREATE must own at least one evidence-bound topic. Owning nothing is not a way',
             '  out of this rule: if no topic on this page can be bound to real source elements, the page',
             '  itself is not warranted — decide "reference_only" or "exclude" for the candidate instead.',
+        ];
+    }
+
+    /**
+     * Plan §18 (P0-1): the source-to-plan direction, enforced by
+     * EnterpriseWikiSourceCoverageValidator. Shared by every planning and repair prompt, like
+     * ownedTopicEvidenceRules().
+     *
+     * @return string[]
+     */
+    public static function sourceCoverageRules(): array
+    {
+        return [
+            '  SOURCE COVERAGE. Every material section of the source document (the [sec-N] headers in',
+            '  SOURCE ELEMENTS) must either reach a planned page through owned_topics, or be excluded on',
+            '  purpose. The source_summary does not count — it orients, it does not hold the knowledge.',
+            '  The source_article is the default owner: give it one owned topic for each material section',
+            '  that no concept/entity page owns. Never create an extra page only to cover a section.',
+            '  A paragraph that ends with ":" introduces the list that follows it. Citing that paragraph',
+            '  brings its whole list along, so name the paragraph rather than every item.',
+            '  excluded_sections (on source_article; always [] on source_summary): each entry is',
+            '  {section_key, reason, justification, existing_page_id}. section_key is the [sec-N] key.',
+            '  reason is one of: example (an illustrative or fictitious example), front_matter (title,',
+            '  preface, document control), duplicate_of_existing (already fully explained by the existing',
+            '  page existing_page_id from the wiki index), out_of_scope (not knowledge this Wiki should',
+            '  hold). justification says concretely why, in one sentence. existing_page_id is required for',
+            '  duplicate_of_existing and null otherwise. Never exclude a section you also cite, and never',
+            '  exclude a section to avoid planning its content.',
         ];
     }
 
@@ -1466,6 +1505,24 @@ class EnterpriseWikiMaintainerDecisionAiClient
         }
 
         $sectionKeys = EnterpriseWikiDocumentSectionMap::sectionsForElementKeys($elementKeys, $map);
+
+        // Plan §18 (P0-1): a [source_coverage] issue is ABOUT sections the group's objects do not
+        // cite yet — the repair has to read them in full to bind them, so they are routed too.
+        $known = array_flip(EnterpriseWikiDocumentSectionMap::sectionKeys($map));
+
+        foreach ($group['issues'] as $issue) {
+            if (! str_starts_with((string) $issue, EnterpriseWikiSourceCoverageValidator::ISSUE_PREFIX)) {
+                continue;
+            }
+
+            preg_match_all('/\[(sec-\d+)\]/', (string) $issue, $matches);
+
+            foreach ($matches[1] as $sectionKey) {
+                if (isset($known[$sectionKey]) && ! in_array($sectionKey, $sectionKeys, true)) {
+                    $sectionKeys[] = $sectionKey;
+                }
+            }
+        }
 
         return $sectionKeys === [] ? null : $sectionKeys;
     }

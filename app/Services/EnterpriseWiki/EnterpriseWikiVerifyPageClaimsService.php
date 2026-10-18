@@ -630,7 +630,7 @@ class EnterpriseWikiVerifyPageClaimsService
         }
 
         $safetyNet = $deterministicMatch
-            ? ['verdict' => WikiClaimVerificationAiClient::VERDICT_SUPPORTED, 'deterministic_reason' => null]
+            ? ['verdict' => WikiClaimVerificationAiClient::VERDICT_SUPPORTED, 'deterministic_reason' => null, 'normative' => null]
             : $this->applyDeterministicSafetyNet($claim->claim_text, $result, $elementsByKey, $block, $fallbackSourceText);
         $finalVerdict = $safetyNet['verdict'];
 
@@ -664,6 +664,7 @@ class EnterpriseWikiVerifyPageClaimsService
                 'reevaluated_from_content_origin' => $originalContentOrigin,
                 'reevaluated_run_id' => $run->id,
                 'deterministic_reason' => $safetyNet['deterministic_reason'],
+                'normative_check' => $safetyNet['normative'],
             ], static fn ($value): bool => $value !== null), source: EnterpriseWikiClaimClassificationService::SOURCE_MANUAL_REVERIFICATION);
 
             return $locked->fresh()->content_origin;
@@ -1493,6 +1494,7 @@ class EnterpriseWikiVerifyPageClaimsService
                 $fallbackSourceText,
                 array_filter([
                     'deterministic_reason' => $safetyNet['deterministic_reason'],
+                    'normative_check' => $safetyNet['normative'],
                 ]),
                 $allowClaimDecisionReset,
                 $allowBestPracticePromotion,
@@ -1881,10 +1883,76 @@ class EnterpriseWikiVerifyPageClaimsService
      * the whole candidate pool (Del 5) — forces a downgrade to not_supported regardless of what
      * the AI concluded.
      *
+     * Plan §18 (P0-2): the sentence-level normative check runs first and for every verdict. A
+     * confident strengthening ("bør" → "skal", "bør ikke" → "skal ikke", "kan" → "skal") is
+     * never left as supported, and is recorded as normative_strengthening — a reason the QA gate
+     * and the Funn panel treat as a real content finding, unlike the diagnostic-only
+     * modality_mismatch. An ambiguous alignment changes nothing but is kept as `normative`
+     * evidence so the uncertainty stays visible.
+     *
+     * @param  array<string, array<string, mixed>>  $elementsByKey
+     * @return array{verdict: string, deterministic_reason: ?string, normative: ?array<string, string>}
+     */
+    private function applyDeterministicSafetyNet(string $claimText, array $result, array $elementsByKey, ?array $block, string $fallbackSourceText): array
+    {
+        $verdict = $result['verdict'];
+        // Only text the page presents as document content must keep the source's force: a
+        // best_practice block is told to state its clause normatively ("skal ...") and may cite the
+        // source element that exposed the gap — that is not a distortion of the source.
+        $normative = ($block['content_origin'] ?? null) === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED
+            ? $this->normativeCheck($claimText, $result, $elementsByKey)
+            : null;
+
+        if (($normative['status'] ?? null) === EnterpriseWikiClaimCanonicalizationService::NORMATIVE_STATUS_STRENGTHENED
+            && $verdict !== WikiClaimVerificationAiClient::VERDICT_CONTRADICTED
+        ) {
+            Log::warning('[WIKI_CLAIM_VERIFICATION] Normative strengthening detected against the source sentence.', [
+                'ai_verdict' => $verdict,
+                'source_class' => $normative['source_class'],
+                'claim_class' => $normative['claim_class'],
+            ]);
+
+            return ['verdict' => WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED, 'deterministic_reason' => 'normative_strengthening', 'normative' => $normative];
+        }
+
+        $outcome = $this->applyFactualSafetyNet($claimText, $result, $elementsByKey, $block, $fallbackSourceText);
+
+        return [...$outcome, 'normative' => $normative];
+    }
+
+    /**
+     * The block's own source elements, narrowed to the ones the verifier cited when it cited
+     * valid ones, in block (document) order so a list item still follows its lead-in.
+     *
+     * @param  array<string, array<string, mixed>>  $elementsByKey
+     * @return array<string, string>|null
+     */
+    private function normativeCheck(string $claimText, array $result, array $elementsByKey): ?array
+    {
+        if ($elementsByKey === []) {
+            return null;
+        }
+
+        $cited = array_values(array_intersect(array_keys($elementsByKey), (array) ($result['supporting_source_element_keys'] ?? [])));
+        $keys = $cited !== [] ? $cited : array_keys($elementsByKey);
+
+        $excerpts = [];
+
+        foreach ($keys as $key) {
+            $excerpts[] = [
+                'text' => (string) ($elementsByKey[$key]['source_excerpt'] ?? ''),
+                'type' => $elementsByKey[$key]['source_element_type'] ?? null,
+            ];
+        }
+
+        return $this->canonicalizationService->detectNormativeStrengthening($claimText, $excerpts);
+    }
+
+    /**
      * @param  array<string, array<string, mixed>>  $elementsByKey
      * @return array{verdict: string, deterministic_reason: ?string}
      */
-    private function applyDeterministicSafetyNet(string $claimText, array $result, array $elementsByKey, ?array $block, string $fallbackSourceText): array
+    private function applyFactualSafetyNet(string $claimText, array $result, array $elementsByKey, ?array $block, string $fallbackSourceText): array
     {
         $verdict = $result['verdict'];
 

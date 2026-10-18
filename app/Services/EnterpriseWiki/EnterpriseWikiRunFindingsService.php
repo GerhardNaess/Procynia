@@ -849,6 +849,22 @@ class EnterpriseWikiRunFindingsService
             return trans_choice('procynia.wiki.runs_findings_explanation_has_blocking', $openBlockingCount, ['count' => $openBlockingCount]);
         }
 
+        // Plan §18 (P0-3): an escalation on a quality finding is explained by what was found —
+        // never by the generic needs_resync text, which describes a different situation.
+        $qualityFindings = $run->qa_status === EnterpriseWikiIngestRun::QA_STATUS_ESCALATED
+            ? array_values(array_intersect(
+                (array) (((array) ($run->qa_result ?? []))['quality_findings'] ?? []),
+                EnterpriseWikiPostIngestQaService::QUALITY_FINDINGS,
+            ))
+            : [];
+
+        if ($qualityFindings !== []) {
+            return implode(' ', array_map(
+                static fn (string $finding): string => __('procynia.wiki.runs_findings_explanation_quality.'.str_replace(':', '_', $finding)),
+                $qualityFindings,
+            ));
+        }
+
         if ($openQaReviewCount > 0) {
             return trans_choice('procynia.wiki.runs_findings_explanation_qa_review_open', $openQaReviewCount, ['count' => $openQaReviewCount]);
         }

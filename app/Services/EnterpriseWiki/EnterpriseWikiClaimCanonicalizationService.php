@@ -149,6 +149,77 @@ class EnterpriseWikiClaimCanonicalizationService
         'kan', 'may', 'could', 'optional',
     ];
 
+    public const MODALITY_CLASS_OBLIGATION = 'obligation';
+
+    public const MODALITY_CLASS_PROHIBITION = 'prohibition';
+
+    public const MODALITY_CLASS_RECOMMENDATION = 'recommendation';
+
+    public const MODALITY_CLASS_NEGATIVE_RECOMMENDATION = 'negative_recommendation';
+
+    public const MODALITY_CLASS_PERMISSION = 'permission';
+
+    public const MODALITY_CLASS_DESCRIPTIVE = 'descriptive';
+
+    public const NORMATIVE_STATUS_STRENGTHENED = 'strengthened';
+
+    public const NORMATIVE_STATUS_AMBIGUOUS = 'ambiguous';
+
+    /**
+     * [source class, claim class] pairs that change what the reader is bound to do (plan §18,
+     * decision 1). Weakening, and a recommendation restated as plain description, stay with the
+     * existing diagnostic modality_mismatch rather than this escalating check.
+     */
+    private const NORMATIVE_STRENGTHENING_PAIRS = [
+        [self::MODALITY_CLASS_RECOMMENDATION, self::MODALITY_CLASS_OBLIGATION],
+        [self::MODALITY_CLASS_NEGATIVE_RECOMMENDATION, self::MODALITY_CLASS_PROHIBITION],
+        [self::MODALITY_CLASS_PERMISSION, self::MODALITY_CLASS_OBLIGATION],
+    ];
+
+    private const LEADING_MODAL_WORDS = [
+        'skal', 'må', 'bør', 'burde', 'kan', 'kreves', 'anbefales', 'frarådes',
+        'shall', 'must', 'may', 'can', 'should', 'is', 'are',
+    ];
+
+    /** Significant tokens a claim clause must share with the source clause it is aligned to. */
+    private const NORMATIVE_ALIGNMENT_MIN_OVERLAP = 2;
+
+    /** Share of the claim clause's significant tokens the aligned source clause must contain. */
+    private const NORMATIVE_ALIGNMENT_MIN_RATIO = 0.4;
+
+    // Modal patterns run on normalized (lower-cased) text. (?<!\p{L}) / (?!\p{L}) instead of \b,
+    // which is ASCII-only without UCP and would split "bør"/"må".
+    private const NEGATIVE_RECOMMENDATION_PATTERNS = [
+        '/(?<!\p{L})(?:bør|burde)(?:\s+\p{L}+){0,2}?\s+(?:ikke|aldri)(?!\p{L})/u',
+        // Subordinate-clause word order: "som ikke bør slås sammen".
+        '/(?<!\p{L})(?:ikke|aldri)\s+(?:bør|burde)(?!\p{L})/u',
+        '/(?<!\p{L})(?:frarådes|frarådet|anbefales\s+ikke|ikke\s+anbefalt)(?!\p{L})/u',
+        '/(?<!\p{L})(?:is\s+not\s+recommended|not\s+recommended|is\s+discouraged)(?!\p{L})/u',
+    ];
+
+    private const PROHIBITION_PATTERNS = [
+        '/(?<!\p{L})(?:skal|må|kan)(?:\s+\p{L}+){0,2}?\s+(?:ikke|aldri)(?!\p{L})/u',
+        '/(?<!\p{L})(?:ikke|aldri)\s+(?:skal|må|kan)(?!\p{L})/u',
+        '/(?<!\p{L})(?:forbudt|forbys|ikke\s+tillatt|tillates\s+ikke)(?!\p{L})/u',
+        '/(?<!\p{L})(?:shall|must|may)\s+(?:not|never)(?!\p{L})/u',
+        '/(?<!\p{L})(?:is\s+prohibited|are\s+prohibited|is\s+forbidden)(?!\p{L})/u',
+    ];
+
+    private const RECOMMENDATION_PATTERNS = [
+        '/(?<!\p{L})(?:bør|burde|anbefales|anbefalt|anbefaler|anbefaling|anbefalinger)(?!\p{L})/u',
+        '/(?<!\p{L})(?:recommended|recommend|recommends|recommendation|is\s+advised)(?!\p{L})/u',
+    ];
+
+    private const OBLIGATION_PATTERNS = [
+        '/(?<!\p{L})(?:skal|må|plikter|pliktig|kreves|krever\s+at|påkrevd|pålagt|forpliktet|obligatorisk)(?!\p{L})/u',
+        '/(?<!\p{L})(?:shall|must|required|requires|mandatory|obliged)(?!\p{L})/u',
+    ];
+
+    private const PERMISSION_PATTERNS = [
+        '/(?<!\p{L})(?:kan|tillates|tillatt|valgfri|valgfritt|har\s+anledning)(?!\p{L})/u',
+        '/(?<!\p{L})(?:may|can|could|optional|is\s+permitted|are\s+permitted)(?!\p{L})/u',
+    ];
+
     /** Del 3/Del 9 #13 — a claim must not silently swap which party performs an action. */
     private const ACTOR_TERMS_SUPPLIER = [
         'leverandøren', 'leverandør', 'contractor', 'supplier', 'vendor',
@@ -709,6 +780,275 @@ class EnterpriseWikiClaimCanonicalizationService
     }
 
     /**
+     * The normative class of one clause (plan §18, P0-2). Six classes instead of modalityTier()'s
+     * two: an obligation, a prohibition, a recommendation, a negative recommendation, a permission
+     * and plain description are different statements in governance, security and compliance text
+     * and must survive generation unchanged.
+     *
+     * Order matters: a negated modal is checked before the bare modal ("bør derfor aldri" is a
+     * negative recommendation, not a recommendation), and when one clause carries both a
+     * recommendation and an obligation marker ("det anbefales at hvert tiltak skal ha en eier")
+     * the weaker, governing recommendation wins — the conservative choice for a check whose only
+     * job is to catch strengthening. "should"/"mulig å" stay out for the reason given at
+     * MODALITY_MARKERS_WEAK.
+     */
+    public function modalityClass(string $text): string
+    {
+        $normalized = $this->textNormalizer->normalize($text);
+
+        // A purpose clause ("..., slik at det kan følges opp") states why, not what the reader
+        // is bound to — its modal never governs the statement.
+        $normalized = trim(preg_replace('/(?<!\p{L})(?:slik\s+at|for\s+at|so\s+that|in\s+order\s+to)(?!\p{L}).*$/u', '', $normalized) ?? $normalized);
+
+        if ($normalized === '') {
+            return self::MODALITY_CLASS_DESCRIPTIVE;
+        }
+
+        if ($this->matchesAnyPattern($normalized, self::NEGATIVE_RECOMMENDATION_PATTERNS)) {
+            return self::MODALITY_CLASS_NEGATIVE_RECOMMENDATION;
+        }
+
+        if ($this->matchesAnyPattern($normalized, self::PROHIBITION_PATTERNS)) {
+            return self::MODALITY_CLASS_PROHIBITION;
+        }
+
+        if ($this->matchesAnyPattern($normalized, self::RECOMMENDATION_PATTERNS)) {
+            return self::MODALITY_CLASS_RECOMMENDATION;
+        }
+
+        if ($this->matchesAnyPattern($normalized, self::OBLIGATION_PATTERNS)) {
+            return self::MODALITY_CLASS_OBLIGATION;
+        }
+
+        if ($this->matchesAnyPattern($normalized, self::PERMISSION_PATTERNS)) {
+            return self::MODALITY_CLASS_PERMISSION;
+        }
+
+        return self::MODALITY_CLASS_DESCRIPTIVE;
+    }
+
+    /**
+     * Sentence-level check for a real normative strengthening (plan §18, P0-2): a recommendation
+     * turned into a requirement, a negative recommendation into a prohibition, or a permission
+     * into an unconditional requirement.
+     *
+     * Unlike modalityTier(), which looks at whole texts, every obligation/prohibition clause of
+     * the claim is aligned to the ONE source clause it restates (token overlap on the cited
+     * excerpts), so a "bør" elsewhere in the same block can no longer hide a "skal" here, and a
+     * "bør" somewhere in the source can no longer flag a claim whose own sentence is faithful.
+     * Valid paraphrases compare equal because the comparison is between classes, not words
+     * ("det anbefales" = "bør", "må" = "skal", "bør aldri" = "bør ikke").
+     *
+     * A list item without its own modal inherits the class of the lead-in paragraph that
+     * introduces it ("Følgende kriterier anbefales:"), which is the correct source context for
+     * such an item. A coordinated clause ("... og bør ...") without its own modal inherits the
+     * class of the clause it continues.
+     *
+     * Returns null when nothing is wrong, NORMATIVE_STATUS_STRENGTHENED when the alignment is
+     * confident, and NORMATIVE_STATUS_AMBIGUOUS when a strengthening is possible but the clause
+     * it would rest on is not clearly the one the claim restates — never a confident conclusion
+     * from a guessed sentence.
+     *
+     * @param  list<array{text: string, type?: ?string}>  $sourceExcerpts  in document order
+     * @return array{status: string, claim_sentence: string, source_sentence: string, claim_class: string, source_class: string}|null
+     */
+    public function detectNormativeStrengthening(string $claimText, array $sourceExcerpts): ?array
+    {
+        $sourceClauses = $this->classifiedSourceClauses($sourceExcerpts);
+
+        if ($sourceClauses === []) {
+            return null;
+        }
+
+        $ambiguous = null;
+
+        foreach ($this->classifiedClauses($claimText) as $claimClause) {
+            if (! in_array($claimClause['class'], [self::MODALITY_CLASS_OBLIGATION, self::MODALITY_CLASS_PROHIBITION], true)) {
+                continue;
+            }
+
+            $claimTokens = $claimClause['tokens'];
+
+            if ($claimTokens === []) {
+                continue;
+            }
+
+            $scored = [];
+
+            foreach ($sourceClauses as $sourceClause) {
+                $overlap = count(array_intersect($claimTokens, $sourceClause['tokens']));
+
+                if ($overlap > 0) {
+                    $scored[] = ['clause' => $sourceClause, 'overlap' => $overlap];
+                }
+            }
+
+            if ($scored === []) {
+                continue;
+            }
+
+            usort($scored, static fn (array $a, array $b): int => $b['overlap'] <=> $a['overlap']);
+
+            $best = $scored[0];
+            $strengthened = $this->isNormativeStrengthening($best['clause']['class'], $claimClause['class']);
+
+            if (! $strengthened) {
+                continue;
+            }
+
+            $finding = [
+                'claim_sentence' => $claimClause['text'],
+                'source_sentence' => $best['clause']['text'],
+                'claim_class' => $claimClause['class'],
+                'source_class' => $best['clause']['class'],
+            ];
+
+            // A tie with a clause the claim restates faithfully means the system cannot tell
+            // which source sentence this is — that is uncertainty, not a finding.
+            $tiedWithFaithfulClause = false;
+
+            foreach (array_slice($scored, 1) as $other) {
+                if ($other['overlap'] === $best['overlap']
+                    && ! $this->isNormativeStrengthening($other['clause']['class'], $claimClause['class'])
+                ) {
+                    $tiedWithFaithfulClause = true;
+                }
+            }
+
+            $confident = $best['overlap'] >= self::NORMATIVE_ALIGNMENT_MIN_OVERLAP
+                && $best['overlap'] / count($claimTokens) >= self::NORMATIVE_ALIGNMENT_MIN_RATIO
+                && ! $tiedWithFaithfulClause;
+
+            if ($confident) {
+                return ['status' => self::NORMATIVE_STATUS_STRENGTHENED, ...$finding];
+            }
+
+            if ($best['overlap'] >= self::NORMATIVE_ALIGNMENT_MIN_OVERLAP) {
+                $ambiguous ??= ['status' => self::NORMATIVE_STATUS_AMBIGUOUS, ...$finding];
+            }
+        }
+
+        return $ambiguous;
+    }
+
+    private function isNormativeStrengthening(string $sourceClass, string $claimClass): bool
+    {
+        return in_array([$sourceClass, $claimClass], self::NORMATIVE_STRENGTHENING_PAIRS, true);
+    }
+
+    /**
+     * @param  list<array{text: string, type?: ?string}>  $sourceExcerpts
+     * @return list<array{text: string, class: string, tokens: list<string>}>
+     */
+    private function classifiedSourceClauses(array $sourceExcerpts): array
+    {
+        $clauses = [];
+        $leadInClass = null;
+
+        foreach ($sourceExcerpts as $excerpt) {
+            $text = trim((string) ($excerpt['text'] ?? ''));
+
+            if ($text === '') {
+                continue;
+            }
+
+            $isListItem = in_array((string) ($excerpt['type'] ?? ''), ['list_item', 'listitem'], true);
+            $excerptClauses = $this->classifiedClauses($text);
+
+            if ($isListItem && $leadInClass !== null) {
+                foreach ($excerptClauses as $index => $clause) {
+                    if ($clause['class'] === self::MODALITY_CLASS_DESCRIPTIVE) {
+                        $excerptClauses[$index]['class'] = $leadInClass;
+                    }
+                }
+            } elseif (! $isListItem) {
+                // A paragraph ending in a colon introduces the list items that follow it.
+                $leadInClass = str_ends_with(rtrim($text), ':') && $excerptClauses !== []
+                    ? $excerptClauses[array_key_last($excerptClauses)]['class']
+                    : null;
+            }
+
+            array_push($clauses, ...$excerptClauses);
+        }
+
+        return $clauses;
+    }
+
+    /**
+     * @return list<array{text: string, class: string, tokens: list<string>}>
+     */
+    private function classifiedClauses(string $text): array
+    {
+        $result = [];
+
+        foreach (preg_split('/(?<=[.!?;:])\s+|\n+/u', trim($text), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $sentence) {
+            $previousClass = null;
+
+            foreach ($this->splitIntoClauses($sentence) as $clause) {
+                $class = $this->modalityClass($clause);
+
+                // "..., og en egen saksreferanse" continues the predicate of the clause before
+                // it ("skal ha en eier ... og en egen saksreferanse"); only a coordinated clause
+                // that opens with its own modal ("og bør derfor aldri ...") states its own class.
+                if ($previousClass !== null
+                    && $previousClass !== self::MODALITY_CLASS_DESCRIPTIVE
+                    && preg_match('/^(?:og|and)\s/ui', $clause) === 1
+                    && ! $this->opensWithModal($clause)
+                ) {
+                    $class = $previousClass;
+                }
+
+                $result[] = [
+                    'text' => $clause,
+                    'class' => $class,
+                    'tokens' => array_values(array_unique($this->significantTokens($this->textNormalizer->normalize($clause)))),
+                ];
+
+                $previousClass = $class;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * The set of non-descriptive modality classes a text asserts, order-independent.
+     *
+     * @return list<string>
+     */
+    private function normativeProfile(string $text): array
+    {
+        $classes = array_values(array_unique(array_filter(
+            array_column($this->classifiedClauses($text), 'class'),
+            static fn (string $class): bool => $class !== self::MODALITY_CLASS_DESCRIPTIVE,
+        )));
+        sort($classes);
+
+        return $classes;
+    }
+
+    private function opensWithModal(string $clause): bool
+    {
+        $words = preg_split('/\s+/u', mb_strtolower(trim($clause), 'UTF-8'), 5, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        return array_intersect(array_slice($words, 1, 3), self::LEADING_MODAL_WORDS) !== [];
+    }
+
+    /**
+     * @param  list<string>  $patterns
+     */
+    private function matchesAnyPattern(string $normalizedText, array $patterns): bool
+    {
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $normalizedText) === 1) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * True only when the claim names EXCLUSIVELY one party (supplier or customer) and the cited
      * source excerpt names EXCLUSIVELY the other — deliberately conservative, since real source
      * text routinely names both parties in the same sentence (e.g. "the Contractor shall report
@@ -964,6 +1304,14 @@ class EnterpriseWikiClaimCanonicalizationService
         }
 
         if ($this->hasNormativeMarker($normalizedA) !== $this->hasNormativeMarker($normalizedB)) {
+            return false;
+        }
+
+        // Plan §18 (P0-2): "skal" and "bør" are both normative markers and both stopwords, so
+        // without this a "skal" claim could reuse a fact verified for the "bør" wording of the
+        // same source elements. Two texts are only the same fact when they bind the reader the
+        // same way.
+        if ($this->normativeProfile($a) !== $this->normativeProfile($b)) {
             return false;
         }
 

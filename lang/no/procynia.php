@@ -10036,6 +10036,14 @@ return [
         'claim_finding_action_undocumented_or_incorrect_claim' => 'Kontroller påstanden mot kilden. Godkjenn den dersom den likevel stemmer, avvis den dersom den er feil, eller behold/fjern blokkeringen etter eget skjønn.',
         'claim_finding_action_possible_content_deviation' => 'Sammenlign påstanden med kildeteksten. Avviket er ikke bekreftet — vurder om det er reelt før du bestemmer deg.',
         'claim_finding_action_technical_uncertainty' => 'Dette er en teknisk koblingsusikkerhet, ikke en bekreftet innholdsfeil. Se gjennom siden, og behold eller fjern blokkeringen etter eget skjønn.',
+        'modality_class' => [
+            'obligation' => 'krav',
+            'prohibition' => 'forbud',
+            'recommendation' => 'anbefaling',
+            'negative_recommendation' => 'fraråding',
+            'permission' => 'mulighet',
+            'descriptive' => 'beskrivelse',
+        ],
         'claim_finding' => [
             'stale_version' => [
                 'title' => 'Utdatert sidekobling',
@@ -10068,6 +10076,11 @@ return [
             'actor_mismatch' => [
                 'title' => 'Feil aktør',
                 'explanation' => 'Påstanden tilskriver handlingen til feil aktør sammenlignet med kilden.',
+            ],
+            'normative_strengthening' => [
+                'title' => 'Strengere enn kilden',
+                'explanation' => 'Teksten gjør en anbefaling eller mulighet i kilden om til et krav eller forbud.',
+                'explanation_detailed' => 'Kilden sier «:source» (:source_class), men teksten sier «:claim» (:claim_class). Teksten må ha samme forpliktelse som kilden.',
             ],
             'modality_mismatch' => [
                 'title' => 'Sterkere enn kilden',
@@ -10620,6 +10633,12 @@ return [
         'runs_findings_explanation_has_blocking' => '{1} Kjøringen har ett åpent blokkerende teknisk funn, og kunne derfor ikke fullføres uten videre behandling.|[2,*] Kjøringen har :count åpne blokkerende tekniske funn, og kunne derfor ikke fullføres uten videre behandling.',
         'runs_findings_explanation_inconsistent_passed' => '{1} Kjøringen har ett åpent blokkerende teknisk funn, men står som bestått. Statusen må synkroniseres.|[2,*] Kjøringen har :count åpne blokkerende tekniske funn, men står som bestått. Statusen må synkroniseres.',
         'runs_findings_explanation_qa_review_open' => '{1} Kjøringen er fullført og Wiki er tilgjengelig. Ett faglig QA-punkt er åpent for frivillig gjennomgang.|[2,*] Kjøringen er fullført og Wiki er tilgjengelig. :count faglige QA-punkter er åpne for frivillig gjennomgang.',
+        'runs_findings_explanation_quality' => [
+            'control_not_completed_semantic_link_qa' => 'Kjøringen krever oppfølging: den semantiske kontrollen av lenkene kunne ikke gjennomføres på minst én side. En kontroll som ikke ble gjennomført, regnes ikke som bestått.',
+            'control_not_completed_source_coverage' => 'Kjøringen krever oppfølging: kontrollen av om kildedokumentets innhold er dekket, kunne ikke gjennomføres.',
+            'normative_strengthening' => 'Kjøringen krever oppfølging: minst én tekst er strengere enn kilden, for eksempel «skal» der kilden sier «bør». Vurder påstandene som er merket «Strengere enn kilden».',
+            'source_section_uncovered' => 'Kjøringen krever oppfølging: minst én del av kildedokumentet har ikke fått plass på noen Wiki-side og er heller ikke bevisst utelatt.',
+        ],
         'runs_findings_explanation_needs_resync' => 'Ingen åpne blokkerende tekniske funn lenger, men kjøringens status er ikke oppdatert ennå.',
         'runs_findings_explanation_verification_incomplete_auto' => 'Kjøringen ble avbrutt før alle påstander var verifisert. Systemet vil forsøke å gjenoppta behandlingen automatisk.',
         'runs_findings_explanation_verification_incomplete_manual' => 'Kjøringen ble avbrutt før alle påstander var verifisert og krever ny behandling.',

@@ -75,11 +75,11 @@ class WikiPageContentAiClient
     private const DEFAULT_EXPECTED_BLOCK_COUNT = 5;
 
     /**
-     * What source_based means, stated once for every prompt that writes source_based blocks.
-     * A source_based block is never claim-verified afterwards (only best_practice and
-     * unsupported content is — see EnterpriseWikiExtractPageClaimsService::claimCandidateBlocks()),
-     * so this generation contract is the only thing that keeps a plausible but unstated purpose,
-     * cause, consequence or benefit from being presented as document-backed. Rephrasing alone
+     * What source_based means, stated once for every prompt that writes source_based blocks
+     * (generation, section repair, figure repair). Each source_based block is verified afterwards
+     * as one whole-block claim, but this contract is still the first line of defence against a
+     * plausible but unstated purpose, cause, consequence or benefit — and, since run 962 (plan
+     * §18, P0-2), against changing how binding a statement is. Rephrasing alone
      * never needed this rule; the earlier wording only protected meaning, obligations and
      * parties, and the "finished agreement text" house style was read as licence to round a
      * sentence off with an inferred effect.
@@ -88,6 +88,7 @@ class WikiPageContentAiClient
         '- The WHOLE material assertion of a source_based block must be supported by the source elements it cites. You may rephrase, shorten, reorder, change grammatical form, translate, and combine information those elements state explicitly.',
         '- Never add to a source_based block anything its cited elements do not state: no added purpose or intended effect ("so that ...", "in order to ...", "slik at ...", "for å ..."), no added cause or reason, no added consequence, outcome, or benefit, no added requirement, and no added recommendation — not even when it is plausible, generally true, or makes the sentence read better. The house style governs wording only; it never licenses adding substance.',
         '- When you want to say more than the cited elements state: if it is a genuine obligation, control, or mechanism that closes a gap in the source, write it as its own separate best_practice block under the best_practice rules — never fold it into the source_based sentence. Any other inference, explanation, or elaboration does not belong on the page: omit it.',
+        '- Keep the normative force of every source statement exactly, sentence by sentence: a requirement stays a requirement ("skal"/"må"/"shall"/"must"), a prohibition stays a prohibition ("skal ikke"/"må ikke"), a recommendation stays a recommendation ("bør"/"anbefales"/"recommended"), advice against stays advice against ("bør ikke"/"bør aldri"), a possibility stays a possibility ("kan"/"may"), and a description stays a description. Never turn "bør" into "skal", "bør ikke"/"bør aldri" into "skal ikke", or "kan" into an unconditional requirement, and never drop a negation, condition, exception, or the party a statement applies to. A list item introduced by "Følgende kriterier anbefales:" is a recommendation too. Equivalent wording is fine ("det anbefales at X" = "X bør"; "må" = "skal").',
     ];
 
     public function __construct(
@@ -750,7 +751,7 @@ class WikiPageContentAiClient
             'Every content block must explicitly choose content_origin: source_based, best_practice, or structural — for source_based blocks, copy exact source_element_keys from SOURCE ELEMENTS. structural is for a pure "Se også"/cross-reference one-liner with no assertion of its own; best_practice requires a concrete obligation, control, or mechanism that goes beyond the source, never a bare heading or reference.',
             ...self::SOURCE_BASED_FIDELITY_RULES,
             'For a useful Wiki cross-reference, add a link_intent selecting an allowed target_page_id and set anchor_text to the exact words in this block\'s markdown the link should sit on. Write no link syntax at all — no [[...]], no slug, no marker: the server inserts the link on those words.',
-            'Write every block as finished agreement text, exactly as the rest of the page: a best_practice block states its clause normatively ("skal ...") and never as advice — no "Procynia anbefaler", "det anbefales", "beste praksis tilsier", or any equivalent advisory opener, and no "fordi ..." justification in the text itself. The justification belongs in best_practice_reason.',
+            'Write every block as finished agreement text, exactly as the rest of the page: a source_based block keeps the normative force of its source exactly ("bør" stays "bør"), while a best_practice block states its clause normatively ("skal ...") and never as advice — no "Procynia anbefaler", "det anbefales", "beste praksis tilsier", or any equivalent advisory opener, and no "fordi ..." justification in the text itself. The justification belongs in best_practice_reason.',
             '',
             'Return only JSON matching the schema. No text before or after JSON.',
         ]);
@@ -1249,6 +1250,7 @@ class WikiPageContentAiClient
             '',
             'HOUSE STYLE — every content block is finished agreement text:',
             '- The whole page must read as usable agreement text: wording that could stand in the contract or governing document as it is, without further editing. Write in continuous, professional prose.',
+            '- The house style governs register and wording only. It never changes how binding a source_based statement is: a recommendation in the source stays a recommendation on the page (see SOURCE_BASED). The normative "skal" style below applies to best_practice blocks only.',
             '- Never write about the source, about this system, or about your own work: no "kilden beskriver", "dokumentet sier", "ifølge kildedokumentet", "Procynia", "vi", or any other meta-commentary about where the text came from or why it is here. State the substance directly.',
             '- Use the party and role names that actually follow from the source and its context (for example Kunden, Leverandøren, a named role, or a specific function). Never invent a party the material does not support, and never default every obligation to "Kunden skal" — each obligation belongs to the party that would realistically carry it.',
             '',

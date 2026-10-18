@@ -8,6 +8,7 @@ Status (2026-10-18):
 | Arbeidspakke B – kunnskapskobling | Godkjent for implementering (D4, D5, D6, D8) | Implementert på `feat/wiki-knowledge-integration`, ikke committet (§17) | Testet (§17.6) |
 | Arbeidspakke C – varsler og resultatvisning | Akseptert som planleggingsretning, ikke godkjent for implementering | Ikke påbegynt | – |
 | Test med ekte AI (D11) | Inngår i strategien, plan i §17.8 | Ikke gjennomført, ikke godkjent for kjøring | – |
+| Kvalitetsrettelser etter kjøring 962 (§18) | Godkjent (beslutning 1–5 i §18.2) | Implementert på `fix/wiki-run962-quality`, ikke committet | Målrettet testet (§18.9). Ny test med ekte AI er ikke gjennomført |
 
 Bindende rammer: `AGENTS.md` (Enterprise Wiki architecture invariants) og
 `docs/enterprise-wiki-architecture.md`. Forslaget er sjekket mot design-sjekklisten i §J der (se §14).
@@ -1357,3 +1358,250 @@ Bestått betyr alle påkrevde lenker og ingen lenker som regnes som feil.
 ### 17.9 Status
 
 B1–B6 er implementert og teknisk kontrollert. Alle obligatoriske akseptansekriterier i §13 (arbeidspakke B) er oppfylt. Arbeidspakke C er ikke implementert. Endringene er ikke committet.
+
+---
+
+## 18. Kvalitetsrettelser etter Wiki-kjøring 962 (2026-10-18)
+
+Branch `fix/wiki-run962-quality` (fra `main` `a8deed95`), i egen worktree. **Ikke committet.** Arbeidspakke C er ikke endret. Ingen ny kjøring med ekte AI er gjennomført.
+
+### 18.1 Bakgrunn
+
+Kjøring 962 var den første kontrollerte kjøringen med ekte AI etter arbeidspakke B. Den brukte `wiki-knowledge-integration-test-source.docx` hos kunde 4, og fasiten ligger i `docs/testing/wiki-knowledge-integration-expected-results.md`. Kjøringen endte `completed` med QA `passed` og 0 funn.
+
+Den tekniske kunnskapskoblingen fungerte. Etter fasitens kriterier bestod testen likevel ikke. Undersøkelsen fant fire årsaker. Alle er bekreftet i kode og data:
+
+| Prioritet | Feil | Dokumentert årsak |
+|---|---|---|
+| P0-1 | Bare 15 av 51 kildeelementer ble tildelt en side | Ingen kontroll gikk fra kilde til plan. Planleggerprompten ba om få temaer («typically 1-3 items»), og maks 6 nøkler per tema ble kuttet stille. Artikkel- og konseptsider får bare tildelte elementer. |
+| P0-2 | «bør» ble «skal» | Husstilen («finished agreement text») og `best_practice`-regelen om «skal» smittet over på `source_based`. Modalitetskontrollen hadde to nivåer og vurderte hele teksten. AI-verifikatoren svarte `modality: match`. |
+| P0-3 | QA `passed` tross alvorlige avvik | Påstander, dekning og semantisk lenke-QA påvirket aldri sluttstatus. `semantic_qa` var hardkodet `null`. `modality_mismatch` var bevisst skjult (v0.7). |
+| P1-1 | 16 eldre lenker fikk kjøring 962 som opphav | `materializeWikilinksForPage()` brukte `updateOrCreate` og skrev gjeldende run-ID over på alle rader. |
+
+**To presiseringer til evalueringen:**
+- «Påstandsdekning 20,6 %» er kundebred (`EnterpriseWikiCoverageService`), ikke kjøringens. Tallet er uendret og brukes ikke som terskel.
+- Fasitens spørring «Lenker opprettet i kjøringen» filtrerte på lenkeradens run-ID og talte derfor de 16 eldre lenkene.
+
+### 18.2 Godkjente beslutninger
+
+1. **Normativ betydning.** Reell forsterkning i `source_based`-innhold blir synlig og gir `escalated`: «bør» → «skal», «bør ikke» → «skal ikke» og «kan» → ubetinget krav. Gyldige omskrivninger blokkeres ikke. Diagnostiske negasjons- og subjektsignaler beholder dagens behandling.
+2. **`excluded_sections`.** Planleggeren kan utelate en kildeseksjon eksplisitt med `example`, `front_matter`, `duplicate_of_existing` eller `out_of_scope`, og med en begrunnelse som kan kontrolleres.
+3. **Feilet kontroll.** En obligatorisk kontroll som ikke ble fullført, er ikke bestått. Ugyldige slugs i semantisk lenke-QA forkastes enkeltvis. Statusmodellen er uendret.
+4. **Retest.** Retesten skjer med en isolert evalueringskunde med deterministisk utgangspunkt. Kloning er planlagt, ikke utført (§18.11).
+5. **Dokumentasjon.** Denne seksjonen.
+
+### 18.3 P1-1 – Historisk lenkeopphav [Implementert]
+
+`EnterpriseWikiBuildPageLinksService::materializeWikilinksForPage()` bruker nå `firstOrNew` på den samme uniknøkkelen (`customer_id, from_page_id, to_page_id, link_type`).
+
+- `enterprise_wiki_ingest_run_id` settes bare når raden opprettes.
+- Versjonspekere, `source`, `confidence` og `metadata.anchor_text` oppdateres som før.
+- Retry er idempotent.
+- Kallere uten kjøring (`WikiClaimController` og to reparasjonstjenester) kan ikke lenger nullstille opphavet.
+- Det er ingen migrasjon og ingen historisk datakorrigering. De 16 radene fra kjøring 962 har fortsatt feil run-ID. Den opprinnelige verdien finnes ikke lenger i raden.
+
+**Telleregel:** Fasitens spørring er erstattet med regelen fra §8.4. En relasjon er ny når den er en `wikilink`-rad fra en side kjøringen skrev (pivot eller anvendt inngående relink), og ikke fantes i sidens siste versjon før kjøringen startet. Regelen stoler verken på run-ID eller `created_at` alene. Kontrollert lesende mot kjøring 962: 23 nye relasjoner (20 utgående, 3 inngående), og ingen av de 16 eldre.
+
+### 18.4 P0-2 – Normativ betydning [Implementert]
+
+**Generering** (`WikiPageContentAiClient`):
+- `SOURCE_BASED_FIDELITY_RULES` har en konkret regel per setning: krav, forbud, anbefaling, fraråding, mulighet og beskrivelse beholdes. Det samme gjelder negasjon, betingelse, unntak og hvem utsagnet gjelder.
+- Regelen gjelder for generering, seksjonsreparasjon og figurreparasjon.
+- Husstilen gjelder nå bare ordvalg. «Skal»-stilen er avgrenset til `best_practice`, også i reparasjonsprompten.
+- Verifikatorprompten (`WikiClaimVerificationAiClient`) har fått eksempelet «bør» → «skal».
+
+**Deterministisk kontroll** (`EnterpriseWikiClaimCanonicalizationService`):
+- `modalityClass()` gir seks klasser: `obligation`, `prohibition`, `recommendation`, `negative_recommendation`, `permission` og `descriptive`. Det er et lite, domenenøytralt NO/EN-leksikon, ikke en synonymtabell.
+- Negerte modaler vurderes før de bare modalene. Ved både anbefaling og krav i samme ledd vinner den svakere anbefalingen («det anbefales at … skal»).
+- Formålsledd («slik at det kan …») styrer ikke utsagnet.
+- «should» og «mulig å» er fortsatt utelatt.
+- `detectNormativeStrengthening()` deler både påstand og kilde i setninger og ledd. Hvert krav- eller forbudsledd i påstanden kobles til det ene kildeleddet det gjengir (token-overlapp på de siterte utdragene). Bare tre par regnes som forsterkning: anbefaling → krav, fraråding → forbud og mulighet → krav.
+- En «bør» et annet sted i blokken kan derfor ikke skjule en «skal».
+- Et listepunkt arver klassen fra innledningen sin («Følgende kriterier anbefales:»). Et sideordnet ledd uten eget modalverb arver fra leddet foran.
+- Uklar kobling (likt med et trofast kildeledd, eller svak overlapp) gir `ambiguous`. Det lagres som `review_metadata.normative_check`, men endrer ikke resultatet.
+
+**Verifikasjon** (`EnterpriseWikiVerifyPageClaimsService::applyDeterministicSafetyNet()`):
+- Kontrollen kjører først, uansett AI-dom, men bare for blokker med `content_origin = source_based`. En `best_practice`-blokk skal skrive «skal» og kan sitere kilden som motivasjon.
+- Ved sikker forsterkning blir dommen `not_supported` med `deterministic_reason = normative_strengthening`. Setningene og klassene lagres i `normative_check`.
+
+**Kanoniske fakta:** `areEquivalentTexts()` krever samme normative profil. En «skal»-påstand kan ikke gjenbruke et faktum som er verifisert for «bør».
+
+**Review:** `EnterpriseWikiClaimFindingExplainer` gjør `normative_strengthening`, og bare den, brukerrettet. Teksten «Strengere enn kilden» viser begge setningene og klassene. `modality_mismatch`, `negation_mismatch` og `subject_mismatch` forblir diagnostiske.
+
+Det skjer ingen automatisk omskriving. Avviket håndteres i eksisterende review: behold, rediger, fjern eller «Ikke blokker».
+
+**Kjøring 962 målt mot den nye kontrollen** (fixturer i `tests/Fixtures/EnterpriseWiki/run962`):
+- 438, 439, 440 og 442 er forsterkninger.
+- 437 og 443 gjengir en anbefaling som beskrivelse. De forblir diagnostisk `modality_mismatch` og eskalerer ikke.
+- 431 og 434 gjør beskrivelse til «skal». Det er ikke et forsterkningspar etter beslutning 1. (Rettelsesplanen antok at 434 var maskert av en «bør». Det stemte ikke: kildens «bør derfor ikke» er bevart.)
+- 428 (negasjon) og 441 (subjekt) var falske positive i den gamle kontrollen og gir ingen funn.
+
+### 18.5 P0-1 – Kunnskapsdekning [Implementert]
+
+**Kulepunkter** (`EnterpriseWikiPlannedSectionEvidenceResolver::bindPlannedElements()`):
+- Et planlagt innledningsavsnitt (som slutter med «:») tar med listen som følger i samme seksjon.
+- Et planlagt listepunkt tar med innledningen sin.
+- Disse følgeelementene teller ikke mot `MAX_ELEMENTS_PER_SECTION`, men teller mot tegnbudsjettet. Et følgeelement som ikke får plass helt, kuttes ikke. Det rapporteres i `omitted_source_element_keys`, og det samme gjør planlagte nøkler over grensene. Begge logges ved generering.
+
+**Dekningsvalidator** (`EnterpriseWikiSourceCoverageValidator`, ny):
+- Enheten er avsnitt + listen det innleder, en liste uten innledning, eller ett element. En enhet er vesentlig fra 60 tegn.
+- Seksjonene er `sec-N` fra `EnterpriseWikiDocumentSectionMap`.
+- Dekning måles på det genereringen faktisk får, via `bindPlannedElements()`. Det gjelder eide temaer på artikkelen og konsept- og entitetssider, pluss nøkler i `patch_targets`.
+- Sammendraget teller ikke, fordi det orienterer og ikke holder kunnskapen.
+- Seksjonsstatus er `covered`, `partial`, `uncovered`, `excluded` eller `immaterial`. Samlet status er `complete`, `partial`, `incomplete` eller `not_applicable` (ikke-DOCX eller ingen artikkel).
+
+**`excluded_sections`:**
+- Feltet ligger på `source_article` (alltid `[]` på sammendraget). Skjemaet er `{section_key, reason, justification, existing_page_id}`.
+- Det ligger på artikkelobjektet fordi den eksisterende delta-reparasjonen da kan endre det.
+- En utelatelse er ugyldig når seksjonen ikke finnes, når begrunnelsen er under 15 tegn, når seksjonen samtidig er sitert, eller når `duplicate_of_existing` mangler en kjent side.
+- En ugyldig utelatelse skjuler aldri hullet. Mer enn 50 % utelatt vesentlig tekst er `incomplete`.
+
+**Reparasjon:**
+- Funnene har prefikset `[source_coverage]` og markøren `{object:source_article}`. `EnterpriseWikiMaintainerDecisionIssueAttributor` plasserer dem dermed strukturelt.
+- De går gjennom den eksisterende begrensede delta-reparasjonen (`MAX_REPAIR_ROUNDS = 2`, og stopper ved manglende fremgang).
+- `repairSectionKeys()` sender de udekkede seksjonene i fulltekst.
+- Planlegger- og reparasjonsprompter har fått `sourceCoverageRules()`: artikkelen eier hver vesentlig seksjon ingen annen side eier, og det lages aldri en ny side bare for dekning.
+
+**Mykt, ikke blokkerende:** Dekningsfunn som gjenstår etter reparasjon, feiler aldri planen. De logges og vurderes av QA (§18.6). Det samme gjelder et dekningsfunn som ikke kan plasseres.
+
+**Kostnad:** Kontrollen er deterministisk. Ved hull brukes høyst den eksisterende reparasjonsrammen (ett gpt-5-delta-kall per runde, maks to runder). Artikkelgenereringen får mer evidens, men det blir ikke flere sider.
+
+### 18.6 P0-3 – QA-regler [Implementert]
+
+`EnterpriseWikiPostIngestQaService::evaluate()` har tre nye kontroller i `qa_result.checks`: `semantic_link_qa`, `normative_fidelity` og `source_coverage`. Resultatet har også `quality_findings` og `quality_notes`.
+
+| Situasjon | Resultat |
+|---|---|
+| Uferdige steg / aktiv reservasjon (som før) | `escalated` |
+| Kritisk teknisk mangel (som før) | `failed` – går foran alle kvalitetsfunn |
+| Semantisk lenke-QA ikke fullført: `failed` (unntatt `invalid_revision`) etter ett nytt forsøk, eller en forlatt `reserved`-rad | `escalated` – `control_not_completed:semantic_link_qa` |
+| Dekningskontrollen kunne ikke lese dokumentet | `escalated` – `control_not_completed:source_coverage` |
+| Uavgjort `normative_strengthening` på gjeldende versjon (samme `blockingState()` som publiseringsporten) | `escalated` – `normative_strengthening` |
+| Dekning `incomplete` (hel seksjon udekket, eller overdreven utelatelse) | `escalated` – `source_section_uncovered` |
+| Lenke-QA ikke relevant (`ai_unavailable`, `empty_content`, ingen forsøk registrert) | Merknad `semantic_link_qa_not_run` |
+| Dekning `partial` (enkeltelementer i dekkede seksjoner, ugyldig utelatelse) | Merknad `source_coverage_partial` |
+| Uklar normativ kobling | Merknad `normative_alignment_uncertain` |
+| Udokumenterte påstander uten normativt funn, og diagnostiske signaler | Uendret – informativt, aldri eskalering |
+| Alle kontroller fullført, ingen funn | `passed` |
+
+Utfallene skilles slik:
+
+| Utfall | Eksempler |
+|---|---|
+| Fullført | `applied`, `no_change_recommended`, `invalid_revision`, `block_provenance_at_risk` (vurderingen ble gjort) |
+| Ikke relevant / ikke kjørt | Se tabellen over |
+| Faglig avvik | Normativ forsterkning, kunnskapstap |
+| Teknisk feil | Se tabellen over |
+
+**Semantisk lenke-QA:**
+- `WikiLinkSemanticQaAiClient` forkaster slugs utenfor katalogen enkeltvis (`rejected_missing_link_slugs`). Et malformet svar er fortsatt en feil.
+- `EnterpriseWikiLinkSemanticRepairService` gjør ett nytt forsøk ved feil, slik at en forbigående feil ikke eskalerer.
+
+**Konsistens:**
+- `EnterpriseWikiEscalatedRunRecoveryService` behandler kvalitetsfunn som `not_recoverable` (en person må avgjøre), aldri som «stale» eller gjenopptakbart.
+- `EnterpriseWikiRunFindingsService` forklarer eskaleringen med funnet (`runs_findings_explanation_quality.*`, NO/EN), aldri med `needs_resync`.
+- Påstanden som blokkerer publisering, vises i Funn, og en beslutning frigjør både publisering og QA.
+- `semantic_qa` beholdes som `null` av hensyn til eksisterende lesere. `coverage_summary` er fortsatt kundebred og brukes ikke som terskel.
+
+### 18.7 Avvik fra rettelsesplanen (bevisste)
+
+1. `excluded_sections` ligger på `source_article`, ikke på toppnivå, slik at den eksisterende reparasjonen kan endre det.
+2. Dekningsfunn er «myke» i planleggingen: begrenset reparasjon, deretter QA. Planen feiler ikke.
+3. Delvis dekning går til reparasjon, men gir bare en merknad etter reparasjonen. Det er hel udekket seksjon som eskalerer.
+4. Semantisk lenke-QA har fått ett nytt forsøk, for å skille vedvarende fra forbigående feil (beslutning 3).
+5. `invalid_revision` og `block_provenance_at_risk` regnes som fullført kontroll. Vurderingen ble gjort, og bare reparasjonen ble avvist.
+6. Den normative kontrollen gjelder bare `source_based`-blokker (se §18.4).
+7. Fasitens tellespørring (`docs/testing/…`, usporet fil) er oppdatert i hovedarbeidskatalogen, ikke på branchen.
+
+### 18.8 Berørte filer
+
+**Produksjonskode:**
+- `EnterpriseWikiBuildPageLinksService`
+- `EnterpriseWikiClaimCanonicalizationService`
+- `EnterpriseWikiVerifyPageClaimsService`
+- `EnterpriseWikiClaimFindingExplainer`
+- `WikiPageContentAiClient`
+- `WikiClaimVerificationAiClient`
+- `EnterpriseWikiPlannedSectionEvidenceResolver`
+- `EnterpriseWikiSourceCoverageValidator` (ny)
+- `EnterpriseWikiMaintainerDecisionService`
+- `EnterpriseWikiMaintainerDecisionPrompt`
+- `EnterpriseWikiMaintainerDecisionAiClient`
+- `EnterpriseWikiMaintainerDecisionSplitCoordinator`
+- `EnterpriseWikiMaintainerDecisionIssueAttributor`
+- `EnterpriseWikiGenerateAppliedPagesService` (logging)
+- `WikiLinkSemanticQaAiClient`
+- `EnterpriseWikiLinkSemanticRepairService`
+- `EnterpriseWikiPostIngestQaService`
+- `EnterpriseWikiEscalatedRunRecoveryService`
+- `EnterpriseWikiRunFindingsService`
+- `lang/{no,en}/procynia.php`
+
+Det er ingen migrasjoner og ingen UI-endringer.
+
+### 18.9 Tester (målrettet)
+
+**Nye testfiler:**
+- `EnterpriseWikiNormativeStrengtheningTest`
+- `EnterpriseWikiNormativeStrengtheningVerificationTest`
+- `EnterpriseWikiSourceCoverageValidatorTest`
+- `EnterpriseWikiSourceCoverageRepairTest`
+- `EnterpriseWikiPostIngestQaQualityRulesTest`
+- `WikiLinkSemanticQaAiClientTest`
+- `EnterpriseWikiRun962QualityIntegrationTest`
+
+**Utvidede testfiler:**
+- `EnterpriseWikiWikilinkMaterializationTest` (P1-1)
+- `EnterpriseWikiLinkLintAndSemanticRepairTest` (nytt forsøk)
+- `WikiPageContentAiClientTest` (promptregler)
+
+**Fixturer:** `tests/Fixtures/EnterpriseWiki/run962`. Fixturene inneholder elementene fra det generelle testdokumentet, den lagrede planleggerbeslutningen og de 17 påstandene med kildeutdrag. Det er ingen personopplysninger, og fixturene inneholder ingen kundespesifikk evidens ut over sidetitler i beslutningen.
+
+Integrasjonstesten kjører hele kjeden med ekte tjenester og mocket AI:
+1. Planlegging med dekningsreparasjon
+2. Lenkemateriale med historisk opphav
+3. Uttrekk og verifisering av påstander
+4. Semantisk lenke-QA med gjettet slug
+5. QA, Funn og beslutning, og deretter QA `passed`
+
+Resultater (kjørt i worktree mot `procynia_test`):
+
+| Testsett | Bestått | Feilet |
+|---|---|---|
+| Nye og direkte berørte verifikator-, kanonikaliserings- og forklaringstester, inkludert integrasjonstesten | 305 | 0 |
+| Planleggings- og beslutningstester (21 filer) | 549 | 0 |
+| QA, Funn, gjenopptak, vedlikehold og dokumentflyt (19 filer) | 286 | 0 |
+| Lenkemateriale og graf (3 filer) | 30 | 0 |
+| Semantisk lenke-QA og reparasjon | 36 | 0 |
+| Prompt- og AI-klienttester (`WikiPageContentAiClientTest`, `WikiClaimVerificationAiClientTest`) | 87 | 0 |
+
+Hele PHP-, Wiki-, JS- og E2E-suiten er ikke kjørt. Pint er rent på alle nye og endrede filer, unntatt `EnterpriseWikiWikilinkMaterializationTest`, som feilet allerede på `main`.
+
+### 18.10 Gjenstående begrensninger
+
+- Modalitetsleksikonet er bevisst lite og dekker norsk og engelsk. Andre språk, «should» og «mulig å» gir ingen forsterkningsfunn.
+- Koblingen mellom setninger bygger på token-overlapp. Svake eller like koblinger blir merknad, ikke funn. Kontrollen kan derfor overse en reell forsterkning i en kraftig omskrevet setning. AI-verifikatoren og review er fortsatt den andre forsvarslinjen.
+- Beskrivelse → «skal» og anbefaling → beskrivelse eskalerer ikke (beslutning 1). De forblir diagnostiske.
+- Hvor godt dekningsreparasjonen fungerer, er ikke målt med ekte AI. Den kan gi lengre artikler og ett ekstra gpt-5-kall.
+- `ownedTopicEntries()` kutter fortsatt nøkler over 6 ved parsing. Kuttet er nå synlig som udekket, men ikke forhindret.
+- QA leser DOCX-elementene på nytt ved hver evaluering.
+- De eksisterende dataene fra kjøring 962 er ikke endret. Det gjelder også de 16 lenkeradene.
+- Øvrige funn fra evalueringen ligger utenfor denne rettelsen og er ikke forutsetninger for den: svake inngående ankre, artikkel/konsept-prioritering, filnavn som artikkeltittel, indirekte koblinger, grafvisning per kjøring og øvrige feilklassifiseringer.
+
+### 18.11 Planlagt retest med ekte AI [Ikke gjennomført]
+
+Kunde 4 kan ikke gi en sammenlignbar retest:
+- Side 2538–2541 finnes allerede.
+- Side 67, 68 og 73 har nye versjoner.
+- Samme fil kan bli fanget av hash-duplikatkontrollen.
+
+**Plan (krever egen godkjenning):**
+1. Opprett evalueringskunden fra §17.8. Kunde-ID-en skal stå på en konfigurert liste over evalueringskunder.
+2. Seed kunden deterministisk og uten AI med en kopi av kunde 4s side 65–111, slik versjonene var før `2026-10-18 16:59:58`. Kopien skal omfatte sider, gjeldende versjoner med `content_blocks_json` og lenkerader. Det krever en ny operatørkommando, som ikke er bygget. Kunde 4 endres ikke.
+3. Restart køarbeiderne med koden fra branchen.
+4. Last opp den samme DOCX-filen. Vurder resultatet mot fasiten, med side-ID-er mappet via slug, og mot `qa_result.quality_findings`, `checks.source_coverage`, `checks.normative_fidelity` og `checks.semantic_link_qa`.
+5. Kjør høyst tre kjøringer. Kostnaden rapporteres fra `ai_usage_attempts` etter første kjøring.
+
+### 18.12 Status
+
+P1-1, P0-2, P0-1, P0-3 og rettelsen i semantisk lenke-QA er implementert og målrettet testet. Ingenting er committet. Retesten med ekte AI er planlagt, ikke gjennomført.
