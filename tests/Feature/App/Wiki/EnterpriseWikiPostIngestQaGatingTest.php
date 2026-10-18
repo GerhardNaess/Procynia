@@ -188,17 +188,22 @@ class EnterpriseWikiPostIngestQaGatingTest extends TestCase
                 array $linkCatalog = [],
                 array $sourceElements = [],
             ) => $this->structuredPageResult($pageType === 'article'
-                ? "# Artikkel\n\nSee [[sammendrag|Sammendrag]] here."
+                ? "# Artikkel\n\nSee [[ukjent-side|Ukjent]] here."
                 : "# Sammendrag\n\nSe [[Advania]] her.", $sourceElements));
 
         Queue::fake();
 
         $service = app(EnterpriseWikiGenerateAppliedPagesService::class);
 
-        // Article succeeds.
-        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle($service);
+        // Since controlled partial completion (D1), one failed page no longer fails the run —
+        // only a wave where every page failed does. Both pages fail here, through the real
+        // exception path, so the run-level message is still the one being asserted on.
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle($service);
+        } catch (\Throwable) {
+            // expected
+        }
 
-        // Summary fails — real exception path.
         try {
             (new GenerateEnterpriseWikiAppliedPage($run->id, $summary->id))->handle($service);
         } catch (\Throwable) {

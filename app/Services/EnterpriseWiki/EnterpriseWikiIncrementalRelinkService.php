@@ -98,10 +98,14 @@ class EnterpriseWikiIncrementalRelinkService
 
         $runPageIds = $pivotRows->pluck('enterprise_wiki_page_id')->all();
 
+        // Only a page this run actually generated can be a link target worth adding elsewhere: a
+        // page whose generation failed in a partially completed run is an empty shell, and
+        // relinking existing pages to it would point readers at content that does not exist.
         $triggers = $pivotRows
             ->filter(fn (EnterpriseWikiIngestRunPage $row) => $row->page !== null
                 && in_array($row->page->page_type, self::TRIGGER_PAGE_TYPES, true)
-                && in_array($row->action, EnterpriseWikiIngestRunPage::ACTIONS, true))
+                && in_array($row->action, EnterpriseWikiIngestRunPage::ACTIONS, true)
+                && $row->generation_status !== EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED)
             ->pluck('page');
 
         $counts = [

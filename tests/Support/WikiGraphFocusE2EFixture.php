@@ -4,6 +4,7 @@ namespace Tests\Support;
 
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
+use App\Models\EnterpriseWikiPageVersion;
 use App\Services\EnterpriseWiki\GraphProjection\EnterpriseWikiGraphProjector;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -44,14 +45,27 @@ class WikiGraphFocusE2EFixture
         self::cleanup($customerId);
 
         $ids = DB::transaction(function () use ($customerId): array {
-            $page = fn (string $title): int => (int) EnterpriseWikiPage::query()->create([
-                'customer_id' => $customerId,
-                'slug' => self::SLUG_PREFIX.Str::slug($title),
-                'title' => $title,
-                'page_type' => EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
-                'status' => EnterpriseWikiPage::STATUS_APPROVED,
-                'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
-            ])->id;
+            // A graph node is a page with a current version; a page without one is an incomplete
+            // shell the graph leaves out (EnterpriseWikiGraphDataService).
+            $page = function (string $title) use ($customerId): int {
+                $id = (int) EnterpriseWikiPage::query()->create([
+                    'customer_id' => $customerId,
+                    'slug' => self::SLUG_PREFIX.Str::slug($title),
+                    'title' => $title,
+                    'page_type' => EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
+                    'status' => EnterpriseWikiPage::STATUS_APPROVED,
+                    'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+                ])->id;
+
+                EnterpriseWikiPageVersion::query()->create([
+                    'enterprise_wiki_page_id' => $id,
+                    'version_number' => 1,
+                    'is_current' => true,
+                    'content_markdown' => '# '.$title,
+                ]);
+
+                return $id;
+            };
 
             $link = fn (int $from, int $to) => EnterpriseWikiPageLink::query()->create([
                 'customer_id' => $customerId,

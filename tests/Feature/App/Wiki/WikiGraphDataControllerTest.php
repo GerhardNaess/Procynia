@@ -147,17 +147,43 @@ class WikiGraphDataControllerTest extends TestCase
         $this->assertArrayHasKey('status', $node);
     }
 
-    public function test_node_current_version_id_is_null_when_no_version(): void
+    public function test_a_page_without_a_current_version_is_not_a_node_but_is_counted(): void
     {
+        // Arbeidspakke A5 (docs/enterprise-wiki-knowledge-integration-plan.md §5): an incomplete
+        // shell — e.g. a page whose generation failed — is not drawn as an ordinary, empty
+        // knowledge node. The graph says how many it left out instead of hiding that they exist.
         $customer = $this->createCustomer();
         $user = $this->createUser($customer);
-        $page = $this->createPage($customer, 'article', 'Ingen versjon');
+        $complete = $this->createPage($customer, 'article', 'Ferdig side');
+        $shell = $this->createPage($customer, 'article', 'Ingen versjon', withCurrentVersion: false);
 
         $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
 
         $response->assertOk();
-        $node = collect($response->json('nodes'))->firstWhere('page_id', $page->id);
-        $this->assertNull($node['current_version_id']);
+        $pageIds = collect($response->json('nodes'))->pluck('page_id');
+        $this->assertTrue($pageIds->contains($complete->id));
+        $this->assertFalse($pageIds->contains($shell->id));
+        $this->assertSame(1, $response->json('summary.incomplete_count'));
+        $this->assertSame(1, $response->json('summary.node_count'));
+        $this->assertNotNull(EnterpriseWikiPage::query()->find($shell->id), 'the shell itself is never deleted');
+    }
+
+    public function test_a_shell_is_neither_a_run_scoped_node_nor_a_neighbour_but_may_be_the_focus(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $summary = $this->createPage($customer, 'summary', 'Sammendrag');
+        $shell = $this->createPage($customer, 'article', 'Feilet artikkel', withCurrentVersion: false);
+        $run = $this->createAppliedRun($customer, $summary, $shell);
+
+        $runGraph = $this->actingAs($user)->getJson("/app/wiki/graph-data?run_id={$run->id}")->assertOk();
+        $this->assertSame([$summary->id], collect($runGraph->json('nodes'))->pluck('page_id')->all());
+        $this->assertSame(1, $runGraph->json('summary.incomplete_count'));
+
+        // Asked for by id, the shell itself is shown — alone, since no relation is materialized to it.
+        $focus = $this->actingAs($user)->getJson("/app/wiki/graph-data?page_id={$shell->id}")->assertOk();
+        $this->assertSame([$shell->id], collect($focus->json('nodes'))->pluck('page_id')->all());
+        $this->assertNull($focus->json('nodes.0.current_version_id'));
     }
 
     public function test_node_claim_count_matches_actual_claims(): void
@@ -1288,9 +1314,13 @@ class WikiGraphDataControllerTest extends TestCase
         ]));
     }
 
-    private function createPage(Customer $customer, string $pageType, string $title, string $status = EnterpriseWikiPage::STATUS_APPROVED): EnterpriseWikiPage
+    /**
+     * A graph node is a page with a current version (a page without one is an incomplete shell the
+     * graph leaves out), so pages are created with one unless a test is about shells.
+     */
+    private function createPage(Customer $customer, string $pageType, string $title, string $status = EnterpriseWikiPage::STATUS_APPROVED, bool $withCurrentVersion = true): EnterpriseWikiPage
     {
-        return EnterpriseWikiPage::query()->create([
+        $page = EnterpriseWikiPage::query()->create([
             'customer_id' => $customer->id,
             'slug' => Str::slug($title).'-'.Str::lower(Str::random(4)),
             'title' => $title,
@@ -1299,6 +1329,12 @@ class WikiGraphDataControllerTest extends TestCase
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('h', 64, '0'),
         ]);
+
+        if ($withCurrentVersion) {
+            $this->createVersion($page, isCurrent: true);
+        }
+
+        return $page;
     }
 
     private function createSystemOwner(Customer $customer): User
@@ -1364,9 +1400,20 @@ class WikiGraphDataControllerTest extends TestCase
 
     private function createVersion(EnterpriseWikiPage $page, bool $isCurrent = false): EnterpriseWikiPageVersion
     {
+        if ($isCurrent) {
+            $current = EnterpriseWikiPageVersion::query()
+                ->where('enterprise_wiki_page_id', $page->id)
+                ->where('is_current', true)
+                ->first();
+
+            if ($current instanceof EnterpriseWikiPageVersion) {
+                return $current;
+            }
+        }
+
         return EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $page->id,
-            'version_number' => 1,
+            'version_number' => (int) EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $page->id)->max('version_number') + 1,
             'is_current' => $isCurrent,
             'content_markdown' => '# '.$page->title,
         ]);

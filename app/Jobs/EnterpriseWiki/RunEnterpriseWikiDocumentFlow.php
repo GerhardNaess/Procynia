@@ -4,6 +4,7 @@ namespace App\Jobs\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiIngestRun;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
+use App\Services\EnterpriseWiki\EnterpriseWikiRunTerminalTransition;
 use App\Support\Ai\RunsInAiCallContext;
 use App\Support\EnterpriseWiki\EnterpriseWikiQueueTrace;
 use Illuminate\Bus\Queueable;
@@ -93,8 +94,7 @@ class RunEnterpriseWikiDocumentFlow implements ShouldQueue
             return;
         }
 
-        EnterpriseWikiIngestRun::query()->whereKey($run->id)->nonTerminal()->update([
-            'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+        app(EnterpriseWikiRunTerminalTransition::class)->fail($run->id, [
             'error_message' => mb_substr($exception->getMessage(), 0, 1000),
             'finished_at' => now(),
         ]);

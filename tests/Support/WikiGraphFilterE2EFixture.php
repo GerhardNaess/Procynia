@@ -9,6 +9,7 @@ use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
+use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
@@ -138,6 +139,15 @@ class WikiGraphFilterE2EFixture
                         'page_type' => $pageType,
                         'status' => EnterpriseWikiPage::STATUS_APPROVED,
                         'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+                    ]);
+
+                    // A graph node is a page with a current version; a page without one is an
+                    // incomplete shell the graph leaves out (EnterpriseWikiGraphDataService).
+                    EnterpriseWikiPageVersion::query()->create([
+                        'enterprise_wiki_page_id' => $page->id,
+                        'version_number' => 1,
+                        'is_current' => true,
+                        'content_markdown' => '# '.$title,
                     ]);
 
                     EnterpriseWikiIngestRunPage::query()->create([

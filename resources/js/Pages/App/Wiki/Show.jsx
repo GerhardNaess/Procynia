@@ -1001,6 +1001,37 @@ function PageActionsMenu({ tw, page }) {
     );
 }
 
+const INCOMPLETE_PAGE_REASONS = {
+    plan_defect: ['incomplete_page_reason_plan_defect', 'Årsak: Siden kunne ikke genereres fordi sideplanen eller kildegrunnlaget ikke var tilstrekkelig.'],
+    transient: ['incomplete_page_reason_transient', 'Årsak: Genereringen stoppet på grunn av en midlertidig feil.'],
+    unknown: ['incomplete_page_reason_unknown', 'Årsak: Genereringen feilet av en ukjent årsak.'],
+    in_progress: ['incomplete_page_reason_in_progress', 'Siden genereres fortsatt.'],
+};
+
+// Arbeidspakke A5: a page without a current version is an incomplete shell, not a finished
+// article. The reason comes from the backend (WikiController::incompletePageExplanation()).
+function IncompletePageNotice({ incomplete, tw }) {
+    const reason = INCOMPLETE_PAGE_REASONS[incomplete.reason];
+
+    return (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3" data-testid="wiki-page-incomplete">
+            <p className="text-base font-semibold leading-6 text-amber-900">{tw.incomplete_page_label ?? 'Ufullstendig'}</p>
+            <p className="mt-1 text-base leading-6 text-slate-700">
+                {tw.incomplete_page_body ?? 'Siden er opprettet, men har ikke fått innhold. Den regnes ikke som en ferdig Wiki-artikkel, og den vises ikke i grafen eller som lenkemål.'}
+            </p>
+            {reason && <p className="mt-1 text-base leading-6 text-slate-700">{tw[reason[0]] ?? reason[1]}</p>}
+            {incomplete.run_id && (
+                <Link
+                    href={`/app/wiki?tab=runs&focus_run=${incomplete.run_id}`}
+                    className="mt-2 inline-flex text-base font-semibold leading-6 text-violet-700 underline hover:text-violet-900"
+                >
+                    {tw.incomplete_page_open_run ?? 'Åpne kjøringen'}
+                </Link>
+            )}
+        </div>
+    );
+}
+
 export default function WikiShow({
     page,
     current_version,
@@ -2762,6 +2793,7 @@ export default function WikiShow({
                             {tw.version ?? 'Versjon'} {current_version.version_number}
                         </p>
                     )}
+                    {page.incomplete && <IncompletePageNotice incomplete={page.incomplete} tw={tw} />}
                 </section>
 
                 {/* Approval actions */}

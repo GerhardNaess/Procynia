@@ -49,9 +49,9 @@ class EnterpriseWikiLinkCatalogService
      */
     public function buildForCustomer(int $customerId, ?EnterpriseWikiPage $excludePage = null): array
     {
-        $scope = fn (): Builder => EnterpriseWikiPage::query()
+        $scope = fn (): Builder => $this->withCurrentVersion(EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
-            ->when($excludePage !== null, fn ($query) => $query->where('id', '!=', $excludePage->id));
+            ->when($excludePage !== null, fn ($query) => $query->where('id', '!=', $excludePage->id)));
 
         $totalAvailable = $scope()->count();
 
@@ -90,8 +90,13 @@ class EnterpriseWikiLinkCatalogService
      */
     public function buildForPage(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $excludePage): array
     {
+        // The run's own pages are offered whether or not they have been generated yet — the
+        // initial wave must be able to link to concept/entity pages the deferred wave writes later.
+        // A page whose generation already FAILED is the exception: it is an empty shell, and no
+        // later step of this run (deferred wave, link semantic repair) may point readers at it.
         $runPages = EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('generation_status', '!=', EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED)
             ->with('page')
             ->get()
             ->pluck('page')
@@ -101,14 +106,14 @@ class EnterpriseWikiLinkCatalogService
 
         $excludedIds = $runPages->pluck('id')->push($excludePage->id)->all();
 
-        $totalAvailable = EnterpriseWikiPage::query()
+        $totalAvailable = $runPages->count() + $this->withCurrentVersion(EnterpriseWikiPage::query()
             ->where('customer_id', $run->customer_id)
-            ->where('id', '!=', $excludePage->id)
+            ->whereNotIn('id', $excludedIds))
             ->count();
 
-        $otherPages = EnterpriseWikiPage::query()
+        $otherPages = $this->withCurrentVersion(EnterpriseWikiPage::query()
             ->where('customer_id', $run->customer_id)
-            ->whereNotIn('id', $excludedIds)
+            ->whereNotIn('id', $excludedIds))
             ->orderByDesc('updated_at')
             ->limit(self::MAX_OTHER_PAGES)
             ->get();
@@ -135,5 +140,20 @@ class EnterpriseWikiLinkCatalogService
             'catalog' => $catalog,
             'run_page_count' => $runPages->count(),
         ];
+    }
+
+    /**
+     * A page outside the run is only a link target once it has a current version: a page without
+     * one is an incomplete shell — typically left by a failed generation in an earlier, partially
+     * completed run (docs/enterprise-wiki-knowledge-integration-plan.md §5) — and linking to it
+     * would point readers at content that does not exist.
+     */
+    private function withCurrentVersion(Builder $query): Builder
+    {
+        return $query->whereExists(fn ($versions) => $versions
+            ->selectRaw('1')
+            ->from('enterprise_wiki_page_versions')
+            ->whereColumn('enterprise_wiki_page_versions.enterprise_wiki_page_id', 'enterprise_wiki_pages.id')
+            ->where('enterprise_wiki_page_versions.is_current', true));
     }
 }

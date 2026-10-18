@@ -14,6 +14,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -426,6 +427,102 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
 
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $run->fresh()->status);
 
+        Queue::assertNothingPushed();
+    }
+
+    // =========================================================================
+    // The recorded QA verdict on resume
+    // =========================================================================
+
+    public function test_resuming_an_escalated_run_clears_its_stale_qa_verdict_but_keeps_its_history(): void
+    {
+        Queue::fake();
+
+        $run = $this->createEscalatedRunWithUnverifiedClaims($this->createCustomer());
+        $run->update(['qa_last_error' => 'verification_incomplete', 'qa_result' => ['incomplete_steps' => ['verification_incomplete']]]);
+
+        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
+            ->expectsOutputToContain('outcome=resumed')
+            ->assertExitCode(0);
+
+        $fresh = $run->fresh();
+        $this->assertNull($fresh->qa_status);
+        $this->assertSame('verification_incomplete', $fresh->qa_last_error);
+        $this->assertSame(['incomplete_steps' => ['verification_incomplete']], $fresh->qa_result);
+        $this->assertSame(1, $fresh->qa_attempt_count);
+    }
+
+    public function test_resuming_a_failed_run_clears_a_recorded_qa_verdict(): void
+    {
+        Queue::fake();
+
+        foreach ([EnterpriseWikiIngestRun::QA_STATUS_FAILED, EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, EnterpriseWikiIngestRun::QA_STATUS_PASSED] as $verdict) {
+            $run = $this->createStuckRun($this->createCustomer(), stepsComplete: false, qaStatus: $verdict);
+            $run->update(['qa_last_error' => 'earlier verdict']);
+
+            $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
+                ->expectsOutputToContain('resume_continuation')
+                ->assertExitCode(0);
+
+            $fresh = $run->fresh();
+            $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING, $fresh->status);
+            $this->assertNull($fresh->qa_status, "a recorded [{$verdict}] verdict must not finalize the resumed run");
+            $this->assertSame('earlier verdict', $fresh->qa_last_error);
+        }
+
+        Queue::assertPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class, 3);
+    }
+
+    public function test_escalated_dry_run_keeps_the_recorded_qa_verdict(): void
+    {
+        Queue::fake();
+
+        $run = $this->createEscalatedRunWithUnverifiedClaims($this->createCustomer());
+
+        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id, '--dry-run' => true])
+            ->assertExitCode(0);
+
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->fresh()->qa_status);
+    }
+
+    public function test_running_the_command_again_on_a_resumed_run_changes_nothing(): void
+    {
+        Queue::fake();
+
+        $run = $this->createEscalatedRunWithUnverifiedClaims($this->createCustomer());
+
+        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])->assertExitCode(0);
+        // The resumed flow has reached QA and claimed it.
+        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_QA, 'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_RUNNING]);
+
+        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])->assertExitCode(1);
+
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_RUNNING, $run->fresh()->qa_status);
+        Queue::assertPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class, 1);
+    }
+
+    public function test_a_customer_user_as_actor_is_refused_and_the_verdict_is_untouched(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $run = $this->createEscalatedRunWithUnverifiedClaims($customer);
+        $customerUser = User::query()->create([
+            'customer_id' => $customer->id,
+            'name' => 'Kundebruker',
+            'email' => 'kunde-'.Str::lower(Str::random(8)).'@procynia.test',
+            'password' => bcrypt('secret-password'),
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'is_active' => true,
+        ]);
+
+        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id, '--actor' => (string) $customerUser->id])
+            ->expectsOutputToContain('is not an internal Procynia super admin')
+            ->assertExitCode(1);
+
+        $fresh = $run->fresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $fresh->status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $fresh->qa_status);
         Queue::assertNothingPushed();
     }
 

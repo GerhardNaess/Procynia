@@ -67,6 +67,13 @@ class EnterpriseWikiBuildPageLinksService
 
         [$articles, $summaries] = $this->articlesAndSummariesForRun($run);
 
+        // A page whose generation failed in a partially completed run is an empty shell, not an
+        // article or summary: pairing it would record a structural relation to content that does
+        // not exist. Its pair is built when a retry gives it a version.
+        $hasVersion = fn (array $entry): bool => $entry['version'] !== null;
+        $articles = array_values(array_filter($articles, $hasVersion));
+        $summaries = array_values(array_filter($summaries, $hasVersion));
+
         [$created, $skipped] = $this->buildBidirectional(
             $run, $articles, $summaries,
             EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY,
@@ -324,6 +331,7 @@ class EnterpriseWikiBuildPageLinksService
 
         $parsed = $this->linkParser->parse($markdown);
         $resolution = $this->linkResolver->resolve($page->customer_id, $page, $parsed);
+        $resolution['resolved'] = $this->linkResolver->materializableTargets($resolution['resolved']);
 
         $result = DB::transaction(function () use ($page, $currentVersion, $ingestRunId, $resolution) {
             if ($ingestRunId !== null) {

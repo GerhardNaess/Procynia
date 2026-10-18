@@ -319,6 +319,23 @@ class EnterpriseWikiIngestRun extends Model
         return self::isTerminalStatus($this->status);
     }
 
+    /**
+     * The qa_status a run must carry once recovery reopens it to finish continuation work its
+     * recorded QA verdict was judged without. The continuation's QA step only claims a run whose
+     * qa_status is null, pending or repair_required, and finalizes from any recorded verdict as
+     * it stands — a kept passed/escalated/failed would finish the resumed run with the old result.
+     * A stale running claim is released; a status QA can already claim is left alone. qa_result,
+     * qa_last_error and qa_attempt_count stay as history until the new verdict replaces them.
+     */
+    public function qaStatusForResumedContinuation(): ?string
+    {
+        return match ($this->qa_status) {
+            self::QA_STATUS_PASSED, self::QA_STATUS_ESCALATED, self::QA_STATUS_FAILED => null,
+            self::QA_STATUS_RUNNING => self::QA_STATUS_PENDING,
+            default => $this->qa_status,
+        };
+    }
+
     public static function isTerminalStatus(?string $status): bool
     {
         return in_array($status, self::TERMINAL_STATUSES, true);

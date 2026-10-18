@@ -623,6 +623,14 @@ class WikiControllerTest extends TestCase
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
         $draft = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Wiki-utkast fra graf');
+        // A graph node is a page with a current version; a page without one is an incomplete
+        // shell the graph leaves out (EnterpriseWikiGraphDataService, arbeidspakke A5).
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $draft->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# Wiki-utkast fra graf',
+        ]);
 
         $graphResponse = $this->actingAs($user)->getJson('/app/wiki/graph-data');
         $graphResponse->assertOk();
@@ -3476,6 +3484,14 @@ class WikiControllerTest extends TestCase
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $draft = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Wiki-utkast fra graf');
+        // A graph node is a page with a current version; a page without one is an incomplete
+        // shell the graph leaves out (EnterpriseWikiGraphDataService, arbeidspakke A5).
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $draft->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# Wiki-utkast fra graf',
+        ]);
 
         $graphResponse = $this->actingAs($user)->getJson('/app/wiki/graph-data');
         $graphResponse->assertOk();

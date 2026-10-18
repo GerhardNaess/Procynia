@@ -115,8 +115,12 @@ class EnterpriseWikiPageGenerationFailureRecoveryServiceTest extends TestCase
 
         $this->service()->attempt($run->id, caller: 'test');
 
+        // Reset to a clean slate, then reserved through the same atomic compare-and-swap every
+        // other page dispatch uses (EnterpriseWikiGenerateAppliedPagesService::reservePageForDispatch()).
         $failedPivot = EnterpriseWikiIngestRunPage::query()->find($pivots['failed']->id);
-        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_PENDING, $failedPivot->generation_status);
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_DISPATCHED, $failedPivot->generation_status);
+        $this->assertNotNull($failedPivot->generation_dispatched_at);
+        $this->assertNull($failedPivot->generation_claim_token);
         $this->assertNull($failedPivot->generation_started_at);
         $this->assertNull($failedPivot->generation_completed_at);
         $this->assertNull($failedPivot->generation_error);
@@ -159,20 +163,26 @@ class EnterpriseWikiPageGenerationFailureRecoveryServiceTest extends TestCase
         );
     }
 
-    public function test_mixed_initial_and_deferred_failed_pages_are_rejected(): void
+    public function test_mixed_initial_and_deferred_failures_retry_the_initial_wave_and_leave_the_deferred_page_to_the_finalizer(): void
     {
         Queue::fake();
 
         $customer = $this->createCustomer();
         [$run, $pivots] = $this->createRun593LikeFixture($customer, secondFailedPage: true);
         $this->markFailedConceptAsIndependent($run, $pivots['failed']);
+        [$initialFailed, $deferredFailed] = $pivots['failed_multi'];
 
         $result = $this->service()->attempt($run->id, caller: 'test');
 
-        $this->assertSame(EnterpriseWikiRunRecoveryResult::OUTCOME_NOT_RECOVERABLE, $result->outcome);
-        $this->assertStringContainsString('both initial and deferred generation phases', $result->reason);
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->fresh()->status);
-        Queue::assertNothingPushed();
+        $this->assertSame(EnterpriseWikiRunRecoveryResult::OUTCOME_RESUMED, $result->outcome);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES, $run->fresh()->status);
+
+        // Only the initial-wave page is dispatched now. The deferred entity is reset to pending
+        // and dispatched once by FinalizeEnterpriseWikiPageGeneration, never twice.
+        Queue::assertPushed(GenerateEnterpriseWikiAppliedPage::class, 1);
+        Queue::assertPushed(GenerateEnterpriseWikiAppliedPage::class, fn ($job) => $job->pageId === $initialFailed->enterprise_wiki_page_id);
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_PENDING, $deferredFailed->fresh()->generation_status);
+        $this->assertNull($deferredFailed->fresh()->generation_error);
     }
 
     public function test_run_without_any_failed_page_is_rejected(): void

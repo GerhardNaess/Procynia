@@ -282,8 +282,7 @@ class EnterpriseWikiDocumentFlowService
                     ]);
             }
 
-            $locked->update([
-                'status' => EnterpriseWikiIngestRun::STATUS_CANCELLED,
+            $this->terminalTransition()->cancel($locked->id, [
                 'finished_at' => now(),
                 'error_message' => mb_substr(
                     'Kjøring avbrutt av '.$actor->name.($reason !== null && $reason !== '' ? ': '.$reason : '.'),
@@ -1453,15 +1452,14 @@ class EnterpriseWikiDocumentFlowService
 
     private function completeRun(EnterpriseWikiIngestRun $run): void
     {
-        $updated = EnterpriseWikiIngestRun::query()->whereKey($run->id)->nonTerminal()->update([
-            'status' => EnterpriseWikiIngestRun::STATUS_COMPLETED,
+        $updated = $this->terminalTransition()->complete($run->id, [
             'finished_at' => now(),
             'error_message' => null,
             'failed_phase' => null,
             'transient_failure' => null,
         ]);
 
-        if ($updated > 0) {
+        if ($updated) {
             Log::info('[WIKI_DOCUMENT_FLOW] Run completed.', [
                 'run_id' => $run->id,
             ]);
@@ -1470,15 +1468,14 @@ class EnterpriseWikiDocumentFlowService
 
     private function escalateRun(EnterpriseWikiIngestRun $run): void
     {
-        $updated = EnterpriseWikiIngestRun::query()->whereKey($run->id)->nonTerminal()->update([
-            'status' => EnterpriseWikiIngestRun::STATUS_ESCALATED,
+        $updated = $this->terminalTransition()->escalate($run->id, [
             'finished_at' => now(),
             'error_message' => null,
             'failed_phase' => null,
             'transient_failure' => null,
         ]);
 
-        if ($updated > 0) {
+        if ($updated) {
             Log::info('[WIKI_DOCUMENT_FLOW] Run escalated.', [
                 'run_id' => $run->id,
             ]);
@@ -1511,7 +1508,6 @@ class EnterpriseWikiDocumentFlowService
         ], true);
 
         $update = [
-            'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
             // Wiki run-588: the phase the run was actually in when it failed — persisted
             // separately from the generic terminal 'status' above so the run list can show
             // exactly which step failed (and which later steps never ran) instead of the
@@ -1533,12 +1529,7 @@ class EnterpriseWikiDocumentFlowService
             $update['qa_last_error'] = mb_substr($exception->getMessage(), 0, 1000);
         }
 
-        $updated = EnterpriseWikiIngestRun::query()
-            ->whereKey($run->id)
-            ->nonTerminal()
-            ->update($update);
-
-        if ($updated === 0) {
+        if (! $this->terminalTransition()->fail($run->id, $update)) {
             return;
         }
 
@@ -1550,6 +1541,15 @@ class EnterpriseWikiDocumentFlowService
             'exception' => get_class($exception),
             'error' => $exception->getMessage(),
         ]);
+    }
+
+    /**
+     * Resolved per call rather than injected: tests construct this service with a positional
+     * argument list, and the transition holds no state of its own.
+     */
+    private function terminalTransition(): EnterpriseWikiRunTerminalTransition
+    {
+        return app(EnterpriseWikiRunTerminalTransition::class);
     }
 
     private function resolveLanguageCode(int $customerId): string

@@ -159,13 +159,15 @@ class EnterpriseWikiPublicationSettlementServiceTest extends TestCase
             'EnterpriseWikiIncrementalRelinkService.php',       // AI weaves a link into another page's prose
             'EnterpriseWikiPatchApplicationService.php',        // corrected requirements
             'EnterpriseWikiDocumentWithdrawalService.php',      // content removed with its source document
+            // A run regenerates pages it creates AND existing pages it updates — including published
+            // ones, which must return to draft so the new version can be reviewed
+            // (docs/enterprise-wiki-knowledge-integration-plan.md §3.3, arbeidspakke A3).
+            'EnterpriseWikiGenerateAppliedPagesService.php',
         ];
 
         $technical = [
             // Restores the structural article/summary pairing link; navigation, not knowledge.
             'EnterpriseWikiArticleSummaryLinkRepairService.php',
-            // Generation writes into pages the apply/ingest step already created as drafts.
-            'EnterpriseWikiGenerateAppliedPagesService.php',
             // The mechanism itself.
             'EnterpriseWikiPageVersionWriter.php',
             // Human-initiated: a maintainer picks the target from documented candidates.

@@ -355,6 +355,7 @@ function RunListItem({
     runPagesState,
     runFindingsState,
     onRetryMaintainerDecision,
+    onRetryFailedPages,
     onFetchRunPages,
     onFetchRunFindings,
     focusFindingId,
@@ -507,6 +508,7 @@ function RunListItem({
                                 locale={locale}
                                 onOpenFindings={(targetRun) => onTogglePanel(targetRun, 'findings', (targetRun.lint_count ?? 0) > 0)}
                                 onRetryMaintainerDecision={onRetryMaintainerDecision}
+                                onRetryFailedPages={onRetryFailedPages}
                             />
                         </div>
                     </div>
@@ -580,6 +582,7 @@ function RunListItem({
                                 locale={locale}
                                 onOpenFindings={(targetRun) => onTogglePanel(targetRun, 'findings', (targetRun.lint_count ?? 0) > 0)}
                                 onRetryMaintainerDecision={onRetryMaintainerDecision}
+                                onRetryFailedPages={onRetryFailedPages}
                             />
                         </div>
                     </div>
@@ -637,7 +640,47 @@ function RunListItem({
     );
 }
 
-function RunActivityBlock({ run, tw, locale, onOpenFindings = null, onRetryMaintainerDecision = null }) {
+const FAILED_PAGES_KIND_COPY = {
+    transient: ['run_failed_pages_kind_transient', 'Feilen ser ut til å være midlertidig.'],
+    unknown: ['run_failed_pages_kind_unknown', 'Årsaken er ikke kjent, og et nytt forsøk kan gi samme resultat.'],
+    plan_defect: ['run_failed_pages_kind_plan_defect', 'Feilen skyldes sideplanen eller kildegrunnlaget, ikke et midlertidig problem. Et nytt forsøk ville gitt samme resultat, og tilbys derfor ikke.'],
+};
+
+// Arbeidspakke A4: pages a failed or partially completed run could not generate. The failure kind
+// and whether the retry may be offered both come from the backend
+// (EnterpriseWikiPageGenerationFailureRecoveryService) — never derived here.
+function FailedPagesBlock({ failedPages, tw, onRetry }) {
+    if (!failedPages || !failedPages.count) return null;
+
+    const [kindKey, kindFallback] = FAILED_PAGES_KIND_COPY[failedPages.failure_kind] ?? FAILED_PAGES_KIND_COPY.unknown;
+
+    return (
+        <div className="min-w-0 max-w-full space-y-1 break-words" data-run-failed-pages={failedPages.count}>
+            <p className="break-words text-base font-medium leading-6 text-rose-800">
+                {(tw.run_failed_pages_summary ?? ':count side(r) kunne ikke genereres og er ufullstendige.').replace(':count', String(failedPages.count))}
+            </p>
+            <p className="break-words text-base leading-6 text-slate-600">
+                {tw[kindKey] ?? kindFallback}
+            </p>
+            {failedPages.can_retry && onRetry && (
+                <>
+                    <p className="break-words text-base leading-6 text-slate-600">
+                        {tw.run_failed_pages_retry_hint ?? 'Bare sidene som feilet, genereres på nytt. Sider som allerede er generert, endres ikke.'}
+                    </p>
+                    <button
+                        type="button"
+                        onClick={onRetry}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-base font-semibold leading-6 text-violet-700 transition hover:border-violet-400 hover:bg-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                    >
+                        {tw.run_retry_failed_pages_button ?? 'Prøv igjen for feilede sider'}
+                    </button>
+                </>
+            )}
+        </div>
+    );
+}
+
+function RunActivityBlock({ run, tw, locale, onOpenFindings = null, onRetryMaintainerDecision = null, onRetryFailedPages = null }) {
     const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
 
     if (!run) return null;
@@ -743,6 +786,12 @@ function RunActivityBlock({ run, tw, locale, onOpenFindings = null, onRetryMaint
                     )}
                 </div>
             ) : null}
+
+            <FailedPagesBlock
+                failedPages={run.failed_pages}
+                tw={tw}
+                onRetry={onRetryFailedPages ? (event) => onRetryFailedPages(run, event.currentTarget, 'failed_pages') : null}
+            />
 
             {seemsStalled && (
                 <p className="text-base leading-6 text-amber-700">
@@ -2771,11 +2820,16 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
     // Wiki run-592: mirrors cancelTarget above exactly (same confirm-then-router.patch shape) —
     // retryTarget/retryInFlight is intentionally its own pair rather than reusing cancelTarget so
     // the two confirmation modals (and their in-flight guards) never collide for the same run.
+    // One confirm dialog for both retry actions: retryKind says which one it is confirming
+    // ('maintainer_decision' — «Prøv sideplanleggingen på nytt»; 'failed_pages' — arbeidspakke A4's
+    // «Prøv igjen for feilede sider»).
     const [retryTarget, setRetryTarget] = useState(null);
+    const [retryKind, setRetryKind] = useState('maintainer_decision');
     const [retryInFlight, setRetryInFlight] = useState(false);
 
-    const handleRetryClick = (run, trigger = null) => {
+    const handleRetryClick = (run, trigger = null, kind = 'maintainer_decision') => {
         retryTriggerRef.current = trigger;
+        setRetryKind(kind);
         setRetryTarget(run);
     };
     const handleRetryDismiss = () => {
@@ -2786,7 +2840,8 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
         if (!retryTarget || retryInFlight) return;
         const runId = retryTarget.id;
         setRetryInFlight(true);
-        router.patch(`/app/wiki/runs/${runId}/retry-maintainer-decision`, {
+        const retryPath = retryKind === 'failed_pages' ? 'retry-failed-pages' : 'retry-maintainer-decision';
+        router.patch(`/app/wiki/runs/${runId}/${retryPath}`, {
             tab: 'runs',
             run_status: filters.status ?? '',
             run_decision: filters.decision ?? '',
@@ -3023,6 +3078,7 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
                                     runPagesState={runPagesState}
                                     runFindingsState={runFindingsState}
                                     onRetryMaintainerDecision={handleRetryClick}
+                                    onRetryFailedPages={handleRetryClick}
                                     onFetchRunPages={fetchRunPages}
                                     onFetchRunFindings={fetchRunFindings}
                                     focusFindingId={String(focusRunId ?? '') === String(run.id) ? focusFindingId : null}
@@ -3091,14 +3147,18 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
                 {retryTarget && (
                     <>
                         <h2 id="wiki-run-retry-title" className="mb-4 text-base font-semibold text-slate-900">
-                            {tw.run_retry_maintainer_decision_confirm_title ?? 'Prøv sideplanleggingen på nytt?'}
+                            {retryKind === 'failed_pages'
+                                ? (tw.run_retry_failed_pages_confirm_title ?? 'Prøv igjen for feilede sider?')
+                                : (tw.run_retry_maintainer_decision_confirm_title ?? 'Prøv sideplanleggingen på nytt?')}
                         </h2>
                         <div id="wiki-run-retry-description">
                             <p className="break-all text-base font-medium leading-6 text-slate-800">
                                 {retryTarget.source_document_filename}
                             </p>
                             <p className="mt-2 text-base leading-6 text-slate-600">
-                                {tw.run_retry_maintainer_decision_confirm_body ?? 'Dokumentet og kildegrunnlaget er bevart. Sideplanleggingen startes på nytt med samme kjøring — du trenger ikke laste opp dokumentet igjen.'}
+                                {retryKind === 'failed_pages'
+                                    ? (tw.run_retry_failed_pages_confirm_body ?? 'Bare sidene som feilet, genereres på nytt. Sider som allerede er generert, beholdes uendret. Deretter fortsetter kjøringen med lenker, kontroll og QA som vanlig.')
+                                    : (tw.run_retry_maintainer_decision_confirm_body ?? 'Dokumentet og kildegrunnlaget er bevart. Sideplanleggingen startes på nytt med samme kjøring — du trenger ikke laste opp dokumentet igjen.')}
                             </p>
                         </div>
                         <div className="mt-5 flex flex-wrap justify-end gap-3">
@@ -3117,7 +3177,9 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
                                 aria-disabled={retryInFlight || undefined}
                                 className={`inline-flex h-11 items-center rounded-full px-4 text-base font-semibold leading-6 transition aria-disabled:cursor-not-allowed aria-disabled:opacity-50 ${PRIMARY_COLOURS}`}
                             >
-                                {tw.run_retry_maintainer_decision_confirm_button ?? 'Prøv på nytt'}
+                                {retryKind === 'failed_pages'
+                                    ? (tw.run_retry_failed_pages_confirm_button ?? 'Prøv igjen')
+                                    : (tw.run_retry_maintainer_decision_confirm_button ?? 'Prøv på nytt')}
                             </button>
                         </div>
                     </>

@@ -10,6 +10,7 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\Ai\Wiki\EnterpriseWikiSectionParser;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageOwnerService;
+use App\Services\EnterpriseWiki\EnterpriseWikiRunTerminalTransition;
 use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -82,8 +83,7 @@ class ProcessEnterpriseWikiIngest implements ShouldQueue
             $pageTitle = pathinfo((string) $document->original_filename, PATHINFO_FILENAME) ?: 'Wiki-side';
 
             if (empty($sections)) {
-                $run->update([
-                    'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+                app(EnterpriseWikiRunTerminalTransition::class)->fail($run->id, [
                     'error_message' => 'No sections could be extracted from the document text.',
                     'finished_at' => now(),
                 ]);
@@ -156,14 +156,12 @@ class ProcessEnterpriseWikiIngest implements ShouldQueue
             ));
         } catch (InvalidArgumentException $e) {
             // Validation failures are deterministic — mark failed without re-throw.
-            $run->update([
-                'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+            app(EnterpriseWikiRunTerminalTransition::class)->fail($run->id, [
                 'error_message' => $e->getMessage(),
                 'finished_at' => now(),
             ]);
         } catch (Throwable $e) {
-            $run->update([
-                'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+            app(EnterpriseWikiRunTerminalTransition::class)->fail($run->id, [
                 'error_message' => mb_substr($e->getMessage(), 0, 1000),
                 'finished_at' => now(),
             ]);
@@ -177,8 +175,7 @@ class ProcessEnterpriseWikiIngest implements ShouldQueue
         $run = EnterpriseWikiIngestRun::query()->find($this->runId);
 
         if ($run && ! $run->isTerminal()) {
-            $run->update([
-                'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+            app(EnterpriseWikiRunTerminalTransition::class)->fail($run->id, [
                 'error_message' => mb_substr($exception->getMessage(), 0, 1000),
                 'finished_at' => now(),
             ]);

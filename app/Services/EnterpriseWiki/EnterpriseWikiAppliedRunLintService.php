@@ -961,7 +961,12 @@ class EnterpriseWikiAppliedRunLintService
         }
 
         $resolution = $this->linkResolver->resolve($run->customer_id, $page, $parsed);
-        $parsedValidTargetIds = array_map(fn (array $t) => $t['to_page']->id, $resolution['resolved']);
+        // Same rule the materializer applies: a link to a page without a current version (an
+        // incomplete shell) is expected to have no row yet, so it is neither missing nor stale.
+        $parsedValidTargetIds = array_map(
+            fn (array $t) => $t['to_page']->id,
+            $this->linkResolver->materializableTargets($resolution['resolved']),
+        );
 
         $materializedTargetIds = EnterpriseWikiPageLink::query()
             ->where('customer_id', $run->customer_id)

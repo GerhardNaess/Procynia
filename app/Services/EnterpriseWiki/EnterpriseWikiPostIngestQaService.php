@@ -239,7 +239,8 @@ class EnterpriseWikiPostIngestQaService
         if ($incompleteSteps !== []) {
             return [
                 'verdict' => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
-                'reason' => 'Run has unfinished continuation step(s) or an active reservation: '.implode(', ', $incompleteSteps).'.',
+                'reason' => 'Run has unfinished continuation step(s) or an active reservation: '.implode(', ', $incompleteSteps).'.'
+                    .$this->failedPageGenerationReason($pivotRows),
                 'incomplete_steps' => $incompleteSteps,
                 'critical_defects' => [],
                 'claim_qa_signals' => [],
@@ -482,6 +483,28 @@ class EnterpriseWikiPostIngestQaService
         }
 
         return $reasons;
+    }
+
+    /**
+     * A partially completed run (docs/enterprise-wiki-knowledge-integration-plan.md §4.2) names the
+     * pages that did not generate, so the escalation explains itself without a log lookup. The
+     * per-page reason stays on the pivot's generation_error.
+     */
+    private function failedPageGenerationReason(Collection $pivotRows): string
+    {
+        $failed = $pivotRows->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED);
+
+        if ($failed->isEmpty()) {
+            return '';
+        }
+
+        $titles = EnterpriseWikiPage::query()
+            ->whereIn('id', $failed->pluck('enterprise_wiki_page_id'))
+            ->orderBy('id')
+            ->pluck('title')
+            ->implode(', ');
+
+        return ' Page(s) that failed to generate: '.$titles.'.';
     }
 
     /**

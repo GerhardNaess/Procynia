@@ -116,12 +116,14 @@ class FinalizeEnterpriseWikiPageGenerationTest extends TestCase
         Queue::assertNotPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class);
     }
 
-    public function test_phase_1_failure_marks_run_failed_and_does_not_dispatch_concept_or_entity(): void
+    public function test_phase_1_partial_failure_still_dispatches_the_deferred_wave_and_never_fails_the_run(): void
     {
+        // Decision D1 + D7 (docs/enterprise-wiki-knowledge-integration-plan.md §4.2): a failed
+        // summary no longer stops the article that did generate, nor the concept/entity pages.
         Queue::fake();
 
         $customer = $this->createCustomer();
-        [$run] = $this->createRun($customer, EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES, [
+        [$run, $pages] = $this->createRun($customer, EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES, [
             'article' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
             'summary' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED,
             'concept' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_PENDING,
@@ -131,12 +133,80 @@ class FinalizeEnterpriseWikiPageGenerationTest extends TestCase
         (new FinalizeEnterpriseWikiPageGeneration($run->id))->handle();
 
         $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_GENERATING_CONCEPT_ENTITY_PAGES, $run->status);
+        $this->assertNull($run->finished_at);
+        $this->assertNull($run->error_message);
+
+        Queue::assertPushed(GenerateEnterpriseWikiAppliedPage::class, fn ($job) => $job->pageId === $pages['concept']->id);
+        Queue::assertPushed(GenerateEnterpriseWikiAppliedPage::class, fn ($job) => $job->pageId === $pages['entity']->id);
+        Queue::assertPushed(GenerateEnterpriseWikiAppliedPage::class, 2);
+        Queue::assertNotPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class);
+
+        // The failed page itself is left as it was: failed, no version, its own error kept.
+        $this->assertSame(
+            EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED,
+            EnterpriseWikiIngestRunPage::query()->where('enterprise_wiki_page_id', $pages['summary']->id)->value('generation_status'),
+        );
+    }
+
+    public function test_phase_1_partial_failure_without_deferred_pages_continues_the_flow(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        [$run] = $this->createRun($customer, EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES, [
+            'article' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED,
+            'summary' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+        ]);
+
+        (new FinalizeEnterpriseWikiPageGeneration($run->id))->handle();
+        (new FinalizeEnterpriseWikiPageGeneration($run->id))->handle();
+
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING, $run->fresh()->status);
+        Queue::assertPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class, 1);
+    }
+
+    public function test_phase_1_where_every_page_failed_fails_the_run_with_its_phase_and_dispatches_nothing(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        [$run] = $this->createRun($customer, EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES, [
+            'article' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED,
+            'summary' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED,
+            'concept' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_PENDING,
+            'entity' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_PENDING,
+        ]);
+
+        (new FinalizeEnterpriseWikiPageGeneration($run->id))->handle();
+
+        $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES, $run->failed_phase);
+        $this->assertFalse($run->transient_failure);
         $this->assertNotNull($run->finished_at);
-        $this->assertStringContainsString('1 of 2 initial page(s) failed', $run->error_message);
+        $this->assertStringContainsString('2 of 2 initial page(s) failed', $run->error_message);
+        $this->assertStringContainsString('Article (article): boom', $run->error_message);
 
         Queue::assertNotPushed(GenerateEnterpriseWikiAppliedPage::class);
         Queue::assertNotPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class);
+    }
+
+    public function test_a_wave_that_failed_only_on_transient_errors_is_recorded_as_transient(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        [$run] = $this->createRun($customer, EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES, [
+            'article' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED,
+            'summary' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED,
+        ]);
+        EnterpriseWikiIngestRunPage::query()->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->update(['generation_error' => '[RuntimeException] OpenAI request failed: HTTP status [503]']);
+
+        (new FinalizeEnterpriseWikiPageGeneration($run->id))->handle();
+
+        $this->assertTrue($run->fresh()->transient_failure);
     }
 
     public function test_phase_1_dispatches_concept_and_entity_jobs_only_once_even_if_finalize_runs_twice(): void
@@ -239,7 +309,7 @@ class FinalizeEnterpriseWikiPageGenerationTest extends TestCase
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING, $run->fresh()->status);
     }
 
-    public function test_phase_2_failure_marks_run_failed_and_does_not_dispatch_continuation(): void
+    public function test_phase_2_partial_failure_continues_the_flow_exactly_once(): void
     {
         Queue::fake();
 
@@ -252,10 +322,30 @@ class FinalizeEnterpriseWikiPageGenerationTest extends TestCase
         ]);
 
         (new FinalizeEnterpriseWikiPageGeneration($run->id))->handle();
+        (new FinalizeEnterpriseWikiPageGeneration($run->id))->handle();
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING, $run->status);
+        $this->assertNull($run->error_message);
+        Queue::assertPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class, 1);
+    }
+
+    public function test_phase_2_fails_the_run_when_no_page_of_the_run_generated(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        [$run] = $this->createRun($customer, EnterpriseWikiIngestRun::STATUS_GENERATING_CONCEPT_ENTITY_PAGES, [
+            'concept' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED,
+            'entity' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED,
+        ]);
+
+        (new FinalizeEnterpriseWikiPageGeneration($run->id))->handle();
 
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->status);
-        $this->assertStringContainsString('1 of 2 concept/entity page(s) failed', $run->error_message);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_GENERATING_CONCEPT_ENTITY_PAGES, $run->failed_phase);
+        $this->assertStringContainsString('2 of 2 concept/entity page(s) failed', $run->error_message);
 
         Queue::assertNotPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class);
     }

@@ -31,11 +31,18 @@ final readonly class EnterpriseWikiRunRecoveryResult implements JsonSerializable
     /** The source document or its applied pages no longer exist. */
     public const OUTCOME_MISSING_DEPENDENCIES = 'missing_dependencies';
 
+    /**
+     * Why a page-generation retry is refused, for the user-facing explanation (one of the
+     * CODE_* constants, or null when no specific explanation applies). Never parsed from $reason.
+     */
+    public const CODE_PLAN_DEFECT = 'plan_defect';
+
     /** @param  string[]  $incompleteSteps */
     public function __construct(
         public string $outcome,
         public string $reason,
         public array $incompleteSteps = [],
+        public ?string $code = null,
     ) {}
 
     /** @param  string[]  $incompleteSteps */
@@ -56,9 +63,9 @@ final readonly class EnterpriseWikiRunRecoveryResult implements JsonSerializable
     }
 
     /** @param  string[]  $incompleteSteps */
-    public static function notRecoverable(string $reason, array $incompleteSteps = []): self
+    public static function notRecoverable(string $reason, array $incompleteSteps = [], ?string $code = null): self
     {
-        return new self(self::OUTCOME_NOT_RECOVERABLE, $reason, $incompleteSteps);
+        return new self(self::OUTCOME_NOT_RECOVERABLE, $reason, $incompleteSteps, $code);
     }
 
     public static function staleState(string $reason): self
@@ -83,6 +90,7 @@ final readonly class EnterpriseWikiRunRecoveryResult implements JsonSerializable
             'outcome' => $this->outcome,
             'reason' => $this->reason,
             'incomplete_steps' => $this->incompleteSteps,
+            'code' => $this->code,
         ];
     }
 

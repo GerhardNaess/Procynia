@@ -27,10 +27,12 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionFailureRecoveryService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageDeletionService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageGenerationFailureRecoveryService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\EnterpriseWiki\EnterpriseWikiReviewNotificationService;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunFindingsService;
+use App\Services\EnterpriseWiki\EnterpriseWikiRunRecoveryResult;
 use App\Services\EnterpriseWiki\EnterpriseWikiWikilinkRenderer;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerContext;
@@ -81,6 +83,7 @@ class WikiController extends Controller
         private readonly EnterpriseWikiClaimContentRepairService $claimContentRepairService,
         private readonly EnterpriseWikiBestPracticeSectionService $bestPracticeSectionService,
         private readonly EnterpriseWikiMaintainerDecisionFailureRecoveryService $maintainerDecisionRecoveryService,
+        private readonly EnterpriseWikiPageGenerationFailureRecoveryService $pageGenerationRecoveryService,
         private readonly EnterpriseWikiPublicationStatusService $publicationStatus,
         private readonly EnterpriseWikiPageDeletionService $pageDeletionService,
         private readonly CustomerPermissionService $customerPermissions,
@@ -886,6 +889,7 @@ class WikiController extends Controller
                         && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE)
                         && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false)
                         && $this->maintainerDecisionRecoveryService->evaluate($run->id, allowManualOverride: true)->isResumed(),
+                    'failed_pages' => $this->failedPagesSummaryForRun($run, $document, $user),
                     'error_message' => $run->error_message,
                     'qa_status' => $run->qa_status,
                     'qa_last_error' => $run->qa_last_error,
@@ -1088,6 +1092,123 @@ class WikiController extends Controller
 
         return $this->redirectToWikiTab($request)
             ->with('success', __('procynia.wiki.run_retry_maintainer_decision_success'));
+    }
+
+    /**
+     * Arbeidspakke A4 (docs/enterprise-wiki-knowledge-integration-plan.md §4.2): user-triggered
+     * "Prøv igjen for feilede sider" — re-dispatches only the pages that failed to generate in a
+     * failed or partially completed (escalated) run; pages that generated are never touched.
+     * Same authorization as cancelRun()/retryMaintainerDecision(). Whether the run may be resumed —
+     * including never retrying a plan defect (decision D3) — is entirely
+     * EnterpriseWikiPageGenerationFailureRecoveryService's decision; this action never dispatches
+     * anything the service refuses.
+     */
+    public function retryFailedPages(Request $request, EnterpriseWikiIngestRun $run): RedirectResponse
+    {
+        $customerId = $this->customerContext->currentCustomerId();
+        $user = $this->customerContext->currentUser();
+
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE);
+
+        abort_unless((int) $run->customer_id === (int) $customerId, 404);
+        abort_unless($run->source_type === EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT, 404);
+
+        $document = EnterpriseWikiDocument::query()
+            ->where('customer_id', $customerId)
+            ->find($run->source_id);
+
+        abort_unless($document instanceof EnterpriseWikiDocument, 404);
+        abort_unless($user instanceof User && $user->canDeleteEnterpriseWikiDocument($document), 403);
+
+        $result = $this->pageGenerationRecoveryService->attempt($run->id, caller: 'wiki_controller');
+
+        Log::info('[PROCYNIA][WIKI_RUN] Failed-page retry requested.', [
+            'run_id' => $run->id,
+            'document_id' => $document->id,
+            'user_id' => $user->id,
+            'outcome' => $result->outcome,
+            'code' => $result->code,
+        ]);
+
+        if (! $result->isResumed()) {
+            return $this->redirectToWikiTab($request)->with('error', $result->code === EnterpriseWikiRunRecoveryResult::CODE_PLAN_DEFECT
+                ? __('procynia.wiki.run_retry_failed_pages_plan_defect')
+                : __('procynia.wiki.run_retry_failed_pages_not_allowed'));
+        }
+
+        return $this->redirectToWikiTab($request)
+            ->with('success', __('procynia.wiki.run_retry_failed_pages_success'));
+    }
+
+    /**
+     * The Kjøringer row's view of the pages a run failed to generate: how many, what kind of
+     * failure (plan defect / transient / unknown — EnterpriseWikiPageGenerationFailureRecoveryService::failureKind(),
+     * the most severe one wins), and whether "Prøv igjen for feilede sider" may be offered to this
+     * user — decided by the recovery service's own evaluate(), never re-derived here. Null when the
+     * run has no failed page. The raw generation error stays behind the existing technical details.
+     *
+     * @return array{count: int, failure_kind: string, can_retry: bool}|null
+     */
+    private function failedPagesSummaryForRun(EnterpriseWikiIngestRun $run, ?EnterpriseWikiDocument $document, ?User $user): ?array
+    {
+        if (! in_array($run->status, [EnterpriseWikiIngestRun::STATUS_FAILED, EnterpriseWikiIngestRun::STATUS_ESCALATED], true)) {
+            return null;
+        }
+
+        $errors = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED)
+            ->pluck('generation_error');
+
+        if ($errors->isEmpty()) {
+            return null;
+        }
+
+        $kinds = $errors->map(fn (?string $error): string => EnterpriseWikiPageGenerationFailureRecoveryService::failureKind($error));
+        $failureKind = match (true) {
+            $kinds->contains(EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_PLAN_DEFECT) => EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_PLAN_DEFECT,
+            $kinds->contains(EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_UNKNOWN) => EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_UNKNOWN,
+            default => EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_TRANSIENT,
+        };
+
+        $mayManage = $document instanceof EnterpriseWikiDocument
+            && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE)
+            && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false);
+
+        return [
+            'count' => $errors->count(),
+            'failure_kind' => $failureKind,
+            'can_retry' => $mayManage && $this->pageGenerationRecoveryService->evaluate($run->id)->isResumed(),
+        ];
+    }
+
+    /**
+     * Arbeidspakke A5 (docs/enterprise-wiki-knowledge-integration-plan.md §5): why a page without a
+     * current version is incomplete, from the latest run that planned it. `reason` is
+     * `in_progress` while that run is still generating it, otherwise the failure kind
+     * (EnterpriseWikiPageGenerationFailureRecoveryService::failureKind()) — never the raw error,
+     * which stays behind the run's technical details. Null fields when no run ever planned it.
+     *
+     * @return array{reason: ?string, run_id: ?int}
+     */
+    private function incompletePageExplanation(EnterpriseWikiPage $page): array
+    {
+        $pivot = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->whereHas('run', fn ($query) => $query->where('customer_id', $page->customer_id))
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $pivot instanceof EnterpriseWikiIngestRunPage) {
+            return ['reason' => null, 'run_id' => null];
+        }
+
+        return [
+            'reason' => $pivot->generation_status === EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED
+                ? EnterpriseWikiPageGenerationFailureRecoveryService::failureKind($pivot->generation_error)
+                : 'in_progress',
+            'run_id' => (int) $pivot->enterprise_wiki_ingest_run_id,
+        ];
     }
 
     /**
@@ -1664,6 +1785,7 @@ class WikiController extends Controller
                 'owner' => $page->owner !== null
                     ? ['id' => $page->owner->id, 'name' => $page->owner->name]
                     : null,
+                'incomplete' => $currentVersion === null ? $this->incompletePageExplanation($page) : null,
             ],
             // Who handed this version over, to whom, and what the viewer may do about it. The Wiki
             // page view does not read these yet — the frontend gate is a later UI step — but the

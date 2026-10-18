@@ -98,6 +98,7 @@ class EnterpriseWikiEscalatedRunRecoveryService
             $result = $this->decide($run);
 
             if ($result->isResumed()) {
+                $previousQaStatus = $run->qa_status;
                 $this->resume($run);
 
                 Log::info('[WIKI_RUN_RECOVERY] Escalated run resumed.', [
@@ -105,6 +106,7 @@ class EnterpriseWikiEscalatedRunRecoveryService
                     'customer_id' => $run->customer_id,
                     'caller' => $caller,
                     'incomplete_steps' => $result->incompleteSteps,
+                    'previous_qa_status' => $previousQaStatus,
                 ]);
             } else {
                 Log::info('[WIKI_RUN_RECOVERY] Escalated run recovery evaluated.', [
@@ -235,25 +237,22 @@ class EnterpriseWikiEscalatedRunRecoveryService
     }
 
     /**
-     * Resets only the checkpoint/status fields that must reopen — never touches qa_last_error,
-     * qa_result, qa_completed_at, or qa_attempt_count, so the history of why the run previously
-     * escalated remains visible after it resumes. Mirrors
-     * wiki:recover-document-flow::executeResumeContinuation()'s existing status=failed path
-     * exactly, so both recovery routes leave a run in the identical shape once resumed.
+     * Resets only the checkpoint/status fields that must reopen. The recorded QA verdict is
+     * cleared (EnterpriseWikiIngestRun::qaStatusForResumedContinuation()) so the resumed flow runs
+     * QA again instead of finalizing from the verdict it is resuming away from; qa_last_error,
+     * qa_result, qa_completed_at and qa_attempt_count are never touched, so the history of why the
+     * run previously escalated remains visible until that new verdict replaces it. Mirrors
+     * wiki:recover-document-flow::executeResumeContinuation()'s status=failed path, so both
+     * recovery routes leave a run in the identical shape once resumed.
      */
     private function resume(EnterpriseWikiIngestRun $run): void
     {
-        $updates = [
+        $run->update([
             'status' => EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING,
             'finished_at' => null,
             'error_message' => null,
-        ];
-
-        if ($run->qa_status === EnterpriseWikiIngestRun::QA_STATUS_RUNNING) {
-            $updates['qa_status'] = EnterpriseWikiIngestRun::QA_STATUS_PENDING;
-        }
-
-        $run->update($updates);
+            'qa_status' => $run->qaStatusForResumedContinuation(),
+        ]);
 
         ContinueEnterpriseWikiDocumentFlowAfterPages::dispatch($run->id);
     }
