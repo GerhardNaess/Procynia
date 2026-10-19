@@ -3,6 +3,7 @@
 namespace App\Services\EnterpriseWiki;
 
 use App\Exceptions\EnterpriseWikiBlockProvenanceAmbiguousException;
+use App\Exceptions\EnterpriseWikiPageUnderReviewException;
 use App\Exceptions\EnterpriseWikiPageVersionBestPracticeReviewLostException;
 use App\Exceptions\EnterpriseWikiPageVersionBlockProvenanceLostException;
 use App\Models\EnterpriseWikiClaim;
@@ -30,6 +31,12 @@ use RuntimeException;
  * back this up as the last line of defense — this class prevents the race in practice, the
  * database constraint guarantees it can never silently succeed even if some future writer
  * bypasses this class.
+ *
+ * OPEN REVIEWS. A page in pending_review never gets a new current version from here unless the
+ * caller says it writes on a person's behalf ($allowDuringReview). The review assignment lives on
+ * the submitted version, so an automated version under an open review would strand that review
+ * (see EnterpriseWikiPageUnderReviewException). Checked under the same page lock as the write, so
+ * a page that entered review while an AI call was in flight is refused as well.
  */
 class EnterpriseWikiPageVersionWriter
 {
@@ -40,9 +47,12 @@ class EnterpriseWikiPageVersionWriter
      * @param  array<string, mixed>  $attributes  EnterpriseWikiPageVersion attributes other than
      *                                            enterprise_wiki_page_id, version_number, and is_current.
      */
-    public function writeNewCurrentVersion(EnterpriseWikiPage|int $page, array $attributes): EnterpriseWikiPageVersion
-    {
-        return $this->writeNewCurrentVersionRestoringBlocks($page, $attributes, null);
+    public function writeNewCurrentVersion(
+        EnterpriseWikiPage|int $page,
+        array $attributes,
+        bool $allowDuringReview = false,
+    ): EnterpriseWikiPageVersion {
+        return $this->writeNewCurrentVersionRestoringBlocks($page, $attributes, null, $allowDuringReview);
     }
 
     /**
@@ -60,18 +70,26 @@ class EnterpriseWikiPageVersionWriter
      * @param  (Closure(EnterpriseWikiPageVersion): void)|null  $restoreBlocks  Reconstructs
      *                                                                          content_blocks_json on the freshly written version. Null for an ordinary caller that
      *                                                                          already supplies its own blocks.
+     * @param  bool  $allowDuringReview  True only for a write made on a person's behalf (a manual
+     *                                   edit, the withdrawal of a deleted document's content).
      *
      * @throws EnterpriseWikiPageVersionBlockProvenanceLostException
+     * @throws EnterpriseWikiPageUnderReviewException
      */
     public function writeNewCurrentVersionRestoringBlocks(
         EnterpriseWikiPage|int $page,
         array $attributes,
         ?Closure $restoreBlocks,
+        bool $allowDuringReview = false,
     ): EnterpriseWikiPageVersion {
         $pageId = $page instanceof EnterpriseWikiPage ? $page->id : $page;
 
-        return DB::transaction(function () use ($pageId, $attributes, $restoreBlocks): EnterpriseWikiPageVersion {
-            $this->lockPage($pageId);
+        return DB::transaction(function () use ($pageId, $attributes, $restoreBlocks, $allowDuringReview): EnterpriseWikiPageVersion {
+            $locked = $this->lockPage($pageId);
+
+            if (! $allowDuringReview) {
+                $this->assertNotUnderReview($locked);
+            }
 
             $superseded = EnterpriseWikiPageVersion::query()
                 ->where('enterprise_wiki_page_id', $pageId)
@@ -296,7 +314,7 @@ class EnterpriseWikiPageVersionWriter
         }
 
         return DB::transaction(function () use ($pageId, $version): EnterpriseWikiPageVersion {
-            $this->lockPage($pageId);
+            $this->assertNotUnderReview($this->lockPage($pageId));
 
             EnterpriseWikiPageVersion::query()
                 ->where('enterprise_wiki_page_id', $pageId)
@@ -310,12 +328,25 @@ class EnterpriseWikiPageVersionWriter
         });
     }
 
-    private function lockPage(int $pageId): void
+    private function lockPage(int $pageId): EnterpriseWikiPage
     {
         $locked = EnterpriseWikiPage::query()->whereKey($pageId)->lockForUpdate()->first();
 
         if ($locked === null) {
             throw new RuntimeException("Page [{$pageId}] no longer exists.");
+        }
+
+        return $locked;
+    }
+
+    /**
+     * Must only be called with the row lockPage() returned: the status is read under the same lock
+     * the version write is serialised by, so submit() cannot slip in between check and write.
+     */
+    private function assertNotUnderReview(EnterpriseWikiPage $locked): void
+    {
+        if ($locked->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            throw new EnterpriseWikiPageUnderReviewException((int) $locked->id);
         }
     }
 

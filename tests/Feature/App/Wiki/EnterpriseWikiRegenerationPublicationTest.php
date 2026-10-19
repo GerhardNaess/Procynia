@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\App\Wiki;
 
+use App\Exceptions\EnterpriseWikiPageUnderReviewException;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
@@ -101,7 +102,7 @@ class EnterpriseWikiRegenerationPublicationTest extends TestCase
         );
     }
 
-    public function test_a_page_already_in_review_keeps_its_review_when_regenerated(): void
+    public function test_a_page_already_in_review_is_not_regenerated_and_keeps_its_review(): void
     {
         Queue::fake();
         $customer = $this->createCustomer();
@@ -111,13 +112,24 @@ class EnterpriseWikiRegenerationPublicationTest extends TestCase
         $run = $this->createRunUpdating($customer, $page);
         $this->mockGeneration("# Konsept\n\nNy forklaring under gjennomgang.");
 
-        (new GenerateEnterpriseWikiAppliedPage($run->id, $page->id))->handle(app(EnterpriseWikiGenerateAppliedPagesService::class));
+        // Previously the page was regenerated under the open review and only the approval guard
+        // stopped the stranded version. Now the update is deferred before any AI call: a version
+        // written under an open review strands the reviewer's handover, so none is written.
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $page->id))->handle(app(EnterpriseWikiGenerateAppliedPagesService::class));
+            $this->fail('Expected the update to be deferred.');
+        } catch (EnterpriseWikiPageUnderReviewException) {
+        }
 
-        // The settlement rule leaves a named reviewer's open handover alone; the review flow's own
-        // guard is what refuses to approve a version that changed after submission.
         $page->refresh();
         $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->status);
         $this->assertSame($published->id, (int) $page->published_version_id);
+        $this->assertSame($published->id, (int) $page->currentVersion()->value('id'));
+        $this->assertSame(1, EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $page->id)->count());
+        $this->assertSame(
+            EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED,
+            EnterpriseWikiIngestRunPage::query()->where('enterprise_wiki_ingest_run_id', $run->id)->value('generation_status'),
+        );
     }
 
     public function test_a_never_published_draft_stays_a_draft(): void

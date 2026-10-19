@@ -11,6 +11,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPatchApplicationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -629,6 +630,87 @@ class EnterpriseWikiPatchApplicationTest extends TestCase
         $this->assertSame(2, EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $pages['summary']->id)->count());
     }
 
+    /** Run 963: the decision only referenced page 69 (`preserve`) while it was in review. */
+    public function test_a_preserve_target_in_review_is_a_plain_no_op_not_a_deferred_update(): void
+    {
+        [$run, $pages] = $this->scenario([$this->preserveTarget()]);
+        $concept = $pages['concept'];
+        $submitted = $concept->currentVersion;
+        $reviewer = $this->createReviewUser($concept->customer_id);
+        $submitter = $this->createReviewUser($concept->customer_id);
+        $submitted->forceFill([
+            'submitted_by_user_id' => $submitter->id,
+            'submitted_at' => now(),
+            'reviewer_user_id' => $reviewer->id,
+        ])->save();
+        $concept->forceFill(['status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW])->save();
+        $submittedAt = (string) $submitted->fresh()->submitted_at;
+
+        $result = $this->service()->applyForRun($run);
+
+        $this->assertSame([], $result['failures'], 'preserve is not an update, so nothing was deferred');
+        $this->assertSame(0, $result['pages_patched']);
+        $this->assertSame(1, $result['pages_skipped']);
+
+        // No outcome row at all: nothing for QA to report as page_generation_incomplete, so the
+        // decision cannot escalate the run.
+        $this->assertFalse(EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $concept->id)
+            ->exists());
+        $this->assertFalse(EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED)
+            ->exists());
+
+        $concept = $concept->fresh();
+        $current = $concept->currentVersion;
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $concept->status);
+        $this->assertSame(1, EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->count());
+        $this->assertSame($submitted->id, $current->id);
+        $this->assertSame($submitted->content_markdown, $current->content_markdown);
+        $this->assertSame($reviewer->id, (int) $current->reviewer_user_id);
+        $this->assertSame($submitter->id, (int) $current->submitted_by_user_id);
+        $this->assertSame($submittedAt, (string) $current->submitted_at);
+    }
+
+    public function test_a_patch_target_in_review_is_deferred_and_the_other_page_is_still_patched(): void
+    {
+        [$run, $pages] = $this->scenario([$this->replaceTargetA(), $this->replaceTargetOnSummary()]);
+        $article = $pages['article'];
+        $submitted = $article->currentVersion;
+        $reviewer = $this->createReviewUser($article->customer_id);
+        $submitted->forceFill([
+            'submitted_by_user_id' => $this->createReviewUser($article->customer_id)->id,
+            'submitted_at' => now(),
+            'reviewer_user_id' => $reviewer->id,
+        ])->save();
+        $article->forceFill(['status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW])->save();
+
+        $result = $this->service()->applyForRun($run);
+
+        $this->assertSame(1, $result['pages_patched'], 'the independent page is still patched');
+        $this->assertCount(1, $result['failures']);
+        $this->assertSame(2, EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $pages['summary']->id)->count());
+
+        $this->assertSame(1, EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->count(), 'no version for the page in review');
+        $article = $article->fresh();
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $article->status);
+        $this->assertSame($submitted->id, $article->currentVersion->id);
+        $this->assertSame($submitted->content_markdown, $article->currentVersion->content_markdown);
+        $this->assertSame($reviewer->id, (int) $article->currentVersion->reviewer_user_id);
+
+        // Recorded as this page's outcome — not as a patched page — so the run escalates.
+        $pivot = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $article->id)
+            ->firstOrFail();
+        $this->assertSame(EnterpriseWikiIngestRunPage::ACTION_PATCHED, $pivot->action);
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED, $pivot->generation_status);
+        $this->assertNull($pivot->generated_page_version_id);
+        $this->assertStringStartsWith('[EnterpriseWikiPageUnderReviewException]', (string) $pivot->generation_error);
+    }
+
     // =========================================================================
     // Idempotency, concurrency and the no-full-generation guarantee
     // =========================================================================
@@ -712,6 +794,19 @@ class EnterpriseWikiPatchApplicationTest extends TestCase
     // =========================================================================
     // Helpers
     // =========================================================================
+
+    private function createReviewUser(int $customerId): User
+    {
+        return User::query()->create([
+            'name' => 'Review User',
+            'email' => Str::lower(Str::random(10)).'@test.invalid',
+            'password' => bcrypt('secret'),
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $customerId,
+            'is_active' => true,
+        ]);
+    }
 
     private function service(): EnterpriseWikiPatchApplicationService
     {

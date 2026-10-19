@@ -4,6 +4,7 @@ namespace Tests\Feature\App\Wiki;
 
 use App\Exceptions\EnterpriseWikiFigureMaterializationException;
 use App\Exceptions\EnterpriseWikiPageGenerationIncompleteException;
+use App\Exceptions\EnterpriseWikiPageUnderReviewException;
 use App\Exceptions\EnterpriseWikiPlannedSectionEvidenceMissingException;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
@@ -13,11 +14,15 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\User;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
 use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageGenerationFailureRecoveryService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPlannedSectionCoverageValidator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -2006,8 +2011,187 @@ XML;
     }
 
     // =========================================================================
+    // Open reviews — automated generation never takes a review away from its reviewer
+    // =========================================================================
+
+    public function test_a_page_in_review_gets_no_new_working_version_and_no_ai_call(): void
+    {
+        Queue::fake();
+        $customer = $this->createCustomer();
+        [$run, $article, $summary] = $this->createAppliedRunWithTwoPages($customer);
+        $review = $this->putInReview($summary);
+
+        $this->mock(WikiPageContentAiClient::class)->shouldNotReceive('generatePageFromSource');
+
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $summary->id))->handle(app(EnterpriseWikiGenerateAppliedPagesService::class));
+            $this->fail('Expected the deferral to be rethrown like any other page failure.');
+        } catch (EnterpriseWikiPageUnderReviewException $e) {
+            $this->assertSame($summary->id, $e->pageId);
+        }
+
+        $this->assertReviewUntouched($summary, $review);
+
+        $pivot = $this->pivotFor($run, $summary);
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED, $pivot->generation_status, 'a deferred update is never a completed one');
+        $this->assertStringStartsWith('[EnterpriseWikiPageUnderReviewException]', (string) $pivot->generation_error);
+        $this->assertNull($pivot->generated_page_version_id);
+        $this->assertSame(
+            EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_TRANSIENT,
+            EnterpriseWikiPageGenerationFailureRecoveryService::failureKind($pivot->generation_error),
+            'the deferral lasts as long as the review, so a later retry is the way to apply it',
+        );
+        Queue::assertPushed(FinalizeEnterpriseWikiPageGeneration::class, fn ($job) => $job->runId === $run->id);
+    }
+
+    public function test_the_other_pages_of_the_run_still_generate_and_may_link_to_the_page_in_review(): void
+    {
+        Queue::fake();
+        $customer = $this->createCustomer();
+        [$run, $article, $summary] = $this->createAppliedRunWithTwoPages($customer);
+        $review = $this->putInReview($summary);
+        $service = app(EnterpriseWikiGenerateAppliedPagesService::class);
+
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $summary->id))->handle($service);
+        } catch (EnterpriseWikiPageUnderReviewException) {
+            // deferred — asserted in the test above
+        }
+
+        // The article's mocked content links to the summary (createAppliedRunWithTwoPages()).
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle($service);
+
+        $articlePivot = $this->pivotFor($run, $article);
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED, $articlePivot->generation_status);
+        $articleVersion = EnterpriseWikiPageVersion::query()->findOrFail($articlePivot->generated_page_version_id);
+        $this->assertStringContainsString("[[{$summary->slug}]]", (string) $articleVersion->content_markdown);
+
+        // Linking TO a page in review is not changing it: the link row is the article's.
+        app(EnterpriseWikiBuildPageLinksService::class)->materializeWikilinksForPage($article->fresh(), $run->id);
+        $this->assertTrue(EnterpriseWikiPageLink::query()
+            ->where('from_page_id', $article->id)
+            ->where('to_page_id', $summary->id)
+            ->exists());
+
+        $this->assertReviewUntouched($summary, $review);
+    }
+
+    public function test_a_review_opened_while_the_page_is_being_generated_is_not_overwritten(): void
+    {
+        Queue::fake();
+        $customer = $this->createCustomer();
+        [$run, $article, $summary] = $this->createAppliedRunWithTwoPages($customer);
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# Existing working version',
+            'generated_by_model' => 'gpt-5',
+        ]);
+        $review = null;
+
+        // The page is submitted for review while its AI call is in flight: planning saw a draft,
+        // the write must see the review.
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(function (...$arguments) use ($article, $summary, &$review): array {
+                $review = $this->putInReview($article);
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$summary->slug}]].", $arguments['sourceElements'] ?? $arguments[6] ?? []);
+            });
+
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(app(EnterpriseWikiGenerateAppliedPagesService::class));
+            $this->fail('Expected the version writer to refuse the write.');
+        } catch (EnterpriseWikiPageUnderReviewException) {
+        }
+
+        $this->assertReviewUntouched($article, $review);
+        $this->assertSame('# Existing working version', $article->fresh()->currentVersion->content_markdown);
+
+        $pivot = $this->pivotFor($run, $article);
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED, $pivot->generation_status);
+        $this->assertStringStartsWith('[EnterpriseWikiPageUnderReviewException]', (string) $pivot->generation_error);
+        $this->assertNull($pivot->generated_page_version_id);
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
+
+    /**
+     * The state submit() leaves behind: the working version handed to a named reviewer, the page
+     * pending_review. Gives the page a working version first when it has none.
+     *
+     * @return array{version_id: int, version_count: int, reviewer_user_id: int, submitted_by_user_id: int, submitted_at: string}
+     */
+    private function putInReview(EnterpriseWikiPage $page): array
+    {
+        $version = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->where('is_current', true)
+            ->first() ?? EnterpriseWikiPageVersion::query()->create([
+                'enterprise_wiki_page_id' => $page->id,
+                'version_number' => 1,
+                'is_current' => true,
+                'content_markdown' => '# Under review',
+                'generated_by_model' => 'gpt-5',
+            ]);
+
+        $submitter = $this->createReviewUser($page->customer_id);
+        $reviewer = $this->createReviewUser($page->customer_id);
+
+        $version->forceFill([
+            'submitted_by_user_id' => $submitter->id,
+            'submitted_at' => now(),
+            'reviewer_user_id' => $reviewer->id,
+        ])->save();
+        $page->forceFill(['status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW])->save();
+
+        return [
+            'version_id' => $version->id,
+            'version_count' => EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $page->id)->count(),
+            'reviewer_user_id' => $reviewer->id,
+            'submitted_by_user_id' => $submitter->id,
+            'submitted_at' => (string) $version->fresh()->submitted_at,
+        ];
+    }
+
+    /** @param array{version_id: int, version_count: int, reviewer_user_id: int, submitted_by_user_id: int, submitted_at: string} $review */
+    private function assertReviewUntouched(EnterpriseWikiPage $page, array $review): void
+    {
+        $page = $page->fresh();
+        $current = $page->currentVersion;
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->status);
+        $this->assertSame($review['version_count'], EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $page->id)->count(), 'no new working version');
+        $this->assertSame($review['version_id'], $current->id, 'the submitted version is still the working version');
+        $this->assertSame($review['reviewer_user_id'], (int) $current->reviewer_user_id);
+        $this->assertSame($review['submitted_by_user_id'], (int) $current->submitted_by_user_id);
+        $this->assertSame($review['submitted_at'], (string) $current->submitted_at);
+    }
+
+    private function createReviewUser(int $customerId): User
+    {
+        return User::query()->create([
+            'name' => 'Review User',
+            'email' => Str::lower(Str::random(10)).'@test.invalid',
+            'password' => bcrypt('secret'),
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $customerId,
+            'is_active' => true,
+        ]);
+    }
+
+    private function pivotFor(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): EnterpriseWikiIngestRunPage
+    {
+        return EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->firstOrFail();
+    }
 
     private function createCustomer(string $name = 'Test AS'): Customer
     {

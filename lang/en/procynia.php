@@ -10639,6 +10639,8 @@ return [
         'runs_findings_explanation_verification_incomplete_auto' => 'The run was interrupted before all claims were verified. The system will attempt to resume processing automatically.',
         'runs_findings_explanation_verification_incomplete_manual' => 'The run was interrupted before all claims were verified and requires new processing.',
         'runs_findings_explanation_qa_pending' => 'Technical quality control has not finished yet.',
+        'runs_findings_explanation_update_deferred_in_review' => 'The update of “:title” was not carried out because the article is under review.',
+        'submit_working_version_changed' => 'The working version changed while the page was being sent for review. Reload the page and send it for review again.',
         'runs_findings_status_requires_action' => 'Requires action',
         'runs_findings_status_open' => 'Open',
         'runs_findings_status_resolved' => 'Resolved',

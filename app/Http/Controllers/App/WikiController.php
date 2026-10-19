@@ -2707,6 +2707,17 @@ class WikiController extends Controller
         }
 
         DB::transaction(function () use ($page, $version, $user, $reviewer): void {
+            // The same page row lock EnterpriseWikiPageVersionWriter writes under. Everything above
+            // was read without it, so an automated version written in between would otherwise make
+            // this hand over a version that is no longer the working one — a review stranded from
+            // the start. Re-read under the lock and refuse instead.
+            $locked = EnterpriseWikiPage::query()->whereKey($page->id)->lockForUpdate()->first();
+            $currentVersionId = $locked?->currentVersion()->value('id');
+
+            if ($locked?->status !== EnterpriseWikiPage::STATUS_DRAFT || (int) $currentVersionId !== (int) $version->id) {
+                abort(409, __('procynia.wiki.submit_working_version_changed'));
+            }
+
             $version->forceFill([
                 'submitted_by_user_id' => $user->id,
                 'submitted_at' => now(),

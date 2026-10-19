@@ -194,7 +194,9 @@ class EnterpriseWikiClaimContentRepairService
 
             // Through the writer, so the page lock, the version numbering, the single-current
             // constraint, best-practice carry-forward and the block/provenance guards all apply —
-            // there is no staged phase to keep it out of them any more.
+            // there is no staged phase to keep it out of them any more. A person's own edit, so
+            // the writer's open-review refusal (meant for automated writers) does not apply; what
+            // a person may edit is the controller's and the edit policy's decision, unchanged.
             $newVersion = $this->versionWriter->writeNewCurrentVersion($page->id, [
                 'content_markdown' => $this->markdownFromBlocks($blocks),
                 'content_blocks_json' => $blocks,
@@ -202,7 +204,7 @@ class EnterpriseWikiClaimContentRepairService
                 'generated_by_model' => null,
                 'generation_prompt_hash' => null,
                 'created_by_user_id' => $actor->id,
-            ]);
+            ], allowDuringReview: true);
 
             // Claims are copied forward ONLY for blocks the user left alone. A claim verified
             // against the old wording says nothing about the new one, so for a changed block it is

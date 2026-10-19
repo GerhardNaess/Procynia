@@ -128,6 +128,16 @@ class EnterpriseWikiExtractPageClaimsService
                 continue;
             }
 
+            // A page in review is not this run's to annotate: its current version is the one a
+            // reviewer holds (typically because this run's update of it was deferred), and new
+            // claims on it would add source findings to a review nobody asked for. No checkpoint, so
+            // the run stays honestly incomplete for this page.
+            if ($page->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+                $skipped++;
+
+                continue;
+            }
+
             // Authoritative checkpoint: this (run, page) already completed extraction —
             // regardless of whether it produced any claims — so skip without an AI call.
             if ($row->claims_extracted_at !== null) {

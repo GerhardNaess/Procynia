@@ -17,6 +17,7 @@ use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageVersionWriter;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -690,6 +691,48 @@ class WikiControllerTest extends TestCase
             ->assertRedirect();
 
         $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->fresh()->status);
+    }
+
+    public function test_submit_refuses_when_an_automated_version_lands_before_the_handover(): void
+    {
+        $customer = $this->createCustomer();
+        $pageOwner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Samtidig innsending');
+        $page->forceFill(['owner_user_id' => $pageOwner->id])->save();
+        $read = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# Versjonen brukeren så',
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        $settings = $customer->resolvedPermissionSettings();
+        $settings[Customer::PERMISSION_APPROVE_WIKI_PAGES] = ['bid_manager'];
+        $customer->forceFill(['permission_settings' => $settings])->save();
+        $reviewer = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+
+        // submit() reads the working version, then loads the reviewer, then opens its transaction.
+        // An automated writer committing in that window is what this simulates.
+        $landed = false;
+        User::retrieved(function (User $user) use ($reviewer, $page, &$landed): void {
+            if ($landed || $user->id !== $reviewer->id) {
+                return;
+            }
+
+            $landed = true;
+            app(EnterpriseWikiPageVersionWriter::class)
+                ->writeNewCurrentVersion($page->id, ['content_markdown' => '# Maskinskrevet i mellomtiden']);
+        });
+
+        $this->actingAs($pageOwner)
+            ->patch('/app/wiki/'.$page->slug.'/submit', ['reviewer_user_id' => $reviewer->id])
+            ->assertStatus(409);
+
+        $this->assertTrue($landed, 'the simulated concurrent write must have happened');
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->fresh()->status);
+        $this->assertNull($read->fresh()->reviewer_user_id, 'a version that is no longer the working one is never handed over');
+        $this->assertNull($page->fresh()->currentVersion->reviewer_user_id);
     }
 
     public function test_submit_from_approved_status_returns_422(): void

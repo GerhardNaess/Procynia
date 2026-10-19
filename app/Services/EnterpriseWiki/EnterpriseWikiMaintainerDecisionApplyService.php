@@ -335,6 +335,14 @@ class EnterpriseWikiMaintainerDecisionApplyService
             );
         }
 
+        // A reused page in review is left exactly as it is — not even last_source_hash or page_type
+        // moves while a reviewer holds it. It still gets its pivot: the update is deferred on THIS
+        // page (generation refuses it and records why), never rerouted to a new look-alike page.
+        // The row was read under lockForUpdate() in resolvePage(), so the status is current.
+        if ($page->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            return;
+        }
+
         $attributes = ['last_source_hash' => $expectedHash];
 
         if ($page->page_type !== $pageType) {

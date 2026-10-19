@@ -10643,6 +10643,8 @@ return [
         'runs_findings_explanation_verification_incomplete_auto' => 'Kjøringen ble avbrutt før alle påstander var verifisert. Systemet vil forsøke å gjenoppta behandlingen automatisk.',
         'runs_findings_explanation_verification_incomplete_manual' => 'Kjøringen ble avbrutt før alle påstander var verifisert og krever ny behandling.',
         'runs_findings_explanation_qa_pending' => 'Teknisk kvalitetskontroll er ikke fullført ennå.',
+        'runs_findings_explanation_update_deferred_in_review' => 'Oppdatering av «:title» ble ikke gjennomført fordi artikkelen er til gjennomgang.',
+        'submit_working_version_changed' => 'Arbeidsversjonen ble endret mens siden ble sendt til gjennomgang. Last siden på nytt og send den til gjennomgang igjen.',
         'runs_findings_status_requires_action' => 'Krever handling',
         'runs_findings_status_open' => 'Åpent',
         'runs_findings_status_resolved' => 'Løst',

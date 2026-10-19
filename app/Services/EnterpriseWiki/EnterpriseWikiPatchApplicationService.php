@@ -2,6 +2,7 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Exceptions\EnterpriseWikiPageUnderReviewException;
 use App\Exceptions\EnterpriseWikiPatchApplicationException;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
@@ -142,6 +143,12 @@ class EnterpriseWikiPatchApplicationService
                 } else {
                     $skipped++;
                 }
+            } catch (EnterpriseWikiPageUnderReviewException $e) {
+                // Deferred, not failed: the page is in review, so its patch waits for the review to
+                // close. Recorded as this page's outcome so the run escalates instead of passing
+                // with an update that never happened. No version was written.
+                $failures[] = $e->getMessage();
+                $this->recordReviewDeferral($run, $pageId, $e);
             } catch (EnterpriseWikiPatchApplicationException $e) {
                 // Controlled stop for THIS page only. No version was written for it, and the other
                 // pages' patches are independent — one unlocatable target must not silently abandon
@@ -258,6 +265,15 @@ class EnterpriseWikiPatchApplicationService
             return ['wrote_version' => false, 'targets_applied' => 0];
         }
 
+        // Only now, with a real change planned: a page in review keeps its working version untouched,
+        // so the update is deferred. Checked after the preserve-only return on purpose — a page the
+        // decision merely references (run 963: page 69, `preserve`) is not an update, and must not be
+        // recorded as a deferred one. The version writer refuses the same write under the page lock,
+        // which covers a review opened while this page was being planned.
+        if ($page->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            throw new EnterpriseWikiPageUnderReviewException((int) $page->id);
+        }
+
         // --- Execute the plan. Deterministic order: replacements (by block index) before
         // insertions, so an insertion's index is never invalidated by an earlier edit. ---
         $blocks = $this->executePlan($originalBlocks, $plan, "Run [{$run->id}] page [{$pageId}]");
@@ -339,6 +355,51 @@ class EnterpriseWikiPatchApplicationService
         ]);
 
         return ['wrote_version' => true, 'targets_applied' => count($plan)];
+    }
+
+    /**
+     * The deferred patch as this run's outcome for the page, through the pivot every other step of
+     * the run already reads: generation_status=failed with the reason recorded, and no version.
+     * Post-ingest QA reports page_generation_incomplete and the run escalates; the Kjøringer row and
+     * the findings explanation name the page. Claim extraction leaves a page in review alone, so
+     * nothing of this run attaches to the version under review.
+     */
+    private function recordReviewDeferral(EnterpriseWikiIngestRun $run, int $pageId, EnterpriseWikiPageUnderReviewException $e): void
+    {
+        DB::transaction(function () use ($run, $pageId, $e): void {
+            $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
+
+            if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
+                return;
+            }
+
+            $pivot = EnterpriseWikiIngestRunPage::query()
+                ->where('enterprise_wiki_ingest_run_id', $run->id)
+                ->where('enterprise_wiki_page_id', $pageId)
+                ->lockForUpdate()
+                ->first();
+
+            if ($pivot !== null && $pivot->generated_page_version_id !== null) {
+                return;
+            }
+
+            EnterpriseWikiIngestRunPage::query()->updateOrCreate(
+                [
+                    'enterprise_wiki_ingest_run_id' => $run->id,
+                    'enterprise_wiki_page_id' => $pageId,
+                ],
+                [
+                    'action' => EnterpriseWikiIngestRunPage::ACTION_PATCHED,
+                    'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED,
+                    'generation_error' => mb_substr(sprintf('[%s] %s', class_basename($e), $e->getMessage()), 0, 1000),
+                ],
+            );
+        });
+
+        Log::warning('[WIKI_PATCH] Patch deferred: page is in review — no version written.', [
+            'run_id' => $run->id,
+            'page_id' => $pageId,
+        ]);
     }
 
     /**

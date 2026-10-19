@@ -849,6 +849,18 @@ class EnterpriseWikiRunFindingsService
             return trans_choice('procynia.wiki.runs_findings_explanation_has_blocking', $openBlockingCount, ['count' => $openBlockingCount]);
         }
 
+        // An update an open review deferred is said by name. The run escalated on it
+        // (page_generation_incomplete), and the generic texts below would describe a different
+        // situation — a stale status, or a step the system will finish by itself.
+        $reviewDeferred = $this->reviewDeferredPageTitles($run);
+
+        if ($reviewDeferred !== []) {
+            return implode(' ', array_map(
+                static fn (string $title): string => __('procynia.wiki.runs_findings_explanation_update_deferred_in_review', ['title' => $title]),
+                $reviewDeferred,
+            ));
+        }
+
         // Plan §18 (P0-3): an escalation on a quality finding is explained by what was found —
         // never by the generic needs_resync text, which describes a different situation.
         $qualityFindings = $run->qa_status === EnterpriseWikiIngestRun::QA_STATUS_ESCALATED
@@ -884,6 +896,36 @@ class EnterpriseWikiRunFindingsService
         }
 
         return __('procynia.wiki.runs_findings_explanation_qa_pending');
+    }
+
+    /**
+     * Titles of the pages whose update this run deferred because they were in review — read from
+     * the pivot outcome the generation job and the patch engine record
+     * ("[EnterpriseWikiPageUnderReviewException] …" as generation_error), never from the page's
+     * status today: a review closed since then does not make the update have happened.
+     *
+     * @return list<string>
+     */
+    private function reviewDeferredPageTitles(EnterpriseWikiIngestRun $run): array
+    {
+        $pageIds = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED)
+            ->where('generation_error', 'like', '%'.EnterpriseWikiPageGenerationFailureRecoveryService::REVIEW_DEFERRAL_MARKER.'%')
+            ->pluck('enterprise_wiki_page_id');
+
+        if ($pageIds->isEmpty()) {
+            return [];
+        }
+
+        return EnterpriseWikiPage::query()
+            ->where('customer_id', $run->customer_id)
+            ->whereIn('id', $pageIds)
+            ->orderBy('id')
+            ->pluck('title')
+            ->map(static fn (mixed $title): string => (string) $title)
+            ->values()
+            ->all();
     }
 
     /**

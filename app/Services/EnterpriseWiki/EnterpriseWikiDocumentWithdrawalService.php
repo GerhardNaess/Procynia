@@ -440,11 +440,13 @@ class EnterpriseWikiDocumentWithdrawalService
         )));
 
         try {
+            // A person deleted the document; its content must leave every page, including one in
+            // review, so the writer's open-review refusal for automated writers does not apply.
             $this->versionWriter->writeNewCurrentVersion((int) $version->enterprise_wiki_page_id, [
                 'content_markdown' => $markdown,
                 'content_blocks_json' => $renumbered,
                 'generated_by_model' => $version->generated_by_model,
-            ]);
+            ], allowDuringReview: true);
 
             // Withdrawing a deleted document's paragraphs removes knowledge the page asserted, so
             // a published page returns to draft rather than publishing the shorter text itself.

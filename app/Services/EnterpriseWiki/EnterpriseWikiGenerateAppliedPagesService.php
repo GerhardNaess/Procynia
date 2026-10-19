@@ -5,6 +5,7 @@ namespace App\Services\EnterpriseWiki;
 use App\Exceptions\EnterpriseWikiFigureMaterializationException;
 use App\Exceptions\EnterpriseWikiInvalidWikilinksException;
 use App\Exceptions\EnterpriseWikiPageGenerationIncompleteException;
+use App\Exceptions\EnterpriseWikiPageUnderReviewException;
 use App\Exceptions\EnterpriseWikiPatchTargetRegenerationBlockedException;
 use App\Exceptions\EnterpriseWikiPlannedSectionEvidenceMissingException;
 use App\Exceptions\EnterpriseWikiPlannedSectionRepairShapeException;
@@ -722,6 +723,15 @@ class EnterpriseWikiGenerateAppliedPagesService
                 "Run [{$run->id}] source_type is not enterprise_wiki_document."
             );
         }
+
+        // An open review defers this page's update — before the lease and before any AI call, so the
+        // page keeps its working version, its reviewer and its review history, and no content is
+        // produced for it. The job records the deferral as this page's failed outcome, the run's
+        // other pages continue (controlled partial completion), and the run escalates instead of
+        // completing. Checked first, so a deferred patch target keeps this reason on a retry. A
+        // review opened while the AI call below is in flight is refused by the version writer
+        // under the page lock, with the same outcome.
+        $this->guardAgainstOpenReview($run, $page);
 
         // Fase 8K-2 destructive-update guard — BEFORE the lease is claimed and before any AI call,
         // so a blocked page is never marked running and no content is ever produced for it. This
@@ -2016,6 +2026,26 @@ class EnterpriseWikiGenerateAppliedPagesService
         ]);
 
         throw new EnterpriseWikiPatchTargetRegenerationBlockedException((int) $run->id, (int) $page->id);
+    }
+
+    /**
+     * @throws EnterpriseWikiPageUnderReviewException
+     */
+    private function guardAgainstOpenReview(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): void
+    {
+        $status = EnterpriseWikiPage::query()->whereKey($page->id)->value('status');
+
+        if ($status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            return;
+        }
+
+        Log::warning('[WIKI_PAGE_GENERATION] Update deferred: page is in review.', [
+            'run_id' => $run->id,
+            'page_id' => $page->id,
+            'page_type' => $page->page_type,
+        ]);
+
+        throw new EnterpriseWikiPageUnderReviewException((int) $page->id);
     }
 
     /** @param list<array<string, mixed>> $bestPracticeReview */

@@ -65,6 +65,9 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
         'EnterpriseWikiPatchTargetRegenerationBlockedException',
     ];
 
+    /** generation_error prefix for an update an open review deferred (EnterpriseWikiPageUnderReviewException). */
+    public const REVIEW_DEFERRAL_MARKER = 'EnterpriseWikiPageUnderReviewException';
+
     public const FAILURE_PLAN_DEFECT = 'plan_defect';
 
     public const FAILURE_TRANSIENT = 'transient';
@@ -277,6 +280,15 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
      */
     public static function failureKind(?string $generationError): string
     {
+        // An update deferred by an open review is temporary by definition: it lasts exactly as long
+        // as the review, and a person's retry after that is the way to apply it. A retry while the
+        // review is still open is refused again before any AI call. Kept out of
+        // EnterpriseWikiTransientFailureClassifier on purpose — that allow-list also drives automatic
+        // retries, and nothing here should loop against a review.
+        if ($generationError !== null && str_contains($generationError, self::REVIEW_DEFERRAL_MARKER)) {
+            return self::FAILURE_TRANSIENT;
+        }
+
         foreach (self::PLAN_DEFECT_MARKERS as $marker) {
             if ($generationError !== null && str_contains($generationError, $marker)) {
                 return self::FAILURE_PLAN_DEFECT;
