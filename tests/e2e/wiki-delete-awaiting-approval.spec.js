@@ -30,6 +30,8 @@ test.describe.serial('Kildedokumenter delete button for awaiting_document_owner_
         const row = page.locator('tr', { has: page.getByText('E2E Delete Awaiting Approval Check.docx', { exact: true }) });
         await expect(row).toBeVisible();
 
+        // «Slett» lives in the row's ⋯ panel.
+        await row.getByRole('button', { name: 'Flere handlinger' }).click();
         const deleteButton = row.getByRole('button', { name: 'Slett' });
         await expect(deleteButton).toBeEnabled();
         await expect(deleteButton).not.toHaveAttribute('title', 'Dokumentet har en aktiv kjøring');
@@ -42,6 +44,8 @@ test.describe.serial('Kildedokumenter delete button for awaiting_document_owner_
         const row = page.locator('tr', { has: page.getByText('E2E Delete Active Run Check.docx', { exact: true }) });
         await expect(row).toBeVisible();
 
+        // «Slett» lives in the row's ⋯ panel.
+        await row.getByRole('button', { name: 'Flere handlinger' }).click();
         const deleteButton = row.getByRole('button', { name: 'Slett' });
         await expect(deleteButton).toBeDisabled();
         await expect(deleteButton).toHaveAttribute('title', 'Dokumentet har en aktiv kjøring');
@@ -52,6 +56,7 @@ test.describe.serial('Kildedokumenter delete button for awaiting_document_owner_
         await page.goto('/app/wiki?tab=sources');
 
         const row = page.locator('tr', { has: page.getByText('E2E Delete Awaiting Approval Check.docx', { exact: true }) });
+        await row.getByRole('button', { name: 'Flere handlinger' }).click();
         await row.getByRole('button', { name: 'Slett' }).click();
 
         const dialog = page.getByRole('dialog');
@@ -69,6 +74,7 @@ test.describe.serial('Kildedokumenter delete button for awaiting_document_owner_
         await page.goto('/app/wiki?tab=sources');
 
         const row = page.locator('tr', { has: page.getByText('E2E Delete Awaiting Approval Check.docx', { exact: true }) });
+        await row.getByRole('button', { name: 'Flere handlinger' }).click();
         await row.getByRole('button', { name: 'Slett' }).click();
 
         const dialog = page.getByRole('dialog');
@@ -90,11 +96,12 @@ test.describe.serial('Kildedokumenter delete button for awaiting_document_owner_
         await page.setViewportSize({ width: 1440, height: 900 });
         await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=sources');
-        await expect(page.getByText('E2E Delete Active Run Check.docx', { exact: true })).toBeVisible();
+        // The list renders as a table from 1280px and as cards below it; only one is shown.
+        await expect(page.getByRole('rowheader', { name: /E2E Delete Active Run Check\.docx/ })).toBeVisible();
 
         await page.setViewportSize({ width: 390, height: 844 });
         await page.goto('/app/wiki?tab=sources');
-        await expect(page.getByText('E2E Delete Active Run Check.docx', { exact: true })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'E2E Delete Active Run Check.docx', exact: true })).toBeVisible();
 
         const bodyOverflows = await page.evaluate(
             () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,

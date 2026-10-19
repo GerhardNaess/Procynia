@@ -49,13 +49,16 @@ test.describe.serial('Wiki tab preservation after actions', () => {
         const row = page.locator('tr', { has: page.getByText('E2E Tab Preservation Source Check.docx', { exact: true }) });
         await expect(row).toBeVisible();
 
-        const select = row.locator('select');
+        // The owner is changed in a dialog opened from the row's pencil.
+        await row.getByRole('button', { name: 'Endre dokumenteier' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Endre dokumenteier' });
+        const select = dialog.getByLabel('Dokumenteier');
         const optionValues = await select.locator('option').evaluateAll(
             (options) => options.map((o) => o.value).filter((v) => v !== ''),
         );
         expect(optionValues.length).toBeGreaterThan(0);
         await select.selectOption(optionValues[0]);
-        await row.getByRole('button', { name: 'Lagre eier' }).click();
+        await dialog.getByRole('button', { name: 'Lagre eier' }).click();
 
         await page.waitForURL((url) => url.searchParams.get('tab') === 'sources');
         expect(new URL(page.url()).searchParams.get('tab')).toBe('sources');

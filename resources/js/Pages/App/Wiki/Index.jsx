@@ -1,6 +1,6 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
-import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { PRIMARY_ACTION, PRIMARY_COLOURS, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import ActionDialog, { DialogTitleBar } from '../../../Components/App/ActionDialog';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
@@ -49,10 +49,6 @@ const RUNS_GRID_TEMPLATE = 'minmax(0,3.5rem) minmax(0,1.1fr) minmax(0,1.9fr) min
 const ACTION_BUTTON_BASE = 'inline-flex h-10 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3.5 text-base font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50';
 const ACTION_BUTTON_PRIMARY = `${ACTION_BUTTON_BASE} shadow-sm ${PRIMARY_COLOURS}`;
 const ACTION_BUTTON_SECONDARY = `${ACTION_BUTTON_BASE} border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 focus-visible:ring-slate-300`;
-const ACTION_BUTTON_DESTRUCTIVE = `${ACTION_BUTTON_BASE} border-rose-300 bg-white text-rose-700 hover:border-rose-400 hover:bg-rose-50 focus-visible:ring-rose-400`;
-// Icon-only sibling of ACTION_BUTTON_SECONDARY: same border, hover and focus-visible treatment,
-// square so it reads as one control next to the field it commits.
-const ICON_BUTTON_SECONDARY = 'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-slate-300 hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50';
 
 const ACTION_BUTTON_DESTRUCTIVE_WRAP = 'inline-flex h-10 max-w-full items-center justify-center gap-1.5 rounded-lg border border-rose-300 bg-white px-3 text-sm font-semibold leading-5 text-rose-700 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 hover:border-rose-400 hover:bg-rose-50 focus-visible:ring-rose-400 disabled:cursor-not-allowed disabled:opacity-50 whitespace-normal break-words text-center';
 
@@ -1282,30 +1278,34 @@ function ingestStatusLabel(status, qaStatus = null, tw = {}) {
     return tw[`ingest_status_${status}`] ?? INGEST_STATUS_LABELS[status] ?? tw.ingest_status_unknown ?? 'Ukjent status';
 }
 
-function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, onViewDecision }) {
+const SOURCE_INLINE_LINK = 'rounded text-base font-semibold leading-6 text-violet-700 underline decoration-violet-300 underline-offset-2 transition hover:text-violet-900 hover:decoration-violet-500 focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600';
+
+/**
+ * The Wiki-status cell of one source document: the run's status, at most one short line saying what
+ * it means, and the way on to where the rest is.
+ *
+ * The full account of a run — the backend's own error text, failed pages, findings, retries — lives
+ * on Kjøringer, filtered to this document. It used to be repeated here, so a failed run put a long
+ * English exception into the middle of the document list. The list now says what happened in a
+ * sentence and «Se detaljer» opens the run where that information is explained and can be acted on.
+ */
+function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, onViewDecision, detailsHref, describedById }) {
     if (!run) {
         return <span className={`${BADGE} bg-slate-100 text-slate-600`}>{notStartedLabel}</span>;
     }
 
     if (run.status === 'decision_only') {
-        const generatedAt = run.maintainer_decision_generated_at
-            ? formatDate(run.maintainer_decision_generated_at, locale)
-            : null;
         return (
-            <div className="space-y-1.5">
-                <span className={`${BADGE} bg-violet-100 text-violet-700`}>{label}</span>
-                {generatedAt && (
-                    <p className="text-base leading-6 text-slate-600">
-                        {(tw ?? {}).decision_panel_generated ?? 'Generert'} {generatedAt}
-                    </p>
-                )}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className={`${BADGE} whitespace-normal bg-violet-100 text-violet-700`}>{label}</span>
                 {run.maintainer_decision_json && onViewDecision && (
                     <button
                         type="button"
                         onClick={(event) => onViewDecision(run, event.currentTarget)}
-                        className="inline-flex h-9 items-center rounded-full border border-violet-200 bg-violet-50 px-3.5 text-base font-semibold leading-6 text-violet-700 transition hover:bg-violet-100"
+                        aria-describedby={describedById}
+                        className={SOURCE_INLINE_LINK}
                     >
-                        {(tw ?? {}).decision_panel_view_button ?? 'Vis beslutning'}
+                        {tw.decision_panel_view_button ?? 'Vis beslutning'}
                     </button>
                 )}
             </div>
@@ -1314,37 +1314,326 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
 
     const cls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
     const isInProgress = IN_PROGRESS_STATUSES.includes(run.status);
-    const canRefresh = isInProgress;
-    const queuedSince = run.status === 'queued' ? formatTime(run.created_at, locale) : null;
-    const errorMessage = run.qa_last_error ?? run.error_message;
+    const seemsStalled = isRunStalled(run);
+    const progressAt = run.last_progress_at ?? run.updated_at ?? run.started_at ?? run.created_at;
+
+    // One line at most, and never the backend's own error text (see the docblock).
+    let summary = null;
+    let summaryTone = 'text-slate-600';
+
+    if (run.status === 'failed') {
+        summary = tw.source_run_summary_failed ?? 'Kjøringen stoppet før Wiki-innholdet var ferdig.';
+        summaryTone = 'text-rose-700';
+    } else if (run.status === 'escalated') {
+        summary = tw.source_run_summary_escalated ?? 'Krever oppfølging.';
+        summaryTone = 'text-amber-800';
+    } else if (seemsStalled) {
+        summary = tw.ingest_activity_stalled ?? 'Ser ut til å stå stille';
+        summaryTone = 'text-amber-800';
+    } else if (run.status === 'queued') {
+        const queuedSince = formatTime(run.created_at, locale);
+        summary = queuedSince
+            ? (tw.ingest_activity_queued_since ?? 'I kø siden :time').replace(':time', queuedSince)
+            : null;
+    } else if (isInProgress && progressAt) {
+        summary = `${tw.ingest_activity_last_progress ?? 'Siste fremdrift'} ${formatRelativeProgress(progressAt, locale)}`;
+    }
+
+    const needsAttention = run.status === 'failed' || run.status === 'escalated' || seemsStalled;
+
     return (
-        <div className="space-y-2">
-            <div className="flex items-center gap-2">
-                <span className={`${BADGE} ${cls}`}>{label}</span>
-                {canRefresh && (
+        <div className="min-w-0 space-y-0.5">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className={`${BADGE} whitespace-normal ${cls}`}>{label}</span>
+                {isInProgress && (
                     <button
                         type="button"
                         onClick={onReload}
-                        className="text-base leading-6 text-slate-600 underline hover:text-slate-800"
+                        className={SOURCE_INLINE_LINK}
                     >
                         {tw.ingest_activity_reload ?? 'Oppdater'}
                     </button>
                 )}
             </div>
-            {run.status === 'queued' && (
-                <p className="text-base leading-6 text-slate-600">
-                    {queuedSince ? `${(tw.ingest_activity_queued_since ?? 'I kø siden :time').replace(':time', queuedSince)} · ` : ''}
-                    {tw.ingest_activity_queued_note ?? 'Behandlingen er ikke startet ennå.'}
-                </p>
+            {summary && (
+                <p className={`text-base leading-6 ${summaryTone}`}>{summary}</p>
             )}
-            <RunActivityBlock run={run} tw={tw} locale={locale} />
-            {run.status === 'failed' && errorMessage && !(run.failed_phase === 'maintainer_decision' && run.transient_failure) && (
-                <p
-                    className="line-clamp-2 wrap-break-word text-base leading-6 text-rose-700"
-                    title={errorMessage}
+            {needsAttention && detailsHref && (
+                <Link href={detailsHref} aria-describedby={describedById} className={SOURCE_INLINE_LINK}>
+                    {tw.source_run_details_link ?? 'Se detaljer'}
+                </Link>
+            )}
+        </div>
+    );
+}
+
+/**
+ * The Wiki pages a document has produced, behind a disclosure: the count is what the list needs to
+ * show, and the titles one at a time made every finished row as tall as its page count.
+ */
+function SourceGeneratedPages({ pages, panelId, describedById, tw }) {
+    const [isOpen, setIsOpen] = useState(false);
+
+    if (!pages || pages.length === 0) {
+        return null;
+    }
+
+    const toggleLabel = pages.length === 1
+        ? (tw.source_generated_pages_one ?? '1 Wiki-side')
+        : (tw.source_generated_pages_many ?? ':count Wiki-sider').replace(':count', String(pages.length));
+
+    return (
+        <div className="mt-1">
+            <button
+                type="button"
+                aria-expanded={isOpen}
+                aria-controls={panelId}
+                aria-describedby={describedById}
+                onClick={() => setIsOpen((open) => !open)}
+                className={`inline-flex items-center gap-1 ${SOURCE_INLINE_LINK}`}
+            >
+                {toggleLabel}
+                <svg className={`h-4 w-4 shrink-0 transition ${isOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" d="M5.22 7.22a.75.75 0 0 1 1.06 0L10 10.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+                </svg>
+            </button>
+            {isOpen && (
+                <ul id={panelId} className="mt-1 space-y-0.5">
+                    {pages.map((p) => (
+                        <li key={p.id}>
+                            <Link
+                                href={`/app/wiki/${p.slug}`}
+                                className="block wrap-break-word text-base leading-6 text-violet-700 hover:text-violet-900 hover:underline"
+                            >
+                                {p.title}
+                            </Link>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </div>
+    );
+}
+
+/**
+ * The document owner as a name, with a small pencil for whoever may change it. Changing it opens
+ * a dialog (SourcesTab) rather than putting a select and a save button in every row.
+ */
+function SourceOwner({ source, canEdit, onEdit, describedById, tw }) {
+    const editLabel = tw.source_owner_edit ?? 'Endre dokumenteier';
+
+    return (
+        <div className="flex min-w-0 items-center gap-1">
+            <span className={`min-w-0 wrap-break-word text-base leading-6 ${source.owner_name ? 'text-slate-700' : 'font-medium text-amber-800'}`}>
+                {source.owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier')}
+            </span>
+            {canEdit && (
+                <button
+                    type="button"
+                    onClick={(event) => onEdit(source, event.currentTarget)}
+                    aria-label={editLabel}
+                    aria-describedby={describedById}
+                    title={editLabel}
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-slate-500"
                 >
-                    {errorMessage}
-                </p>
+                    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path d="m5.433 13.917 1.262-3.155A4 4 0 0 1 7.58 9.42l6.92-6.918a2.121 2.121 0 0 1 3 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 0 1-.65-.65Z" />
+                        <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0 0 10 3H4.75A2.75 2.75 0 0 0 2 5.75v9.5A2.75 2.75 0 0 0 4.75 18h9.5A2.75 2.75 0 0 0 17 15.25V10a.75.75 0 0 0-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5Z" />
+                    </svg>
+                </button>
+            )}
+        </div>
+    );
+}
+
+/**
+ * «Lag Wiki» as the row's one visible action, and «Last ned» / «Slett» behind a `⋯` disclosure.
+ *
+ * The disclosure follows QualityItemActions (A11Y-103): not `role="menu"`, which would promise
+ * arrow-key navigation; Tab reaches the items, Escape closes and returns focus to the trigger, and
+ * so does Tab-ing out of the panel. The panel is `fixed`, measured off the trigger, because the list
+ * sits in a scroll box that would clip an absolutely positioned one; it is re-measured on scroll and
+ * resize. It also names the whole document, which the row clips to two lines.
+ */
+function SourceRowActions({
+    source,
+    panelId,
+    describedById,
+    canIngest,
+    ingesting,
+    ingestDisabled,
+    ingestDisabledTitle,
+    onIngest,
+    canDelete,
+    deleteBlocked,
+    onDelete,
+    showNotAvailableNote,
+    tw,
+}) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [position, setPosition] = useState(null);
+    const triggerRef = useRef(null);
+    const panelRef = useRef(null);
+
+    // A layout effect: the panel needs its position to render at all, and measured after paint it
+    // appeared one frame after aria-expanded did — a Tab pressed in between skipped past it.
+    useLayoutEffect(() => {
+        if (!isOpen) {
+            return undefined;
+        }
+
+        const place = () => {
+            const rect = triggerRef.current?.getBoundingClientRect();
+
+            if (!rect) return;
+
+            // Follows the trigger while the page or the list scrolls (focusing the trigger from the
+            // keyboard can itself scroll it into view after the panel opened); closes only once
+            // the trigger has left the screen.
+            if (rect.bottom < 0 || rect.top > window.innerHeight) {
+                setIsOpen(false);
+                return;
+            }
+
+            // Opens upwards when there is no room below — the last rows of the list sit at the
+            // bottom of the viewport — and from the trigger's left edge when ending at its right
+            // edge would push the panel off the screen (the cards on a phone).
+            const width = Math.min(256, window.innerWidth - 16);
+            const openUp = rect.bottom + 200 > window.innerHeight && rect.top > 200;
+            const alignLeft = rect.right - width < 8;
+            setPosition({
+                ...(alignLeft
+                    ? { left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)) }
+                    : { right: Math.max(8, window.innerWidth - rect.right) }),
+                ...(openUp ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }),
+            });
+        };
+
+        const handlePointerDown = (event) => {
+            if (!panelRef.current?.contains(event.target) && !triggerRef.current?.contains(event.target)) {
+                setIsOpen(false);
+            }
+        };
+
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                setIsOpen(false);
+                triggerRef.current?.focus();
+            }
+        };
+
+        place();
+        document.addEventListener('mousedown', handlePointerDown);
+        document.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('resize', place);
+        window.addEventListener('scroll', place, true);
+
+        return () => {
+            document.removeEventListener('mousedown', handlePointerDown);
+            document.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('resize', place);
+            window.removeEventListener('scroll', place, true);
+        };
+    }, [isOpen]);
+
+    const handlePanelBlur = (event) => {
+        const next = event.relatedTarget;
+
+        if (next && !panelRef.current?.contains(next) && !triggerRef.current?.contains(next)) {
+            setIsOpen(false);
+        }
+    };
+
+    const menuLabel = tw.source_more_actions ?? 'Flere handlinger';
+    const activeRunTitle = tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring';
+    const panelItem = 'flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-base font-semibold transition focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2';
+
+    return (
+        <div className="flex flex-col items-start gap-1">
+            <div className="flex items-center gap-1.5">
+                {canIngest && (
+                    <button
+                        type="button"
+                        disabled={ingestDisabled}
+                        title={ingestDisabledTitle}
+                        aria-describedby={describedById}
+                        onClick={onIngest}
+                        className={ACTION_BUTTON_PRIMARY}
+                    >
+                        {ingesting ? (tw.source_ingest_starting ?? 'Starter...') : (tw.source_ingest_button ?? 'Lag Wiki')}
+                    </button>
+                )}
+                <button
+                    ref={triggerRef}
+                    type="button"
+                    aria-expanded={isOpen}
+                    aria-controls={isOpen ? panelId : undefined}
+                    aria-label={menuLabel}
+                    aria-describedby={describedById}
+                    title={menuLabel}
+                    onClick={() => setIsOpen((open) => !open)}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
+                >
+                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path d="M4 10a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Zm4.5 0a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Zm4.5 0a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Z" />
+                    </svg>
+                </button>
+            </div>
+            {showNotAvailableNote && (
+                <span className="text-base leading-6 text-slate-600">
+                    {tw.source_ingest_not_available ?? 'Wiki-generering er ikke aktivert ennå.'}
+                </span>
+            )}
+
+            {isOpen && position && (
+                <div
+                    ref={panelRef}
+                    id={panelId}
+                    onBlur={handlePanelBlur}
+                    style={{ top: position.top, bottom: position.bottom, left: position.left, right: position.right }}
+                    className="fixed z-40 w-64 max-w-[calc(100vw-1rem)] rounded-2xl border border-slate-200 bg-white p-1.5 text-left shadow-lg"
+                >
+                    <p className="break-all px-3 pb-1.5 pt-1 text-base leading-6 text-slate-600">{source.original_filename}</p>
+                    <a
+                        href={`/app/wiki/sources/${source.id}/download`}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-describedby={describedById}
+                        onClick={() => setIsOpen(false)}
+                        className={`${panelItem} text-slate-700 hover:bg-slate-50 focus-visible:outline-slate-500`}
+                    >
+                        <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
+                            <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+                        </svg>
+                        {tw.source_download_button ?? 'Last ned'}
+                    </a>
+                    {canDelete && (
+                        <>
+                            {/* Disabled while the pipeline is still working on the document; the
+                                reason is said in the panel, not only in a tooltip. */}
+                            <button
+                                type="button"
+                                disabled={deleteBlocked}
+                                title={deleteBlocked ? activeRunTitle : undefined}
+                                aria-describedby={describedById}
+                                onClick={() => {
+                                    setIsOpen(false);
+                                    onDelete(source, triggerRef.current);
+                                }}
+                                className={`${panelItem} text-rose-700 hover:bg-rose-50 focus-visible:outline-rose-500 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent`}
+                            >
+                                <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                    <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.519.149.022a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 3.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
+                                </svg>
+                                {tw.source_delete_button ?? 'Slett'}
+                            </button>
+                            {deleteBlocked && (
+                                <p className="px-3 pb-1 text-base leading-6 text-slate-600">{activeRunTitle}</p>
+                            )}
+                        </>
+                    )}
+                </div>
             )}
         </div>
     );
@@ -1853,10 +2142,13 @@ function SourcesTab({
     const sourcesHeadingRef = useRef(null);
     const decisionTriggerRef = useRef(null);
     const deleteCancelRef = useRef(null);
+    const deleteTriggerRef = useRef(null);
+    const ownerTriggerRef = useRef(null);
+    const ownerSelectRef = useRef(null);
     const [ingestingIds, setIngestingIds] = useState(new Set());
     const [decisionView, setDecisionView] = useState(null);
-    const [ownerDrafts, setOwnerDrafts] = useState({});
-    const [savingOwnerIds, setSavingOwnerIds] = useState(new Set());
+    // The owner dialog: { source, value, saving, error } while open, null otherwise.
+    const [ownerEdit, setOwnerEdit] = useState(null);
 
     const handleSourceReload = () => router.reload({ only: ['sources'] });
 
@@ -1878,36 +2170,62 @@ function SourcesTab({
         next === 'uploading' ? { message: tw.sources_uploading ?? 'Laster opp...' } : null
     ));
 
-    const handleOwnerChange = (sourceId, value) => {
-        setOwnerDrafts((prev) => ({
-            ...prev,
-            [sourceId]: value,
-        }));
+    const handleOwnerEditOpen = (source, trigger) => {
+        if (!canAssignDocumentOwner) return;
+
+        ownerTriggerRef.current = trigger;
+        setOwnerEdit({ source, value: String(source.owner_user_id ?? ''), saving: false, error: null });
     };
 
-    const handleOwnerSave = (source) => {
-        if (!source || !canAssignDocumentOwner) return;
+    const handleOwnerEditClose = () => setOwnerEdit(null);
 
-        const currentValue = ownerDrafts[source.id] ?? String(source.owner_user_id ?? '');
-        const normalized = String(currentValue ?? '').trim();
+    /**
+     * Saving stays explicit — the select never submits on change — and the dialog stays open until
+     * the backend has answered: a refusal is shown at the field, a success closes the dialog and the
+     * layout's toast says «Dokumenteier oppdatert.».
+     */
+    const handleOwnerSave = (event) => {
+        event.preventDefault();
+
+        if (!ownerEdit || ownerEdit.saving || !canAssignDocumentOwner) return;
+
+        const { source } = ownerEdit;
+        const normalized = String(ownerEdit.value ?? '').trim();
 
         if (normalized === String(source.owner_user_id ?? '')) {
+            setOwnerEdit(null);
             return;
         }
 
-        setSavingOwnerIds((prev) => new Set(prev).add(source.id));
+        setOwnerEdit((prev) => (prev ? { ...prev, saving: true, error: null } : prev));
 
         router.patch(
             `/app/wiki/sources/${source.id}/owner`,
             { owner_user_id: normalized === '' ? null : Number(normalized), ...tabReturnParams() },
             {
                 preserveScroll: true,
+                onSuccess: (page) => {
+                    // The controller answers a refusal with a flash error and a redirect, which
+                    // Inertia reports as a success; only a real success closes the dialog.
+                    const flashError = page?.props?.flash?.error ?? null;
+
+                    if (flashError) {
+                        setOwnerEdit((prev) => (prev ? { ...prev, saving: false, error: flashError } : prev));
+                        return;
+                    }
+
+                    setOwnerEdit(null);
+                },
+                onError: (errors) => {
+                    setOwnerEdit((prev) => (prev ? {
+                        ...prev,
+                        saving: false,
+                        error: errors?.owner_user_id ?? (tw.source_owner_save_failed ?? 'Kunne ikke lagre dokumenteier. Prøv igjen.'),
+                    } : prev));
+                    focusElement(ownerSelectRef.current);
+                },
                 onFinish: () => {
-                    setSavingOwnerIds((prev) => {
-                        const next = new Set(prev);
-                        next.delete(source.id);
-                        return next;
-                    });
+                    setOwnerEdit((prev) => (prev && prev.saving ? { ...prev, saving: false } : prev));
                 },
             },
         );
@@ -1915,7 +2233,8 @@ function SourcesTab({
 
     const [deletePreview, setDeletePreview] = useState(null);
 
-    const handleDeleteClick = (source) => {
+    const handleDeleteClick = (source, trigger = null) => {
+        deleteTriggerRef.current = trigger;
         setDeletePreview({ source, loading: true, blocked: false, data: null, error: null });
         fetch(`/app/wiki/sources/${source.id}/delete-preview`, {
             headers: { 'Accept': 'application/json' },
@@ -2030,6 +2349,91 @@ function SourcesTab({
     }[status] ?? status);
 
     const notStartedLabel = tw.ingest_status_not_started ?? 'Ikke startet';
+
+    const startIngest = (source) => {
+        if (ingestingIds.has(source.id)) return;
+        setIngestingIds((prev) => new Set(prev).add(source.id));
+        router.post(
+            `/app/wiki/sources/${source.id}/ingest`,
+            tabReturnParams(),
+            {
+                onFinish: () =>
+                    setIngestingIds((prev) => {
+                        const next = new Set(prev);
+                        next.delete(source.id);
+                        return next;
+                    }),
+            },
+        );
+    };
+
+    // The three cells both layouts share — the table from 1280px, the cards below it — so a row
+    // cannot say or allow something different depending on the screen it is read on. `variant`
+    // keeps the ids of the two copies apart.
+    const renderWikiStatus = (source, nameId, variant) => (
+        <>
+            <IngestStatusBadge
+                run={source.latest_ingest_run}
+                label={source.latest_ingest_run ? ingestStatusLabel(source.latest_ingest_run.status, source.latest_ingest_run.qa_status, tw) : null}
+                notStartedLabel={notStartedLabel}
+                locale={locale}
+                onReload={handleSourceReload}
+                tw={tw}
+                onViewDecision={(run, trigger) => {
+                    decisionTriggerRef.current = trigger;
+                    setDecisionView(run);
+                }}
+                detailsHref={`/app/wiki?tab=runs&run_src=${source.id}`}
+                describedById={nameId}
+            />
+            <SourceGeneratedPages
+                pages={source.generated_pages}
+                panelId={`wiki-source-${source.id}-pages-${variant}`}
+                describedById={nameId}
+                tw={tw}
+            />
+        </>
+    );
+
+    const renderOwner = (source, nameId) => (
+        <SourceOwner
+            source={source}
+            canEdit={canAssignDocumentOwner}
+            onEdit={handleOwnerEditOpen}
+            describedById={nameId}
+            tw={tw}
+        />
+    );
+
+    const renderActions = (source, nameId, variant) => {
+        const isInProgress = !!(source.latest_ingest_run && IN_PROGRESS_STATUSES.includes(source.latest_ingest_run.status));
+        const canIngest = canManageSources && source.document_status === 'extracted';
+        const ingesting = ingestingIds.has(source.id);
+
+        return (
+            <SourceRowActions
+                source={source}
+                panelId={`wiki-source-${source.id}-actions-${variant}`}
+                describedById={nameId}
+                canIngest={canIngest}
+                ingesting={ingesting}
+                ingestDisabled={ingesting || isInProgress || !wikiGenerationAvailable}
+                ingestDisabledTitle={!wikiGenerationAvailable
+                    ? (tw.source_ingest_not_available ?? 'Wiki-generering er ikke aktivert ennå.')
+                    : (isInProgress ? (tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring') : undefined)}
+                onIngest={() => startIngest(source)}
+                // The frontend only reflects authorization and state; the backend
+                // (deletePreview/destroy) re-checks both. Deliberately narrower than isInProgress:
+                // a run merely awaiting document-owner approval has finished all automatic work and
+                // does not block deletion — mirrors EnterpriseWikiDocumentDeletionService::hasActiveRun().
+                canDelete={!!source.can_delete}
+                deleteBlocked={!!source.latest_ingest_run?.expects_automatic_progress}
+                onDelete={handleDeleteClick}
+                showNotAvailableNote={canIngest && !wikiGenerationAvailable}
+                tw={tw}
+            />
+        );
+    };
 
     return (
         <>
@@ -2261,228 +2665,113 @@ function SourcesTab({
                             {tw.sources_list_empty ?? 'Ingen kildedokumenter lastet opp ennå.'}
                         </p>
                     ) : (
-                        <ScrollRegion
-                            axis="both"
-                            label={tw.sources_title ?? 'Kildedokumenter'}
-                            className="max-h-[min(56vh,42rem)] overflow-auto rounded-2xl border border-slate-100"
-                        >
-                            <table className="min-w-full table-fixed divide-y divide-slate-100">
-                                <caption className="sr-only">{tw.sources_title ?? 'Kildedokumenter'}</caption>
-                                <colgroup>
-                                    <col />
-                                    <col style={{ width: '110px' }} />
-                                    <col style={{ width: '110px' }} />
-                                    <col style={{ width: '220px' }} />
-                                    <col style={{ width: '200px' }} />
-                                    <col style={{ width: '420px' }} />
-                                </colgroup>
-                                <thead className="sticky top-0 z-10 bg-slate-50 shadow-[0_1px_0_rgba(226,232,240,1)]">
-                                    <tr className="text-left text-base font-semibold uppercase tracking-wide leading-6 text-slate-500">
-                                        <th scope="col" className="px-4 py-3">{tw.source_col_filename ?? 'Filnavn'}</th>
-                                        <th scope="col" className="px-4 py-3">{tw.source_col_status ?? 'Status'}</th>
-                                        <th scope="col" className="px-4 py-3">{tw.source_col_uploaded ?? 'Lastet opp'}</th>
-                                        <th scope="col" className="px-4 py-3">{tw.ingest_col_wiki_status ?? 'Wiki-status'}</th>
-                                        <th scope="col" className="px-4 py-3">{tw.source_col_owner ?? 'Dokumenteier'}</th>
-                                        <th scope="col" className="px-4 py-3">{tw.source_col_actions ?? 'Handlinger'}</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-50 bg-white">
-                                    {sources.map((source) => {
-                                        const isInProgress = !!(source.latest_ingest_run && IN_PROGRESS_STATUSES.includes(source.latest_ingest_run.status));
-                                        // Frontend only reflects authorization/state for UX — the backend
-                                        // (deletePreview/destroy) independently re-checks both, since the
-                                        // frontend is never the security boundary. Authorized users still see
-                                        // the button while a run is active, but it is disabled with a clear
-                                        // explanation rather than silently disappearing.
-                                        const canDelete = !!source.can_delete;
-                                        // Deliberately narrower than isInProgress above: a run merely awaiting
-                                        // document-owner approval has finished all automatic processing and
-                                        // does not block deletion (the backend ends it automatically as part
-                                        // of delete) — only a run the pipeline is still actively working on
-                                        // should disable the Delete button. Mirrors
-                                        // EnterpriseWikiDocumentDeletionService::hasActiveRun().
-                                        const hasBlockingRun = !!source.latest_ingest_run?.expects_automatic_progress;
-                                        const ingestDisabledTitle = !wikiGenerationAvailable
-                                            ? (tw.source_ingest_not_available ?? 'Wiki-generering er ikke aktivert ennå.')
-                                            : (isInProgress
-                                                ? (tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring')
-                                                : undefined);
-                                        const sourceOwnerLabel = source.owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier');
-                                        // The row's name, for the buttons that act on it: «Slett» in a list of
-                                        // twenty rows says nothing about which document goes (2.4.6).
-                                        const sourceNameId = `wiki-source-${source.id}-name`;
-                                        return (
-                                        <tr key={source.id} className="text-base leading-6 text-slate-700">
-                                            <th scope="row" className="overflow-hidden px-4 py-3 text-left align-top font-normal">
-                                                <span id={sourceNameId} className="block truncate font-medium text-slate-900" title={source.original_filename}>
-                                                    {source.original_filename}
-                                                </span>
-                                            </th>
-                                            <td className="px-4 py-3 align-top">
-                                                <SourceStatusBadge
-                                                    status={source.document_status}
-                                                    label={sourceStatusLabel(source.document_status)}
-                                                />
-                                            </td>
-                                            <td className="whitespace-nowrap px-4 py-3 align-top text-base text-slate-600">
-                                                {formatDate(source.created_at, locale)}
-                                            </td>
-                                            <td className="px-4 py-3 align-top">
-                                                <IngestStatusBadge
-                                                    run={source.latest_ingest_run}
-                                                    label={source.latest_ingest_run ? ingestStatusLabel(source.latest_ingest_run.status, source.latest_ingest_run.qa_status) : null}
-                                                    notStartedLabel={notStartedLabel}
-                                                    locale={locale}
-                                                    onReload={handleSourceReload}
-                                                    tw={tw}
-                                                    onViewDecision={(run, trigger) => {
-                                                        decisionTriggerRef.current = trigger;
-                                                        setDecisionView(run);
-                                                    }}
-                                                />
-                                                {source.generated_pages.length > 0 && (
-                                                    <ul className="mt-2 space-y-0.5">
-                                                        {source.generated_pages.map((p) => (
-                                                            <li key={p.id}>
-                                                                <Link
-                                                                    href={`/app/wiki/${p.slug}`}
-                                                                    className="block truncate text-base text-violet-700 hover:text-violet-900 hover:underline"
-                                                                    title={p.title}
-                                                                >
-                                                                    {p.title}
-                                                                </Link>
-                                                            </li>
-                                                        ))}
-                                                    </ul>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3 align-top">
-                                                {canAssignDocumentOwner ? (
-                                                    /* Select and save sit on one line: a row has exactly one owner, so the
-                                                       cell only ever needs the name plus the action that commits a change.
-                                                       Saving stays EXPLICIT — the select never submits on change. */
-                                                    <div className="flex items-center gap-1.5">
-                                                        <select
-                                                            aria-label={(ta.wiki_source_owner_for ?? 'Dokumenteier for :file').replace(':file', source.original_filename)}
-                                                            value={ownerDrafts[source.id] ?? String(source.owner_user_id ?? '')}
-                                                            onChange={(event) => handleOwnerChange(source.id, event.target.value)}
-                                                            /* w-0 + flex-1: a <select>'s intrinsic width is its longest
-                                                               option, and in a table-fixed column that minimum was what
-                                                               kept the Dokumenteier column ~100px wider than the name it
-                                                               now shows — which is width Handlinger needs for its three
-                                                               buttons. */
-                                                            className={`${RUNS_SELECT_CLS} w-0 min-w-0 flex-1`}
-                                                        >
-                                                            <option value="">{tw.document_owner_missing ?? 'Mangler Dokumenteier'}</option>
-                                                            {ownerOptions.map((option) => (
-                                                                <option key={option.id} value={option.id}>
-                                                                    {option.name ?? option.label}
-                                                                </option>
-                                                            ))}
-                                                        </select>
-                                                        <button
-                                                            type="button"
-                                                            disabled={savingOwnerIds.has(source.id)}
-                                                            aria-describedby={sourceNameId}
-                                                            onClick={() => handleOwnerSave(source)}
-                                                            aria-label={savingOwnerIds.has(source.id)
-                                                                ? (tw.document_owner_saving ?? 'Lagrer eier...')
-                                                                : (tw.document_owner_save ?? 'Lagre eier')}
-                                                            title={savingOwnerIds.has(source.id)
-                                                                ? (tw.document_owner_saving ?? 'Lagrer eier...')
-                                                                : (tw.document_owner_save ?? 'Lagre eier')}
-                                                            className={ICON_BUTTON_SECONDARY}
-                                                        >
-                                                            <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                                <path d="M3 4.75A1.75 1.75 0 0 1 4.75 3h8.19c.464 0 .909.184 1.237.513l2.31 2.31c.329.328.513.773.513 1.237v8.19A1.75 1.75 0 0 1 15.25 17H4.75A1.75 1.75 0 0 1 3 15.25V4.75Zm3.5-.25v3.5h6V4.5h-6Zm3.5 5.75a2.75 2.75 0 1 0 0 5.5 2.75 2.75 0 0 0 0-5.5Z" />
-                                                            </svg>
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <span className={`${BADGE} ${source.owner_name ? 'bg-slate-100 text-slate-700' : 'bg-amber-50 text-amber-700'}`}>
-                                                        {sourceOwnerLabel}
-                                                    </span>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3 align-top">
-                                                {/* One action container: Last ned | Lag Wiki | Slett stay on the same line on
-                                                    desktop and fall back to the existing wrap on narrow viewports. */}
-                                                <div className="flex flex-col items-start gap-2">
-                                                    <div className="flex flex-wrap items-center gap-2">
-                                                        <a
-                                                            href={`/app/wiki/sources/${source.id}/download`}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            aria-describedby={sourceNameId}
-                                                            className={ACTION_BUTTON_SECONDARY}
-                                                        >
-                                                            <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                                <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
-                                                                <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
-                                                            </svg>
-                                                            {tw.source_download_button ?? 'Last ned'}
-                                                        </a>
-                                                        {canManageSources && source.document_status === 'extracted' && (
-                                                            <button
-                                                                type="button"
-                                                                disabled={ingestingIds.has(source.id) || isInProgress || !wikiGenerationAvailable}
-                                                                title={ingestDisabledTitle}
-                                                                aria-describedby={sourceNameId}
-                                                                onClick={() => {
-                                                                    if (ingestingIds.has(source.id)) return;
-                                                                    setIngestingIds((prev) => new Set(prev).add(source.id));
-                                                                    router.post(
-                                                                        `/app/wiki/sources/${source.id}/ingest`,
-                                                                        tabReturnParams(),
-                                                                        {
-                                                                            onFinish: () =>
-                                                                                setIngestingIds((prev) => {
-                                                                                    const next = new Set(prev);
-                                                                                    next.delete(source.id);
-                                                                                    return next;
-                                                                                }),
-                                                                        },
-                                                                    );
-                                                                }}
-                                                                className={ACTION_BUTTON_PRIMARY}
-                                                            >
-                                                                <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-11.25a.75.75 0 00-1.5 0v2.5h-2.5a.75.75 0 000 1.5h2.5v2.5a.75.75 0 001.5 0v-2.5h2.5a.75.75 0 000-1.5h-2.5v-2.5z" clipRule="evenodd" />
-                                                                </svg>
-                                                                {ingestingIds.has(source.id)
-                                                                    ? (tw.source_ingest_starting ?? 'Starter...')
-                                                                    : (tw.source_ingest_button ?? 'Lag Wiki')}
-                                                            </button>
-                                                        )}
-                                                        {canDelete && (
-                                                            <button
-                                                                type="button"
-                                                                disabled={hasBlockingRun}
-                                                                title={hasBlockingRun ? (tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring') : undefined}
-                                                                aria-describedby={sourceNameId}
-                                                                onClick={() => handleDeleteClick(source)}
-                                                                className={ACTION_BUTTON_DESTRUCTIVE}
-                                                            >
-                                                                <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                                    <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.519.149.022a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 3.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
-                                                                </svg>
-                                                                {tw.source_delete_button ?? 'Slett'}
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                    {canManageSources && source.document_status === 'extracted' && !wikiGenerationAvailable && (
-                                                        <span className="text-base text-slate-600">
-                                                            {tw.source_ingest_not_available ?? 'Wiki-generering er ikke aktivert ennå.'}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </td>
+                        <>
+                            {/* From 1280px: a table with five columns that fits a laptop without
+                                scrolling sideways. «Lag Wiki» used to be the last of six columns in a
+                                table wider than its box — behind a horizontal scroll macOS does not
+                                show — and a later fix pinned a 420px-wide action column instead. The
+                                upload date now sits under the filename, «Last ned» and «Slett» are in
+                                the row's ⋯ panel, and the owner is a name with a pencil, so every
+                                column is narrow enough for Filnavn to keep the room it needs. */}
+                            <ScrollRegion
+                                axis="both"
+                                label={tw.sources_title ?? 'Kildedokumenter'}
+                                className="hidden max-h-[min(64vh,48rem)] overflow-auto rounded-2xl border border-slate-100 xl:block"
+                            >
+                                <table className="w-full table-fixed divide-y divide-slate-100">
+                                    <caption className="sr-only">{tw.sources_title ?? 'Kildedokumenter'}</caption>
+                                    <colgroup>
+                                        <col />
+                                        <col style={{ width: '7.5rem' }} />
+                                        <col style={{ width: '10rem' }} />
+                                        <col style={{ width: '11rem' }} />
+                                        <col style={{ width: '10.5rem' }} />
+                                    </colgroup>
+                                    <thead className="sticky top-0 z-10 bg-slate-50 shadow-[0_1px_0_rgba(226,232,240,1)]">
+                                        <tr className="text-left text-base font-semibold leading-6 text-slate-600">
+                                            <th scope="col" className="px-3 py-2.5">{tw.source_col_filename ?? 'Filnavn'}</th>
+                                            <th scope="col" className="px-3 py-2.5">{tw.source_col_status ?? 'Status'}</th>
+                                            <th scope="col" className="px-3 py-2.5">{tw.ingest_col_wiki_status ?? 'Wiki-status'}</th>
+                                            <th scope="col" className="px-3 py-2.5">{tw.source_col_owner ?? 'Dokumenteier'}</th>
+                                            <th scope="col" className="px-3 py-2.5">{tw.source_col_actions ?? 'Handlinger'}</th>
                                         </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </ScrollRegion>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 bg-white">
+                                        {sources.map((source) => {
+                                            // The row's name, for the controls that act on it: «Slett» in a
+                                            // list of twenty rows says nothing about which document goes (2.4.6).
+                                            const nameId = `wiki-source-${source.id}-name`;
+
+                                            return (
+                                                <tr key={source.id} className="text-base leading-6 text-slate-700">
+                                                    <th scope="row" className="px-3 py-2.5 text-left align-top font-normal">
+                                                        <span id={nameId} className="line-clamp-2 wrap-break-word font-medium text-slate-900" title={source.original_filename}>
+                                                            {source.original_filename}
+                                                        </span>
+                                                        <span className="mt-0.5 block text-base leading-6 text-slate-600">
+                                                            {tw.source_col_uploaded ?? 'Lastet opp'} {formatDate(source.created_at, locale)}
+                                                        </span>
+                                                    </th>
+                                                    <td className="px-3 py-2.5 align-top">
+                                                        <SourceStatusBadge
+                                                            status={source.document_status}
+                                                            label={sourceStatusLabel(source.document_status)}
+                                                        />
+                                                    </td>
+                                                    <td className="px-3 py-2.5 align-top">
+                                                        {renderWikiStatus(source, nameId, 'table')}
+                                                    </td>
+                                                    <td className="px-3 py-2.5 align-top">
+                                                        {renderOwner(source, nameId)}
+                                                    </td>
+                                                    <td className="px-3 py-2.5 align-top">
+                                                        {renderActions(source, nameId, 'table')}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </ScrollRegion>
+
+                            {/* Below 1280px the five columns no longer fit, so each document is a
+                                card: name and status first, then Wiki-status and owner, then the
+                                actions — all of it inside the viewport, nothing sideways. */}
+                            <ul
+                                aria-labelledby="wiki-sources-heading"
+                                className="divide-y divide-slate-100 rounded-2xl border border-slate-100 xl:hidden"
+                            >
+                                {sources.map((source) => {
+                                    const nameId = `wiki-source-${source.id}-card-name`;
+
+                                    return (
+                                        <li key={source.id} className="space-y-3 px-4 py-3 text-base leading-6 text-slate-700">
+                                            <div className="space-y-1">
+                                                <h3 id={nameId} className="line-clamp-2 wrap-break-word text-base font-medium text-slate-900" title={source.original_filename}>
+                                                    {source.original_filename}
+                                                </h3>
+                                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                                    <SourceStatusBadge
+                                                        status={source.document_status}
+                                                        label={sourceStatusLabel(source.document_status)}
+                                                    />
+                                                    <span className="text-slate-600">
+                                                        {tw.source_col_uploaded ?? 'Lastet opp'} {formatDate(source.created_at, locale)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-[9rem_minmax(0,1fr)]">
+                                                <dt className="font-semibold text-slate-600">{tw.ingest_col_wiki_status ?? 'Wiki-status'}</dt>
+                                                <dd className="min-w-0">{renderWikiStatus(source, nameId, 'card')}</dd>
+                                                <dt className="font-semibold text-slate-600">{tw.source_col_owner ?? 'Dokumenteier'}</dt>
+                                                <dd className="min-w-0">{renderOwner(source, nameId)}</dd>
+                                            </dl>
+                                            {renderActions(source, nameId, 'card')}
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        </>
                     )}
 
                 </div>
@@ -2496,15 +2785,89 @@ function SourcesTab({
                 returnFocusRef={decisionTriggerRef}
             />
 
+            {/* Changing a document's owner. The select only drafts; «Lagre eier» commits, and the
+                dialog stays open with the reason at the field if the backend refuses. */}
+            <ActionDialog
+                isOpen={ownerEdit !== null}
+                onClose={handleOwnerEditClose}
+                closeDisabled={!!ownerEdit?.saving}
+                titleId="wiki-source-owner-edit-title"
+                descriptionId="wiki-source-owner-edit-file"
+                initialFocusRef={ownerSelectRef}
+                returnFocusRef={ownerTriggerRef}
+                fallbackFocusRef={sourcesHeadingRef}
+                size="xs"
+            >
+                {ownerEdit && (
+                    <form onSubmit={handleOwnerSave} noValidate>
+                        <h2 id="wiki-source-owner-edit-title" className="text-xl font-semibold tracking-tight text-slate-950">
+                            {tw.source_owner_dialog_title ?? 'Endre dokumenteier'}
+                        </h2>
+                        <p id="wiki-source-owner-edit-file" className="mt-2 break-all text-base leading-6 text-slate-600">
+                            {ownerEdit.source.original_filename}
+                        </p>
+                        <div className="mt-5 space-y-1.5">
+                            <label htmlFor="wiki-source-owner-edit" className="block text-base font-semibold text-slate-700">
+                                {tw.document_owner_label ?? 'Dokumenteier'}
+                            </label>
+                            <select
+                                ref={ownerSelectRef}
+                                id="wiki-source-owner-edit"
+                                value={ownerEdit.value}
+                                onChange={(event) => {
+                                    const { value } = event.target;
+                                    setOwnerEdit((prev) => (prev ? { ...prev, value, error: null } : prev));
+                                }}
+                                aria-invalid={ownerEdit.error ? true : undefined}
+                                aria-describedby={ownerEdit.error ? 'wiki-source-owner-edit-error' : undefined}
+                                className={`${RUNS_SELECT_CLS} w-full`}
+                            >
+                                <option value="">{tw.document_owner_missing ?? 'Mangler Dokumenteier'}</option>
+                                {ownerOptions.map((option) => (
+                                    <option key={option.id} value={option.id}>
+                                        {option.name ?? option.label}
+                                    </option>
+                                ))}
+                            </select>
+                            {ownerEdit.error && (
+                                <p id="wiki-source-owner-edit-error" role="alert" className="text-base text-rose-700">{ownerEdit.error}</p>
+                            )}
+                        </div>
+                        <div className="mt-6 flex flex-wrap gap-3">
+                            {/* Busy, not disabled: focus stays on the button while the request runs. */}
+                            <button
+                                type="submit"
+                                aria-disabled={ownerEdit.saving || undefined}
+                                className={PRIMARY_ACTION}
+                            >
+                                {ownerEdit.saving
+                                    ? (tw.document_owner_saving ?? 'Lagrer eier...')
+                                    : (tw.document_owner_save ?? 'Lagre eier')}
+                            </button>
+                            <button
+                                type="button"
+                                aria-disabled={ownerEdit.saving || undefined}
+                                onClick={() => { if (!ownerEdit.saving) handleOwnerEditClose(); }}
+                                className={SECONDARY_ACTION}
+                            >
+                                {tw.delete_cancel_button ?? 'Avbryt'}
+                            </button>
+                        </div>
+                    </form>
+                )}
+            </ActionDialog>
+
             {/* Deleting a source document (A11Y-002): a modal dialog with a title and a description,
-                focus on «Avbryt» (the safe choice), Escape, a trapped Tab and focus back on «Slett».
-                The preview loads inside it; a failure to load is an alert there. */}
+                focus on «Avbryt» (the safe choice), Escape, a trapped Tab and focus back on the row's
+                ⋯ button that «Slett» was chosen from. The preview loads inside it; a failure to load
+                is an alert there. */}
             <ActionDialog
                 isOpen={deletePreview !== null}
                 onClose={handleDeleteCancel}
                 titleId="wiki-source-delete-title"
                 descriptionId="wiki-source-delete-description"
                 initialFocusRef={deleteCancelRef}
+                returnFocusRef={deleteTriggerRef}
                 fallbackFocusRef={sourcesHeadingRef}
                 size="xs"
             >

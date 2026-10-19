@@ -326,7 +326,9 @@ test.describe.serial('WCAG Fase 5 — Enterprise Wiki', () => {
 
         await expect(page.getByLabel('Velg fil')).toHaveAccessibleDescription(/PDF eller DOCX/);
         await expect(page.getByRole('button', { name: 'Søk', exact: true })).toBeVisible();
-        await expect(page.getByRole('row', { name: /Leverandørrutiner/ }).getByRole('link', { name: 'Last ned' }))
+        const sourceRow = page.getByRole('row', { name: /Leverandørrutiner/ });
+        await sourceRow.getByRole('button', { name: 'Flere handlinger' }).click();
+        await expect(sourceRow.getByRole('link', { name: 'Last ned' }))
             .toHaveAccessibleDescription('Leverandørrutiner (E2E a11y).docx');
         await expectNoAxeViolations(page, 'main', 'kildedokumenter');
 
