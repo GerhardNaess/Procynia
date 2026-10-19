@@ -10029,9 +10029,11 @@ return [
         'claim_finding_category_undocumented_or_incorrect_claim' => 'Undocumented or incorrect factual claim',
         'claim_finding_category_possible_content_deviation' => 'Possible content deviation',
         'claim_finding_category_technical_uncertainty' => 'Technical uncertainty',
+        'claim_finding_category_changed_normative_meaning' => 'Changed normative meaning',
         'claim_finding_action_undocumented_or_incorrect_claim' => 'Check the claim against the source. Approve it if it still holds, reject it if it is wrong, or keep/remove the blocking as you see fit.',
         'claim_finding_action_possible_content_deviation' => 'Compare the claim with the source text. The deviation is not confirmed — assess whether it is real before deciding.',
         'claim_finding_action_technical_uncertainty' => 'This is a technical linking uncertainty, not a confirmed content error. Review the page, and keep or remove the blocking as you see fit.',
+        'claim_finding_action_changed_normative_meaning' => 'Compare the wording with the source sentence. Correct the text so it carries the same obligation as the source, or approve the deviation if the stricter wording is correct.',
         'modality_class' => [
             'obligation' => 'requirement',
             'prohibition' => 'prohibition',
@@ -10075,8 +10077,8 @@ return [
             ],
             'normative_strengthening' => [
                 'title' => 'Stricter than the source',
-                'explanation' => 'The text turns a recommendation or possibility in the source into a requirement or prohibition.',
-                'explanation_detailed' => 'The source says ":source" (:source_class), but the text says ":claim" (:claim_class). The text must carry the same obligation as the source.',
+                'explanation' => 'The text turns a recommendation or possibility in the source into a requirement or prohibition. This needs assessment because the reader is given a stricter obligation than the source sets.',
+                'explanation_detailed' => 'The source says: ":source" (:source_class). The Wiki article says: ":claim" (:claim_class). The wording in the article is stricter than the source. This needs assessment because the reader is given a stricter obligation than the source sets.',
             ],
             'modality_mismatch' => [
                 'title' => 'Stronger than the source',

@@ -3361,6 +3361,7 @@ const FINDING_STATUS_STYLES = {
 const CLAIM_FINDING_CATEGORIES = new Set([
     'undocumented_or_incorrect_claim',
     'possible_content_deviation',
+    'changed_normative_meaning',
     'technical_uncertainty',
 ]);
 

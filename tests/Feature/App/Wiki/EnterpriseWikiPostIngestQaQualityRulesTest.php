@@ -11,6 +11,7 @@ use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLinkQaAttempt;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Services\EnterpriseWiki\EnterpriseWikiClaimFindingExplainer;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSectionMap;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
 use App\Services\EnterpriseWiki\EnterpriseWikiEscalatedRunRecoveryService;
@@ -123,6 +124,63 @@ class EnterpriseWikiPostIngestQaQualityRulesTest extends TestCase
 
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $scenario['run']->fresh()->qa_status);
         $this->assertSame([], $result['quality_findings']);
+    }
+
+    /**
+     * Run 963 (#455/#472/#473): «bør derfor aldri slås sammen» became «skal ikke slås sammen». The
+     * statement is in the source — only its force changed — so it is shown as a changed normative
+     * meaning at medium severity, not as a critical undocumented factual claim. Severity is display
+     * only: the run still escalates and the version still cannot be published until someone decides.
+     */
+    public function test_a_normative_strengthening_is_a_changed_normative_meaning_at_medium_severity_and_still_escalates(): void
+    {
+        $scenario = $this->scenario();
+        $claim = $this->normativeClaim($scenario);
+        $version = $claim->version;
+        $version->forceFill(['content_blocks_json' => [[
+            'block_key' => 'block-0001',
+            'markdown' => $claim->claim_text,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+        ]]])->save();
+
+        $this->qa()->runForRun($scenario['run']);
+
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $scenario['run']->fresh()->qa_status);
+        $this->assertTrue(app(EnterpriseWikiClaimFindingExplainer::class)->blocksPublication($claim->fresh(), $version->fresh()));
+
+        $findings = app(EnterpriseWikiRunFindingsService::class)->buildForRun($scenario['run']->fresh(), null, false);
+        $item = collect($findings['findings'])->firstWhere('claim_id', $claim->id);
+
+        $this->assertSame(EnterpriseWikiClaimFindingExplainer::CATEGORY_CHANGED_NORMATIVE_MEANING, $item['category']);
+        $this->assertSame(__('procynia.wiki.claim_finding_category_changed_normative_meaning'), $item['category_label']);
+        $this->assertSame('Endret normativ betydning', $item['category_label']);
+        $this->assertSame('warning', $item['severity']);
+        $this->assertTrue($item['system_recommends_blocking']);
+
+        // What the source says, what the article says, and that the article is stricter.
+        $this->assertStringContainsString('Forbedringssløyfen bør måles som en egen prosess.', $item['explanation']);
+        $this->assertStringContainsString('Forbedringssløyfen skal måles som en egen prosess.', $item['explanation']);
+        $this->assertStringContainsString('strengere enn kilden', $item['explanation']);
+        $this->assertSame($claim->claim_text, $item['claim_text']);
+    }
+
+    public function test_other_claim_findings_keep_their_category_and_severity(): void
+    {
+        $scenario = $this->scenario();
+        $contradicted = $this->claimOnArticle($scenario, ['classification_basis' => 'semantic_verification', 'verdict' => 'contradicted', 'reason' => 'Kilden sier det motsatte.']);
+        $contradicted->update(['generation_issue' => 'claim_contradicted_by_source']);
+        $confirmed = $this->claimOnArticle($scenario, ['classification_basis' => 'scoped_run_reevaluation', 'verdict' => 'not_supported', 'reason' => 'Ikke i kilden.']);
+        $possible = $this->claimOnArticle($scenario, ['classification_basis' => 'semantic_verification', 'verdict' => 'not_supported', 'reason' => 'Usikkert.']);
+
+        $findings = collect(app(EnterpriseWikiRunFindingsService::class)->buildForRun($scenario['run']->fresh(), null, false)['findings'])->keyBy('claim_id');
+
+        foreach ([$contradicted, $confirmed] as $claim) {
+            $this->assertSame(EnterpriseWikiClaimFindingExplainer::CATEGORY_UNDOCUMENTED_OR_INCORRECT_CLAIM, $findings[$claim->id]['category']);
+            $this->assertSame('critical', $findings[$claim->id]['severity']);
+        }
+
+        $this->assertSame(EnterpriseWikiClaimFindingExplainer::CATEGORY_POSSIBLE_CONTENT_DEVIATION, $findings[$possible->id]['category']);
+        $this->assertSame('warning', $findings[$possible->id]['severity']);
     }
 
     public function test_diagnostic_modality_and_negation_signals_keep_their_existing_non_blocking_handling(): void

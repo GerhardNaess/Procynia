@@ -235,6 +235,7 @@ const CLAIM_SOURCE_STATUS_STYLES = {
 const FINDING_CATEGORY_STYLES = {
     undocumented_or_incorrect_claim: 'bg-rose-100 text-rose-700',
     possible_content_deviation: 'bg-amber-100 text-amber-700',
+    changed_normative_meaning: 'bg-amber-100 text-amber-700',
     technical_uncertainty: 'bg-sky-100 text-sky-700',
 };
 

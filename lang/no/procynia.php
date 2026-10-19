@@ -10033,9 +10033,11 @@ return [
         'claim_finding_category_undocumented_or_incorrect_claim' => 'Udokumentert eller feilaktig faktapåstand',
         'claim_finding_category_possible_content_deviation' => 'Mulig innholdsavvik',
         'claim_finding_category_technical_uncertainty' => 'Teknisk usikkerhet',
+        'claim_finding_category_changed_normative_meaning' => 'Endret normativ betydning',
         'claim_finding_action_undocumented_or_incorrect_claim' => 'Kontroller påstanden mot kilden. Godkjenn den dersom den likevel stemmer, avvis den dersom den er feil, eller behold/fjern blokkeringen etter eget skjønn.',
         'claim_finding_action_possible_content_deviation' => 'Sammenlign påstanden med kildeteksten. Avviket er ikke bekreftet — vurder om det er reelt før du bestemmer deg.',
         'claim_finding_action_technical_uncertainty' => 'Dette er en teknisk koblingsusikkerhet, ikke en bekreftet innholdsfeil. Se gjennom siden, og behold eller fjern blokkeringen etter eget skjønn.',
+        'claim_finding_action_changed_normative_meaning' => 'Sammenlign formuleringen med kildesetningen. Rett teksten slik at den har samme forpliktelse som kilden, eller godkjenn avviket dersom den strengere formuleringen er riktig.',
         'modality_class' => [
             'obligation' => 'krav',
             'prohibition' => 'forbud',
@@ -10079,8 +10081,8 @@ return [
             ],
             'normative_strengthening' => [
                 'title' => 'Strengere enn kilden',
-                'explanation' => 'Teksten gjør en anbefaling eller mulighet i kilden om til et krav eller forbud.',
-                'explanation_detailed' => 'Kilden sier «:source» (:source_class), men teksten sier «:claim» (:claim_class). Teksten må ha samme forpliktelse som kilden.',
+                'explanation' => 'Teksten gjør en anbefaling eller mulighet i kilden om til et krav eller forbud. Det må vurderes fordi leseren da får en strengere forpliktelse enn kilden gir.',
+                'explanation_detailed' => 'Kilden sier: «:source» (:source_class). Wiki-artikkelen sier: «:claim» (:claim_class). Formuleringen i artikkelen er strengere enn kilden. Det må vurderes fordi leseren da får en strengere forpliktelse enn kilden gir.',
             ],
             'modality_mismatch' => [
                 'title' => 'Sterkere enn kilden',

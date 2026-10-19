@@ -165,6 +165,10 @@ class EnterpriseWikiClaimCanonicalizationService
 
     public const NORMATIVE_STATUS_AMBIGUOUS = 'ambiguous';
 
+    public const NEGATION_STATUS_CONFLICT = 'conflict';
+
+    public const NEGATION_STATUS_AMBIGUOUS = 'ambiguous';
+
     /**
      * [source class, claim class] pairs that change what the reader is bound to do (plan §18,
      * decision 1). Weakening, and a recommendation restated as plain description, stay with the
@@ -697,7 +701,7 @@ class EnterpriseWikiClaimCanonicalizationService
             return 'frequency_mismatch';
         }
 
-        if ($this->hasNegationMarker($claimNorm) !== $this->hasNegationMarker($sourceNorm)) {
+        if (($this->detectNegationConflict($claimText, $supportingText)['status'] ?? null) === self::NEGATION_STATUS_CONFLICT) {
             return 'negation_mismatch';
         }
 
@@ -718,6 +722,164 @@ class EnterpriseWikiClaimCanonicalizationService
         }
 
         return null;
+    }
+
+    /**
+     * Clause-aligned negation check (run 963). Every clause of the claim is aligned to the ONE
+     * source clause it restates — the same token-overlap alignment and thresholds as
+     * detectNormativeStrengthening() — and only that pair's polarity is compared. Comparing the
+     * whole supporting text instead let any "ikke"/"aldri" in a cited excerpt flag a claim that
+     * restates a different sentence of it: all three claims of summary page 2586 were blocked by
+     * a negation in a source sentence the claim never restated («… slik at manglende spor ikke
+     * tolkes som fravær av aktivitet», «… dersom det ikke skyldes …»).
+     *
+     * Clauses are split further than splitIntoClauses() does — at commas and before a purpose
+     * clause («slik at», «for at», «for å») — so a trailing contrast or purpose clause («…, ikke
+     * på hukommelse», «… for at det ikke skal skje igjen») is its own unit and only counts when
+     * the claim restates it; «for å hindre gjentakelse» states the same purpose without a
+     * negation word and is not a reversal. Never before «men»/«but»: "ikke X, men Y" must stay
+     * one unit for hasNegationMarker()'s contrast exclusion.
+     *
+     * Returns null when no aligned pair disagrees, NEGATION_STATUS_CONFLICT for a confident
+     * alignment with opposite polarity, and NEGATION_STATUS_AMBIGUOUS when the disagreeing clause
+     * is not clearly the one the claim restates (too little overlap, or tied with a clause of the
+     * claim's own polarity) — kept as diagnostics, never concluded as a conflict. When nothing
+     * aligns at all (cross-language), see unalignedNegationConflict().
+     *
+     * @return array{status: string, claim_clause: string, source_clause: string}|null
+     */
+    public function detectNegationConflict(string $claimText, string $supportingText): ?array
+    {
+        $sourceClauses = $this->negationClauses($supportingText);
+
+        if ($sourceClauses === []) {
+            return null;
+        }
+
+        $ambiguous = null;
+        $anyOverlap = false;
+
+        foreach ($this->negationClauses($claimText) as $claimClause) {
+            $claimTokens = $claimClause['tokens'];
+
+            if ($claimTokens === []) {
+                continue;
+            }
+
+            $scored = [];
+
+            foreach ($sourceClauses as $sourceClause) {
+                $overlap = count(array_intersect($claimTokens, $sourceClause['tokens']));
+
+                if ($overlap > 0) {
+                    $scored[] = ['clause' => $sourceClause, 'overlap' => $overlap];
+                }
+            }
+
+            if ($scored === []) {
+                continue;
+            }
+
+            $anyOverlap = true;
+
+            usort($scored, static fn (array $a, array $b): int => $b['overlap'] <=> $a['overlap']);
+
+            $best = $scored[0];
+
+            if ($best['clause']['negated'] === $claimClause['negated']) {
+                continue;
+            }
+
+            $tiedWithSamePolarity = false;
+
+            foreach (array_slice($scored, 1) as $other) {
+                if ($other['overlap'] === $best['overlap'] && $other['clause']['negated'] === $claimClause['negated']) {
+                    $tiedWithSamePolarity = true;
+                }
+            }
+
+            $finding = [
+                'claim_clause' => $claimClause['text'],
+                'source_clause' => $best['clause']['text'],
+            ];
+
+            $confident = $best['overlap'] >= self::NORMATIVE_ALIGNMENT_MIN_OVERLAP
+                && $best['overlap'] / count($claimTokens) >= self::NORMATIVE_ALIGNMENT_MIN_RATIO
+                && ! $tiedWithSamePolarity;
+
+            if ($confident) {
+                return ['status' => self::NEGATION_STATUS_CONFLICT, ...$finding];
+            }
+
+            if ($best['overlap'] >= self::NORMATIVE_ALIGNMENT_MIN_OVERLAP) {
+                $ambiguous ??= ['status' => self::NEGATION_STATUS_AMBIGUOUS, ...$finding];
+            }
+        }
+
+        return $anyOverlap ? $ambiguous : $this->unalignedNegationConflict($claimText, $supportingText);
+    }
+
+    /**
+     * No clause of the claim shares a word with the source — typically a Norwegian claim checked
+     * against an English source (run 37), where word overlap cannot align anything. One sentence
+     * against one sentence is still an unambiguous pairing, so its polarity is compared; for
+     * anything longer the source sentence cannot be identified and a disagreement is recorded as
+     * ambiguous, never concluded.
+     *
+     * @return array{status: string, claim_clause: string, source_clause: string}|null
+     */
+    private function unalignedNegationConflict(string $claimText, string $supportingText): ?array
+    {
+        $claimNegated = $this->hasNegationMarker($this->textNormalizer->normalize($claimText));
+
+        if ($claimNegated === $this->hasNegationMarker($this->textNormalizer->normalize($supportingText))) {
+            return null;
+        }
+
+        $singleSentence = static fn (string $text): bool => count(preg_split('/(?<=[.!?;:])\s+|\n+/u', trim($text), -1, PREG_SPLIT_NO_EMPTY) ?: []) === 1;
+
+        return [
+            'status' => $singleSentence($claimText) && $singleSentence($supportingText)
+                ? self::NEGATION_STATUS_CONFLICT
+                : self::NEGATION_STATUS_AMBIGUOUS,
+            'claim_clause' => trim($claimText),
+            'source_clause' => trim($supportingText),
+        ];
+    }
+
+    /**
+     * @return list<array{text: string, negated: bool, tokens: list<string>}>
+     */
+    private function negationClauses(string $text): array
+    {
+        $result = [];
+
+        foreach (preg_split('/(?<=[.!?;:])\s+|\n+/u', trim($text), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $sentence) {
+            foreach ($this->splitIntoClauses($sentence) as $clause) {
+                $parts = preg_split(
+                    '/\s*,\s*(?!(?:men|but)(?!\p{L}))|\s+(?=(?:slik\s+at|for\s+at|for\s+å|so\s+that|in\s+order\s+to)(?!\p{L}))/ui',
+                    $clause,
+                    -1,
+                    PREG_SPLIT_NO_EMPTY,
+                ) ?: [];
+
+                foreach ($parts as $part) {
+                    $normalized = $this->textNormalizer->normalize($part);
+
+                    if ($normalized === '') {
+                        continue;
+                    }
+
+                    $result[] = [
+                        'text' => trim($part),
+                        'negated' => $this->hasNegationMarker($normalized),
+                        'tokens' => array_values(array_unique($this->significantTokens($normalized))),
+                    ];
+                }
+            }
+        }
+
+        return $result;
     }
 
     /**

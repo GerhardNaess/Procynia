@@ -293,6 +293,9 @@ class EnterpriseWikiRunFindingsService
         $blockingState = $this->claimFindingExplainer->blockingState($claim);
         $severity = match ($explanation['category']) {
             EnterpriseWikiClaimFindingExplainer::CATEGORY_UNDOCUMENTED_OR_INCORRECT_CLAIM => 'critical',
+            // Medium: the statement is documented, only its force changed. Severity is display
+            // only — the QA gate escalates on the claim's blocking state, not on this value.
+            EnterpriseWikiClaimFindingExplainer::CATEGORY_CHANGED_NORMATIVE_MEANING => 'warning',
             default => 'warning',
         };
 

@@ -665,6 +665,7 @@ class EnterpriseWikiVerifyPageClaimsService
                 'reevaluated_run_id' => $run->id,
                 'deterministic_reason' => $safetyNet['deterministic_reason'],
                 'normative_check' => $safetyNet['normative'],
+                'negation_check' => $safetyNet['negation'] ?? null,
             ], static fn ($value): bool => $value !== null), source: EnterpriseWikiClaimClassificationService::SOURCE_MANUAL_REVERIFICATION);
 
             return $locked->fresh()->content_origin;
@@ -1495,6 +1496,7 @@ class EnterpriseWikiVerifyPageClaimsService
                 array_filter([
                     'deterministic_reason' => $safetyNet['deterministic_reason'],
                     'normative_check' => $safetyNet['normative'],
+                    'negation_check' => $safetyNet['negation'] ?? null,
                 ]),
                 $allowClaimDecisionReset,
                 $allowBestPracticePromotion,
@@ -1891,7 +1893,7 @@ class EnterpriseWikiVerifyPageClaimsService
      * evidence so the uncertainty stays visible.
      *
      * @param  array<string, array<string, mixed>>  $elementsByKey
-     * @return array{verdict: string, deterministic_reason: ?string, normative: ?array<string, string>}
+     * @return array{verdict: string, deterministic_reason: ?string, normative: ?array<string, string>, negation?: ?array<string, string>}
      */
     private function applyDeterministicSafetyNet(string $claimText, array $result, array $elementsByKey, ?array $block, string $fallbackSourceText): array
     {
@@ -1950,7 +1952,7 @@ class EnterpriseWikiVerifyPageClaimsService
 
     /**
      * @param  array<string, array<string, mixed>>  $elementsByKey
-     * @return array{verdict: string, deterministic_reason: ?string}
+     * @return array{verdict: string, deterministic_reason: ?string, negation?: ?array<string, string>}
      */
     private function applyFactualSafetyNet(string $claimText, array $result, array $elementsByKey, ?array $block, string $fallbackSourceText): array
     {
@@ -2052,6 +2054,9 @@ class EnterpriseWikiVerifyPageClaimsService
         }
 
         $conflict = $this->canonicalizationService->detectDeterministicConflict($claimText, $supportingText);
+        // The clause pair the negation check compared (or found too uncertain to compare) — kept as
+        // diagnostics next to normative_check, so a negation finding names the sentence it rests on.
+        $negation = $this->canonicalizationService->detectNegationConflict($claimText, $supportingText);
 
         if ($conflict !== null) {
             Log::warning('[WIKI_CLAIM_VERIFICATION] Deterministic conflict overrode an AI verdict of support.', [
@@ -2059,10 +2064,10 @@ class EnterpriseWikiVerifyPageClaimsService
                 'conflict' => $conflict,
             ]);
 
-            return ['verdict' => WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED, 'deterministic_reason' => $conflict];
+            return ['verdict' => WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED, 'deterministic_reason' => $conflict, 'negation' => $negation];
         }
 
-        return ['verdict' => $verdict, 'deterministic_reason' => null];
+        return ['verdict' => $verdict, 'deterministic_reason' => null, 'negation' => $negation];
     }
 
     /**

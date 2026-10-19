@@ -65,6 +65,14 @@ class EnterpriseWikiClaimFindingExplainer
     public const CATEGORY_TECHNICAL_UNCERTAINTY = 'technical_uncertainty';
 
     /**
+     * A confirmed normative strengthening ("bør aldri" → "skal ikke"): the statement is in the
+     * source, only its force changed — not an undocumented factual claim. Its own category keeps
+     * it out of the critical "undocumented or incorrect" severity, while suggested_blocking stays
+     * true, so the QA gate still escalates and publication stays held until someone decides.
+     */
+    public const CATEGORY_CHANGED_NORMATIVE_MEANING = 'changed_normative_meaning';
+
+    /**
      * No decision has been recorded — EnterpriseWikiClaim::blocking_override is null. This is
      * NOT the same as "the system's suggestion applies as the user's decision" (see
      * blockingState()'s docblock) — it means a decision is still outstanding.
@@ -524,7 +532,7 @@ class EnterpriseWikiClaimFindingExplainer
             : __('procynia.wiki.claim_finding.normative_strengthening.explanation');
 
         return $this->buildContentFinding(
-            self::CATEGORY_UNDOCUMENTED_OR_INCORRECT_CLAIM,
+            self::CATEGORY_CHANGED_NORMATIVE_MEANING,
             __('procynia.wiki.claim_finding.normative_strengthening.title'),
             $explanation,
         );

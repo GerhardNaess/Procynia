@@ -95,9 +95,124 @@ class EnterpriseWikiVerifyPageClaimsNegationSafetyNetTest extends TestCase
         );
     }
 
+    /**
+     * Run 963, page 2586, claim 477: every cited excerpt supports the claim, but paragraph-22's
+     * second sentence («… dersom det ikke skyldes …») — which the claim never restates — used to
+     * decide the negation check for the whole claim.
+     */
+    public function test_a_negation_in_a_cited_sentence_the_claim_does_not_restate_no_longer_blocks_it(): void
+    {
+        $claim = $this->blockClaim(
+            'Læringen omsettes til tiltak og varig forbedring: observerte teknikker føres i dekningsmatrisen, tiltak eiersettes og lukkes først når effekten er påvist gjennom klare akseptkriterier, og nye metoder kan utløse retrospektiv trusseljakt i hele miljøet. Forbedringssløyfen følges opp med indikatorer i tjenesterapporteringen, herunder andel gjennomganger innen frist, andel tiltak lukket med verifisert effekt, alder på åpne tiltak, gjentatte rotårsaker og utviklingen i deteksjons- og responsgap, vurdert i sammenheng med kvitteringstid og falske positiver.',
+            [
+                'paragraph-22' => 'Den siste indikatoren må ses sammen med kvitteringstid og andelen falske positiver. Et kortere responsgap er bare en forbedring dersom det ikke skyldes at flere reelle hendelser er klassifisert lavere.',
+                'paragraph-23' => 'Indikatorene rapporteres i den ordinære tjenesterapporteringen.',
+            ],
+        );
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $claim->getAttribute('test_run_id')]);
+        $claim = EnterpriseWikiClaim::query()->findOrFail($claim->id);
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $claim->content_origin);
+        $this->assertNotSame('negation_mismatch', $claim->review_metadata['deterministic_reason'] ?? null);
+    }
+
+    public function test_a_real_negation_reversal_is_still_blocked_and_names_the_source_clause(): void
+    {
+        $claim = $this->blockClaim(
+            'Leverandøren skal ikke utføre sikkerhetskopiering av kundens data.',
+            [
+                'paragraph-1' => 'Rapporten sendes månedlig.',
+                'paragraph-2' => 'Leverandøren skal utføre sikkerhetskopiering av kundens data.',
+            ],
+        );
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $claim->getAttribute('test_run_id')]);
+        $claim = EnterpriseWikiClaim::query()->findOrFail($claim->id);
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+        $this->assertSame('negation_mismatch', $claim->review_metadata['deterministic_reason'] ?? null);
+        $this->assertSame('conflict', $claim->review_metadata['negation_check']['status'] ?? null);
+        $this->assertSame(
+            'Leverandøren skal utføre sikkerhetskopiering av kundens data.',
+            $claim->review_metadata['negation_check']['source_clause'] ?? null,
+        );
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================
+
+    /**
+     * A source_based block citing $elements, its claim, and a verifier that calls the claim
+     * supported by every element.
+     *
+     * @param  array<string, string>  $elements
+     */
+    private function blockClaim(string $claimText, array $elements): EnterpriseWikiClaim
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer, implode("\n\n", $elements));
+        $run = $this->createRunApplied($customer, $document);
+        $page = $this->createPage($customer, 'Forbedringssløyfe');
+
+        EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+        ]);
+
+        $sourceElements = [];
+
+        foreach ($elements as $key => $excerpt) {
+            $sourceElements[] = [
+                'source_type' => 'enterprise_wiki_document',
+                'source_id' => $document->id,
+                'source_label' => $document->original_filename,
+                'source_element_key' => $key,
+                'source_element_type' => 'paragraph',
+                'source_excerpt' => $excerpt,
+            ];
+        }
+
+        $version = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# Forbedringssløyfe\n\n{$claimText}",
+            'content_blocks_json' => [[
+                'block_key' => 'block-0001',
+                'position' => 0,
+                'markdown' => $claimText,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                'source_type' => 'enterprise_wiki_document',
+                'source_id' => $document->id,
+                'source_label' => $document->original_filename,
+                'source_element_key' => array_key_first($elements),
+                'source_excerpt' => reset($elements),
+                'source_elements' => $sourceElements,
+            ]],
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->andReturn(['supporting_source_element_keys' => array_keys($elements)] + $this->supportedVerdict());
+
+        $claim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'content_block_key' => 'block-0001',
+            'claim_text' => $claimText,
+            'position_order' => 0,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+        $claim->setAttribute('test_run_id', $run->id);
+
+        return $claim;
+    }
 
     private function supportedVerdict(): array
     {
