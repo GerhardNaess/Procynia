@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
     buildOpenClaimWorklist,
+    claimReasonHeadingKey,
     claimWorklistReasonKey,
     claimWorklistTitle,
     resolveDistinctPageExcerpt,
@@ -220,5 +221,30 @@ describe('the claim card no longer leads with system terminology', () => {
     test('page quality findings stay a separate section', () => {
         assert.ok(showSource.includes('verification_basis_structural_heading'));
         assert.ok(showSource.includes('data-testid="page-quality-finding"'));
+    });
+});
+
+describe('claimReasonHeadingKey', () => {
+    const unsupported = { id: 7, content_origin: 'unsupported_generated_content', finding_explanation: 'Kilden sier «bør».' };
+
+    test('an open card asks the reader to decide, whatever its origin', () => {
+        assert.equal(claimReasonHeadingKey({ ...unsupported, approval_status: 'pending' }, true), 'open');
+        assert.equal(claimReasonHeadingKey(bestPractice(1, 'Tekst'), true), 'open');
+    });
+
+    test('a decided best-practice suggestion is a QA finding, so its reason is the finding\'s', () => {
+        assert.equal(claimReasonHeadingKey({ ...bestPractice(1, 'Tekst'), approval_status: 'approved' }, false), 'decided_finding');
+    });
+
+    test('a decided unsupported claim may be diagnostic only, so the heading stays neutral', () => {
+        assert.equal(claimReasonHeadingKey({ ...unsupported, approval_status: 'approved' }, false), 'neutral');
+        assert.equal(claimReasonHeadingKey({ ...unsupported, approval_status: 'rejected' }, false), 'neutral');
+    });
+
+    test('the card heading is chosen by the helper and every heading is translated', () => {
+        assert.ok(showSource.includes('claimReasonHeadingKey(claim, isOpenGroup)'));
+        assert.ok(showSource.includes('tw.claim_card_why_label'));
+        assert.ok(showSource.includes('tw.claim_card_decided_reason_label'));
+        assert.ok(showSource.includes('tw.claim_card_reason_label'));
     });
 });

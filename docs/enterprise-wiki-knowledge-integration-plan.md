@@ -1363,7 +1363,7 @@ B1–B6 er implementert og teknisk kontrollert. Alle obligatoriske akseptansekri
 
 ## 18. Kvalitetsrettelser etter Wiki-kjøring 962 (2026-10-18)
 
-Branch `fix/wiki-run962-quality` (fra `main` `a8deed95`), i egen worktree. **Ikke committet.** Arbeidspakke C er ikke endret. Ingen ny kjøring med ekte AI er gjennomført.
+Utviklet på branch `fix/wiki-run962-quality` (fra `main` `a8deed95`) og nå committet og pushet til `main` (se §18.12). Arbeidspakke C er ikke endret.
 
 ### 18.1 Bakgrunn
 
@@ -1387,7 +1387,7 @@ Den tekniske kunnskapskoblingen fungerte. Etter fasitens kriterier bestod testen
 1. **Normativ betydning.** Reell forsterkning i `source_based`-innhold blir synlig og gir `escalated`: «bør» → «skal», «bør ikke» → «skal ikke» og «kan» → ubetinget krav. Gyldige omskrivninger blokkeres ikke. Diagnostiske negasjons- og subjektsignaler beholder dagens behandling.
 2. **`excluded_sections`.** Planleggeren kan utelate en kildeseksjon eksplisitt med `example`, `front_matter`, `duplicate_of_existing` eller `out_of_scope`, og med en begrunnelse som kan kontrolleres.
 3. **Feilet kontroll.** En obligatorisk kontroll som ikke ble fullført, er ikke bestått. Ugyldige slugs i semantisk lenke-QA forkastes enkeltvis. Statusmodellen er uendret.
-4. **Retest.** Retesten skjer med en isolert evalueringskunde med deterministisk utgangspunkt. Kloning er planlagt, ikke utført (§18.11).
+4. **Retest.** Retesten skulle skje med en isolert evalueringskunde med deterministisk utgangspunkt. Den er ikke gjennomført (§18.11).
 5. **Dokumentasjon.** Denne seksjonen.
 
 ### 18.3 P1-1 – Historisk lenkeopphav [Implementert]
@@ -1588,20 +1588,39 @@ Hele PHP-, Wiki-, JS- og E2E-suiten er ikke kjørt. Pint er rent på alle nye og
 - De eksisterende dataene fra kjøring 962 er ikke endret. Det gjelder også de 16 lenkeradene.
 - Øvrige funn fra evalueringen ligger utenfor denne rettelsen og er ikke forutsetninger for den: svake inngående ankre, artikkel/konsept-prioritering, filnavn som artikkeltittel, indirekte koblinger, grafvisning per kjøring og øvrige feilklassifiseringer.
 
-### 18.11 Planlagt retest med ekte AI [Ikke gjennomført]
+### 18.11 Retest med ekte AI [Ikke gjennomført]
+
+Den planlagte retesten mot fasiten med en isolert evalueringskunde er ikke gjennomført. Operatørkommandoen for å seede en slik kunde finnes ikke i `main`. Planen under er beholdt som historikk.
 
 Kunde 4 kan ikke gi en sammenlignbar retest:
 - Side 2538–2541 finnes allerede.
 - Side 67, 68 og 73 har nye versjoner.
 - Samme fil kan bli fanget av hash-duplikatkontrollen.
 
-**Plan (krever egen godkjenning):**
+**Opprinnelig plan (ikke utført):**
 1. Opprett evalueringskunden fra §17.8. Kunde-ID-en skal stå på en konfigurert liste over evalueringskunder.
-2. Seed kunden deterministisk og uten AI med en kopi av kunde 4s side 65–111, slik versjonene var før `2026-10-18 16:59:58`. Kopien skal omfatte sider, gjeldende versjoner med `content_blocks_json` og lenkerader. Det krever en ny operatørkommando, som ikke er bygget. Kunde 4 endres ikke.
+2. Seed kunden deterministisk og uten AI med en kopi av kunde 4s side 65–111, slik versjonene var før `2026-10-18 16:59:58`. Kopien skal omfatte sider, gjeldende versjoner med `content_blocks_json` og lenkerader. Det krever en ny operatørkommando. Kunde 4 endres ikke.
 3. Restart køarbeiderne med koden fra branchen.
 4. Last opp den samme DOCX-filen. Vurder resultatet mot fasiten, med side-ID-er mappet via slug, og mot `qa_result.quality_findings`, `checks.source_coverage`, `checks.normative_fidelity` og `checks.semantic_link_qa`.
 5. Kjør høyst tre kjøringer. Kostnaden rapporteres fra `ai_usage_attempts` etter første kjøring.
 
+**Det som faktisk er kjørt med ekte AI:** Kjøring 963 ble startet hos kunde 4 2026-10-18 etter `4ff73c1d` og endte `escalated`. Den er ikke vurdert mot fasiten og er ikke sammenlignbar med kjøring 962 (se punktene over). Dataene fra kjøringen ble brukt som regresjonsgrunnlag for negasjonsrettelsen i `1007982b` (sammendragssiden 2586).
+
 ### 18.12 Status
 
-P1-1, P0-2, P0-1, P0-3 og rettelsen i semantisk lenke-QA er implementert og målrettet testet. Ingenting er committet. Retesten med ekte AI er planlagt, ikke gjennomført.
+**Implementert, committet og pushet til `main`:**
+
+| Commit | Innhold |
+|---|---|
+| `4ff73c1d` | P1-1, P0-2, P0-1, P0-3 og rettelsen i semantisk lenke-QA (§18.3–18.6) |
+| `6419ccb3` | Generering gir aldri en side under gjennomgang (`pending_review`) en ny arbeidsversjon |
+| `1007982b` | Setningsvis negasjonskontroll og egen kategori «Endret normativ betydning» (kjøring 963) |
+| `086ad35e` | Kildedokumenter: kompakt liste og forenklet feilvisning |
+| `b91e0bb9` | Kjøringer og QA-funn: kompakte rader, forklaringen står i behandlingsvisningen |
+| `1bc14501` | Kildedokumentet og fasiten for evalueringen (`docs/testing/`) |
+
+Overskriften på forklaringen i behandlingsvisningen er rettet i commiten som oppdaterer denne seksjonen. Et åpent kort spør «Hvorfor må du vurdere dette?». Et avgjort beste praksis-forslag har «Begrunnelse for funnet». En avgjort påstand uten kildestøtte har den nøytrale «Begrunnelse». Frontend kan ikke skille et registrert QA-funn fra et rent diagnostisk signal for slike påstander.
+
+**Verifisert:** De målrettede testene i §18.9 (for `4ff73c1d`) og de målrettede JS- og oversettelsestestene for overskriftsrettelsen. De senere commitene har egne tester i commitene. Hele PHP-, Wiki-, JS- og E2E-suiten er ikke kjørt som samlet sluttkontroll for denne runden.
+
+**Ikke gjennomført:** Retest med ekte AI vurdert mot fasiten (§18.11). Hvor godt dekningsreparasjonen fungerer med ekte AI, er derfor fortsatt ikke målt (§18.10).

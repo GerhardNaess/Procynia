@@ -9971,6 +9971,8 @@ return [
         'verification_worklist_reason_other' => 'Needs a decision',
         'verification_worklist_untitled' => 'Claim without text',
         'claim_card_why_label' => 'Why do you need to decide?',
+        'claim_card_decided_reason_label' => 'Reason for the finding',
+        'claim_card_reason_label' => 'Reason',
         'claim_card_what_label' => 'What should you do?',
         'claim_card_reference_label' => 'Reference #:id',
         'claim_card_shared_decision' => 'One decision covering :count claims in the same section.',

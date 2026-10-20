@@ -9975,6 +9975,8 @@ return [
         'verification_worklist_reason_other' => 'Krever en vurdering',
         'verification_worklist_untitled' => 'Påstand uten tekst',
         'claim_card_why_label' => 'Hvorfor må du vurdere dette?',
+        'claim_card_decided_reason_label' => 'Begrunnelse for funnet',
+        'claim_card_reason_label' => 'Begrunnelse',
         'claim_card_what_label' => 'Hva skal du gjøre?',
         'claim_card_reference_label' => 'Referanse #:id',
         'claim_card_shared_decision' => 'Én beslutning for :count påstander i samme avsnitt.',

@@ -7,6 +7,8 @@
 - Kunde: Advania Norge AS (`customer_id = 4`)
 - Grunnlag: Wiki-tilstanden i utviklingsdatabasen 2026-10-18, lest uten endringer
 
+**Om side-ID-ene.** Alle side-ID-er, kjørings-ID-er og radtall i dette dokumentet gjelder bare databasetilstanden over. Et annet miljø, en ny database eller en senere tilstand i samme database kan ha andre ID-er for de samme sidene. Ved en ny kjøring må hver side derfor identifiseres ut fra faglig innhold og identitet: tittel, slug og hva siden handler om. Den numeriske ID-en alene er ikke nok. Historiske referanser, for eksempel kontrolltallene fra kjøring 962, er ikke stabile referanser for fremtidige kjøringer.
+
 ## 1. Hvorfor dette temaet
 
 Kunde 4 har to grupper med Wiki-innhold:

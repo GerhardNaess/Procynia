@@ -32,6 +32,7 @@ import {
 } from './wikiBestPracticeSectionLogic';
 import {
     buildOpenClaimWorklist,
+    claimReasonHeadingKey,
     resolveDistinctPageExcerpt,
     worklistRangesByCard,
 } from './wikiOpenClaimWorklist';
@@ -2065,7 +2066,11 @@ export default function WikiShow({
                 {(problemLabel || isBestPracticeClaim) && (
                     <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
                         <p className="text-base font-semibold text-slate-600">
-                            {tw.claim_card_why_label ?? 'Hvorfor må du vurdere dette?'}
+                            {({
+                                open: tw.claim_card_why_label ?? 'Hvorfor må du vurdere dette?',
+                                decided_finding: tw.claim_card_decided_reason_label ?? 'Begrunnelse for funnet',
+                                neutral: tw.claim_card_reason_label ?? 'Begrunnelse',
+                            })[claimReasonHeadingKey(claim, isOpenGroup)]}
                         </p>
                         <p className="mt-1 text-base leading-6 text-slate-700">
                             {isBestPracticeClaim

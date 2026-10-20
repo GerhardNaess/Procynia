@@ -143,3 +143,22 @@ export function resolveDistinctPageExcerpt(claimText, pageExcerpt) {
 
     return pageExcerpt;
 }
+
+/**
+ * Which heading the claim card's explanation carries, as a stable key the UI translates.
+ *
+ * An open card asks the reader to decide. A decided best-practice suggestion is always a QA finding,
+ * so its explanation is the finding's reason. A decided unsupported claim may be a registered QA
+ * finding or only a diagnostic signal (EnterpriseWikiClaimFindingExplainer::isUserFacingAddition()),
+ * and the claim props cannot tell the two apart — so it gets a neutral heading rather than a guess.
+ *
+ * @param {object} claim
+ * @param {boolean} isOpenGroup
+ * @returns {'open'|'decided_finding'|'neutral'}
+ */
+export function claimReasonHeadingKey(claim, isOpenGroup) {
+    if (isOpenGroup) return 'open';
+    if (claim?.content_origin === 'best_practice') return 'decided_finding';
+
+    return 'neutral';
+}

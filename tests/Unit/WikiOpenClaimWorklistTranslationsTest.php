@@ -25,6 +25,8 @@ class WikiOpenClaimWorklistTranslationsTest extends TestCase
         'verification_worklist_reason_other',
         'verification_worklist_untitled',
         'claim_card_why_label',
+        'claim_card_decided_reason_label',
+        'claim_card_reason_label',
         'claim_card_what_label',
         'claim_card_reference_label',
         'claim_card_shared_decision',
@@ -67,6 +69,8 @@ class WikiOpenClaimWorklistTranslationsTest extends TestCase
         $this->assertSame('Behold teksten', $wiki['claim_card_keep_text']);
         $this->assertSame('Fjern teksten', $wiki['claim_card_remove_text']);
         $this->assertSame('Hvorfor må du vurdere dette?', $wiki['claim_card_why_label']);
+        $this->assertSame('Begrunnelse for funnet', $wiki['claim_card_decided_reason_label']);
+        $this->assertSame('Begrunnelse', $wiki['claim_card_reason_label']);
         $this->assertSame('Hva skal du gjøre?', $wiki['claim_card_what_label']);
     }
 
