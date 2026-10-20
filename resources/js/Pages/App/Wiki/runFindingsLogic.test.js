@@ -2,6 +2,9 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     RUN_TIMELINE_STEPS,
+    RUN_STATUS_FILTER_KEYS,
+    runStatusKey,
+    getRunFailureLines,
     ACTIVE_WIKI_RUN_STATUSES,
     matchesFindingsLocalFilter,
     getRunTimelineState,
@@ -504,9 +507,10 @@ describe('getEscalationCopy — explains an escalated run instead of repeating t
     // 15 automatic maintenance-cycle retries that updated qa_status without ever reconciling the
     // run's own `status` column back (see EnterpriseWikiMaintenanceCycleService::processRun()) —
     // 3 of the run's 25 total findings are still open and blocking.
-    test('claim-integrity cause: error_message becomes the primary reason, the status/qa_status drift becomes a distinct secondary line, and the blocking count is reported against the true total', () => {
+    test('stored cause: the translated failure_summary becomes the primary reason, the status/qa_status drift becomes a distinct secondary line, and the blocking count is reported against the true total', () => {
         const run = {
-            error_message: 'Wiki-siden ble stanset fordi systemet fant innhold som ikke kunne bekreftes mot kildegrunnlaget. Automatisk reparasjon vil bli forsøkt.',
+            error_message: '[SomeException] raw technical text',
+            failure_summary: { kind: 'unknown', title: 'Kjøringen stoppet med en feil', lines: ['Årsaken er registrert i de tekniske detaljene.'] },
             findings_explanation: 'Kjøringen har 3 åpne blokkerende funn, men står som bestått. Statusen må synkroniseres.',
             findings_open_blocking_count: 3,
             lint_count: 25,
@@ -514,8 +518,10 @@ describe('getEscalationCopy — explains an escalated run instead of repeating t
 
         const copy = getEscalationCopy(run, {});
 
-        assert.equal(copy.primaryReason, run.error_message);
+        assert.equal(copy.primaryReason, 'Kjøringen stoppet med en feil Årsaken er registrert i de tekniske detaljene.');
         assert.equal(copy.secondaryReason, run.findings_explanation);
+        // The raw stored message is never the explanation.
+        assert.equal(copy.primaryReason.includes('SomeException'), false);
         assert.equal(copy.blockingCount, 3);
         assert.match(copy.blockingSummary, /3/);
         assert.match(copy.blockingSummary, /25/);
@@ -542,9 +548,10 @@ describe('getEscalationCopy — explains an escalated run instead of repeating t
 
     // Cause 3: both fields happen to hold the identical string — never show the same sentence
     // twice, matching the whole point of this fix (the row already showed "Eskalert" three times).
-    test('identical error_message and findings_explanation never duplicate into two lines', () => {
+    test('an identical cause and findings_explanation never duplicate into two lines', () => {
         const run = {
-            error_message: 'Samme forklaring.',
+            error_message: 'raw',
+            failure_summary: { title: 'Samme forklaring.', lines: [] },
             findings_explanation: 'Samme forklaring.',
             findings_open_blocking_count: 1,
             lint_count: 1,
@@ -562,7 +569,7 @@ describe('getEscalationCopy — explains an escalated run instead of repeating t
     test('no data available falls back to the plain "Eskalert" word, never a guessed reason', () => {
         const run = { error_message: null, findings_explanation: null, findings_open_blocking_count: 0, lint_count: 0 };
 
-        assert.equal(getEscalationCopy(run, {}).primaryReason, 'Eskalert');
+        assert.equal(getEscalationCopy(run, {}).primaryReason, 'Krever oppfølging');
         assert.equal(getEscalationCopy(run, { ingest_activity_escalated: 'Escalated' }).primaryReason, 'Escalated');
     });
 
@@ -809,18 +816,93 @@ describe('getRunCompactSummary — the collapsed Kjøringer row says one short l
         assert.equal(getRunCompactSummary({ ...run, failed_pages: { count: 2 } }, { run_compact_failed_pages_many: ':count errors' }), '2 errors');
     });
 
-    test('an escalation without failed pages needs follow-up — QA findings are never counted here', () => {
-        assert.equal(getRunCompactSummary({ status: 'escalated', lint_count: 5, findings_open_blocking_count: 2 }), 'Krever oppfølging');
-        assert.equal(getRunCompactSummary({ status: 'escalated', failed_pages: null }), 'Krever oppfølging');
+    test('an escalation without failed pages adds no line — its badge says it, QA findings are never counted here', () => {
+        assert.equal(getRunCompactSummary({ status: 'escalated', lint_count: 5, findings_open_blocking_count: 2 }), null);
+        assert.equal(getRunCompactSummary({ status: 'escalated', failed_pages: null }), null);
     });
 
     test('a transient page-planning failure is told apart from any other failure', () => {
         assert.equal(getRunCompactSummary({ status: 'failed', failed_phase: 'maintainer_decision', transient_failure: true }), 'Midlertidig feil');
-        assert.equal(getRunCompactSummary({ status: 'failed', failed_phase: 'generating_pages' }), 'Stoppet med feil');
+        // «Feilet» already says it; the cause is in «Status og oppfølging».
+        assert.equal(getRunCompactSummary({ status: 'failed', failed_phase: 'generating_pages' }), null);
     });
 
     test('a completed or running run says nothing beyond its badge', () => {
         assert.equal(getRunCompactSummary({ status: 'completed', lint_count: 2 }), null);
         assert.equal(getRunCompactSummary({ status: 'generating_pages', expects_automatic_progress: true }), null);
+    });
+});
+
+describe('a handled claim finding in Kjøringer', () => {
+    test('an accepted deviation is resolved, never open', () => {
+        assert.equal(matchesFindingsLocalFilter({ status: 'accepted_deviation' }, 'resolved'), true);
+        assert.equal(matchesFindingsLocalFilter({ status: 'accepted_deviation' }, 'open'), false);
+        assert.equal(matchesFindingsLocalFilter({ status: 'accepted_deviation', blocks_run: false }, 'blocking'), false);
+    });
+
+    test('an escalated run with its follow-up done gets no new call to action', () => {
+        assert.equal(getRunCompactSummary({ status: 'escalated', qa_follow_up: 'complete', follow_up_complete: true }), null);
+        assert.equal(getRunCompactSummary({ status: 'escalated', qa_follow_up: 'open', follow_up_complete: false }), null);
+        // Failed pages are never hidden behind a finished follow-up.
+        assert.equal(getRunCompactSummary({ status: 'escalated', qa_follow_up: 'complete', failed_pages: { count: 1 } }), '1 feil');
+    });
+});
+
+describe('a stopped run is explained by its failure_summary, never by the raw stored message', () => {
+    const run26 = {
+        status: 'failed',
+        failed_phase: null,
+        error_message: '1 of 2 initial page(s) failed to generate: X. Details — X (article): [EnterpriseWikiPlannedSectionEvidenceMissingException] Run [26] page [110] (article): planned_section_no_evidence before generation: A, B.',
+        failure_summary: {
+            kind: 'planned_section_evidence_missing',
+            title: 'Kunne ikke generere artikkelen',
+            lines: ['Artikkelen «X» mangler kildegrunnlag for fem planlagte avsnitt.', 'Kjøringen ble stoppet for å unngå å generere innhold uten tilstrekkelig dokumentasjon.'],
+            failed_phase: 'generating_pages',
+        },
+    };
+
+    test('heading, then what happened, then why — no raw text', () => {
+        assert.deepEqual(getRunFailureLines(run26), [
+            ['alert', 'Kunne ikke generere artikkelen'],
+            ['primary', 'Artikkelen «X» mangler kildegrunnlag for fem planlagte avsnitt.'],
+            ['note', 'Kjøringen ble stoppet for å unngå å generere innhold uten tilstrekkelig dokumentasjon.'],
+        ]);
+        assert.equal(getRunFailureLines({ status: 'failed', error_message: 'raw' }), null);
+    });
+
+    test('the timeline marks the step the stored message can only come from, and leaves later steps unstarted', () => {
+        const states = RUN_TIMELINE_STEPS.map((_, index) => getRunTimelineState(run26, index));
+        assert.deepEqual(states, ['done', 'done', 'done', 'error', 'empty', 'empty']);
+        // A recorded failed_phase still wins, and without either nothing is made up.
+        assert.equal(getRunTimelineState({ ...run26, failed_phase: 'maintainer_decision' }, 1), 'error');
+        assert.deepEqual(
+            RUN_TIMELINE_STEPS.map((_, index) => getRunTimelineState({ status: 'failed', failed_phase: null, failure_summary: { failed_phase: null } }, index)),
+            ['empty', 'empty', 'empty', 'empty', 'empty', 'empty'],
+        );
+    });
+});
+
+describe('runStatusKey — the one status word a run is shown with', () => {
+    test('completed, failed, running and waiting runs', () => {
+        assert.equal(runStatusKey({ status: 'completed' }), 'completed');
+        assert.equal(runStatusKey({ status: 'awaiting_document_owner_approval' }), 'completed');
+        assert.equal(runStatusKey({ status: 'failed' }), 'failed');
+        assert.equal(runStatusKey({ status: 'queued' }), 'waiting');
+        for (const status of ['running', 'maintainer_decision', 'generating_pages', 'verifying_claims', 'qa']) {
+            assert.equal(runStatusKey({ status }), 'in_progress', status);
+        }
+    });
+
+    test('an escalated run is «Oppfølging fullført» only when the backend confirms nothing is left', () => {
+        assert.equal(runStatusKey({ status: 'escalated', follow_up_complete: true }), 'completed_with_remarks');
+        assert.equal(runStatusKey({ status: 'escalated', follow_up_complete: false }), 'needs_follow_up');
+        // Uncertain — no reading at all, or a QA count alone — needs follow-up.
+        assert.equal(runStatusKey({ status: 'escalated' }), 'needs_follow_up');
+        assert.equal(runStatusKey({ status: 'escalated', follow_up_complete: null, qa_follow_up: 'complete' }), 'needs_follow_up');
+    });
+
+    test('the filter offers the words the rows show, once each', () => {
+        assert.deepEqual(RUN_STATUS_FILTER_KEYS, ['waiting', 'in_progress', 'completed', 'completed_with_remarks', 'needs_follow_up', 'failed', 'cancelled', 'decision_only']);
+        assert.equal(new Set(RUN_STATUS_FILTER_KEYS).size, RUN_STATUS_FILTER_KEYS.length);
     });
 });

@@ -73,7 +73,11 @@ class WikiClaimController extends Controller
             'back_url' => ['nullable', 'string', 'max:2048'],
         ]);
 
+        $this->abortIfAlreadyDecided($claim);
+
+        $textBeforeBestPracticeEdit = (string) $claim->claim_text;
         $this->applyBestPracticeTextEdit($claim, $validated['approved_text'] ?? null);
+        $bestPracticeEdited = (string) $claim->fresh()->claim_text !== $textBeforeBestPracticeEdit;
 
         $textBeforeEdit = (string) $claim->claim_text;
         $sourceFindingEdited = $this->applySourceBasedFindingTextEdit($claim, $validated['approved_text'] ?? null);
@@ -110,7 +114,10 @@ class WikiClaimController extends Controller
 
         return redirect()
             ->route('app.wiki.show', $this->wikiShowRouteParamsForReviewReturn($request, $page->slug, $claim->id))
-            ->with('success', 'Påstanden er godkjent.');
+            ->with('success', $this->decisionMessage(
+                $sourceFindingEdited || $bestPracticeEdited ? 'claim_flash_approved_edited' : 'claim_flash_approved',
+                $claim->fresh(),
+            ));
     }
 
     public function reject(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
@@ -124,6 +131,8 @@ class WikiClaimController extends Controller
             'comment' => ['nullable', 'string', 'max:1000'],
             'back_url' => ['nullable', 'string', 'max:2048'],
         ]);
+
+        $this->abortIfAlreadyDecided($claim);
 
         $claim->loadMissing('version');
         $isSourceBasedFinding = $claim->version !== null
@@ -166,9 +175,14 @@ class WikiClaimController extends Controller
         $this->cascadeBestPracticeDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED, $validated['comment'] ?? null);
         $this->cascadeBlockDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED, $validated['comment'] ?? null);
 
+        $textRemoved = $isSourceBasedFinding || $claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE;
+
         return redirect()
             ->route('app.wiki.show', $this->wikiShowRouteParamsForReviewReturn($request, $page->slug, $claim->id))
-            ->with('success', 'Påstanden er avvist.');
+            ->with('success', $this->decisionMessage(
+                $textRemoved ? 'claim_flash_rejected_removed' : 'claim_flash_rejected',
+                $claim->fresh(),
+            ));
     }
 
     /**
@@ -443,7 +457,7 @@ class WikiClaimController extends Controller
                 $claim->id,
                 $this->reviewBackUrlFromRequest($request),
             ))
-            ->with('success', 'Kilden er koblet til påstanden.');
+            ->with('success', __('procynia.wiki.claim_flash_source_linked'));
     }
 
     public function unapprove(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
@@ -480,7 +494,7 @@ class WikiClaimController extends Controller
 
         return redirect()
             ->route('app.wiki.show', $this->wikiShowRouteParamsForReviewReturn($request, $page->slug, $claim->id))
-            ->with('success', 'Beslutningen er angret.');
+            ->with('success', $this->decisionMessage('claim_flash_unapproved', $claim->fresh(), reopened: true));
     }
 
     /**
@@ -535,7 +549,76 @@ class WikiClaimController extends Controller
                 $claim->id,
                 $this->reviewBackUrlFromRequest($request),
             ))
-            ->with('success', $newBlocking ? 'Blokkeringen er beholdt.' : 'Blokkeringen er fjernet.');
+            ->with('success', $this->decisionMessage(
+                $newBlocking ? 'claim_flash_blocking_kept' : 'claim_flash_blocking_removed',
+                $claim->fresh(),
+            ));
+    }
+
+    /**
+     * Two people deciding the same claim from two open tabs: the second decision would silently
+     * overwrite the first. A decided claim is changed only through «Angre beslutning», so approve and
+     * reject refuse it as a conflict — the page reloads and shows the decision that stands.
+     */
+    private function abortIfAlreadyDecided(EnterpriseWikiClaim $claim): void
+    {
+        abort_unless($claim->isPending(), 409);
+    }
+
+    /**
+     * The confirmation after a decision: what happened to the claim and its text, then — read back
+     * from the stored state, never assumed — whether the QA finding it belongs to is now handled or
+     * still needs follow-up. A claim that is no QA finding gets the first sentence only.
+     */
+    private function decisionMessage(string $actionKey, EnterpriseWikiClaim $claim, bool $reopened = false): string
+    {
+        $message = __('procynia.wiki.'.$actionKey);
+        $findingIsOpen = $this->qaFindingIsOpen($claim);
+
+        if ($findingIsOpen === null) {
+            return $message;
+        }
+
+        $outcomeKey = match (true) {
+            $findingIsOpen && $reopened => 'claim_flash_finding_reopened',
+            $findingIsOpen => 'claim_flash_finding_still_open',
+            default => 'claim_flash_finding_closed',
+        };
+
+        return $message.' '.__('procynia.wiki.'.$outcomeKey);
+    }
+
+    /**
+     * Whether the Kjøringer QA finding this claim belongs to is still open, by the same rules
+     * EnterpriseWikiRunFindingsService lists it with: a best-practice suggestion while its section
+     * is undecided, a claim finding while EnterpriseWikiClaimFindingExplainer::findingResolution()
+     * says so — for any occurrence of the same fact on a current page version, since the list shows
+     * them as one finding. null when the claim is no user-facing finding at all.
+     */
+    private function qaFindingIsOpen(EnterpriseWikiClaim $claim): ?bool
+    {
+        if (! $this->claimFindingExplainer->isUserFacingAddition($claim)) {
+            return null;
+        }
+
+        if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
+            return $claim->isPending();
+        }
+
+        $occurrences = $claim->canonical_fact_id === null
+            ? collect([$claim])
+            : EnterpriseWikiClaim::query()
+                ->where('canonical_fact_id', $claim->canonical_fact_id)
+                ->whereHas('version', fn ($query) => $query->where('is_current', true))
+                ->whereHas('page', fn ($query) => $query->where('customer_id', $this->customerContext->currentCustomerId()))
+                ->get()
+                ->push($claim)
+                ->unique('id');
+
+        return $occurrences->contains(
+            fn (EnterpriseWikiClaim $occurrence): bool => $this->claimFindingExplainer->isUserFacingAddition($occurrence)
+                && $this->claimFindingExplainer->findingResolution($occurrence) === EnterpriseWikiClaimFindingExplainer::RESOLUTION_OPEN,
+        );
     }
 
     /**

@@ -32,7 +32,7 @@ test.describe.serial('Kjøringer run row readability', () => {
         const mainRow = row.locator('[data-run-main-row]');
         await expect(row).toBeVisible();
 
-        const statusPill = mainRow.getByText('Kjører', { exact: true });
+        const statusPill = mainRow.getByText('I arbeid', { exact: true });
         await expect(statusPill).toBeVisible();
         expect(await statusPill.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
 

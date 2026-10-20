@@ -31,6 +31,8 @@ use App\Services\EnterpriseWiki\EnterpriseWikiPageGenerationFailureRecoveryServi
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\EnterpriseWiki\EnterpriseWikiReviewNotificationService;
+use App\Services\EnterpriseWiki\EnterpriseWikiRunDismissalService;
+use App\Services\EnterpriseWiki\EnterpriseWikiRunFailurePresenter;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunFindingsService;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunRecoveryResult;
 use App\Services\EnterpriseWiki\EnterpriseWikiWikilinkRenderer;
@@ -50,6 +52,28 @@ use Inertia\Response;
 
 class WikiController extends Controller
 {
+    /**
+     * Kjøringer status filter groups → the stored statuses they cover. «I arbeid» is every status
+     * the pipeline still moves on its own except the queue, which is «Venter».
+     */
+    private const RUN_STATUS_FILTER_GROUPS = [
+        'waiting' => [EnterpriseWikiIngestRun::STATUS_QUEUED],
+        'in_progress' => [
+            EnterpriseWikiIngestRun::STATUS_RUNNING,
+            EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED,
+            EnterpriseWikiIngestRun::STATUS_MAINTAINER_DECISION,
+            EnterpriseWikiIngestRun::STATUS_APPLYING,
+            EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES,
+            EnterpriseWikiIngestRun::STATUS_GENERATING_CONCEPT_ENTITY_PAGES,
+            EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING,
+            EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS,
+            EnterpriseWikiIngestRun::STATUS_POST_CLAIM_VERIFICATION,
+            EnterpriseWikiIngestRun::STATUS_QA,
+        ],
+        'needs_follow_up' => [EnterpriseWikiIngestRun::STATUS_ESCALATED],
+        'completed_with_remarks' => [EnterpriseWikiIngestRun::STATUS_ESCALATED],
+    ];
+
     use AuthorizesWikiPermissions;
     use PreservesWikiReviewReturnUrl;
     use RedirectsToWikiIndexTab;
@@ -87,6 +111,8 @@ class WikiController extends Controller
         private readonly EnterpriseWikiPublicationStatusService $publicationStatus,
         private readonly EnterpriseWikiPageDeletionService $pageDeletionService,
         private readonly CustomerPermissionService $customerPermissions,
+        private readonly EnterpriseWikiRunFailurePresenter $runFailurePresenter,
+        private readonly EnterpriseWikiRunDismissalService $runDismissalService,
     ) {}
 
     public function index(Request $request): Response
@@ -753,6 +779,11 @@ class WikiController extends Controller
                 'expects_automatic_progress' => $latestRuns[$doc->id]->expectsAutomaticProgress(),
                 'maintainer_decision_json' => $latestRuns[$doc->id]->maintainer_decision_json,
                 'maintainer_decision_status' => $latestRuns[$doc->id]->maintainer_decision_status,
+                // Same reading as the Kjøringer row, so the document list and Kjøringer name an
+                // escalated run alike.
+                'follow_up_complete' => $latestRuns[$doc->id]->status === EnterpriseWikiIngestRun::STATUS_ESCALATED
+                    ? $this->runFindingsService->escalationFollowUpComplete($latestRuns[$doc->id])
+                    : null,
                 'maintainer_decision_generated_at' => $latestRuns[$doc->id]->maintainer_decision_generated_at,
                 'pages_count' => (int) ($latestRuns[$doc->id]->pages_count ?? 0),
                 'sections_count' => (int) ($latestRuns[$doc->id]->sections_count ?? 0),
@@ -781,7 +812,9 @@ class WikiController extends Controller
 
     private function loadRunsTab(?User $user, int $customerId, Request $request): array
     {
-        $allowedRunStatuses = EnterpriseWikiIngestRun::STATUSES;
+        // Raw statuses stay accepted for existing links; the Kjøringer filter itself offers the
+        // groups the list shows — «Venter», «I arbeid», and the two readings of an escalated run.
+        $allowedRunStatuses = [...EnterpriseWikiIngestRun::STATUSES, ...array_keys(self::RUN_STATUS_FILTER_GROUPS)];
         $allowedDecisionStatuses = [
             EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING,
             EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
@@ -813,10 +846,13 @@ class WikiController extends Controller
             ->withCount(['sections', 'pages'])
             ->where('enterprise_wiki_ingest_runs.customer_id', $customerId)
             ->where('enterprise_wiki_ingest_runs.source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+            // «Fjern fra oversikten»: only this list leaves cleared runs out. Everything else —
+            // queue, scheduler, recovery, a document's latest run, page provenance — still reads them.
+            ->whereNull('enterprise_wiki_ingest_runs.dismissed_at')
             ->orderByDesc('enterprise_wiki_ingest_runs.created_at');
 
         if ($runStatus !== null) {
-            $query->where('enterprise_wiki_ingest_runs.status', $runStatus);
+            $query->whereIn('enterprise_wiki_ingest_runs.status', self::RUN_STATUS_FILTER_GROUPS[$runStatus] ?? [$runStatus]);
         }
 
         if ($runDecision === 'none') {
@@ -877,6 +913,12 @@ class WikiController extends Controller
                         && $document instanceof EnterpriseWikiDocument
                         && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE)
                         && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false),
+                    // «Fjern fra oversikten»: the same authorization as can_cancel, plus the one
+                    // state rule the dismiss request checks again (EnterpriseWikiRunDismissalService).
+                    'can_dismiss' => $document instanceof EnterpriseWikiDocument
+                        && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE)
+                        && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false)
+                        && $this->runDismissalService->refusal($run, $summary) === null,
                     // Wiki run-592/run-593: only true when
                     // EnterpriseWikiMaintainerDecisionFailureRecoveryService itself would actually
                     // resume this run right now — the frontend never derives this eligibility on
@@ -891,6 +933,9 @@ class WikiController extends Controller
                         && $this->maintainerDecisionRecoveryService->evaluate($run->id, allowManualOverride: true)->isResumed(),
                     'failed_pages' => $this->failedPagesSummaryForRun($run, $document, $user),
                     'error_message' => $run->error_message,
+                    // What Kjøringer says about a stopped run, in the reader's language. The stored
+                    // error_message above stays the diagnostics behind «Vis tekniske detaljer».
+                    'failure_summary' => $this->runFailurePresenter->present($run),
                     'qa_status' => $run->qa_status,
                     'qa_last_error' => $run->qa_last_error,
                     'claim_content_repair_attempt_count' => $run->claim_content_repair_attempt_count,
@@ -909,6 +954,14 @@ class WikiController extends Controller
                     'findings_open_qa_review_count' => $summary['open_qa_review'],
                     'findings_open_non_blocking_count' => $summary['open_non_blocking'] + $summary['best_practice_pending'],
                     'findings_explanation' => $summary['explanation'] ?? null,
+                    // What the run still asks of anyone now, beside qa_status, which records what
+                    // happened during the run and is not rewritten by later decisions.
+                    'qa_follow_up' => $summary['qa_follow_up'] ?? null,
+                    // An escalated run with nothing left to follow up reads «Fullført – med
+                    // merknader»; any other escalated run «Krever oppfølging». null when not escalated.
+                    'follow_up_complete' => $run->status === EnterpriseWikiIngestRun::STATUS_ESCALATED
+                        ? $this->runFindingsService->escalationFollowUpComplete($run, $summary)
+                        : null,
                     // Wiki run-3: run.status alone can never say whether a human actually approved
                     // anything (see documentOwnerApprovalCountsForRun() docblock) — the Kjøringer
                     // timeline's Dokumenteiergodkjenning step uses these counts instead of
@@ -921,7 +974,16 @@ class WikiController extends Controller
                     'last_progress_at' => $run->updated_at,
                     'expects_automatic_progress' => $run->expectsAutomaticProgress(),
                 ];
-            })->all(),
+            })
+                // The two readings of an escalated run are computed per row, not stored, so that
+                // part of the filter is applied to the rows themselves.
+                ->filter(fn (array $row): bool => match ($runStatus) {
+                    'needs_follow_up' => $row['follow_up_complete'] !== true,
+                    'completed_with_remarks' => $row['follow_up_complete'] === true,
+                    default => true,
+                })
+                ->values()
+                ->all(),
             'runs_filters' => [
                 'status' => $runStatus,
                 'decision' => $runDecision,
@@ -1035,6 +1097,50 @@ class WikiController extends Controller
 
         return $this->redirectToWikiTab($request)
             ->with('success', __('procynia.wiki.run_cancel_success'));
+    }
+
+    /**
+     * «Fjern fra oversikten»: clears a finished run from Kjøringer. Visibility only — the run, its
+     * status and everything that refers to it stay (EnterpriseWikiRunDismissalService). Authorized
+     * exactly like «Avbryt kjøring»; the state rule is checked again here, never taken from the
+     * row's can_dismiss. A refusal comes back as a validation error, which the confirmation dialog
+     * shows where it was asked. Clearing a run that already is cleared changes nothing and answers
+     * the same way.
+     */
+    public function dismissRun(Request $request, EnterpriseWikiIngestRun $run): RedirectResponse
+    {
+        $customerId = $this->customerContext->currentCustomerId();
+        $user = $this->customerContext->currentUser();
+
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE);
+
+        abort_unless((int) $run->customer_id === (int) $customerId, 404);
+        abort_unless($run->source_type === EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT, 404);
+
+        $document = EnterpriseWikiDocument::query()
+            ->where('customer_id', $customerId)
+            ->find($run->source_id);
+
+        abort_unless($document instanceof EnterpriseWikiDocument, 404);
+        abort_unless($user instanceof User && $user->canDeleteEnterpriseWikiDocument($document), 403);
+
+        try {
+            $cleared = $this->runDismissalService->dismiss($run, $user);
+        } catch (\DomainException) {
+            throw ValidationException::withMessages(['run' => __('procynia.wiki.run_dismiss_not_allowed')]);
+        }
+
+        if ($cleared) {
+            Log::info('[PROCYNIA][WIKI_RUN] Run dismissed from Kjøringer.', [
+                'run_id' => $run->id,
+                'run_status' => $run->status,
+                'document_id' => $document->id,
+                'user_id' => $user->id,
+            ]);
+        }
+
+        return $this->redirectToWikiTab($request)
+            ->with('success', __('procynia.wiki.run_dismiss_success'));
     }
 
     /**
@@ -1626,6 +1732,10 @@ class WikiController extends Controller
                         'system_recommends_blocking' => $blockingState['system_recommends_blocking'] ?? null,
                         'user_decision' => $blockingState['user_decision'] ?? null,
                         'requires_decision' => $blockingState['requires_decision'] ?? null,
+                        // Whether the finding is still open, and how it was handled if not — the
+                        // same rule the Kjøringer findings list reads, so the article's QA note
+                        // and the list can never disagree. null for every non-claim-defect claim.
+                        'finding_resolution' => $isClaimDefect ? $this->claimFindingExplainer->findingResolution($claim) : null,
                         'blocking_override_by_name' => $claim->blockingOverrideBy?->name,
                         'blocking_override_at' => $claim->blocking_override_at,
                         // Text the page presents as document content that the source does not
@@ -2088,6 +2198,11 @@ class WikiController extends Controller
             'blocks.*' => ['required', 'array'],
             'blocks.*.block_key' => ['required', 'string', 'max:255', 'distinct'],
             'blocks.*.markdown' => ['required', 'string', 'max:20000'],
+            // The finding the page was opened from, carried through the save so "Tilbake til funn"
+            // survives it. Both are only view context: claim_id is resolved scoped to this page by
+            // show(), and back_url passes the same whitelist as every other claim action.
+            'claim_id' => ['nullable', 'integer', 'min:1'],
+            'back_url' => ['nullable', 'string', 'max:2048'],
         ], [
             'expected_page_version_id.required' => 'Sideversjon mangler. Last inn siden på nytt og prøv igjen.',
             'blocks.max' => 'Du kan lagre inntil '.self::MAX_WORKING_VERSION_BLOCKS_PER_SAVE.' endrede avsnitt om gangen, og du har endret flere. Sett noen avsnitt tilbake til opprinnelig tekst og lagre, så kan du gjøre resten etterpå.',
@@ -2099,7 +2214,7 @@ class WikiController extends Controller
 
         if ($submittedBlocks === []) {
             return redirect()
-                ->route('app.wiki.show', ['slug' => $page->slug])
+                ->route('app.wiki.show', $this->workingVersionReturnParams($request, $page))
                 ->with('success', 'Ingen endringer å lagre.');
         }
 
@@ -2108,13 +2223,13 @@ class WikiController extends Controller
         if (! $currentVersion instanceof EnterpriseWikiPageVersion
             || (int) $currentVersion->id !== (int) $validated['expected_page_version_id']
         ) {
-            return $this->workingVersionEditConflictRedirect($page);
+            return $this->workingVersionEditConflictRedirect($page, $request);
         }
 
         $normalizedBlocks = $this->validatedManualMixedBlockEditBlocks($submittedBlocks, $currentVersion);
 
         try {
-            $this->claimContentRepairService->applyWorkingVersionBlockEdits(
+            $editResult = $this->claimContentRepairService->applyWorkingVersionBlockEdits(
                 $page,
                 $currentVersion,
                 $normalizedBlocks,
@@ -2122,7 +2237,7 @@ class WikiController extends Controller
             );
         } catch (\InvalidArgumentException $e) {
             if ($this->isManualMixedBlockEditConflict($e)) {
-                return $this->workingVersionEditConflictRedirect($page);
+                return $this->workingVersionEditConflictRedirect($page, $request);
             }
 
             throw ValidationException::withMessages([
@@ -2130,7 +2245,7 @@ class WikiController extends Controller
             ]);
         } catch (\Throwable $e) {
             if ($this->isManualMixedBlockEditConflict($e)) {
-                return $this->workingVersionEditConflictRedirect($page);
+                return $this->workingVersionEditConflictRedirect($page, $request);
             }
 
             // The whole save is one transaction, so the page still has its previous current
@@ -2143,14 +2258,20 @@ class WikiController extends Controller
             ]);
 
             return redirect()
-                ->route('app.wiki.show', ['slug' => $page->slug])
+                ->route('app.wiki.show', $this->workingVersionReturnParams($request, $page))
                 ->with('error', $this->workingVersionEditFailureMessage($e));
         }
 
         // A manual edit never publishes itself — the new working version goes through review by
-        // somebody other than the editor, whoever the editor is.
+        // somebody other than the editor, whoever the editor is. The finding the page was opened
+        // from keeps its own claim id: when the edit replaced that text, show() reports it as
+        // superseded instead of opening a card for a claim the new version does not have.
         return redirect()
-            ->route('app.wiki.show', ['slug' => $page->slug])
+            ->route('app.wiki.show', $this->workingVersionReturnParams(
+                $request,
+                $page,
+                $this->claimCarriedForwardByEdit($request, $page, $editResult),
+            ))
             ->with('success', 'Endringene er lagret i en ny arbeidsversjon.');
     }
 
@@ -2164,10 +2285,68 @@ class WikiController extends Controller
         return 'Endringen kunne ikke lagres akkurat nå. Teksten din er beholdt i editoren, og du kan prøve å lagre på nytt.';
     }
 
-    private function workingVersionEditConflictRedirect(EnterpriseWikiPage $page): RedirectResponse
+    /**
+     * Where a working-version save lands: the page, plus the finding it was opened from when the
+     * request carried one (claim_id + a back_url that passes the review whitelist), exactly like a
+     * claim decision does (PreservesWikiReviewReturnUrl). Anything else keeps the bare slug.
+     *
+     * @return array<string, mixed>
+     */
+    private function workingVersionReturnParams(Request $request, EnterpriseWikiPage $page, ?int $claimIdOverride = null): array
+    {
+        $claimId = $claimIdOverride ?? $request->input('claim_id');
+
+        return is_numeric($claimId) && (int) $claimId > 0
+            ? $this->wikiShowRouteParamsForReviewReturn($request, $page->slug, (int) $claimId)
+            : ['slug' => $page->slug];
+    }
+
+    /**
+     * The claim the finding link points at after a save. An edit that left the finding's paragraph
+     * alone copies its claim into the new version in the same transaction
+     * (EnterpriseWikiClaimContentRepairService::copyClaimsForUnchangedBlocks(): same block, same
+     * wording, same position, decision included) — that copy is the same claim, so the link follows
+     * it. An edit that changed the paragraph copies nothing for it, and the original id stays: the
+     * page then reports the finding as belonging to the previous version. Never a text match against
+     * claims the save did not copy.
+     *
+     * @param  array<string, mixed>  $editResult
+     */
+    private function claimCarriedForwardByEdit(Request $request, EnterpriseWikiPage $page, array $editResult): ?int
+    {
+        $claimId = $request->input('claim_id');
+        $copiedIds = array_map('intval', (array) ($editResult['copied_claim_ids'] ?? []));
+
+        if (! is_numeric($claimId) || (int) $claimId < 1 || $copiedIds === []) {
+            return null;
+        }
+
+        $original = EnterpriseWikiClaim::query()
+            ->whereKey((int) $claimId)
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->where('enterprise_wiki_page_version_id', (int) ($editResult['previous_page_version_id'] ?? 0))
+            ->first();
+
+        if (! $original instanceof EnterpriseWikiClaim) {
+            return null;
+        }
+
+        $copyId = EnterpriseWikiClaim::query()
+            ->whereIn('id', $copiedIds)
+            ->where('enterprise_wiki_page_version_id', (int) ($editResult['page_version_id'] ?? 0))
+            ->where('content_block_key', $original->content_block_key)
+            ->where('claim_text', $original->claim_text)
+            ->where('position_order', $original->position_order)
+            ->orderBy('id')
+            ->value('id');
+
+        return $copyId !== null ? (int) $copyId : null;
+    }
+
+    private function workingVersionEditConflictRedirect(EnterpriseWikiPage $page, ?Request $request = null): RedirectResponse
     {
         return redirect()
-            ->route('app.wiki.show', ['slug' => $page->slug])
+            ->route('app.wiki.show', $request !== null ? $this->workingVersionReturnParams($request, $page) : ['slug' => $page->slug])
             ->with('error', 'Siden er endret av noen andre mens du redigerte. Endringene dine ble ikke lagret. Last inn siden på nytt og gjør endringene igjen.');
     }
 

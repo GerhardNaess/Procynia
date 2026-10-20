@@ -51,6 +51,10 @@ use Illuminate\Support\Collection;
  */
 class EnterpriseWikiRunFindingsService
 {
+    public const QA_FOLLOW_UP_OPEN = 'open';
+
+    public const QA_FOLLOW_UP_COMPLETE = 'complete';
+
     public function __construct(
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
@@ -92,7 +96,7 @@ class EnterpriseWikiRunFindingsService
                     EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
                     EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
                 ])
-                ->with(['version', 'sourceReferences', 'canonicalFact', 'blockingOverrideBy'])
+                ->with(['version', 'sourceReferences', 'canonicalFact', 'blockingOverrideBy', 'approvedBy'])
                 ->get();
 
         $bestPracticeSuggestions = $currentVersionIdByPageId->isEmpty()
@@ -161,7 +165,7 @@ class EnterpriseWikiRunFindingsService
         return [
             'findings' => array_values($items),
             'summary' => array_merge(
-                $this->buildSummary($items, $run),
+                $this->buildSummary($items, $run, $currentVersionIdByPageId),
                 ['best_practice_review' => $this->bestPracticeReviewSummary($currentVersionIdByPageId)],
             ),
         ];
@@ -264,10 +268,13 @@ class EnterpriseWikiRunFindingsService
      * **v0.10 (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): claims never block.**
      * `blocks_run`/`blocks_page` are always `false` here — the system's own suggestion
      * (`system_recommends_blocking`) and any recorded human decision (`user_decision`) remain
-     * informational context for the voluntary QA screen, never a gate. `status` reflects the same
-     * distinction without blocking language: `flagged_for_review` (a human explicitly flagged it),
-     * `open_for_qa_review` (system suggests review, no decision yet), or `open` (a plain, undecided
-     * QA signal).
+     * informational context for the voluntary QA screen, never a gate. While the finding is open,
+     * `status` reflects the same distinction without blocking language: `flagged_for_review` (a
+     * human explicitly flagged it), `open_for_qa_review` (system suggests review, no decision yet),
+     * or `open` (a plain, undecided QA signal). Once it is handled, `status` says how —
+     * `approved`, `approved_edited`, `rejected` or `accepted_deviation`
+     * (EnterpriseWikiClaimFindingExplainer::findingResolution()); the category and severity stay
+     * what the finding was.
      *
      * Del 4: $claims is every claim sharing the same underlying fact (grouped by canonical_fact_id
      * in buildForRun(), usually exactly one). The PRIMARY claim (lowest page id, then lowest claim
@@ -299,11 +306,25 @@ class EnterpriseWikiRunFindingsService
             default => 'warning',
         };
 
+        // Open while any occurrence of the fact still needs handling — the same aggregate rule the
+        // best-practice group uses. Otherwise the primary claim's own decision is the status, read
+        // through the one rule the QA gate and publication release on (findingResolution()), so a
+        // finding the reviewer kept, edited, removed or accepted is never listed as still open.
+        $openClaim = $claims->first(
+            fn (EnterpriseWikiClaim $c): bool => $this->claimFindingExplainer->findingResolution($c) === EnterpriseWikiClaimFindingExplainer::RESOLUTION_OPEN,
+        );
+        $resolution = $openClaim !== null
+            ? EnterpriseWikiClaimFindingExplainer::RESOLUTION_OPEN
+            : $this->claimFindingExplainer->findingResolution($claim);
+        $openState = $openClaim !== null ? $this->claimFindingExplainer->blockingState($openClaim) : null;
+
         $status = match (true) {
-            $blockingState['user_decision'] === EnterpriseWikiClaimFindingExplainer::USER_DECISION_BLOCKING => 'flagged_for_review',
-            $blockingState['requires_decision'] => 'open_for_qa_review',
+            $resolution !== EnterpriseWikiClaimFindingExplainer::RESOLUTION_OPEN => $resolution,
+            $openState['user_decision'] === EnterpriseWikiClaimFindingExplainer::USER_DECISION_BLOCKING => 'flagged_for_review',
+            $openState['requires_decision'] => 'open_for_qa_review',
             default => 'open',
         };
+        $isOpen = $resolution === EnterpriseWikiClaimFindingExplainer::RESOLUTION_OPEN;
 
         $canHandleClaim = $user instanceof User
             && $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $claim->version);
@@ -313,8 +334,14 @@ class EnterpriseWikiRunFindingsService
         $url = $this->pageUrl($page, $claim->id, $returnUrl);
         $actionKey = match (true) {
             $url === null => null,
+            ! $isOpen => 'view_review',
             $canHandleClaim => 'open_and_handle',
             default => 'view_source',
+        };
+        $resolvedAt = match ($resolution) {
+            EnterpriseWikiClaimFindingExplainer::RESOLUTION_OPEN => null,
+            EnterpriseWikiClaimFindingExplainer::RESOLUTION_ACCEPTED_DEVIATION => $claim->blocking_override_at,
+            default => $claim->approved_at,
         };
 
         $sourceExcerpts = $claim->sourceReferences
@@ -375,9 +402,12 @@ class EnterpriseWikiRunFindingsService
             'claim_count' => $claims->count(),
             'occurrences' => $occurrences,
             'created_at' => $claim->created_at?->toIso8601String(),
-            'resolved_at' => null,
+            'resolved_at' => $resolvedAt?->toIso8601String(),
+            'decided_by_name' => $isOpen ? null : ($resolution === EnterpriseWikiClaimFindingExplainer::RESOLUTION_ACCEPTED_DEVIATION
+                ? $claim->blockingOverrideBy?->name
+                : $claim->approvedBy?->name),
             'url' => $url,
-            'can_handle' => $canHandleClaim,
+            'can_handle' => $isOpen && $canHandleClaim,
             'action' => $actionKey,
             'action_label' => $this->actionLabel($actionKey),
         ];
@@ -654,6 +684,7 @@ class EnterpriseWikiRunFindingsService
             'open_and_review' => __('procynia.wiki.runs_findings_action_open_and_review'),
             'view_source' => __('procynia.wiki.runs_findings_action_view_source'),
             'view_page' => __('procynia.wiki.runs_findings_action_open'),
+            'view_review' => __('procynia.wiki.runs_findings_action_view_review'),
             default => null,
         };
     }
@@ -692,6 +723,7 @@ class EnterpriseWikiRunFindingsService
             'approved' => 2,
             'approved_edited' => 2,
             'rejected' => 2,
+            'accepted_deviation' => 2,
             'informative' => 3,
             'superseded' => 4,
         ];
@@ -786,7 +818,11 @@ class EnterpriseWikiRunFindingsService
         ];
     }
 
-    private function buildSummary(array $items, EnterpriseWikiIngestRun $run): array
+    /**
+     * @param  list<array<string, mixed>>  $items
+     * @param  Collection<int, int>  $currentVersionIdByPageId
+     */
+    private function buildSummary(array $items, EnterpriseWikiIngestRun $run, Collection $currentVersionIdByPageId): array
     {
         $total = count($items);
         $openBlocking = 0;
@@ -812,13 +848,19 @@ class EnterpriseWikiRunFindingsService
                 'requires_action' => $openBlocking++,
                 'flagged_for_review', 'open_for_qa_review' => $openQaReview++,
                 'open' => $openNonBlocking++,
-                'resolved', 'approved', 'approved_edited', 'rejected' => $resolved++,
+                'resolved', 'approved', 'approved_edited', 'rejected', 'accepted_deviation' => $resolved++,
                 'informative' => $informative++,
                 'superseded' => $superseded++,
                 'pending_review' => $bestPracticePending++,
                 default => null,
             };
         }
+
+        $qaFollowUp = $this->qaFollowUpState(
+            $run,
+            $currentVersionIdByPageId,
+            $openBlocking + $openQaReview + $openNonBlocking + $bestPracticePending,
+        );
 
         return [
             'total' => $total,
@@ -829,7 +871,10 @@ class EnterpriseWikiRunFindingsService
             'informative' => $informative,
             'superseded' => $superseded,
             'best_practice_pending' => $bestPracticePending,
-            'explanation' => $this->buildExplanation($run, $total, $openBlocking, $openQaReview),
+            'qa_follow_up' => $qaFollowUp,
+            'explanation' => $qaFollowUp === self::QA_FOLLOW_UP_COMPLETE
+                ? __('procynia.wiki.runs_findings_explanation_follow_up_complete')
+                : $this->buildExplanation($run, $total, $openBlocking, $openQaReview),
         ];
     }
 
@@ -946,6 +991,75 @@ class EnterpriseWikiRunFindingsService
      * when it actually won't (e.g. a non-transient error, or a genuinely stale/already-terminal
      * status that recovery correctly declines to touch).
      */
+    /**
+     * What a run escalated on QA still asks of anyone today — kept apart from qa_status, which is
+     * what happened during the run and is never rewritten by a later decision.
+     *
+     * null: the run did not escalate on a quality finding, so there is no QA follow-up to report.
+     * 'complete': it escalated only on normative strengthening, QA's own rule
+     * (EnterpriseWikiClaimFindingExplainer::holdsNormativeFollowUp()) finds no such claim open on
+     * the run's current pages any more, and nothing else in this panel is open.
+     * 'open': anything else — including every other quality finding, which cannot be re-evaluated
+     * from current data here and so keeps its follow-up until the run is processed again.
+     *
+     * Read-only: it never writes the run, its status or its QA result.
+     *
+     * @param  Collection<int, int>  $currentVersionIdByPageId
+     */
+    private function qaFollowUpState(EnterpriseWikiIngestRun $run, Collection $currentVersionIdByPageId, int $openFindings): ?string
+    {
+        if ($run->qa_status !== EnterpriseWikiIngestRun::QA_STATUS_ESCALATED) {
+            return null;
+        }
+
+        $qualityFindings = array_values(array_intersect(
+            (array) (((array) ($run->qa_result ?? []))['quality_findings'] ?? []),
+            EnterpriseWikiPostIngestQaService::QUALITY_FINDINGS,
+        ));
+
+        if ($qualityFindings === []) {
+            return null;
+        }
+
+        if ($qualityFindings !== [EnterpriseWikiPostIngestQaService::FINDING_NORMATIVE_STRENGTHENING]
+            || $openFindings > 0
+            || $this->reviewDeferredPageTitles($run) !== []
+        ) {
+            return self::QA_FOLLOW_UP_OPEN;
+        }
+
+        $stillOpen = $currentVersionIdByPageId->isNotEmpty() && EnterpriseWikiClaim::query()
+            ->whereIn('enterprise_wiki_page_version_id', $currentVersionIdByPageId->values())
+            ->where('approval_status', EnterpriseWikiClaim::APPROVAL_STATUS_PENDING)
+            ->get()
+            ->contains(fn (EnterpriseWikiClaim $claim): bool => $this->claimFindingExplainer->holdsNormativeFollowUp($claim));
+
+        return $stillOpen ? self::QA_FOLLOW_UP_OPEN : self::QA_FOLLOW_UP_COMPLETE;
+    }
+
+    /**
+     * Whether an escalated run has nothing left to follow up: QA's own follow-up state says complete
+     * (qaFollowUpState()) and no page failed to generate. Kjøringer reads this for «Fullført – med
+     * merknader» and «Fjern fra oversikten» alike. Anything else — including a run this cannot judge —
+     * still needs follow-up. Never changes the run's stored status.
+     *
+     * @param  array<string, mixed>|null  $summary  buildForRun()['summary'], when the caller has it
+     */
+    public function escalationFollowUpComplete(EnterpriseWikiIngestRun $run, ?array $summary = null): bool
+    {
+        if ($run->status !== EnterpriseWikiIngestRun::STATUS_ESCALATED) {
+            return false;
+        }
+
+        $summary ??= $this->buildForRun($run, null, false)['summary'];
+
+        return ($summary['qa_follow_up'] ?? null) === self::QA_FOLLOW_UP_COMPLETE
+            && ! EnterpriseWikiIngestRunPage::query()
+                ->where('enterprise_wiki_ingest_run_id', $run->id)
+                ->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED)
+                ->exists();
+    }
+
     private function buildEscalatedOrFailedExplanation(EnterpriseWikiIngestRun $run): string
     {
         $recovery = $this->recoveryService->evaluate($run->id);

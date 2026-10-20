@@ -443,10 +443,7 @@ class EnterpriseWikiPostIngestQaService
         foreach ($claims as $claim) {
             $meta = (array) ($claim->review_metadata ?? []);
 
-            if (($meta['deterministic_reason'] ?? null) === EnterpriseWikiClaimFindingExplainer::NORMATIVE_STRENGTHENING_REASON
-                && $claim->isPending()
-                && $this->claimFindingExplainer->blockingState($claim)['blocks_gate']
-            ) {
+            if ($this->claimFindingExplainer->holdsNormativeFollowUp($claim)) {
                 $strengthened[] = (int) $claim->id;
             } elseif ((($meta['normative_check'] ?? [])['status'] ?? null) === EnterpriseWikiClaimCanonicalizationService::NORMATIVE_STATUS_AMBIGUOUS) {
                 $ambiguous[] = (int) $claim->id;

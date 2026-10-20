@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
     buildOpenClaimWorklist,
+    claimFindingIsOpen,
+    claimInlineNoteState,
     claimReasonHeadingKey,
     claimWorklistReasonKey,
     claimWorklistTitle,
@@ -246,5 +248,113 @@ describe('claimReasonHeadingKey', () => {
         assert.ok(showSource.includes('tw.claim_card_why_label'));
         assert.ok(showSource.includes('tw.claim_card_decided_reason_label'));
         assert.ok(showSource.includes('tw.claim_card_reason_label'));
+    });
+});
+
+describe('claimInlineNoteState', () => {
+    const finding = (extra) => ({ id: 472, content_origin: 'unsupported_generated_content', finding_category_label: 'Endret normativ betydning', ...extra });
+
+    test('a pending claim needs a review, and a handler is offered «Åpne og behandle»', () => {
+        assert.deepEqual(
+            claimInlineNoteState(finding({ approval_status: 'pending', can_handle: true })),
+            { stateKey: 'requires_review', actionKey: 'open_and_handle' },
+        );
+    });
+
+    test('a reader without access is only offered to view it', () => {
+        assert.equal(claimInlineNoteState(finding({ approval_status: 'pending', can_handle: false })).actionKey, 'view');
+    });
+
+    test('a decided claim is never called open, whatever the system still recommends', () => {
+        for (const status of ['approved', 'rejected']) {
+            assert.deepEqual(
+                claimInlineNoteState(finding({ approval_status: status, can_handle: true, requires_decision: true, system_recommends_blocking: true })),
+                { stateKey: 'decided', actionKey: 'view' },
+            );
+        }
+    });
+});
+
+describe('the article shows a note, not the handling card', () => {
+    test('the focused paragraph renders the compact note, never a claim card', () => {
+        assert.ok(showSource.includes('renderInlineQaNote(focusedReviewClaims[0])'));
+        assert.equal(showSource.includes('inlineReview'), false);
+        assert.equal(showSource.includes('Vurdering for dette avsnittet'), false);
+    });
+
+    test('the note moves to the claim card in the verification basis', () => {
+        assert.ok(showSource.includes('const verificationClaims = claims;'));
+        assert.ok(showSource.includes('onClick={() => openClaimInVerificationBasis(claim)}'));
+    });
+
+    test('the note strings are translated', () => {
+        for (const key of ['inline_qa_note_label', 'inline_qa_note_requires_review', 'inline_qa_note_decided', 'inline_qa_note_open_and_handle', 'inline_qa_note_view']) {
+            assert.ok(showSource.includes(`tw.${key}`), key);
+        }
+    });
+});
+
+describe('claimFindingIsOpen — the rule the Kjøringer list uses', () => {
+    test('a claim finding follows the backend finding_resolution, not approval_status alone', () => {
+        assert.equal(claimFindingIsOpen({ approval_status: 'pending', finding_resolution: 'open' }), true);
+        // An explicitly accepted deviation on a pending claim is handled: the QA gate releases it.
+        assert.equal(claimFindingIsOpen({ approval_status: 'pending', finding_resolution: 'accepted_deviation' }), false);
+        for (const resolution of ['approved', 'approved_edited', 'rejected']) {
+            assert.equal(claimFindingIsOpen({ approval_status: 'approved', finding_resolution: resolution }), false, resolution);
+        }
+    });
+
+    test('a claim without a finding resolution is open while it waits for a decision', () => {
+        assert.equal(claimFindingIsOpen({ content_origin: 'best_practice', approval_status: 'pending', finding_resolution: null }), true);
+        assert.equal(claimFindingIsOpen({ content_origin: 'best_practice', approval_status: 'approved' }), false);
+    });
+
+    test('the note calls an accepted deviation handled, as Kjøringer does', () => {
+        assert.deepEqual(
+            claimInlineNoteState({ approval_status: 'pending', finding_resolution: 'accepted_deviation', can_handle: true }),
+            { stateKey: 'decided', actionKey: 'view' },
+        );
+    });
+
+    test('the work list reads the same rule', () => {
+        assert.ok(showSource.includes('claimFindingIsOpen(claim)'));
+    });
+});
+
+describe('claim decisions: refusals and drafts', () => {
+    test('a refused decision is said on the card and never opens the raw error overlay', () => {
+        assert.ok(showSource.includes('onHttpException: (response) => {'));
+        assert.ok(showSource.includes('describeClaimActionRefusal(response?.status, response?.data)'));
+        assert.ok(showSource.includes('data-testid="claim-action-error"'));
+        const start = showSource.indexOf('onHttpException: (response) => {');
+        assert.match(showSource.slice(start, start + 300), /return false;/);
+    });
+
+    test('the edited text and comment are dropped only once the server stored the decision', () => {
+        const options = showSource.slice(showSource.indexOf('const claimActionOptions = (claim) => ({'), showSource.indexOf('const sendClaimAction = '));
+        const onSuccess = options.slice(options.indexOf('onSuccess:'), options.indexOf('onError:'));
+        assert.ok(onSuccess.includes('setClaimTextEdits'));
+        assert.ok(onSuccess.includes('setApprovalComments'));
+        assert.equal(options.slice(options.indexOf('onError:')).includes('setClaimTextEdits'), false);
+    });
+
+    test('every decision goes through one guarded dispatch', () => {
+        for (const action of ['approve', 'reject', 'unapprove', 'blocking']) {
+            assert.ok(showSource.includes(`/claims/\${claim.id}/${action}\``), action);
+        }
+        assert.equal((showSource.match(/router\.patch\(url, data, claimActionOptions\(claim\)\)/g) ?? []).length, 1);
+        assert.equal(showSource.includes('claimActionOptions(claim),'), false);
+    });
+
+    test('saving the article carries the finding it was opened from', () => {
+        const save = showSource.slice(showSource.indexOf('const saveArticleEditing = () => {'), showSource.indexOf('const targetReviewSection'));
+        assert.ok(save.includes('claim_id: reviewReference?.back_url ? (reviewReference.claim_id ?? undefined) : undefined'));
+        assert.ok(save.includes('back_url: reviewReference?.back_url ?? undefined'));
+    });
+
+    test('unsaved text asks once before the page is left', () => {
+        assert.ok(showSource.includes("router.on('before'"));
+        assert.ok(showSource.includes("window.addEventListener('beforeunload', onBeforeUnload)"));
+        assert.ok(showSource.includes('tw.unsaved_changes_confirm'));
     });
 });

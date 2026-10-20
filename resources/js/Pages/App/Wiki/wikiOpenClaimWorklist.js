@@ -162,3 +162,40 @@ export function claimReasonHeadingKey(claim, isOpenGroup) {
 
     return 'neutral';
 }
+
+/**
+ * Whether a claim's QA finding is still open. A claim finding carries `finding_resolution` from the
+ * backend (EnterpriseWikiClaimFindingExplainer::findingResolution()) — the same rule the Kjøringer
+ * findings list and the QA gate read — so a deviation explicitly accepted on a pending claim is
+ * decided here too. Every other claim (a best-practice suggestion, a plain source claim) is open
+ * exactly while it waits for a decision.
+ *
+ * @param {object} claim
+ * @returns {boolean}
+ */
+export function claimFindingIsOpen(claim) {
+    if (typeof claim?.finding_resolution === 'string') {
+        return claim.finding_resolution === 'open';
+    }
+
+    return claim?.approval_status === 'pending';
+}
+
+/**
+ * The short QA note the article shows on the paragraph a finding link opened. Its state follows the
+ * claim's own decision on this page, by the rule the Kjøringer list uses (claimFindingIsOpen): an
+ * open finding still needs a decision, a handled one does not, and a handled one is never called
+ * open. The note says nothing more — the explanation, sources and decision live in the claim's card
+ * in the verification basis.
+ *
+ * @param {object} claim
+ * @returns {{stateKey: 'requires_review'|'decided', actionKey: 'open_and_handle'|'view'}}
+ */
+export function claimInlineNoteState(claim) {
+    const isOpen = claimFindingIsOpen(claim);
+
+    return {
+        stateKey: isOpen ? 'requires_review' : 'decided',
+        actionKey: isOpen && claim?.can_handle === true ? 'open_and_handle' : 'view',
+    };
+}

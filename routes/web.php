@@ -767,6 +767,7 @@ Route::prefix('app')
             Route::get('/runs/{run}/pages', [WikiController::class, 'runPages'])->name('runs.pages');
             Route::get('/runs/{run}/findings', [WikiController::class, 'runFindings'])->name('runs.findings');
             Route::patch('/runs/{run}/cancel', [WikiController::class, 'cancelRun'])->name('runs.cancel');
+            Route::patch('/runs/{run}/dismiss', [WikiController::class, 'dismissRun'])->name('runs.dismiss');
             Route::patch('/runs/{run}/retry-maintainer-decision', [WikiController::class, 'retryMaintainerDecision'])->name('runs.retry-maintainer-decision');
             Route::patch('/runs/{run}/retry-failed-pages', [WikiController::class, 'retryFailedPages'])->name('runs.retry-failed-pages');
             Route::patch('/{slug}/claims/{claim}/manual-block-edit', [WikiController::class, 'updateManualMixedBlockEdit'])->name('claims.manual-block-edit.update');

@@ -229,7 +229,7 @@ test.describe.serial('WCAG Fase 5 — Enterprise Wiki', () => {
         await page.keyboard.press('Enter');
 
         // The decided card left the work list; focus is on the next claim, which is named by its place.
-        await expect(toast(page)).toContainText('Påstanden er godkjent.');
+        await expect(toast(page)).toContainText('Påstanden er godkjent, og teksten er beholdt.');
         await expect(page.locator(`#${secondCardId}`)).toBeFocused();
         await expect(page.locator(`#${secondCardId}`)).toHaveAccessibleName(/Påstand 1 av 1/);
         expect(Math.abs(await page.evaluate(() => window.scrollY) - scrollBefore)).toBeLessThan(400);

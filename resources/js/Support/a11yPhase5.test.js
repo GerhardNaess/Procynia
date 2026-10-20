@@ -254,36 +254,40 @@ describe('claims are decided without losing focus (A11Y-014, -047, -117)', () =>
 
         assert.match(options, /preserveScroll: true/);
         assert.match(options, /refocusIfLost\(claimActionFocusCandidates\(/);
-        assert.equal((show.match(/claimActionOptions\(claim\)/g) ?? []).length, 4, 'approve, reject, undo and blocking');
+        // One guarded dispatch carries the options for every decision.
+        assert.equal((show.match(/claimActionOptions\(claim\)/g) ?? []).length, 1);
+        assert.equal((show.match(/sendClaimAction\(\s*claim,/g) ?? []).length, 4, 'approve, reject, undo and blocking');
     });
 
     test('decision buttons stay focusable while saving, and say which claim they decide', () => {
         const show = code(read('Pages', 'App', 'Wiki', 'Show.jsx'));
 
         assert.equal(/disabled=\{claimProcessing === claim\.id/.test(show), false);
-        assert.ok((show.match(/aria-disabled=\{isBusy \|\| undefined\}/g) ?? []).length >= 7);
-        assert.ok((show.match(/aria-describedby=\{claimDescribedBy\}/g) ?? []).length >= 7);
+        // One claim card (the article only carries a short note): keep, remove, undo and the two
+        // blocking choices.
+        assert.ok((show.match(/aria-disabled=\{isBusy \|\| undefined\}/g) ?? []).length >= 5);
+        assert.ok((show.match(/aria-describedby=\{claimDescribedBy\}/g) ?? []).length >= 5);
     });
 
     test('the comment has a label, not only a placeholder', () => {
         const show = read('Pages', 'App', 'Wiki', 'Show.jsx');
 
-        assert.equal((show.match(/<label htmlFor=\{commentId\}/g) ?? []).length, 2);
+        assert.equal((show.match(/<label htmlFor=\{commentId\}/g) ?? []).length, 1);
         assert.match(show, /id=\{commentId\}/);
     });
 
     test('the blocking choice and the chosen source element are pressed buttons, not disabled ones', () => {
         const show = read('Pages', 'App', 'Wiki', 'Show.jsx');
 
-        assert.equal((show.match(/aria-pressed=\{claim\.user_decision === 'blocking'\}/g) ?? []).length, 2);
-        assert.equal((show.match(/aria-pressed=\{claim\.user_decision === 'not_blocking'\}/g) ?? []).length, 2);
+        assert.equal((show.match(/aria-pressed=\{claim\.user_decision === 'blocking'\}/g) ?? []).length, 1);
+        assert.equal((show.match(/aria-pressed=\{claim\.user_decision === 'not_blocking'\}/g) ?? []).length, 1);
         assert.match(show, /aria-pressed=\{isSelected\}/);
     });
 
     test('a claim card is named by its place in the work list', () => {
         const show = read('Pages', 'App', 'Wiki', 'Show.jsx');
 
-        assert.equal((show.match(/aria-labelledby=\{claimLabelId\}/g) ?? []).length, 2);
+        assert.equal((show.match(/aria-labelledby=\{claimLabelId\}/g) ?? []).length, 1);
     });
 });
 

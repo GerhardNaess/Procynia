@@ -286,6 +286,8 @@ class EnterpriseWikiIngestRun extends Model
             'claim_content_repair_attempt_count' => 'integer',
             'claim_content_repair_attempted_at' => 'datetime',
             'claim_content_repair_result' => 'array',
+            'dismissed_at' => 'datetime',
+            'dismissed_by_user_id' => 'integer',
         ];
     }
 
@@ -366,6 +368,27 @@ class EnterpriseWikiIngestRun extends Model
      * Whether the ordinary "Avbryt kjøring" action should be offered/allowed for this run. See
      * CANCELLABLE_STATUSES's own docblock for why this is narrower than !isTerminal().
      */
+    /**
+     * Statuses a run may be cleared from Kjøringer in at all: finished, one way or another. Whether a
+     * run in one of them may actually be cleared — escalated ones only once nothing is left to follow
+     * up — is EnterpriseWikiRunDismissalService's decision, not this list's.
+     */
+    public const DISMISSABLE_STATUSES = [
+        self::STATUS_FAILED,
+        self::STATUS_CANCELLED,
+        self::STATUS_COMPLETED,
+        self::STATUS_ESCALATED,
+    ];
+
+    /**
+     * Cleared from the Kjøringer list by a person («Fjern fra oversikten»). Visibility only: nothing
+     * else reads it, and no processing, scheduling or recovery is skipped because of it.
+     */
+    public function isDismissed(): bool
+    {
+        return $this->dismissed_at !== null;
+    }
+
     public function isCancellable(): bool
     {
         return in_array($this->status, self::CANCELLABLE_STATUSES, true);

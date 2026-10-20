@@ -22,7 +22,6 @@ import {
 import { formatFindingUserId, resolveWikiBackLink } from './runFindingsLogic';
 import {
     bestPracticeSectionLabelText,
-    groupBestPracticeClaimsForReview,
     groupContentBlocksBySection,
     isPageVersionFinallyApproved,
     partitionBestPracticeReviewUnits,
@@ -30,9 +29,13 @@ import {
     resolveBestPracticeSectionForBlock,
     hasInvalidBestPracticeMetadata,
 } from './wikiBestPracticeSectionLogic';
+import { describeClaimActionRefusal, shouldConfirmLeavingWikiPage } from './wikiReviewRefusal';
 import {
     buildOpenClaimWorklist,
+    claimFindingIsOpen,
+    claimInlineNoteState,
     claimReasonHeadingKey,
+    claimWorklistReasonKey,
     resolveDistinctPageExcerpt,
     worklistRangesByCard,
 } from './wikiOpenClaimWorklist';
@@ -242,9 +245,11 @@ const FINDING_CATEGORY_STYLES = {
 
 const HIGH_VOLUME_THRESHOLD = 100;
 
+// A badge stays on one line where it fits, and wraps inside its card rather than pushing a phone-wide
+// page sideways — «Systemet foreslår faglig gjennomgang (blokkerer ikke Wiki)» is wider than 390px.
 function Badge({ label, cls }) {
     return (
-        <span className={`inline-flex items-center whitespace-nowrap rounded-full px-3 py-1.5 text-base font-semibold leading-6 ${cls}`}>
+        <span className={`inline-flex max-w-full items-center rounded-full px-3 py-1.5 text-base font-semibold leading-6 sm:whitespace-nowrap ${cls}`}>
             {label}
         </span>
     );
@@ -1088,9 +1093,9 @@ export default function WikiShow({
     const focusedReviewClaims = hasFocusedReview
         ? claims.filter((claim) => String(claim.id) === String(targetClaimId))
         : [];
-    const verificationClaims = hasFocusedReview
-        ? claims.filter((claim) => String(claim.id) !== String(targetClaimId))
-        : claims;
+    // The focused claim stays in the verification basis: the article only carries a short note
+    // pointing there (renderInlineQaNote), and the card below is where it is handled.
+    const verificationClaims = claims;
     const hasVerificationContent = verificationClaims.length > 0 || lintFindings.length > 0;
 
     const [processing, setProcessing] = useState(null);
@@ -1098,6 +1103,10 @@ export default function WikiShow({
     const [verifiedClaimsOpen, setVerifiedClaimsOpen] = useState(!hasFocusedReview && Boolean(targetClaimId));
     const [structuralFindingsOpen, setStructuralFindingsOpen] = useState(!hasFocusedReview && Boolean(targetClaimId));
     const [claimProcessing, setClaimProcessing] = useState(null);
+    // A refused decision, per claim: said on the card it was made on, never as a raw error overlay.
+    const [claimActionErrors, setClaimActionErrors] = useState({});
+    // The card «Åpne og behandle» moves focus to, once its section has rendered open.
+    const [basisFocusClaimId, setBasisFocusClaimId] = useState(null);
     const [claimSourceDrafts, setClaimSourceDrafts] = useState({});
     const [claimSourceProcessing, setClaimSourceProcessing] = useState(null);
     const [claimSourceCatalog, setClaimSourceCatalog] = useState({});
@@ -1264,6 +1273,19 @@ export default function WikiShow({
     }, [targetBlockKey, page.slug, current_version?.id]);
 
     useEffect(() => {
+        if (basisFocusClaimId === null) {
+            return undefined;
+        }
+
+        const frame = window.requestAnimationFrame(() => {
+            focusOpenClaim(basisFocusClaimId);
+            setBasisFocusClaimId(null);
+        });
+
+        return () => window.cancelAnimationFrame(frame);
+    }, [basisFocusClaimId, verificationOpen, verifiedClaimsOpen]);
+
+    useEffect(() => {
         if (!hasStructureFinding) {
             return undefined;
         }
@@ -1320,9 +1342,11 @@ export default function WikiShow({
 
     const { claimFindings: claimLintFindings, structuralFindings } = splitWikiVerificationFindings(lintFindings);
     const structuralFindingGroups = groupWikiFindingsByCode(structuralFindings);
-    // A claim still needs a human decision. Unchanged predicate — only how it is applied changed.
+    // A claim still needs a human decision. Open is read through claimFindingIsOpen — the rule the
+    // Kjøringer list uses — so a deviation explicitly accepted on a pending claim is not open here
+    // while the list calls it handled.
     const claimRequiresAction = (claim) => (
-        claim.approval_status === 'pending'
+        claimFindingIsOpen(claim)
         && (
             claim.content_origin === 'best_practice'
             || claim.content_origin === 'internal_error'
@@ -1370,24 +1394,100 @@ export default function WikiShow({
      * that still needs a decision — or to the claim's new place, or the section heading — but only
      * if focus was actually lost. The result itself is the flash message the toast reads out.
      */
+    const setClaimActionError = (claimId, message) => setClaimActionErrors((prev) => {
+        const next = { ...prev };
+
+        if (message) {
+            next[claimId] = message;
+        } else {
+            delete next[claimId];
+        }
+
+        return next;
+    });
+
+    const claimActionErrorMessage = ({ key, message }) => (key === 'validation' && message)
+        ? message
+        : (tw[`claim_action_error_${key}`] ?? tw.claim_action_error_failed ?? 'Beslutningen ble ikke lagret. Teksten og kommentaren din er beholdt, og du kan prøve igjen.');
+
+    /**
+     * A refused decision keeps everything the reviewer typed — the edited text and the comment are
+     * only dropped once the server has stored the decision — and is said on the claim's own card. A
+     * claim that moved on under the tab (decided elsewhere, gone, no longer editable) re-reads the
+     * page, so the card shows what is true now rather than offering an action the server refuses.
+     */
+    const handleClaimRefusal = (claim, refusal) => {
+        setClaimActionError(claim.id, claimActionErrorMessage(refusal));
+
+        if (refusal.reload) {
+            router.reload({ preserveScroll: true });
+        }
+    };
+
     const claimActionOptions = (claim) => ({
         preserveScroll: true,
-        onSuccess: () => refocusIfLost(claimActionFocusCandidates(
-            claim.id,
-            reviewUnits.open.map((unit) => unit.claim.id),
-        )),
+        onSuccess: () => {
+            setClaimTextEdits((prev) => {
+                const next = { ...prev };
+                delete next[claim.id];
+                return next;
+            });
+            setApprovalComments((prev) => {
+                const next = { ...prev };
+                delete next[claim.id];
+                return next;
+            });
+            setClaimRemoveHints((prev) => {
+                const next = { ...prev };
+                delete next[claim.id];
+                return next;
+            });
+            refocusIfLost(claimActionFocusCandidates(
+                claim.id,
+                reviewUnits.open.map((unit) => unit.claim.id),
+            ));
+        },
+        onError: (formErrors) => handleClaimRefusal(claim, describeClaimActionRefusal(422, { errors: formErrors })),
+        // Returning false keeps Inertia's raw error overlay away: the reason is given on the card.
+        onHttpException: (response) => {
+            handleClaimRefusal(claim, describeClaimActionRefusal(response?.status, response?.data));
+
+            return false;
+        },
+        onNetworkError: () => {
+            handleClaimRefusal(claim, { key: 'failed', message: null, reload: false });
+
+            return false;
+        },
         onFinish: () => setClaimProcessing(null),
     });
 
-    const approveClaim = (claim) => {
+    // Every claim decision goes through here: one at a time (a second click while one is saving is
+    // ignored), the card's previous refusal cleared, and a dispatch that throws before Inertia's
+    // promise chain exists still releases the buttons — otherwise onFinish never runs and every
+    // later click on the card would be swallowed in silence.
+    const sendClaimAction = (claim, url, data) => {
         if (claimProcessing) return;
         setClaimProcessing(claim.id);
+        setClaimActionError(claim.id, null);
+
+        try {
+            router.patch(url, data, claimActionOptions(claim));
+        } catch (error) {
+            setClaimProcessing(null);
+            setClaimActionError(claim.id, claimActionErrorMessage({ key: 'failed', message: null }));
+        }
+    };
+
+    const approveClaim = (claim) => {
+        if (claimProcessing) return;
         // A finding on a source_based block is edited in place too; an untouched field is sent
         // as-is and the server treats it as a plain "Behold teksten".
         const approvedText = claim.content_origin === 'best_practice' || claim.source_based_block_finding
             ? String(claimTextEdits[claim.id] ?? claimEditBaselineFor(claim)).trim()
             : '';
-        router.patch(
+        sendClaimAction(
+            claim,
             `/app/wiki/${page.slug}/claims/${claim.id}/approve`,
             {
                 comment: approvalComments[claim.id] || undefined,
@@ -1397,7 +1497,6 @@ export default function WikiShow({
                 // mid-workflow. Sent on every claim action for the same reason.
                 back_url: reviewReference?.back_url ?? undefined,
             },
-            claimActionOptions(claim),
         );
     };
 
@@ -1544,39 +1643,33 @@ export default function WikiShow({
     };
 
     const rejectClaim = (claim) => {
-        if (claimProcessing) return;
-        setClaimProcessing(claim.id);
-        router.patch(
+        sendClaimAction(
+            claim,
             `/app/wiki/${page.slug}/claims/${claim.id}/reject`,
             {
                 comment: approvalComments[claim.id] || undefined,
                 back_url: reviewReference?.back_url ?? undefined,
             },
-            claimActionOptions(claim),
         );
     };
 
     const unapproveClaim = (claim) => {
-        if (claimProcessing) return;
-        setClaimProcessing(claim.id);
-        router.patch(
+        sendClaimAction(
+            claim,
             `/app/wiki/${page.slug}/claims/${claim.id}/unapprove`,
             { back_url: reviewReference?.back_url ?? undefined },
-            claimActionOptions(claim),
         );
     };
 
     const updateClaimBlocking = (claim, blocking) => {
-        if (claimProcessing) return;
-        setClaimProcessing(claim.id);
-        router.patch(
+        sendClaimAction(
+            claim,
             `/app/wiki/${page.slug}/claims/${claim.id}/blocking`,
             {
                 blocking,
                 comment: approvalComments[claim.id] || undefined,
                 back_url: reviewReference?.back_url ?? undefined,
             },
-            claimActionOptions(claim),
         );
     };
 
@@ -1690,7 +1783,6 @@ export default function WikiShow({
 
     const renderClaimCard = (claim, group, options = {}) => {
         const { showClaimText = true } = options;
-        const isInlineReview = options.inlineReview === true;
         const isOpenGroup = group === 'open';
         // A decided QA finding keeps its explanation: the Kjøringer findings list still links here.
         const keepsFindingExplanation = claim.content_origin === 'unsupported_generated_content' && !!claim.finding_explanation;
@@ -1744,222 +1836,7 @@ export default function WikiShow({
         const claimTextId = `claim-${claim.id}-text`;
         const claimDescribedBy = [claimLabelId, showClaimText ? claimTextId : null].filter(Boolean).join(' ');
         const isBusy = claimProcessing === claim.id;
-        const commentId = `claim-comment-${claim.id}${isInlineReview ? '-inline' : ''}`;
-
-        if (isInlineReview) {
-            return (
-                <article
-                    key={claim.id}
-                    id={`claim-${claim.id}`}
-                    tabIndex={-1}
-                    aria-labelledby={claimLabelId}
-                    className="scroll-mt-24 border-l-4 border-violet-300 bg-violet-50/30 px-4 py-3"
-                >
-                    <div className="space-y-3">
-                        <div className="space-y-1.5">
-                            <p className="text-base font-semibold uppercase tracking-wide text-violet-700">
-                                {tw.review_reference_inline_heading ?? 'Vurdering for dette avsnittet'}
-                            </p>
-                            <p id={claimLabelId} className="text-lg font-semibold text-slate-900">
-                                {claim.finding_category_label ?? (tw.claim_finding_category_possible_content_deviation ?? 'Mulig innholdsavvik')}
-                            </p>
-                            <p className="text-base leading-7 text-slate-700">
-                                {problemLabel}
-                            </p>
-                            {claim.system_recommends_blocking && (
-                                <p className="text-base font-medium text-amber-700">
-                                    {tw.claim_finding_system_recommends_blocking ?? 'Systemet anbefaler blokkering'}
-                                </p>
-                            )}
-                            {hasUserDecision && (
-                                <p className={`text-base font-medium ${
-                                    claim.user_decision === 'blocking'
-                                        ? 'text-rose-700'
-                                        : claim.user_decision === 'not_blocking'
-                                            ? 'text-amber-700'
-                                            : 'text-slate-600'
-                                }`}>
-                                    {claim.user_decision === 'blocking'
-                                        ? (tw.claim_finding_user_decision_blocking ?? 'Bruker har valgt: Blokkerer godkjenning')
-                                        : claim.user_decision === 'not_blocking'
-                                            ? (tw.claim_finding_user_decision_not_blocking ?? 'Bruker har valgt: Godkjenn avvik / ikke blokker')
-                                            : (tw.claim_finding_user_decision_pending ?? 'Avventer vurdering')}
-                                </p>
-                            )}
-                        </div>
-
-                        {isInlineReview && canHandleClaim && canEditWikiClaims && targetBlockKey && (() => {
-                            const targetBlock = contentBlocks.find((block) => block.block_key === targetBlockKey) ?? null;
-
-                            return targetBlock?.content_origin === 'mixed'
-                                && manualBlockEdit?.run_id
-                                && wikiBlockEditingKey !== targetBlockKey;
-                        })() && (
-                            <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                    id="wiki-block-edit-start"
-                                    type="button"
-                                    onClick={() => startWikiBlockEdit(
-                                        targetBlockKey,
-                                        getWikiBlockRawMarkdown(contentBlocks.find((block) => block.block_key === targetBlockKey) ?? {}),
-                                    )}
-                                    className="rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
-                                >
-                                    {tw.wiki_block_edit_label ?? 'Rediger teksten'}
-                                </button>
-                            </div>
-                        )}
-
-                        {canHandleClaim && isPendingDecision && (
-                            <div className="space-y-3 rounded-xl border border-slate-100 bg-white/80 px-3 py-3">
-                                {canEditClaimText && (
-                                    <label className="block space-y-1">
-                                        <span className="text-base font-semibold text-amber-700">
-                                            {isSourceFinding
-                                                ? (tw.claim_card_source_finding_edit_label ?? 'Rediger og godkjenn')
-                                                : (tw.verification_basis_best_practice_edit_label ?? 'Rediger og godkjenn')}
-                                        </span>
-                                        {isSourceFinding && (
-                                            <span className="block text-base leading-7 text-slate-600">
-                                                {showRemoveHint
-                                                    ? (tw.claim_card_source_finding_remove_hint ?? 'Avsnittet inneholder også tekst som kilden støtter, så det fjernes ikke i sin helhet. Fjern den udokumenterte delen i tekstfeltet og velg «Godkjenn redigert tekst».')
-                                                    : (tw.claim_card_source_finding_edit_hint ?? 'Teksten presenteres som kildebasert. Fjern eller endre det kilden ikke støtter, og godkjenn den redigerte teksten.')}
-                                            </span>
-                                        )}
-                                        <textarea
-                                            id={`claim-text-edit-${claim.id}`}
-                                            rows={isSourceFinding ? 5 : 3}
-                                            maxLength={20000}
-                                            value={claimTextEdit}
-                                            onChange={(e) => setClaimTextEdits((prev) => ({
-                                                ...prev,
-                                                [claim.id]: e.target.value,
-                                            }))}
-                                            className="w-full rounded-lg border border-field-border bg-white px-3 py-2 text-base text-slate-700 focus:border-amber-400 focus:outline-none"
-                                        />
-                                    </label>
-                                )}
-
-                                {/* A label, not only a placeholder (A11Y-047): the placeholder is gone
-                                    as soon as something is typed, and was never a name. */}
-                                <div className="space-y-1">
-                                    <label htmlFor={commentId} className="block text-base font-semibold text-slate-700">
-                                        {ta.wiki_claim_comment_label ?? 'Kommentar (valgfritt)'}
-                                    </label>
-                                    <input
-                                        id={commentId}
-                                        type="text"
-                                        maxLength={1000}
-                                        placeholder={tw.approval_comment_placeholder ?? 'Valgfri kommentar'}
-                                        value={approvalComments[claim.id] ?? ''}
-                                        onChange={(e) => setApprovalComments((prev) => ({ ...prev, [claim.id]: e.target.value }))}
-                                        className="w-full min-w-0 rounded-lg border border-field-border px-3 py-2 text-base text-slate-700 focus:border-violet-300 focus:outline-none"
-                                    />
-                                </div>
-
-                                {/* aria-disabled while the decision is saved: `disabled` would drop
-                                    focus to the page body the moment the key is pressed (A11Y-014). */}
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <button
-                                        type="button"
-                                        aria-disabled={isBusy || undefined}
-                                        aria-describedby={claimDescribedBy}
-                                        onClick={() => approveClaim(claim)}
-                                        className="rounded-full bg-emerald-700 px-4 py-2 text-base font-semibold text-white transition hover:bg-emerald-800 aria-disabled:opacity-50"
-                                    >
-                                        {keepTextLabel}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        aria-disabled={isBusy || undefined}
-                                        aria-describedby={claimDescribedBy}
-                                        onClick={() => removeClaimText(claim)}
-                                        className="rounded-full border border-rose-300 bg-white px-4 py-2 text-base font-semibold text-rose-700 transition hover:bg-rose-50 aria-disabled:opacity-50"
-                                    >
-                                        {tw.claim_card_remove_text ?? 'Fjern teksten'}
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-
-                        {hasUserDecision && canHandleClaim && (
-                            <div className="space-y-2 rounded-xl border border-slate-100 bg-white/80 px-3 py-3">
-                                {claim.blocking_override_by_name && (
-                                    <p className="text-base text-slate-600">
-                                        {(tw.claim_blocking_reason_overridden ?? 'Overstyrt av :name den :date.')
-                                            .replace(':name', claim.blocking_override_by_name ?? '—')
-                                            .replace(':date', claim.blocking_override_at ? new Date(claim.blocking_override_at).toLocaleString(locale) : '')}
-                                    </p>
-                                )}
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <button
-                                        type="button"
-                                        aria-pressed={claim.user_decision === 'blocking'}
-                                        aria-disabled={isBusy || undefined}
-                                        aria-describedby={claimDescribedBy}
-                                        onClick={() => claim.user_decision !== 'blocking' && updateClaimBlocking(claim, true)}
-                                        className={`rounded-full px-4 py-2 text-base font-semibold transition aria-disabled:opacity-50 ${
-                                            claim.user_decision === 'blocking'
-                                                ? 'bg-rose-600 text-white'
-                                                : 'border border-rose-300 bg-white text-rose-700 hover:bg-rose-50'
-                                        }`}
-                                    >
-                                        {tw.keep_blocking_button ?? 'Blokker godkjenning'}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        aria-pressed={claim.user_decision === 'not_blocking'}
-                                        aria-disabled={isBusy || undefined}
-                                        aria-describedby={claimDescribedBy}
-                                        onClick={() => claim.user_decision !== 'not_blocking' && updateClaimBlocking(claim, false)}
-                                        className={`rounded-full px-4 py-2 text-base font-semibold transition aria-disabled:opacity-50 ${
-                                            claim.user_decision === 'not_blocking'
-                                                ? 'border border-amber-400 bg-amber-100 text-amber-900'
-                                                : 'border border-amber-300 bg-white text-amber-800 hover:bg-amber-50'
-                                        }`}
-                                    >
-                                        {tw.remove_blocking_button ?? 'Godkjenn avvik / Ikke blokker'}
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-
-                        {canHandleClaim && !claim.user_decision && !isPendingDecision && (
-                            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 bg-white/80 px-3 py-3">
-                                <span className="text-base text-slate-600">
-                                    {(tw.claim_decided_by_at ?? 'Besluttet av :name den :date')
-                                        .replace(':name', claim.approved_by_name ?? '—')
-                                        .replace(':date', claim.approved_at ? new Date(claim.approved_at).toLocaleString(locale) : '')}
-                                    {claim.approval_comment ? ` — “${claim.approval_comment}”` : ''}
-                                </span>
-                                <button
-                                    type="button"
-                                    aria-disabled={isBusy || undefined}
-                                    aria-describedby={claimDescribedBy}
-                                    onClick={() => unapproveClaim(claim)}
-                                    className="rounded-full border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:bg-slate-100 aria-disabled:opacity-50"
-                                >
-                                    {tw.undo_claim_decision_button ?? tw.unapprove_claim_button ?? 'Angre beslutning'}
-                                </button>
-                            </div>
-                        )}
-
-                        {!canHandleClaim && (
-                            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-base leading-7 text-slate-600">
-                                {claimAccessNotice}
-                            </div>
-                        )}
-
-                        {findingIdForClaim(claim) && (
-                            <p className="font-mono text-base text-slate-600">
-                                {(tw.claim_card_reference_label ?? 'Referanse #:id')
-                                    .replace(':id', formatFindingUserId(findingIdForClaim(claim)))}
-                            </p>
-                        )}
-                    </div>
-                </article>
-            );
-        }
+        const commentId = `claim-comment-${claim.id}`;
 
         return (
             <article
@@ -2159,39 +2036,6 @@ export default function WikiShow({
                                         {tw.claim_finding_no_source_excerpt ?? 'Systemet fant ingen sikker kildetekst for denne påstanden.'}
                                     </p>
                                 )}
-                                {/* The "this is not documented customer knowledge" warning that used
-                                    to sit here repeated the badge and the why-block above it, so
-                                    only the editable suggested text remains. */}
-                                {canEditClaimText && canHandleClaim && isPendingDecision && (
-                                    <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
-                                        <label className="block space-y-1">
-                                            <span className="text-base font-semibold text-amber-700">
-                                                {isSourceFinding
-                                                    ? (tw.claim_card_source_finding_edit_label ?? 'Rediger og godkjenn')
-                                                    : (tw.verification_basis_best_practice_edit_label ?? 'Foreslått tekst')}
-                                            </span>
-                                            <textarea
-                                                id={`claim-text-edit-${claim.id}`}
-                                                rows={isSourceFinding ? 5 : 3}
-                                                maxLength={20000}
-                                                value={claimTextEdit}
-                                                onChange={(e) => setClaimTextEdits((prev) => ({
-                                                    ...prev,
-                                                    [claim.id]: e.target.value,
-                                                }))}
-                                                className="w-full rounded-lg border border-field-border bg-white px-3 py-2 text-base text-slate-700 focus:border-amber-400 focus:outline-none"
-                                            />
-                                        </label>
-                                        <p className="text-base leading-6 text-amber-800">
-                                            {!isSourceFinding
-                                                ? (tw.claim_card_best_practice_edit_hint ?? 'Du kan justere teksten før du beholder den.')
-                                                : showRemoveHint
-                                                    ? (tw.claim_card_source_finding_remove_hint ?? 'Avsnittet inneholder også tekst som kilden støtter, så det fjernes ikke i sin helhet. Fjern den udokumenterte delen i tekstfeltet og velg «Godkjenn redigert tekst».')
-                                                    : (tw.claim_card_source_finding_edit_hint ?? 'Teksten presenteres som kildebasert. Fjern eller endre det kilden ikke støtter, og godkjenn den redigerte teksten.')}
-                                        </p>
-                                    </div>
-                                )}
-
                                 {canLinkSource && (
                                     <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-3">
                                         <p className="text-base font-semibold text-sky-700">
@@ -2485,6 +2329,61 @@ export default function WikiShow({
                         )}
                     </div>
 
+                    {/* The "this is not documented customer knowledge" warning that used to sit
+                        here repeated the badge and the why-block above it, so only the editable
+                        text remains. Shown whether or not the claim has source references: text
+                        presented as source-based usually has one, and is still edited here. */}
+                    {canEditClaimText && canHandleClaim && isPendingDecision && (
+                        <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
+                            <label className="block space-y-1">
+                                <span className="text-base font-semibold text-amber-700">
+                                    {isSourceFinding
+                                        ? (tw.claim_card_source_finding_edit_label ?? 'Rediger og godkjenn')
+                                        : (tw.verification_basis_best_practice_edit_label ?? 'Foreslått tekst')}
+                                </span>
+                                <textarea
+                                    id={`claim-text-edit-${claim.id}`}
+                                    rows={isSourceFinding ? 5 : 3}
+                                    maxLength={20000}
+                                    value={claimTextEdit}
+                                    onChange={(e) => setClaimTextEdits((prev) => ({
+                                        ...prev,
+                                        [claim.id]: e.target.value,
+                                    }))}
+                                    className="w-full rounded-lg border border-field-border bg-white px-3 py-2 text-base text-slate-700 focus:border-amber-400 focus:outline-none"
+                                />
+                            </label>
+                            <p className="text-base leading-6 text-amber-800">
+                                {!isSourceFinding
+                                    ? (tw.claim_card_best_practice_edit_hint ?? 'Du kan justere teksten før du beholder den.')
+                                    : showRemoveHint
+                                        ? (tw.claim_card_source_finding_remove_hint ?? 'Avsnittet inneholder også tekst som kilden støtter, så det fjernes ikke i sin helhet. Fjern den udokumenterte delen i tekstfeltet og velg «Godkjenn redigert tekst».')
+                                        : (tw.claim_card_source_finding_edit_hint ?? 'Teksten presenteres som kildebasert. Fjern eller endre det kilden ikke støtter, og godkjenn den redigerte teksten.')}
+                            </p>
+                        </div>
+                    )}
+
+                    {/* A mixed paragraph opened from Kjøringer is edited in place in the article;
+                        the editor needs the run context the finding link carries. */}
+                    {String(claim.id) === targetClaimId && canHandleClaim && canEditWikiClaims && targetBlockKey
+                        && contentBlocks.find((block) => block.block_key === targetBlockKey)?.content_origin === 'mixed'
+                        && manualBlockEdit?.run_id
+                        && wikiBlockEditingKey !== targetBlockKey && (
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                id="wiki-block-edit-start"
+                                type="button"
+                                onClick={() => startWikiBlockEdit(
+                                    targetBlockKey,
+                                    getWikiBlockRawMarkdown(contentBlocks.find((block) => block.block_key === targetBlockKey) ?? {}),
+                                )}
+                                className="rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+                            >
+                                {tw.wiki_block_edit_label ?? 'Rediger teksten'}
+                            </button>
+                        </div>
+                    )}
+
                     {canHandleClaim && isPendingDecision && (
                         <div className="space-y-2">
                             <p className="text-base font-semibold text-slate-600">
@@ -2543,6 +2442,19 @@ export default function WikiShow({
                                 {tw.undo_claim_decision_button ?? tw.unapprove_claim_button ?? 'Angre beslutning'}
                             </button>
                         </div>
+                    )}
+
+                    {/* A refused decision, said where it was made. Nothing on the card changed:
+                        the claim keeps its state, and the typed text and comment are still there. */}
+                    {claimActionErrors[claim.id] && (
+                        <p
+                            id={`claim-${claim.id}-action-error`}
+                            role="alert"
+                            data-testid="claim-action-error"
+                            className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-base leading-6 text-rose-800"
+                        >
+                            {claimActionErrors[claim.id]}
+                        </p>
                     )}
 
                     {!canHandleClaim && hasSourceReferences && (
@@ -2667,6 +2579,11 @@ export default function WikiShow({
             {
                 expected_page_version_id: workingVersionEdit.expected_page_version_id,
                 blocks,
+                // The finding this page was opened from survives the save:
+                // the redirect keeps "Tilbake til funn", and a finding the edit replaced is then
+                // reported as belonging to the previous version instead of opening a card.
+                claim_id: reviewReference?.back_url ? (reviewReference.claim_id ?? undefined) : undefined,
+                back_url: reviewReference?.back_url ?? undefined,
             },
             {
                 preserveScroll: true,
@@ -2696,6 +2613,51 @@ export default function WikiShow({
     // target block is part of a multi-block section, the review panel must render AFTER the whole
     // section (below) rather than from inside renderBlock() — placing it inside split the section's
     // own paragraphs apart and left everything after the first one outside the review.
+    // Text typed but not saved: the article editor, the claim-review block editor, and the edited
+    // text of a claim still waiting for its decision. A decided claim's field is gone, so it never
+    // counts, and a saved decision clears its draft (claimActionOptions).
+    const hasUnsavedWikiEdits = (isEditingArticle && changedArticleBlocks().length > 0)
+        || (wikiBlockEditingKey !== null
+            && String(wikiBlockEditDrafts[wikiBlockEditingKey] ?? '').trim()
+                !== String(getWikiBlockRawMarkdown(contentBlocks.find((block) => block.block_key === wikiBlockEditingKey) ?? {}) ?? '').trim())
+        || claims.some((claim) => claim.approval_status === 'pending'
+            && typeof claimTextEdits[claim.id] === 'string'
+            && claimTextEdits[claim.id].trim() !== String(claimEditBaselineFor(claim)).trim());
+    const hasUnsavedWikiEditsRef = useRef(false);
+    hasUnsavedWikiEditsRef.current = hasUnsavedWikiEdits;
+
+    // One plain confirmation before unsaved text is thrown away — closing the tab, or following a
+    // link off this page. A decision, a reload of this page or a jump to another claim on it keeps
+    // the text and never asks (shouldConfirmLeavingWikiPage). No autosave: nothing is stored.
+    useEffect(() => {
+        const message = tw.unsaved_changes_confirm ?? 'Du har tekst som ikke er lagret. Vil du forlate siden og forkaste endringene?';
+        const onBeforeUnload = (event) => {
+            if (!hasUnsavedWikiEditsRef.current) {
+                return undefined;
+            }
+
+            event.preventDefault();
+            event.returnValue = message;
+
+            return message;
+        };
+        const stopBefore = router.on('before', (event) => {
+            const visit = event.detail?.visit;
+
+            if (shouldConfirmLeavingWikiPage(visit, window.location.pathname, hasUnsavedWikiEditsRef.current)
+                && !window.confirm(message)) {
+                event.preventDefault();
+            }
+        });
+
+        window.addEventListener('beforeunload', onBeforeUnload);
+
+        return () => {
+            window.removeEventListener('beforeunload', onBeforeUnload);
+            stopBefore();
+        };
+    }, [tw.unsaved_changes_confirm]);
+
     const targetReviewSection = resolveBestPracticeSectionForBlock(contentBlocks, targetBlockKey);
 
     // Product rule: best-practice content stops being flagged once the PAGE VERSION itself is
@@ -2737,6 +2699,64 @@ export default function WikiShow({
 
         target.scrollIntoView({ behavior: 'smooth', block: 'center' });
         target.focus({ preventScroll: true });
+    };
+
+    // «Åpne og behandle» from the article note: open the verification basis (and «Verifiserte
+    // påstander» for a decided claim), then move to the card that decides the claim — the same
+    // card a grouped best-practice section is decided by.
+    const openClaimInVerificationBasis = (claim) => {
+        const ownsClaim = (unit) => (unit.claimIds ?? [unit.claim?.id]).map(String).includes(String(claim.id));
+        const openUnit = reviewUnits.open.find(ownsClaim);
+        const unit = openUnit ?? reviewUnits.verified.find(ownsClaim);
+
+        setVerificationOpen(true);
+
+        if (!openUnit) {
+            setVerifiedClaimsOpen(true);
+        }
+
+        setBasisFocusClaimId(String(unit?.claim?.id ?? claim.id));
+    };
+
+    // The article keeps only a short marker on the paragraph: the full explanation, sources and
+    // decision stay in the claim's card in the verification basis.
+    const renderInlineQaNote = (claim) => {
+        const { stateKey, actionKey } = claimInlineNoteState(claim);
+        const category = claim.finding_category_label
+            ?? (claim.content_origin === 'best_practice'
+                ? (tw.verification_basis_best_practice_badge ?? 'Forslag basert på beste praksis')
+                : (tw[`verification_worklist_reason_${claimWorklistReasonKey(claim)}`] ?? tw.verification_worklist_reason_other ?? 'Krever en vurdering'));
+
+        return (
+            <div
+                data-testid="inline-qa-note"
+                data-claim-id={claim.id}
+                data-note-state={stateKey}
+                className="mt-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-t border-amber-200 pt-2"
+            >
+                <p className="text-base text-slate-700">
+                    <span className="font-semibold">
+                        {(tw.inline_qa_note_label ?? 'QA: :category').replace(':category', category)}
+                    </span>
+                    {' – '}
+                    <span className={stateKey === 'requires_review' ? 'font-medium text-amber-800' : 'text-slate-600'}>
+                        {stateKey === 'requires_review'
+                            ? (tw.inline_qa_note_requires_review ?? 'krever vurdering')
+                            : (tw.inline_qa_note_decided ?? 'vurdert')}
+                    </span>
+                </p>
+                <button
+                    type="button"
+                    data-testid="inline-qa-note-open"
+                    onClick={() => openClaimInVerificationBasis(claim)}
+                    className="rounded text-base font-semibold text-violet-700 underline underline-offset-2 hover:text-violet-900"
+                >
+                    {actionKey === 'open_and_handle'
+                        ? (tw.inline_qa_note_open_and_handle ?? 'Åpne og behandle')
+                        : (tw.inline_qa_note_view ?? 'Vis vurderingen')}
+                </button>
+            </div>
+        );
     };
 
     // Derive semantic traversal groups from outgoing links
@@ -2927,6 +2947,13 @@ export default function WikiShow({
                                     {ta.wiki_article_edit_hint ?? 'Teksten skrives i Markdown: ## gir en overskrift, - en punktliste og **tekst** fet skrift. Endringene lagres først når du velger Lagre.'}
                                 </p>
                             )}
+                            {/* Opened from a QA finding: saving the whole article makes a new version,
+                                which the finding does not move to — said before the save, not after. */}
+                            {isEditingArticle && targetClaimId && reviewReference?.back_url && (
+                                <p data-testid="article-edit-review-context-hint" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-base leading-6 text-amber-900">
+                                    {tw.article_edit_review_context_hint ?? '«Rediger artikkel» lagrer en ny versjon av hele artikkelen. QA-funnet du kom fra, gjelder da den forrige versjonen. Vil du rette avsnittet og avslutte funnet, bruker du «Åpne og behandle» i QA-merknaden.'}
+                                </p>
+                            )}
                             <div className="wiki-article">
                                 {(() => {
                                     // A single content block's own markup — table/image/editing/plain markdown.
@@ -3073,25 +3100,8 @@ export default function WikiShow({
                                                         <WikiMarkdown components={{ a: WikiArticleLink }}>{currentBlockMarkdown}</WikiMarkdown>
                                                     </>
                                                 )}
-                                                {isTargetBlock && targetReviewSection === null && focusedReviewClaims.length > 0 && (
-                                                    <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50/60 px-4 py-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
-                                                        <div className="space-y-1">
-                                                            <p className="text-base font-semibold text-violet-700">
-                                                                {tw.review_reference_inline_heading ?? 'Vurdering for dette avsnittet'}
-                                                            </p>
-                                                            <p className="text-base text-slate-600">
-                                                                {tw.review_reference_inline_subtitle ?? 'Handlingene under gjelder teksten over.'}
-                                                            </p>
-                                                        </div>
-                                                        <div className="mt-4 space-y-3">
-                                                            {groupBestPracticeClaimsForReview(focusedReviewClaims, contentBlocks).map((unit) => renderClaimCard(
-                                                                unit.claim,
-                                                                unit.claim.approval_status === 'pending' ? 'open' : 'verified',
-                                                                { showClaimText: false, inlineReview: true, claimCount: unit.claimCount },
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                )}
+                                                {isTargetBlock && targetReviewSection === null && focusedReviewClaims.length > 0
+                                                    && renderInlineQaNote(focusedReviewClaims[0])}
                                             </div>
                                         );
                                     };
@@ -3126,25 +3136,8 @@ export default function WikiShow({
                                                     </p>
                                                 )}
                                                 {group.blocks.map((block) => renderBlock(block))}
-                                                {targetReviewSection?.sectionKey === group.sectionKey && focusedReviewClaims.length > 0 && (
-                                                    <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50/60 px-4 py-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
-                                                        <div className="space-y-1">
-                                                            <p className="text-base font-semibold text-violet-700">
-                                                                {tw.review_reference_section_heading ?? 'Vurdering for denne seksjonen'}
-                                                            </p>
-                                                            <p className="text-base text-slate-600">
-                                                                {tw.review_reference_section_subtitle ?? 'Handlingene under gjelder hele teksten over.'}
-                                                            </p>
-                                                        </div>
-                                                        <div className="mt-4 space-y-3">
-                                                            {groupBestPracticeClaimsForReview(focusedReviewClaims, contentBlocks).map((unit) => renderClaimCard(
-                                                                unit.claim,
-                                                                unit.claim.approval_status === 'pending' ? 'open' : 'verified',
-                                                                { showClaimText: false, inlineReview: true, claimCount: unit.claimCount },
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                )}
+                                                {targetReviewSection?.sectionKey === group.sectionKey && focusedReviewClaims.length > 0
+                                                    && renderInlineQaNote(focusedReviewClaims[0])}
                                             </div>
                                         );
                                     });

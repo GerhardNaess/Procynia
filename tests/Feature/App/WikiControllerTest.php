@@ -5279,7 +5279,11 @@ class WikiControllerTest extends TestCase
 
         $response->assertOk();
         $finding = $response->json('findings')[0];
-        $this->assertSame('open', $finding['status']);
+        // An explicitly accepted deviation releases the QA gate and publication
+        // (EnterpriseWikiClaimFindingExplainer::blocksPublication()), so the list calls the finding
+        // handled too — it used to stay "open" here while the gate already treated it as decided.
+        $this->assertSame('accepted_deviation', $finding['status']);
+        $this->assertSame('view_review', $finding['action']);
         $this->assertSame('not_blocking', $finding['user_decision']);
         $this->assertFalse($finding['blocks_run']);
     }

@@ -155,7 +155,8 @@ export function matchesFindingsLocalFilter(finding, filterKey) {
         case 'blocking':
             return finding.blocks_run;
         case 'resolved':
-            return finding.status === 'resolved' || finding.status === 'approved' || finding.status === 'approved_edited' || finding.status === 'rejected';
+            return finding.status === 'resolved' || finding.status === 'approved' || finding.status === 'approved_edited' || finding.status === 'rejected'
+                || finding.status === 'accepted_deviation';
         case 'informative':
             return finding.status === 'informative' || finding.status === 'superseded';
         default:
@@ -318,7 +319,10 @@ export function getRunTimelineState(run, stepIndex) {
     }
 
     if (run.status === 'failed') {
-        const failedIndex = findTimelineStepIndex(run.failed_phase);
+        // failure_summary.failed_phase is read from the stored message only where that message can
+        // only be written by one step (EnterpriseWikiRunFailurePresenter) — for runs stored before
+        // failed_phase existed. Without either, nothing is marked: no progress is made up.
+        const failedIndex = findTimelineStepIndex(run.failed_phase ?? run.failure_summary?.failed_phase ?? null);
 
         if (failedIndex === -1) {
             return 'empty';
@@ -342,7 +346,7 @@ export function getRunTimelineState(run, stepIndex) {
 }
 
 /**
- * A run's `status` badge already says "Eskalert" — historically RunActivityBlock's activity pill
+ * An escalated run's badge already says «Krever oppfølging» — historically RunActivityBlock's activity pill
  * and detail line both repeated that exact word for the escalated case (label === detail === the
  * literal Norwegian word for "escalated"), giving the row up to 3 identical chips with zero
  * explanation of why. This derives one real explanation instead, using data that is already
@@ -392,8 +396,11 @@ export function isRunStalled(run, thresholdMinutes = 15, now = Date.now()) {
 export function getEscalationCopy(run, tw = {}) {
     const blockingCount = run?.findings_open_blocking_count ?? 0;
     const totalCount = run?.lint_count ?? 0;
-    const primaryReason = run?.error_message || run?.findings_explanation || (tw.ingest_activity_escalated ?? 'Eskalert');
-    const secondaryReason = (run?.error_message && run?.findings_explanation && run.findings_explanation !== primaryReason)
+    // The stored error_message is diagnostics, never the explanation: the backend's translated
+    // failure_summary says what it means (EnterpriseWikiRunFailurePresenter).
+    const cause = runFailureText(run);
+    const primaryReason = cause || run?.findings_explanation || (tw.ingest_activity_escalated ?? 'Krever oppfølging');
+    const secondaryReason = (cause && run?.findings_explanation && run.findings_explanation !== primaryReason)
         ? run.findings_explanation
         : null;
     const blockingSummary = blockingCount > 0
@@ -403,6 +410,30 @@ export function getEscalationCopy(run, tw = {}) {
         : (tw.ingest_activity_escalated_not_blocking ?? 'Ingen åpne blokkerende funn lenger. Eskaleringen stopper ikke videre arbeid, men statusen bør oppdateres.');
 
     return { primaryReason, secondaryReason, blockingSummary, blockingCount };
+}
+
+/**
+ * A stopped run's explanation as «Status og oppfølging» lines — [tone, text] — from the backend's
+ * failure_summary: its heading, then the sentences that say what happened. Null without one; the
+ * raw stored message is never turned into a line here.
+ */
+export function getRunFailureLines(run) {
+    const summary = run?.failure_summary;
+
+    if (!summary?.title) {
+        return null;
+    }
+
+    return [
+        ['alert', summary.title],
+        ...(summary.lines ?? []).map((text, index) => [index === 0 ? 'primary' : 'note', text]),
+    ];
+}
+
+function runFailureText(run) {
+    const summary = run?.failure_summary;
+
+    return summary?.title ? [summary.title, ...(summary.lines ?? [])].join(' ') : null;
 }
 
 // Wiki run-592: a maintainer_decision failure classified as a documented transient
@@ -447,17 +478,58 @@ export function getRunCompactSummary(run, tw = {}) {
             : (tw.run_compact_failed_pages_many ?? ':count feil').replace(':count', String(failedPagesCount));
     }
 
+    // An escalated run's badge already says «Krever oppfølging» or «Oppfølging fullført»
+    // (runStatusKey()), and its QA findings have their own column, so the line repeats neither.
     if (run.status === 'escalated') {
-        return tw.run_compact_escalated ?? 'Krever oppfølging';
+        return null;
     }
 
     if (run.status === 'failed') {
+        // «Feilet» says it already; only a temporary failure adds something the badge cannot.
+        // The cause itself is in «Status og oppfølging».
         if (run.failed_phase === 'maintainer_decision' && run.transient_failure) {
             return tw.run_compact_failed_transient ?? 'Midlertidig feil';
         }
 
-        return tw.run_compact_failed ?? 'Stoppet med feil';
+        return null;
     }
 
     return null;
 }
+
+/**
+ * The one status word a Kjøringer row (and a document's latest run) shows, from its stored status
+ * and the backend's follow-up reading — never a new decision of its own:
+ *   queued → 'waiting'; every other status the pipeline still moves on its own → 'in_progress';
+ *   completed (and the legacy awaiting_document_owner_approval, which only ever meant finished) →
+ *   'completed'; escalated → 'completed_with_remarks' only when follow_up_complete is true
+ *   (EnterpriseWikiRunFindingsService::escalationFollowUpComplete()), otherwise — unknown included —
+ *   'needs_follow_up'; failed, cancelled and decision_only keep their own word.
+ * The stored status itself is never changed or hidden; this is only what it is called.
+ *
+ * @param {{status?: string, follow_up_complete?: boolean|null}|null} run
+ * @returns {string}
+ */
+export function runStatusKey(run) {
+    const status = run?.status;
+
+    if (status === 'queued') return 'waiting';
+    if (ACTIVE_WIKI_RUN_STATUSES.includes(status)) return 'in_progress';
+    if (status === 'completed' || status === 'awaiting_document_owner_approval') return 'completed';
+    if (status === 'escalated') return run?.follow_up_complete === true ? 'completed_with_remarks' : 'needs_follow_up';
+    if (status === 'failed' || status === 'cancelled' || status === 'decision_only') return status;
+
+    return 'unknown';
+}
+
+/** The Kjøringer status filter, in the order it is offered: the same words the rows show. */
+export const RUN_STATUS_FILTER_KEYS = [
+    'waiting',
+    'in_progress',
+    'completed',
+    'completed_with_remarks',
+    'needs_follow_up',
+    'failed',
+    'cancelled',
+    'decision_only',
+];

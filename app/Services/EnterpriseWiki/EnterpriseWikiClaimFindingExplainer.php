@@ -90,6 +90,17 @@ class EnterpriseWikiClaimFindingExplainer
      */
     public const USER_DECISION_NOT_BLOCKING = 'not_blocking';
 
+    /** How a finding stands after review — see findingResolution(). */
+    public const RESOLUTION_OPEN = 'open';
+
+    public const RESOLUTION_APPROVED = 'approved';
+
+    public const RESOLUTION_APPROVED_EDITED = 'approved_edited';
+
+    public const RESOLUTION_REJECTED = 'rejected';
+
+    public const RESOLUTION_ACCEPTED_DEVIATION = 'accepted_deviation';
+
     /**
      * Deterministic conflict types EnterpriseWikiClaimCanonicalizationService::detectDeterministicConflict()
      * / detectSubjectMismatch() can return, threaded into review_metadata.deterministic_reason by
@@ -256,6 +267,50 @@ class EnterpriseWikiClaimFindingExplainer
             'requires_decision' => $requiresDecision,
             'blocks_gate' => $userDecision === self::USER_DECISION_BLOCKING || $requiresDecision,
         ];
+    }
+
+    /**
+     * Whether this claim still holds the QA gate's normative follow-up open: text proven stricter
+     * than its source (plan §18, P0-2) that nobody has decided on. The QA gate's normative check and
+     * the Kjøringer follow-up state both read this, so "the run still needs follow-up" can never
+     * disagree with what QA itself would conclude from the same claims.
+     */
+    public function holdsNormativeFollowUp(EnterpriseWikiClaim $claim): bool
+    {
+        $meta = (array) ($claim->review_metadata ?? []);
+
+        return ($meta['deterministic_reason'] ?? null) === self::NORMATIVE_STRENGTHENING_REASON
+            && $claim->isPending()
+            && $this->blockingState($claim)['blocks_gate'];
+    }
+
+    /**
+     * Whether a claim finding still needs handling, and if not, how it was handled — the one rule
+     * the Kjøringer findings list, the article's QA note and the claim card all read, so none of
+     * them can call a finding open that the QA gate and publication already treat as decided.
+     *
+     * It is the same release blocksPublication() and the QA normative check apply: keeping the text
+     * (approve), editing it (approve with new text), removing it (reject), or explicitly recording
+     * "Godkjenn avvik / Ikke blokker" on a pending claim. An explicit blocking decision on a pending
+     * claim keeps it open, and so does no decision at all. A decision taken on the text ends the
+     * finding whatever the blocking decision says — that is the existing gate rule, unchanged.
+     * Undoing the decision (unapprove) puts the claim back to pending, which reopens it here.
+     */
+    public function findingResolution(EnterpriseWikiClaim $claim): string
+    {
+        if ($claim->isApproved()) {
+            return (bool) data_get($claim->review_metadata, 'edited_before_approval', false)
+                ? self::RESOLUTION_APPROVED_EDITED
+                : self::RESOLUTION_APPROVED;
+        }
+
+        if ($claim->isRejected()) {
+            return self::RESOLUTION_REJECTED;
+        }
+
+        return $claim->blocking_override === false
+            ? self::RESOLUTION_ACCEPTED_DEVIATION
+            : self::RESOLUTION_OPEN;
     }
 
     /**

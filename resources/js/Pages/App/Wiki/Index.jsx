@@ -15,6 +15,9 @@ import {
     matchesFindingsLocalFilter,
     getRunTimelineState,
     getEscalationCopy,
+    getRunFailureLines,
+    runStatusKey,
+    RUN_STATUS_FILTER_KEYS,
     getTransientFailureCopy,
     isRunStalled,
     getRunCompactSummary,
@@ -45,6 +48,9 @@ const BADGE = 'inline-flex items-center rounded-full px-2.5 py-0.5 text-base fon
 const RUNS_GRID_TEMPLATE = 'minmax(0,2.5rem) minmax(0,1.3fr) minmax(0,1.7fr) minmax(0,6.5rem) minmax(0,3rem) minmax(0,3rem) minmax(0,5.5rem) minmax(0,5.5rem) minmax(0,8rem)';
 // BADGE never wraps; «Sidestruktur opprettet» must, or it runs into the Sider column.
 const WRAPPING_BADGE = 'inline-flex max-w-full items-center rounded-xl px-2 py-0.5 text-sm font-semibold leading-5 break-words';
+// A run's status in Kjøringer: the size of BADGE, but it wraps inside the status column instead of
+// running into the next one.
+const RUN_STATUS_BADGE = 'inline-flex max-w-full items-center rounded-xl px-2.5 py-0.5 text-base font-semibold leading-5 break-words';
 
 // Shared row-action button styles — deliberately distinct from BADGE (status chips: h-6, no
 // border, no hover/focus state) so an action always reads as a clickable control, never as a
@@ -109,27 +115,6 @@ function SourceStatusBadge({ status, label }) {
     return <span className={`${BADGE} ${cls}`}>{label}</span>;
 }
 
-const INGEST_STATUS_STYLES = {
-    queued: 'bg-amber-100 text-amber-700',
-    running: 'bg-blue-100 text-blue-700',
-    sections_planned: 'bg-blue-100 text-blue-700',
-    maintainer_decision: 'bg-violet-100 text-violet-700',
-    applying: 'bg-indigo-100 text-indigo-700',
-    generating_pages: 'bg-sky-100 text-sky-700',
-    generating_concept_entity_pages: 'bg-sky-100 text-sky-700',
-    verifying_claims: 'bg-cyan-100 text-cyan-700',
-    post_claim_verification: 'bg-cyan-100 text-cyan-700',
-    verification_linking: 'bg-cyan-100 text-cyan-700',
-    qa: 'bg-fuchsia-100 text-fuchsia-700',
-    // Legacy status; kept so a row written before the migration still renders a badge.
-    awaiting_document_owner_approval: 'bg-emerald-100 text-emerald-700',
-    completed: 'bg-emerald-100 text-emerald-700',
-    failed: 'bg-rose-100 text-rose-700',
-    escalated: 'bg-amber-100 text-amber-700',
-    decision_only: 'bg-violet-100 text-violet-700',
-    cancelled: 'bg-slate-200 text-slate-600',
-};
-
 const SEVERITY_STYLES = {
     error: 'bg-rose-100 text-rose-700',
     warning: 'bg-amber-100 text-amber-700',
@@ -143,28 +128,6 @@ const RUN_TIMELINE_DISPLAY_LABELS = {
     generating_pages: 'Sider',
     verification_linking: 'Verifisering',
     qa: 'QA',
-};
-
-const INGEST_STATUS_LABELS = {
-    queued: 'I kø',
-    running: 'Kjører',
-    sections_planned: 'Seksjoner planlagt',
-    maintainer_decision: 'Sideplanlegging',
-    applying: 'Anvender sideplan',
-    generating_pages: 'Genererer sider',
-    generating_concept_entity_pages: 'Genererer konsept- og entitetssider',
-    verifying_claims: 'Verifiserer påstander',
-    post_claim_verification: 'Etterbehandler påstander',
-    verification_linking: 'Verifisering og lenking',
-    qa: 'QA',
-    // Legacy. Runs in this status were settled by migration; the mapping stays so a row
-    // written by an older deploy reads as what it was — processing that had finished.
-    awaiting_document_owner_approval: 'Fullført',
-    completed: 'Fullført',
-    failed: 'Feilet',
-    escalated: 'Eskalert',
-    decision_only: 'Sideplan lagret',
-    cancelled: 'Avbrutt',
 };
 
 const IN_PROGRESS_STATUSES = [
@@ -352,12 +315,13 @@ function RunListItem({
     runFindingsState,
     onRetryMaintainerDecision,
     onRetryFailedPages,
+    onDismissRun = null,
     onFetchRunPages,
     onFetchRunFindings,
     focusFindingId,
 }) {
-    const statusCls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
-    const statusBadgeClass = `${BADGE} ${statusCls}`;
+    const statusCls = runStatusClass(run);
+    const statusBadgeClass = `${RUN_STATUS_BADGE} ${statusCls}`;
     const seemsStalled = isRunStalled(run);
     // The collapsed row answers «what is the status» and «does it need follow-up»: the badge and at
     // most one short line. Everything else is in the row's one detail view.
@@ -372,9 +336,9 @@ function RunListItem({
             <div className="flex flex-wrap items-center gap-1.5">
                 <span
                     className={statusBadgeClass}
-                    title={run.status === 'escalated' ? (run.error_message || run.findings_explanation || undefined) : undefined}
+                    title={run.status === 'escalated' ? (run.failure_summary?.title || run.findings_explanation || undefined) : undefined}
                 >
-                    {ingestStatusLabel(run.status, run.qa_status, tw)}
+                    {runStatusLabel(run, tw)}
                 </span>
                 {seemsStalled && (
                     <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold leading-5 text-amber-700">
@@ -606,6 +570,7 @@ function RunListItem({
                         headingId={`${panelId}-status`}
                         onRetryMaintainerDecision={onRetryMaintainerDecision}
                         onRetryFailedPages={onRetryFailedPages}
+                        onDismiss={onDismissRun}
                     />
 
                     {run.status !== 'decision_only' && (
@@ -621,6 +586,13 @@ function RunListItem({
                             >
                                 <RunTimeline run={run} tw={tw} ta={ta} />
                             </ScrollRegion>
+                            {/* The timeline is how the run itself ended — an escalation stays marked at
+                                QA. Said once, here, when the follow-up done since then is confirmed. */}
+                            {run.status === 'escalated' && run.follow_up_complete === true && (
+                                <p data-run-progress-history-note className="mt-2 text-base leading-6 text-slate-600">
+                                    {tw.run_progress_history_note ?? 'Fremdriften viser resultatet fra den opprinnelige kjøringen. QA-oppfølgingen er senere fullført.'}
+                                </p>
+                            )}
                         </section>
                     )}
 
@@ -689,9 +661,9 @@ const RUN_DETAIL_ACTION_BUTTON = 'inline-flex items-center gap-1.5 rounded-lg bo
  * «Status og oppfølging» in a run's detail view: what happened, what needs follow-up, and the
  * actions for it. Every sentence comes from data the row already carries (escalation reasons,
  * failed_pages, findings counts, the transient-failure classification) — nothing is derived anew.
- * Raw error text sits behind «Vis tekniske detaljer» unless it is the only explanation there is.
+ * Raw error text sits behind «Vis tekniske detaljer» only — never the default explanation.
  */
-function RunStatusFollowUp({ run, tw, locale, headingId, onRetryMaintainerDecision = null, onRetryFailedPages = null }) {
+function RunStatusFollowUp({ run, tw, locale, headingId, onRetryMaintainerDecision = null, onRetryFailedPages = null, onDismiss = null }) {
     const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
 
     const isEscalated = run.status === 'escalated';
@@ -699,6 +671,9 @@ function RunStatusFollowUp({ run, tw, locale, headingId, onRetryMaintainerDecisi
         && run.failed_phase === 'maintainer_decision'
         && !!run.transient_failure;
     const escalation = isEscalated ? getEscalationCopy(run, tw) : null;
+    // The translated explanation of a stopped run; its stored message stays behind «Vis tekniske
+    // detaljer» below (EnterpriseWikiRunFailurePresenter).
+    const failureLines = getRunFailureLines(run);
     const transientFailure = isTransientMaintainerFailure ? getTransientFailureCopy(run, tw) : null;
     const failedPages = run.failed_pages?.count ? run.failed_pages : null;
     const blockingCount = run.findings_open_blocking_count ?? 0;
@@ -709,17 +684,22 @@ function RunStatusFollowUp({ run, tw, locale, headingId, onRetryMaintainerDecisi
     // Each line: [tone, text]. Tone 'primary' is the cause, 'alert' needs action, 'note' explains.
     const lines = [];
 
-    if (escalation) {
+    if (escalation && failureLines) {
+        lines.push(...failureLines);
+        if (run.findings_explanation) lines.push(['note', run.findings_explanation]);
+    } else if (escalation) {
         lines.push(['primary', escalation.primaryReason]);
         if (escalation.secondaryReason) lines.push(['note', escalation.secondaryReason]);
     } else if (transientFailure) {
         lines.push(['alert', transientFailure.primaryMessage]);
         lines.push(['note', [transientFailure.failedInPhase, transientFailure.attemptSummary, transientFailure.documentPreservedNote].filter(Boolean).join(' ')]);
     } else if (run.status === 'failed') {
-        lines.push(['alert', run.qa_last_error ?? run.error_message ?? (tw.run_compact_failed ?? 'Stoppet med feil')]);
+        lines.push(...(failureLines ?? [['alert', tw.run_compact_failed ?? 'Stoppet med feil']]));
     }
 
-    if (failedPages) {
+    // A recognised failure already names the pages and why; the failed-pages sentence would say it
+    // again. Its retry action below stays.
+    if (failedPages && !(failureLines && run.failure_summary?.kind !== 'unknown')) {
         const [kindKey, kindFallback] = FAILED_PAGES_KIND_COPY[failedPages.failure_kind] ?? FAILED_PAGES_KIND_COPY.unknown;
         lines.push(['alert', `${(tw.run_failed_pages_summary ?? ':count side(r) kunne ikke genereres og er ufullstendige.').replace(':count', String(failedPages.count))} ${tw[kindKey] ?? kindFallback}`]);
     }
@@ -760,6 +740,9 @@ function RunStatusFollowUp({ run, tw, locale, headingId, onRetryMaintainerDecisi
 
     const canRetryFailedPages = failedPages?.can_retry && onRetryFailedPages;
     const canRetryDecision = isTransientMaintainerFailure && run.can_retry_maintainer_decision && onRetryMaintainerDecision;
+    // Offered only when the server says this run is finished, nothing about it is left to follow
+    // up, and this person may manage its document (can_dismiss — checked again on the request).
+    const canDismiss = run.can_dismiss === true && onDismiss;
 
     return (
         // Not a live region (A11Y-112): it was re-rendered on every 5 s poll. A status change is said
@@ -774,7 +757,7 @@ function RunStatusFollowUp({ run, tw, locale, headingId, onRetryMaintainerDecisi
                 ))}
             </ul>
 
-            {(canRetryFailedPages || canRetryDecision || technicalDetails.length > 0) && (
+            {(canRetryFailedPages || canRetryDecision || technicalDetails.length > 0 || canDismiss) && (
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1">
                     {canRetryFailedPages && (
                         <button
@@ -802,6 +785,16 @@ function RunStatusFollowUp({ run, tw, locale, headingId, onRetryMaintainerDecisi
                             className="rounded text-base font-semibold leading-6 text-slate-600 underline decoration-dotted underline-offset-2 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
                         >
                             {tw.run_technical_details_toggle ?? 'Vis tekniske detaljer'}
+                        </button>
+                    )}
+                    {canDismiss && (
+                        <button
+                            type="button"
+                            data-run-dismiss
+                            onClick={(event) => onDismiss(run, event.currentTarget)}
+                            className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-base font-semibold leading-6 text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                        >
+                            {tw.run_dismiss_button ?? 'Fjern fra oversikten'}
                         </button>
                     )}
                 </div>
@@ -1149,8 +1142,8 @@ function getWikiRunsHelpSections(tw) {
                     text: tw.runs_page_help_item_status_queued_text ?? 'Kjøringen er opprettet, men behandlingen har ikke startet ennå.',
                 },
                 {
-                    title: tw.runs_page_help_item_status_running_title ?? 'Behandles',
-                    text: tw.runs_page_help_item_status_running_text ?? 'Procynia arbeider aktivt med kjøringen.',
+                    title: tw.runs_page_help_item_status_running_title ?? 'I arbeid',
+                    text: tw.runs_page_help_item_status_running_text ?? 'Procynia arbeider med kjøringen. Fremdriften i detaljene viser hvilket steg den er i.',
                 },
                 {
                     title: tw.runs_page_help_item_status_pages_title ?? 'Genererer Wiki-sider',
@@ -1177,8 +1170,12 @@ function getWikiRunsHelpSections(tw) {
                     text: tw.runs_page_help_item_status_failed_text ?? 'Behandlingen stoppet på grunn av en feil. Feilmeldingen skal beskrive problemet på vanlig språk, uten at interne jobb- eller exception-navn er nødvendig.',
                 },
                 {
-                    title: tw.runs_page_help_item_status_escalated_title ?? 'Eskalert',
-                    text: tw.runs_page_help_item_status_escalated_text ?? 'Noe krevde ekstra oppfølging, og kjøringen trenger videre håndtering før den kan regnes som avsluttet.',
+                    title: tw.runs_page_help_item_status_escalated_title ?? 'Krever oppfølging',
+                    text: tw.runs_page_help_item_status_escalated_text ?? 'Kjøringen ble stoppet for kontroll, og noe må følges opp før den kan regnes som avsluttet — for eksempel åpne QA-funn eller sider som ikke ble generert.',
+                },
+                {
+                    title: tw.runs_page_help_item_status_completed_with_remarks_title ?? 'Oppfølging fullført',
+                    text: tw.runs_page_help_item_status_completed_with_remarks_text ?? 'Kjøringen ble stoppet for kontroll underveis, men all oppfølging er gjort. Merknadene står i detaljene.',
                 },
                 {
                     title: tw.runs_page_help_item_status_decision_only_title ?? 'Beslutning lagret',
@@ -1273,20 +1270,43 @@ function getWikiRunsHelpSections(tw) {
     ];
 }
 
-function ingestStatusLabel(status, qaStatus = null, tw = {}) {
-    if (status === 'completed' && qaStatus === 'passed') {
-        return tw.ingest_status_completed_passed ?? 'Fullført / bestått';
-    }
+// The status words a run is shown with (runStatusKey() in runFindingsLogic.js decides which).
+const RUN_STATUS_FALLBACK_LABELS = {
+    waiting: 'Venter',
+    in_progress: 'I arbeid',
+    completed: 'Fullført',
+    completed_with_remarks: 'Oppfølging fullført',
+    needs_follow_up: 'Krever oppfølging',
+    failed: 'Feilet',
+    cancelled: 'Avbrutt',
+    decision_only: 'Sideplan lagret',
+    unknown: 'Ukjent status',
+};
 
-    if (status === 'escalated' || qaStatus === 'escalated') {
-        return tw.ingest_status_escalated ?? 'Eskalert';
-    }
+// Krever oppfølging is the warning; Oppfølging fullført is calm, but not the plain success
+// green; Feilet stays red and Fullført green.
+const RUN_STATUS_STYLES = {
+    waiting: 'bg-slate-100 text-slate-700',
+    in_progress: 'bg-sky-100 text-sky-700',
+    completed: 'bg-emerald-100 text-emerald-700',
+    completed_with_remarks: 'bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-300',
+    needs_follow_up: 'bg-amber-100 text-amber-800',
+    failed: 'bg-rose-100 text-rose-700',
+    cancelled: 'bg-slate-200 text-slate-600',
+    decision_only: 'bg-violet-100 text-violet-700',
+    unknown: 'bg-slate-100 text-slate-600',
+};
 
-    if (status === 'failed' && qaStatus === 'failed') {
-        return tw.ingest_status_failed ?? 'Feilet';
-    }
+function runStatusKeyLabel(key, tw = {}) {
+    return tw[`run_status_${key}`] ?? RUN_STATUS_FALLBACK_LABELS[key] ?? RUN_STATUS_FALLBACK_LABELS.unknown;
+}
 
-    return tw[`ingest_status_${status}`] ?? INGEST_STATUS_LABELS[status] ?? tw.ingest_status_unknown ?? 'Ukjent status';
+function runStatusLabel(run, tw = {}) {
+    return runStatusKeyLabel(runStatusKey(run), tw);
+}
+
+function runStatusClass(run) {
+    return RUN_STATUS_STYLES[runStatusKey(run)] ?? RUN_STATUS_STYLES.unknown;
 }
 
 const SOURCE_INLINE_LINK = 'rounded text-base font-semibold leading-6 text-violet-700 underline decoration-violet-300 underline-offset-2 transition hover:text-violet-900 hover:decoration-violet-500 focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600';
@@ -1323,7 +1343,7 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
         );
     }
 
-    const cls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
+    const cls = runStatusClass(run);
     const isInProgress = IN_PROGRESS_STATUSES.includes(run.status);
     const seemsStalled = isRunStalled(run);
     const progressAt = run.last_progress_at ?? run.updated_at ?? run.started_at ?? run.created_at;
@@ -2171,7 +2191,7 @@ function SourcesTab({
                 id: `source-${source.id}`,
                 statusKey: `${source.latest_ingest_run.id}:${source.latest_ingest_run.status}:${source.latest_ingest_run.qa_status ?? ''}`,
                 name: source.original_filename,
-                statusLabel: ingestStatusLabel(source.latest_ingest_run.status, source.latest_ingest_run.qa_status, tw),
+                statusLabel: runStatusLabel(source.latest_ingest_run, tw),
             })),
         ta.wiki_run_status_changed ?? 'Kjøring for :name: :status.',
     );
@@ -2385,7 +2405,7 @@ function SourcesTab({
         <>
             <IngestStatusBadge
                 run={source.latest_ingest_run}
-                label={source.latest_ingest_run ? ingestStatusLabel(source.latest_ingest_run.status, source.latest_ingest_run.qa_status, tw) : null}
+                label={source.latest_ingest_run ? runStatusLabel(source.latest_ingest_run, tw) : null}
                 notStartedLabel={notStartedLabel}
                 locale={locale}
                 onReload={handleSourceReload}
@@ -3148,6 +3168,8 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
     const cancelTriggerRef = useRef(null);
     const retryTriggerRef = useRef(null);
     const cancelDismissRef = useRef(null);
+    const dismissTriggerRef = useRef(null);
+    const dismissCancelRef = useRef(null);
     const retryDismissRef = useRef(null);
 
     // A run moving to another status is said once, not on every 5 s poll (A11Y-112).
@@ -3156,7 +3178,7 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
             id: run.id,
             statusKey: `${run.status}:${run.qa_status ?? ''}`,
             name: run.source_document_filename ?? `#${run.id}`,
-            statusLabel: ingestStatusLabel(run.status, run.qa_status, tw),
+            statusLabel: runStatusLabel(run, tw),
         })),
         ta.wiki_run_status_changed ?? 'Kjøring for :name: :status.',
     );
@@ -3228,6 +3250,67 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
                 refocusIfLost(['wiki-runs-heading']);
             },
         });
+    };
+
+    // «Fjern fra oversikten»: confirm first, and the run leaves the list only when the server has
+    // cleared it — the reload that follows a success no longer carries it. A refusal stays in the
+    // dialog, in words, with the run still in the list; nothing is removed ahead of the answer.
+    const [dismissTarget, setDismissTarget] = useState(null);
+    const [dismissInFlight, setDismissInFlight] = useState(false);
+    const [dismissError, setDismissError] = useState(null);
+
+    const handleDismissClick = (run, trigger = null) => {
+        dismissTriggerRef.current = trigger;
+        setDismissError(null);
+        setDismissTarget(run);
+    };
+    const handleDismissCancel = () => {
+        if (dismissInFlight) return;
+        setDismissTarget(null);
+        setDismissError(null);
+    };
+    const dismissErrorMessage = (status) => ({
+        403: tw.run_dismiss_forbidden ?? 'Du har ikke tilgang til å fjerne denne kjøringen fra oversikten.',
+        404: tw.run_dismiss_not_found ?? 'Fant ikke kjøringen. Last siden på nytt.',
+        419: tw.run_dismiss_expired ?? 'Økten din er utløpt. Last siden på nytt og logg inn igjen.',
+    })[status] ?? (tw.run_dismiss_failed ?? 'Kjøringen ble ikke fjernet fra oversikten. Prøv igjen.');
+    const handleDismissConfirm = () => {
+        if (!dismissTarget || dismissInFlight) return;
+        const runId = dismissTarget.id;
+        setDismissInFlight(true);
+        setDismissError(null);
+
+        try {
+            router.patch(`/app/wiki/runs/${runId}/dismiss`, {
+                tab: 'runs',
+                run_status: filters.status ?? '',
+                run_decision: filters.decision ?? '',
+                run_src: filters.src_id ?? '',
+            }, {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setDismissTarget(null);
+                    // The run and its «Fjern fra oversikten» are gone; continue from the list heading.
+                    refocusIfLost(['wiki-runs-heading']);
+                },
+                onError: (errors) => setDismissError(errors?.run ?? Object.values(errors ?? {})[0] ?? dismissErrorMessage(null)),
+                // Returning false keeps Inertia's raw error overlay away: the reason is in the dialog.
+                onHttpException: (response) => {
+                    setDismissError(dismissErrorMessage(response?.status));
+
+                    return false;
+                },
+                onNetworkError: () => {
+                    setDismissError(dismissErrorMessage(null));
+
+                    return false;
+                },
+                onFinish: () => setDismissInFlight(false),
+            });
+        } catch (error) {
+            setDismissInFlight(false);
+            setDismissError(dismissErrorMessage(null));
+        }
     };
 
     const navigate = (overrides) => {
@@ -3376,21 +3459,8 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
                     className={`${RUNS_SELECT_CLS} max-w-full`}
                 >
                     <option value="">{tw.runs_filter_status_all ?? 'Alle statuser'}</option>
-                    {[
-                        'queued',
-                        'maintainer_decision',
-                        'applying',
-                        'generating_pages',
-                        'verification_linking',
-                        'qa',
-                        'completed',
-                        'escalated',
-                        'failed',
-                        'running',
-                        'sections_planned',
-                        'decision_only',
-                    ].map((s) => (
-                        <option key={s} value={s}>{ingestStatusLabel(s, null, tw)}</option>
+                    {RUN_STATUS_FILTER_KEYS.map((key) => (
+                        <option key={key} value={key}>{runStatusKeyLabel(key, tw)}</option>
                     ))}
                 </select>
 
@@ -3478,6 +3548,7 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
                                     runFindingsState={runFindingsState}
                                     onRetryMaintainerDecision={handleRetryClick}
                                     onRetryFailedPages={handleRetryClick}
+                                    onDismissRun={handleDismissClick}
                                     onFetchRunPages={fetchRunPages}
                                     onFetchRunFindings={fetchRunFindings}
                                     focusFindingId={String(focusRunId ?? '') === String(run.id) ? focusFindingId : null}
@@ -3582,6 +3653,57 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
                             </button>
                         </div>
                     </>
+                )}
+            </ActionDialog>
+
+            <ActionDialog
+                isOpen={dismissTarget !== null}
+                onClose={handleDismissCancel}
+                closeDisabled={dismissInFlight}
+                titleId="wiki-run-dismiss-title"
+                descriptionId="wiki-run-dismiss-description"
+                initialFocusRef={dismissCancelRef}
+                returnFocusRef={dismissTriggerRef}
+                size="xs"
+            >
+                {dismissTarget && (
+                    <div data-run-dismiss-dialog>
+                        <h2 id="wiki-run-dismiss-title" className="mb-4 text-base font-semibold text-slate-900">
+                            {tw.run_dismiss_confirm_title ?? 'Fjerne kjøringen fra oversikten?'}
+                        </h2>
+                        <div id="wiki-run-dismiss-description">
+                            <p className="break-all text-base font-medium leading-6 text-slate-800">
+                                {dismissTarget.source_document_filename}
+                            </p>
+                            <p className="mt-2 text-base leading-6 text-slate-600">
+                                {tw.run_dismiss_confirm_body ?? 'Kjøringen fjernes fra Kjøringer. Wiki-artikler, kildedokumentet og historiske data beholdes.'}
+                            </p>
+                        </div>
+                        {dismissError && (
+                            <p role="alert" data-run-dismiss-error className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-base leading-6 text-rose-800">
+                                {dismissError}
+                            </p>
+                        )}
+                        <div className="mt-5 flex flex-wrap justify-end gap-3">
+                            <button
+                                ref={dismissCancelRef}
+                                type="button"
+                                onClick={handleDismissCancel}
+                                aria-disabled={dismissInFlight || undefined}
+                                className="inline-flex h-11 items-center rounded-full border border-slate-300 px-4 text-base font-semibold leading-6 text-slate-600 transition hover:border-slate-400 hover:text-slate-900 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                            >
+                                {tw.run_dismiss_cancel_button ?? 'Avbryt'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleDismissConfirm}
+                                aria-disabled={dismissInFlight || undefined}
+                                className={`inline-flex h-11 items-center rounded-full px-4 text-base font-semibold leading-6 transition aria-disabled:cursor-not-allowed aria-disabled:opacity-50 ${PRIMARY_COLOURS}`}
+                            >
+                                {tw.run_dismiss_confirm_button ?? 'Fjern fra oversikten'}
+                            </button>
+                        </div>
+                    </div>
                 )}
             </ActionDialog>
         </div>
@@ -3747,6 +3869,8 @@ const FINDING_STATUS_STYLES = {
     approved: 'bg-emerald-100 text-emerald-700',
     approved_edited: 'bg-emerald-100 text-emerald-700',
     rejected: 'bg-slate-100 text-slate-700',
+    // A claim finding whose deviation a reviewer explicitly accepted — handled, like the others.
+    accepted_deviation: 'bg-emerald-100 text-emerald-700',
     // Voluntary claim QA signals (v0.10, docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat —
     // v0.10") — deliberately the same neutral sky tone as best-practice suggestions, never the
     // rose/critical styling reserved for a genuinely blocking (requires_action) technical finding.
