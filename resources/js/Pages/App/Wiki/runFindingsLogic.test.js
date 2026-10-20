@@ -7,6 +7,7 @@ import {
     getRunTimelineState,
     getEscalationCopy,
     isRunStalled,
+    getRunCompactSummary,
     isActiveWikiRun,
     formatFindingUserId,
     hasActiveWikiRunForTab,
@@ -796,5 +797,30 @@ describe('resolveWikiBackLink — the label follows the return context, not the 
         assert.equal(resolveWikiBackLink({ back_url: findingUrl }, null).context, 'finding');
         assert.equal(resolveWikiBackLink(null, null, graphOrigin).context, 'graph');
         assert.equal(resolveWikiBackLink(null, null).context, 'wiki');
+    });
+});
+
+describe('getRunCompactSummary — the collapsed Kjøringer row says one short line', () => {
+    test('failed pages are counted as errors, as on run 963', () => {
+        const run = { status: 'escalated', lint_count: 3, findings_open_blocking_count: 0, failed_pages: { count: 1 } };
+
+        assert.equal(getRunCompactSummary(run), '1 feil');
+        assert.equal(getRunCompactSummary({ ...run, failed_pages: { count: 2 } }), '2 feil');
+        assert.equal(getRunCompactSummary({ ...run, failed_pages: { count: 2 } }, { run_compact_failed_pages_many: ':count errors' }), '2 errors');
+    });
+
+    test('an escalation without failed pages needs follow-up — QA findings are never counted here', () => {
+        assert.equal(getRunCompactSummary({ status: 'escalated', lint_count: 5, findings_open_blocking_count: 2 }), 'Krever oppfølging');
+        assert.equal(getRunCompactSummary({ status: 'escalated', failed_pages: null }), 'Krever oppfølging');
+    });
+
+    test('a transient page-planning failure is told apart from any other failure', () => {
+        assert.equal(getRunCompactSummary({ status: 'failed', failed_phase: 'maintainer_decision', transient_failure: true }), 'Midlertidig feil');
+        assert.equal(getRunCompactSummary({ status: 'failed', failed_phase: 'generating_pages' }), 'Stoppet med feil');
+    });
+
+    test('a completed or running run says nothing beyond its badge', () => {
+        assert.equal(getRunCompactSummary({ status: 'completed', lint_count: 2 }), null);
+        assert.equal(getRunCompactSummary({ status: 'generating_pages', expects_automatic_progress: true }), null);
     });
 });

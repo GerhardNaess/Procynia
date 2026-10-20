@@ -55,7 +55,13 @@ test.describe.serial('Kjøringer run row readability', () => {
         const headerTemplate = await header.evaluate((el) => el.style.gridTemplateColumns);
         expect(rowTemplate).toBe(headerTemplate);
 
+        // The progress is part of the run's detail view: hidden while the row is collapsed.
         const desktopTimeline = row.locator('[data-run-progress-row]');
+        await expect(desktopTimeline).toHaveCount(0);
+        const toggle = row.locator('[data-run-main-row] [data-run-details-toggle]');
+        await toggle.focus();
+        await page.keyboard.press('Enter');
+        await expect(toggle).toHaveAttribute('aria-expanded', 'true');
         await expect(desktopTimeline).toBeVisible();
         // Six steps since 5d26caf2 retired the document-owner step, which nothing could reach.
         await expect(desktopTimeline.locator('[data-progress-step]')).toHaveCount(6);

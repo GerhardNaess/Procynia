@@ -39,7 +39,10 @@ test.describe.serial('Kjøringer stalled indicator', () => {
         const mainRow = row.locator('[data-run-main-row]');
         await expect(row).toBeVisible();
         await expect(mainRow.getByText('Ser ut til å stå stille', { exact: true })).toBeVisible();
-        await expect(mainRow.getByText(/Ingen registrert fremdrift siden/)).toBeVisible();
+        // The explanation is in the row's detail panel, not in the collapsed row.
+        await expect(mainRow.getByText(/Ingen registrert fremdrift siden/)).toHaveCount(0);
+        await mainRow.locator('[data-run-details-toggle]').click();
+        await expect(row.locator('[data-run-status-details]').getByText(/Ingen registrert fremdrift siden/)).toBeVisible();
         expect(errors).toEqual([]);
     });
 

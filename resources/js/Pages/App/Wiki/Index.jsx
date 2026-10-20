@@ -1,6 +1,6 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { PRIMARY_ACTION, PRIMARY_COLOURS, SECONDARY_ACTION } from '../../../Support/actionStyles';
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import ActionDialog, { DialogTitleBar } from '../../../Components/App/ActionDialog';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
@@ -9,7 +9,6 @@ import ScrollRegion from '../../../Components/App/ScrollRegion';
 import { focusElement, refocusIfLost } from '../../../Support/focusManagement';
 import { useTransitionAnnouncement } from '../../../Support/statusAnnouncement';
 import { useRunStatusAnnouncements } from './wikiRunAnnouncements';
-import { resolveWikiFindingSecondaryText } from './wikiQualityChecks';
 import { validateSourceFile } from './wikiSourceUpload';
 import {
     RUN_TIMELINE_STEPS,
@@ -18,6 +17,7 @@ import {
     getEscalationCopy,
     getTransientFailureCopy,
     isRunStalled,
+    getRunCompactSummary,
     formatFindingUserId,
     isActiveWikiRun,
     hasActiveWikiRunForTab,
@@ -40,7 +40,11 @@ function formatTime(value, locale) {
 }
 
 const BADGE = 'inline-flex items-center rounded-full px-2.5 py-0.5 text-base font-semibold leading-5 whitespace-nowrap';
-const RUNS_GRID_TEMPLATE = 'minmax(0,3.5rem) minmax(0,1.1fr) minmax(0,1.9fr) minmax(0,1fr) minmax(0,4rem) minmax(0,4.5rem) minmax(0,7rem) minmax(0,6.5rem) minmax(0,7rem)';
+// Fixed widths only where the content is known (ID, counts, dates, the one action); the status
+// column holds a badge and one short line, so document and status share what is left.
+const RUNS_GRID_TEMPLATE = 'minmax(0,2.5rem) minmax(0,1.3fr) minmax(0,1.7fr) minmax(0,6.5rem) minmax(0,3rem) minmax(0,3rem) minmax(0,5.5rem) minmax(0,5.5rem) minmax(0,8rem)';
+// BADGE never wraps; «Sidestruktur opprettet» must, or it runs into the Sider column.
+const WRAPPING_BADGE = 'inline-flex max-w-full items-center rounded-xl px-2 py-0.5 text-sm font-semibold leading-5 break-words';
 
 // Shared row-action button styles — deliberately distinct from BADGE (status chips: h-6, no
 // border, no hover/focus state) so an action always reads as a clickable control, never as a
@@ -320,24 +324,18 @@ function RunTimeline({ run, tw, ta = {} }) {
     );
 }
 
-function RunProgressRow({ run, tw, ta }) {
-    if (!run || run.status === 'decision_only') {
-        return null;
-    }
+function defaultRunDetailSection(run) {
+    const findings = run.lint_count ?? 0;
+    const needsAttention = (run.findings_open_blocking_count ?? 0) > 0 || ['escalated', 'failed'].includes(run.status);
 
-    return (
-        <div data-run-progress-row className="border-t border-slate-100 bg-slate-50/40 px-4 py-4 lg:px-6">
-            {/* Scrolls sideways on a narrow screen; reachable from the keyboard while it does. */}
-            <ScrollRegion
-                data-progress-scroll-area=""
-                label={(ta.wiki_run_progress_label ?? 'Fremdrift for kjøring :id').replace(':id', String(run.id))}
-                className="min-w-0 max-w-full"
-            >
-                <RunTimeline run={run} tw={tw} ta={ta} />
-            </ScrollRegion>
-        </div>
-    );
+    if (findings > 0 && needsAttention) return 'findings';
+    if ((run.pages_count ?? 0) > 0) return 'pages';
+    if (findings > 0) return 'findings';
+
+    return 'overview';
 }
+
+const CHEVRON_PATH = 'M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z';
 
 function RunListItem({
     run,
@@ -347,7 +345,9 @@ function RunListItem({
     activePanel,
     panelId,
     onCancelClick,
+    onToggleDetails,
     onTogglePanel,
+    onSelectSection,
     runPagesState,
     runFindingsState,
     onRetryMaintainerDecision,
@@ -358,12 +358,42 @@ function RunListItem({
 }) {
     const statusCls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
     const statusBadgeClass = `${BADGE} ${statusCls}`;
-    const runError = run.qa_last_error ?? run.error_message;
+    const seemsStalled = isRunStalled(run);
+    // The collapsed row answers «what is the status» and «does it need follow-up»: the badge and at
+    // most one short line. Everything else is in the row's one detail view.
+    const compactSummary = getRunCompactSummary(run, tw);
+    // activePanel: null (closed) | 'overview' | 'pages' | 'findings' — the last two are the open
+    // view with that section of «Sider og QA-funn» shown.
+    const detailsOpen = activePanel !== null;
+    const documentId = `run-${run.id}-document`;
+
+    const renderStatusCell = () => (
+        <div className="min-w-0 max-w-full space-y-0.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+                <span
+                    className={statusBadgeClass}
+                    title={run.status === 'escalated' ? (run.error_message || run.findings_explanation || undefined) : undefined}
+                >
+                    {ingestStatusLabel(run.status, run.qa_status, tw)}
+                </span>
+                {seemsStalled && (
+                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold leading-5 text-amber-700">
+                        {tw.ingest_activity_stalled ?? 'Ser ut til å stå stille'}
+                    </span>
+                )}
+            </div>
+            {compactSummary && (
+                <p data-run-follow-up className="break-words text-base font-medium leading-5 text-slate-700">
+                    {compactSummary}
+                </p>
+            )}
+        </div>
+    );
 
     const renderDecisionBadge = () => {
         if (run.maintainer_decision_status === 'applied') {
             return (
-                <span className={`${BADGE} max-w-full whitespace-normal break-words bg-emerald-100 px-2 py-0.5 text-sm leading-5 text-emerald-700`}>
+                <span className={`${WRAPPING_BADGE} bg-emerald-100 text-emerald-700`}>
                     {tw.run_decision_applied ?? 'Sidestruktur opprettet'}
                 </span>
             );
@@ -371,7 +401,7 @@ function RunListItem({
 
         if (run.maintainer_decision_status === 'pending') {
             return (
-                <span className={`${BADGE} max-w-full whitespace-normal break-words bg-slate-100 px-2 py-0.5 text-sm leading-5 text-slate-500`}>
+                <span className={`${WRAPPING_BADGE} bg-slate-100 text-slate-600`}>
                     {tw.run_decision_pending ?? 'Venter'}
                 </span>
             );
@@ -380,6 +410,7 @@ function RunListItem({
         return <span className="text-slate-500">—</span>;
     };
 
+    // The counts open the same detail view as the chevron, on their own section.
     const renderPagesCell = (compact = false) => {
         if (run.pages_count > 0) {
             return (
@@ -389,16 +420,11 @@ function RunListItem({
                     aria-expanded={activePanel === 'pages'}
                     aria-controls={panelId}
                     aria-label={(ta.wiki_run_pages_toggle ?? 'Vis :count berørte Wiki-sider').replace(':count', String(run.pages_count))}
-                    className={`inline-flex min-w-[2.75rem] items-center justify-center gap-1 rounded-md px-2 py-1 font-semibold text-violet-700 transition hover:bg-violet-50 hover:text-violet-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${compact ? 'text-sm' : ''}`}
+                    className={`inline-flex items-center gap-1 rounded-md py-1 font-semibold text-violet-700 transition hover:bg-violet-50 hover:text-violet-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${compact ? 'pr-2 text-sm' : 'min-w-[2.75rem] justify-center px-2'}`}
                 >
                     {run.pages_count}
-                    <svg
-                        className={`h-3.5 w-3.5 transition-transform ${activePanel === 'pages' ? 'rotate-180' : ''}`}
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        aria-hidden="true"
-                    >
-                        <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
+                    <svg className={`h-3.5 w-3.5 transition-transform ${activePanel === 'pages' ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path fillRule="evenodd" d={CHEVRON_PATH} clipRule="evenodd" />
                     </svg>
                 </button>
             );
@@ -425,16 +451,11 @@ function RunListItem({
                             .replace(':total', run.lint_count)
                             .replace(':blocking', run.findings_open_blocking_count)
                         : undefined}
-                    className={`inline-flex min-w-[2.75rem] items-center justify-center gap-1 rounded-md px-2 py-1 font-semibold transition focus:outline-none focus-visible:ring-2 ${findingsCountToneClass(run)} ${compact ? 'text-sm' : ''}`}
+                    className={`inline-flex items-center gap-1 rounded-md py-1 font-semibold transition focus:outline-none focus-visible:ring-2 ${findingsCountToneClass(run)} ${compact ? 'pr-2 text-sm' : 'min-w-[2.75rem] justify-center px-2'}`}
                 >
                     {run.lint_count}
-                    <svg
-                        className={`h-3.5 w-3.5 transition-transform ${activePanel === 'findings' ? 'rotate-180' : ''}`}
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        aria-hidden="true"
-                    >
-                        <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
+                    <svg className={`h-3.5 w-3.5 transition-transform ${activePanel === 'findings' ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path fillRule="evenodd" d={CHEVRON_PATH} clipRule="evenodd" />
                     </svg>
                 </button>
             );
@@ -443,37 +464,54 @@ function RunListItem({
         return <span className="text-slate-600" title={tw.runs_findings_none ?? 'Ingen funn'}>0</span>;
     };
 
-    const renderActionCell = (compact = false) => {
-        if (run.can_cancel) {
-            return (
+    // «Vis detaljer» is the row's one way into its detail view (the Sider/Funn counts open it on
+    // their own section).
+    const renderDetailsButton = () => (
+        <button
+            type="button"
+            data-run-details-toggle
+            onClick={() => onToggleDetails(run)}
+            aria-expanded={detailsOpen}
+            aria-controls={panelId}
+            aria-describedby={run.source_id ? documentId : undefined}
+            className="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold leading-5 text-slate-700 transition hover:border-violet-300 hover:text-violet-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:ring-offset-1"
+        >
+            {detailsOpen
+                ? (tw.run_details_button_hide ?? 'Skjul detaljer')
+                : (tw.run_details_button_show ?? 'Vis detaljer')}
+        </button>
+    );
+
+    const renderActionCell = () => (
+        <div className="flex max-w-full flex-col items-end gap-1.5">
+            {run.can_cancel && (
                 <button
                     type="button"
                     onClick={(event) => onCancelClick(run, event.currentTarget)}
-                    aria-describedby={`run-${run.id}-document`}
-                    className={`${ACTION_BUTTON_DESTRUCTIVE_WRAP} ${compact ? 'text-sm' : 'text-sm'} leading-5`}
+                    aria-describedby={documentId}
+                    className={`${ACTION_BUTTON_DESTRUCTIVE_WRAP} text-sm leading-5`}
                 >
                     {tw.run_cancel_button ?? 'Avbryt kjøring'}
                 </button>
-            );
-        }
-
-        return <span aria-hidden="true" className="text-slate-500">—</span>;
-    };
+            )}
+            {renderDetailsButton()}
+        </div>
+    );
 
     const documentName = run.source_document_filename ?? '—';
 
     return (
-        <div data-run-item data-run-id={run.id} className="border-b border-slate-200 last:border-b-0">
+        <div data-run-item data-run-id={run.id} data-run-open={detailsOpen || undefined} className="border-b border-slate-200 last:border-b-0">
             <div
                 data-run-main-row
-                className="hidden items-center gap-x-4 px-6 py-5 lg:grid"
+                className={`hidden items-center gap-x-3 px-6 py-2.5 lg:grid ${detailsOpen ? 'bg-slate-50/70' : ''}`}
                 style={{ gridTemplateColumns: RUNS_GRID_TEMPLATE }}
             >
                 <div className="min-w-0 text-right text-sm text-slate-600 tabular-nums">{run.id}</div>
                 <div className="min-w-0">
                     {run.source_id ? (
                         <Link
-                            id={`run-${run.id}-document`}
+                            id={documentId}
                             href="/app/wiki?tab=sources"
                             className="block truncate text-sm font-medium text-slate-900 hover:text-violet-700 hover:underline"
                             title={documentName}
@@ -483,44 +521,12 @@ function RunListItem({
                     ) : (
                         <span className="text-slate-500">—</span>
                     )}
-                    {run.status === 'failed' && runError && !(run.failed_phase === 'maintainer_decision' && run.transient_failure) && (
-                        <p className="mt-1 break-words text-sm leading-5 text-rose-700" title={runError}>
-                            {runError}
-                        </p>
-                    )}
                 </div>
                 <div className="min-w-0 max-w-full">
-                    <div className="min-w-0 max-w-full space-y-1.5">
-                        <span
-                            className={statusBadgeClass}
-                            title={run.status === 'escalated' ? (run.error_message || run.findings_explanation || undefined) : undefined}
-                        >
-                            {ingestStatusLabel(run.status, run.qa_status, tw)}
-                        </span>
-                        <div className="min-w-0 max-w-full">
-                            <RunActivityBlock
-                                run={run}
-                                tw={tw}
-                                locale={locale}
-                                onOpenFindings={(targetRun) => onTogglePanel(targetRun, 'findings', (targetRun.lint_count ?? 0) > 0)}
-                                onRetryMaintainerDecision={onRetryMaintainerDecision}
-                                onRetryFailedPages={onRetryFailedPages}
-                            />
-                        </div>
-                    </div>
+                    {renderStatusCell()}
                 </div>
                 <div className="min-w-0 max-w-full">
-                    {run.maintainer_decision_status === 'applied' ? (
-                        <span className={`${BADGE} max-w-full whitespace-normal break-words bg-emerald-100 px-2 py-0.5 text-sm leading-5 text-emerald-700`}>
-                            {tw.run_decision_applied ?? 'Sidestruktur opprettet'}
-                        </span>
-                    ) : run.maintainer_decision_status === 'pending' ? (
-                        <span className={`${BADGE} max-w-full whitespace-normal break-words bg-slate-100 px-2 py-0.5 text-sm leading-5 text-slate-500`}>
-                            {tw.run_decision_pending ?? 'Venter'}
-                        </span>
-                    ) : (
-                        <span className="text-slate-500">—</span>
-                    )}
+                    {renderDecisionBadge()}
                 </div>
                 <div className="text-center text-sm font-semibold tabular-nums text-violet-700">
                     {renderPagesCell()}
@@ -539,9 +545,9 @@ function RunListItem({
                 </div>
             </div>
 
-            <div data-run-mobile-card className="space-y-4 px-4 py-4 lg:hidden">
-                <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1 space-y-1">
+            <div data-run-mobile-card className={`space-y-3 px-4 py-3 lg:hidden ${detailsOpen ? 'bg-slate-50/70' : ''}`}>
+                <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
                             <span>ID</span>
                             <span className="font-mono text-sm text-slate-600 tabular-nums">{run.id}</span>
@@ -558,77 +564,112 @@ function RunListItem({
                             <span className="text-sm text-slate-500">—</span>
                         )}
                     </div>
-                    <div className="shrink-0">
-                        {renderActionCell(true)}
-                    </div>
+                    <div className="shrink-0">{renderActionCell()}</div>
                 </div>
 
-                <div className="space-y-3">
-                    <div className="min-w-0 max-w-full space-y-1.5">
-                        <span
-                            className={statusBadgeClass}
-                            title={run.status === 'escalated' ? (run.error_message || run.findings_explanation || undefined) : undefined}
-                        >
-                            {ingestStatusLabel(run.status, run.qa_status, tw)}
-                        </span>
-                        <div className="min-w-0 max-w-full">
-                            <RunActivityBlock
-                                run={run}
-                                tw={tw}
-                                locale={locale}
-                                onOpenFindings={(targetRun) => onTogglePanel(targetRun, 'findings', (targetRun.lint_count ?? 0) > 0)}
-                                onRetryMaintainerDecision={onRetryMaintainerDecision}
-                                onRetryFailedPages={onRetryFailedPages}
-                            />
-                        </div>
-                    </div>
+                {renderStatusCell()}
 
-                    <div className="grid grid-cols-2 gap-3 text-sm leading-5 text-slate-600">
-                        <div className="min-w-0">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_decision ?? 'Beslutning'}</div>
-                            <div className="mt-1">{renderDecisionBadge()}</div>
-                        </div>
-                        <div className="min-w-0 text-center">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_pages ?? 'Sider'}</div>
-                            <div className="mt-1">{renderPagesCell(true)}</div>
-                        </div>
-                        <div className="min-w-0 text-center">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_lint ?? 'Funn'}</div>
-                            <div className="mt-1">{renderFindingsCell(true)}</div>
-                        </div>
-                        <div className="min-w-0">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_created ?? 'Opprettet'}</div>
-                            <div className="mt-1">{formatDate(run.created_at, locale)}</div>
-                        </div>
-                        <div className="min-w-0">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_finished ?? 'Fullført'}</div>
-                            <div className="mt-1">{run.finished_at ? formatDate(run.finished_at, locale) : '—'}</div>
-                        </div>
+                <dl className="grid grid-cols-3 gap-x-3 gap-y-2 text-sm leading-5 text-slate-600">
+                    <div className="min-w-0">
+                        <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_decision ?? 'Beslutning'}</dt>
+                        <dd className="mt-1">{renderDecisionBadge()}</dd>
                     </div>
-                </div>
+                    <div className="min-w-0">
+                        <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_pages ?? 'Sider'}</dt>
+                        <dd className="mt-1">{renderPagesCell(true)}</dd>
+                    </div>
+                    <div className="min-w-0">
+                        <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_lint ?? 'Funn'}</dt>
+                        <dd className="mt-1">{renderFindingsCell(true)}</dd>
+                    </div>
+                    <div className="min-w-0">
+                        <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_created ?? 'Opprettet'}</dt>
+                        <dd className="mt-1">{formatDate(run.created_at, locale)}</dd>
+                    </div>
+                    <div className="col-span-2 min-w-0">
+                        <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_finished ?? 'Fullført'}</dt>
+                        <dd className="mt-1">{run.finished_at ? formatDate(run.finished_at, locale) : '—'}</dd>
+                    </div>
+                </dl>
             </div>
 
-            <RunProgressRow run={run} tw={tw} ta={ta} />
+            {detailsOpen && (
+                <div
+                    id={panelId}
+                    data-run-detail-panel
+                    className="divide-y divide-slate-200 border-t border-slate-200 bg-slate-50/70 px-4 lg:px-6"
+                >
+                    <RunStatusFollowUp
+                        run={run}
+                        tw={tw}
+                        locale={locale}
+                        headingId={`${panelId}-status`}
+                        onRetryMaintainerDecision={onRetryMaintainerDecision}
+                        onRetryFailedPages={onRetryFailedPages}
+                    />
 
-            {activePanel !== null && (
-                <div data-run-detail-panel className="border-t border-slate-100 bg-slate-50/70 px-4 py-4 lg:px-6">
-                    {activePanel === 'pages' ? (
-                        <RunAffectedPagesPanel
-                            panelId={panelId}
-                            state={runPagesState[run.id]}
-                            onRetry={() => onFetchRunPages(run.id)}
-                            tw={tw}
-                        />
-                    ) : (
-                        <RunFindingsPanel
-                            panelId={panelId}
-                            state={runFindingsState[run.id]}
-                            onRetry={() => onFetchRunFindings(run.id)}
-                            tw={tw}
-                            ta={ta}
-                            locale={locale}
-                            focusFindingId={focusFindingId}
-                        />
+                    {run.status !== 'decision_only' && (
+                        <section data-run-progress-row aria-labelledby={`${panelId}-progress`} className="py-4">
+                            <h3 id={`${panelId}-progress`} className="mb-2 text-base font-semibold leading-6 text-slate-900">
+                                {tw.run_detail_progress_heading ?? 'Fremdrift'}
+                            </h3>
+                            {/* Scrolls sideways on a narrow screen; reachable from the keyboard while it does. */}
+                            <ScrollRegion
+                                data-progress-scroll-area=""
+                                label={(ta.wiki_run_progress_label ?? 'Fremdrift for kjøring :id').replace(':id', String(run.id))}
+                                className="min-w-0 max-w-full"
+                            >
+                                <RunTimeline run={run} tw={tw} ta={ta} />
+                            </ScrollRegion>
+                        </section>
+                    )}
+
+                    {(run.pages_count > 0 || run.lint_count > 0) && (
+                        <section data-run-pages-findings aria-labelledby={`${panelId}-sections`} className="space-y-3 py-4">
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                                <h3 id={`${panelId}-sections`} className="text-base font-semibold leading-6 text-slate-900">
+                                    {tw.run_detail_sections_heading ?? 'Sider og QA-funn'}
+                                </h3>
+                                <div className="flex flex-wrap gap-2">
+                                    {[
+                                        ['pages', tw.runs_col_pages ?? 'Sider', run.pages_count],
+                                        ['findings', tw.runs_col_lint ?? 'Funn', run.lint_count],
+                                    ].map(([section, label, count]) => (
+                                        <button
+                                            key={section}
+                                            type="button"
+                                            data-run-section={section}
+                                            onClick={() => onSelectSection(run, section)}
+                                            aria-pressed={activePanel === section}
+                                            aria-disabled={count > 0 ? undefined : true}
+                                            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 text-base font-semibold leading-6 text-slate-700 transition hover:border-violet-300 hover:text-violet-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 aria-pressed:border-violet-300 aria-pressed:bg-violet-50 aria-pressed:text-violet-700 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                                        >
+                                            {label}
+                                            <span className="tabular-nums">{count}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            {activePanel === 'pages' && (
+                                <RunAffectedPagesPanel
+                                    panelId={`${panelId}-pages`}
+                                    state={runPagesState[run.id]}
+                                    onRetry={() => onFetchRunPages(run.id)}
+                                    tw={tw}
+                                />
+                            )}
+                            {activePanel === 'findings' && (
+                                <RunFindingsPanel
+                                    panelId={`${panelId}-findings`}
+                                    state={runFindingsState[run.id]}
+                                    onRetry={() => onFetchRunFindings(run.id)}
+                                    tw={tw}
+                                    ta={ta}
+                                    locale={locale}
+                                    focusFindingId={focusFindingId}
+                                />
+                            )}
+                        </section>
                     )}
                 </div>
             )}
@@ -642,166 +683,136 @@ const FAILED_PAGES_KIND_COPY = {
     plan_defect: ['run_failed_pages_kind_plan_defect', 'Feilen skyldes sideplanen eller kildegrunnlaget, ikke et midlertidig problem. Et nytt forsøk ville gitt samme resultat, og tilbys derfor ikke.'],
 };
 
-// Arbeidspakke A4: pages a failed or partially completed run could not generate. The failure kind
-// and whether the retry may be offered both come from the backend
-// (EnterpriseWikiPageGenerationFailureRecoveryService) — never derived here.
-function FailedPagesBlock({ failedPages, tw, onRetry }) {
-    if (!failedPages || !failedPages.count) return null;
+const RUN_DETAIL_ACTION_BUTTON = 'inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-base font-semibold leading-6 text-violet-700 transition hover:border-violet-400 hover:bg-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400';
 
-    const [kindKey, kindFallback] = FAILED_PAGES_KIND_COPY[failedPages.failure_kind] ?? FAILED_PAGES_KIND_COPY.unknown;
-
-    return (
-        <div className="min-w-0 max-w-full space-y-1 break-words" data-run-failed-pages={failedPages.count}>
-            <p className="break-words text-base font-medium leading-6 text-rose-800">
-                {(tw.run_failed_pages_summary ?? ':count side(r) kunne ikke genereres og er ufullstendige.').replace(':count', String(failedPages.count))}
-            </p>
-            <p className="break-words text-base leading-6 text-slate-600">
-                {tw[kindKey] ?? kindFallback}
-            </p>
-            {failedPages.can_retry && onRetry && (
-                <>
-                    <p className="break-words text-base leading-6 text-slate-600">
-                        {tw.run_failed_pages_retry_hint ?? 'Bare sidene som feilet, genereres på nytt. Sider som allerede er generert, endres ikke.'}
-                    </p>
-                    <button
-                        type="button"
-                        onClick={onRetry}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-base font-semibold leading-6 text-violet-700 transition hover:border-violet-400 hover:bg-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
-                    >
-                        {tw.run_retry_failed_pages_button ?? 'Prøv igjen for feilede sider'}
-                    </button>
-                </>
-            )}
-        </div>
-    );
-}
-
-function RunActivityBlock({ run, tw, locale, onOpenFindings = null, onRetryMaintainerDecision = null, onRetryFailedPages = null }) {
+/**
+ * «Status og oppfølging» in a run's detail view: what happened, what needs follow-up, and the
+ * actions for it. Every sentence comes from data the row already carries (escalation reasons,
+ * failed_pages, findings counts, the transient-failure classification) — nothing is derived anew.
+ * Raw error text sits behind «Vis tekniske detaljer» unless it is the only explanation there is.
+ */
+function RunStatusFollowUp({ run, tw, locale, headingId, onRetryMaintainerDecision = null, onRetryFailedPages = null }) {
     const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
 
-    if (!run) return null;
-
-    const isActive = isActiveWikiRun(run);
     const isEscalated = run.status === 'escalated';
-    const progressAt = run.last_progress_at ?? run.updated_at ?? run.started_at ?? run.created_at;
-    // Deliberately NOT based on isActive/isActiveWikiRun: whether a run is worth polling and
-    // whether it looks stuck are different questions, and the backend flag decides the second.
-    const seemsStalled = isRunStalled(run);
-    const statusSetAt = progressAt
-        ? `${formatDate(progressAt, locale)} ${formatTime(progressAt, locale) ?? ''}`.trim()
-        : null;
-    // Escalated runs already show "Eskalert" as the row's main status badge — repeating the same
-    // word here as a second (and, for the plain-text detail line, third) chip left the user with
-    // no explanation of why. Route this one status straight to a real, data-backed explanation
-    // instead of re-rendering the activity pill/detail pair used by every other status.
-    const escalation = isEscalated ? getEscalationCopy(run, tw) : null;
-
-    // Wiki run-592: a maintainer_decision failure classified as a documented transient
-    // HTTP/network condition gets its own explanation block — friendly primary message, raw
-    // exception text only behind a "technical details" toggle, and a retry action gated on the
-    // backend's own eligibility check (run.can_retry_maintainer_decision), never derived here.
     const isTransientMaintainerFailure = run.status === 'failed'
         && run.failed_phase === 'maintainer_decision'
         && !!run.transient_failure;
+    const escalation = isEscalated ? getEscalationCopy(run, tw) : null;
     const transientFailure = isTransientMaintainerFailure ? getTransientFailureCopy(run, tw) : null;
+    const failedPages = run.failed_pages?.count ? run.failed_pages : null;
+    const blockingCount = run.findings_open_blocking_count ?? 0;
+    const totalFindings = run.lint_count ?? 0;
+    const seemsStalled = isRunStalled(run);
+    const progressAt = run.last_progress_at ?? run.updated_at ?? run.started_at ?? run.created_at;
+
+    // Each line: [tone, text]. Tone 'primary' is the cause, 'alert' needs action, 'note' explains.
+    const lines = [];
+
+    if (escalation) {
+        lines.push(['primary', escalation.primaryReason]);
+        if (escalation.secondaryReason) lines.push(['note', escalation.secondaryReason]);
+    } else if (transientFailure) {
+        lines.push(['alert', transientFailure.primaryMessage]);
+        lines.push(['note', [transientFailure.failedInPhase, transientFailure.attemptSummary, transientFailure.documentPreservedNote].filter(Boolean).join(' ')]);
+    } else if (run.status === 'failed') {
+        lines.push(['alert', run.qa_last_error ?? run.error_message ?? (tw.run_compact_failed ?? 'Stoppet med feil')]);
+    }
+
+    if (failedPages) {
+        const [kindKey, kindFallback] = FAILED_PAGES_KIND_COPY[failedPages.failure_kind] ?? FAILED_PAGES_KIND_COPY.unknown;
+        lines.push(['alert', `${(tw.run_failed_pages_summary ?? ':count side(r) kunne ikke genereres og er ufullstendige.').replace(':count', String(failedPages.count))} ${tw[kindKey] ?? kindFallback}`]);
+    }
+
+    if (blockingCount > 0) {
+        lines.push(['alert', escalation?.blockingSummary ?? (tw.ingest_activity_escalated_blocking ?? ':count av :total funn er fortsatt åpne og blokkerer fullføring.')
+            .replace(':count', blockingCount)
+            .replace(':total', totalFindings)]);
+    } else if (isEscalated && totalFindings > 0) {
+        lines.push(['note', (tw.run_detail_findings_not_blocking ?? ':count QA-funn er registrert. Ingen av dem blokkerer fullføring.').replace(':count', String(totalFindings))]);
+    } else if (isEscalated && !run.findings_explanation) {
+        // findings_explanation, when present, is already the cause above and says this same thing.
+        lines.push(['note', escalation.blockingSummary]);
+    }
+
+    if (seemsStalled) {
+        lines.push(['warning', (tw.ingest_activity_stalled_explanation ?? 'Ingen registrert fremdrift siden :time. Kjøringen kan vente på en handling og er ikke nødvendigvis feilet.')
+            .replace(':time', `${formatDate(progressAt, locale)} ${formatTime(progressAt, locale) ?? ''}`.trim())]);
+    } else if (!run.finished_at && progressAt && isActiveWikiRun(run)) {
+        lines.push(['note', `${tw.ingest_activity_last_progress ?? 'Siste fremdrift'} ${formatRelativeProgress(progressAt, locale)}`]);
+    }
+
+    if (lines.length === 0) {
+        lines.push(['note', tw.run_detail_no_follow_up ?? 'Ingen oppfølging er nødvendig.']);
+    }
+
+    // Raw text not already shown above, e.g. run 963's qa_last_error behind its friendly escalation.
+    const shownTexts = new Set(lines.map(([, text]) => text));
+    const technicalDetails = [...new Set([run.error_message, run.qa_last_error].filter(Boolean))]
+        .filter((text) => !shownTexts.has(text));
+
+    const toneClass = {
+        primary: 'font-medium text-slate-900',
+        alert: 'font-medium text-rose-800',
+        warning: 'text-amber-800',
+        note: 'text-slate-600',
+    };
+
+    const canRetryFailedPages = failedPages?.can_retry && onRetryFailedPages;
+    const canRetryDecision = isTransientMaintainerFailure && run.can_retry_maintainer_decision && onRetryMaintainerDecision;
 
     return (
         // Not a live region (A11Y-112): it was re-rendered on every 5 s poll. A status change is said
         // once by useRunStatusAnnouncements in the list; the text here is there to be read.
-        <div className="mt-1 min-w-0 max-w-full space-y-0.5" data-run-active={isActive || undefined}>
-            {seemsStalled && (
-                <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold leading-5 text-amber-700">
-                    {tw.ingest_activity_stalled ?? 'Ser ut til å stå stille'}
-                </span>
-            )}
+        <section data-run-status-details aria-labelledby={headingId} className="min-w-0 max-w-full space-y-2 py-4">
+            <h3 id={headingId} className="text-base font-semibold leading-6 text-slate-900">
+                {tw.run_detail_status_heading ?? 'Status og oppfølging'}
+            </h3>
+            <ul className="max-w-3xl space-y-1" data-run-failed-pages={failedPages?.count || undefined}>
+                {lines.map(([tone, text]) => (
+                    <li key={text} className={`break-words text-base leading-6 ${toneClass[tone]}`}>{text}</li>
+                ))}
+            </ul>
 
-            {isEscalated ? (
-                <div className="min-w-0 max-w-full space-y-1 break-words">
-                    <p className="break-words text-base font-medium leading-6 text-amber-800">
-                        {escalation.primaryReason}
-                    </p>
-                    {escalation.secondaryReason && (
-                        <p className="break-words text-base leading-6 text-slate-600">
-                            {escalation.secondaryReason}
-                        </p>
-                    )}
-                    <p className={`break-words text-base leading-6 ${escalation.blockingCount > 0 ? 'text-rose-700' : 'text-slate-600'}`}>
-                        {escalation.blockingSummary}
-                    </p>
-                    {escalation.blockingCount > 0 && onOpenFindings && (
+            {(canRetryFailedPages || canRetryDecision || technicalDetails.length > 0) && (
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1">
+                    {canRetryFailedPages && (
                         <button
                             type="button"
-                            onClick={() => onOpenFindings(run)}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-base font-semibold leading-6 text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                            onClick={(event) => onRetryFailedPages(run, event.currentTarget, 'failed_pages')}
+                            className={RUN_DETAIL_ACTION_BUTTON}
                         >
-                            {tw.ingest_activity_escalated_action ?? 'Åpne funn'}
+                            {tw.run_retry_failed_pages_button ?? 'Prøv igjen for feilede sider'}
                         </button>
                     )}
-                </div>
-            ) : isTransientMaintainerFailure ? (
-                <div className="min-w-0 max-w-full space-y-1 break-words">
-                    <p className="break-words text-base font-medium leading-6 text-rose-800">
-                        {transientFailure.primaryMessage}
-                    </p>
-                    <p className="break-words text-base leading-6 text-slate-600">
-                        {transientFailure.failedInPhase}
-                    </p>
-                    {transientFailure.attemptSummary && (
-                        <p className="break-words text-base leading-6 text-slate-600">
-                            {transientFailure.attemptSummary}
-                        </p>
-                    )}
-                    <p className="break-words text-base leading-6 text-slate-600">
-                        {transientFailure.documentPreservedNote}
-                    </p>
-                    {transientFailure.technicalDetails && (
-                        <div>
-                            <button
-                                type="button"
-                                onClick={() => setShowTechnicalDetails((current) => !current)}
-                                aria-expanded={showTechnicalDetails}
-                                className="text-base font-semibold leading-6 text-slate-600 underline decoration-dotted hover:text-slate-800 focus:outline-none"
-                            >
-                                {tw.run_technical_details_toggle ?? 'Vis tekniske detaljer'}
-                            </button>
-                            {showTechnicalDetails && (
-                                <p className="mt-1 break-all text-base leading-6 text-slate-600">
-                                    {transientFailure.technicalDetails}
-                                </p>
-                            )}
-                        </div>
-                    )}
-                    {run.can_retry_maintainer_decision && onRetryMaintainerDecision && (
+                    {canRetryDecision && (
                         <button
                             type="button"
                             onClick={(event) => onRetryMaintainerDecision(run, event.currentTarget)}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-base font-semibold leading-6 text-violet-700 transition hover:border-violet-400 hover:bg-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                            className={RUN_DETAIL_ACTION_BUTTON}
                         >
                             {tw.run_retry_maintainer_decision_button ?? 'Prøv sideplanleggingen på nytt'}
                         </button>
                     )}
+                    {technicalDetails.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={() => setShowTechnicalDetails((current) => !current)}
+                            aria-expanded={showTechnicalDetails}
+                            className="rounded text-base font-semibold leading-6 text-slate-600 underline decoration-dotted underline-offset-2 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                        >
+                            {tw.run_technical_details_toggle ?? 'Vis tekniske detaljer'}
+                        </button>
+                    )}
                 </div>
-            ) : null}
-
-            <FailedPagesBlock
-                failedPages={run.failed_pages}
-                tw={tw}
-                onRetry={onRetryFailedPages ? (event) => onRetryFailedPages(run, event.currentTarget, 'failed_pages') : null}
-            />
-
-            {seemsStalled && (
-                <p className="text-base leading-6 text-amber-700">
-                    {(tw.ingest_activity_stalled_explanation ?? 'Ingen registrert fremdrift siden :time. Kjøringen kan vente på en handling og er ikke nødvendigvis feilet.')
-                        .replace(':time', `${formatDate(progressAt, locale)} ${formatTime(progressAt, locale) ?? ''}`.trim())}
-                </p>
             )}
 
-            {statusSetAt && (
-                <p className="text-base leading-6 text-slate-600">
-                    {(tw.ingest_activity_last_progress ?? 'Siste fremdrift')} {formatRelativeProgress(progressAt, locale)}
+            {showTechnicalDetails && technicalDetails.map((text) => (
+                <p key={text} className="max-w-3xl break-all rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-sm leading-6 text-slate-700">
+                    {text}
                 </p>
-            )}
-        </div>
+            ))}
+        </section>
     );
 }
 
@@ -3149,8 +3160,8 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
         })),
         ta.wiki_run_status_changed ?? 'Kjøring for :name: :status.',
     );
-    // expandedRuns[runId] is null (closed) | 'pages' | 'findings' — only one panel is ever shown
-    // per row, so switching panels never stacks two overlapping detail areas under the same row.
+    // expandedRuns[runId] is null (closed) | 'overview' | 'pages' | 'findings'. Anything but null is
+    // the row's one detail view open; 'pages'/'findings' says which part of «Sider og QA-funn» it shows.
     const [expandedRuns, setExpandedRuns] = useState({});
     const [runPagesState, setRunPagesState] = useState({});
     const [runFindingsState, setRunFindingsState] = useState({});
@@ -3259,11 +3270,7 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
             .catch(() => setRunFindingsState((current) => ({ ...current, [runId]: { status: 'error', data: null, fetchedForLintCount: lintCount } })));
     };
 
-    const togglePanel = (run, panel, hasData) => {
-        if (!hasData) return;
-
-        const currentPanel = expandedRuns[run.id] ?? null;
-        const nextPanel = currentPanel === panel ? null : panel;
+    const openPanel = (run, nextPanel) => {
         setExpandedRuns((current) => ({ ...current, [run.id]: nextPanel }));
 
         if (nextPanel === 'pages' && !runPagesState[run.id]) {
@@ -3276,6 +3283,33 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
         // snapshot from before verification/QA produced its real findings.
         if (nextPanel === 'findings' && runFindingsState[run.id]?.fetchedForLintCount !== run.lint_count) {
             fetchRunFindings(run.id, run.lint_count);
+        }
+    };
+
+    // The Sider/Funn counts in the row: open the detail view on that section, or close it again
+    // when it already shows it.
+    const togglePanel = (run, panel, hasData) => {
+        if (!hasData) return;
+
+        openPanel(run, (expandedRuns[run.id] ?? null) === panel ? null : panel);
+    };
+
+    // The row's chevron: opens on the findings when they need attention, otherwise on the pages.
+    const toggleDetails = (run) => {
+        if ((expandedRuns[run.id] ?? null) !== null) {
+            openPanel(run, null);
+            return;
+        }
+
+        openPanel(run, defaultRunDetailSection(run));
+    };
+
+    // The section switch inside an open detail view never closes it.
+    const selectSection = (run, section) => {
+        const count = section === 'pages' ? run.pages_count : run.lint_count;
+
+        if ((count ?? 0) > 0) {
+            openPanel(run, section);
         }
     };
 
@@ -3411,7 +3445,7 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
                 <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                     {/* Column heads for the eye; each row also states its own labels on small
                         screens. Hidden from assistive technology, which reads the rows as they are. */}
-                    <div data-run-header aria-hidden="true" className="hidden items-center gap-x-4 border-b border-slate-200 bg-slate-50/70 px-6 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600 lg:grid" style={{ gridTemplateColumns: RUNS_GRID_TEMPLATE }}>
+                    <div data-run-header aria-hidden="true" className="hidden items-center gap-x-3 border-b border-slate-200 bg-slate-50/70 px-6 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600 lg:grid" style={{ gridTemplateColumns: RUNS_GRID_TEMPLATE }}>
                         <div className="text-right">{tw.runs_col_id ?? 'ID'}</div>
                         <div>{tw.runs_col_document ?? 'Dokument'}</div>
                         <div>{tw.runs_col_status ?? 'Status'}</div>
@@ -3437,7 +3471,9 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
                                     activePanel={activePanel}
                                     panelId={panelId}
                                     onCancelClick={handleCancelClick}
+                                    onToggleDetails={toggleDetails}
                                     onTogglePanel={togglePanel}
+                                    onSelectSection={selectSection}
                                     runPagesState={runPagesState}
                                     runFindingsState={runFindingsState}
                                     onRetryMaintainerDecision={handleRetryClick}
@@ -3622,7 +3658,7 @@ function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
     return (
         <div id={panelId} className="space-y-3">
             <div>
-                <h3 className="text-lg font-semibold text-slate-800">{tw.runs_pages_heading ?? 'Berørte Wiki-sider'}</h3>
+                <h4 className="text-base font-semibold text-slate-800">{tw.runs_pages_heading ?? 'Berørte Wiki-sider'}</h4>
                 <p className="mt-1 text-base leading-6 text-slate-600">{summaryParts.join(' · ')}</p>
                 {stallExplanation && (
                     <p className="mt-1 text-base font-medium leading-6 text-amber-700">{stallExplanation}</p>
@@ -3687,7 +3723,7 @@ function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
 // only — the shared BADGE constant above (h-6/text-xs) stays untouched everywhere else in this
 // file (Kjøringer status chips, Quality tab, page-type/source badges, etc.) so this fix stays
 // scoped to the Funn/Wiki-side/Alvorlighet/Status/Handling list, not a site-wide badge redesign.
-const FINDING_BADGE = 'inline-flex items-center rounded-full px-3 py-1.5 text-base font-semibold leading-6 whitespace-nowrap';
+const FINDING_BADGE = 'inline-flex max-w-full items-center rounded-full px-2.5 py-0.5 text-base font-semibold leading-5';
 
 const FINDING_SEVERITY_STYLES = {
     critical: 'bg-rose-100 text-rose-700',
@@ -3718,32 +3754,6 @@ const FINDING_STATUS_STYLES = {
     flagged_for_review: 'bg-sky-100 text-sky-700',
 };
 
-// Claim-based findings (EnterpriseWikiClaimFindingExplainer categories) carry a concrete claim
-// text, source excerpts, and a system-recommendation/user-decision split lint/best-practice
-// findings don't have — only these get the expandable detail row and the 3-way blocking display.
-const CLAIM_FINDING_CATEGORIES = new Set([
-    'undocumented_or_incorrect_claim',
-    'possible_content_deviation',
-    'changed_normative_meaning',
-    'technical_uncertainty',
-]);
-
-function findingBlockingStatusLabel(finding, tw) {
-    if (finding.user_decision === 'blocking') {
-        return tw.claim_finding_user_decision_blocking ?? 'Bruker har valgt: Blokkerer godkjenning';
-    }
-    if (finding.user_decision === 'not_blocking') {
-        return tw.claim_finding_user_decision_not_blocking ?? 'Bruker har valgt: Godkjenn avvik / ikke blokker';
-    }
-    if (finding.requires_decision) {
-        return tw.claim_finding_user_decision_pending ?? 'Avventer vurdering';
-    }
-
-    return finding.blocks_run
-        ? (tw.runs_findings_blocks_run ?? 'Blokkerer kjøringen')
-        : (tw.runs_findings_blocks_none ?? 'Blokkerer ikke');
-}
-
 const FINDINGS_LOCAL_FILTERS = ['all', 'open', 'blocking', 'resolved', 'informative'];
 
 function findingsLocalFilterLabel(filterKey, tw) {
@@ -3761,14 +3771,18 @@ function findingsLocalFilterLabel(filterKey, tw) {
  * RunAffectedPagesPanel (Del 7); shares the same expansion row, switching in as an alternative to
  * it rather than stacking a second independent panel. Local status/blocking filters apply only
  * within this open panel and never touch the Kjøringer tab's own filter bar.
+ *
+ * One compact row per finding: what it is, where, how serious, its status and the way to handle
+ * it. The explanation, the claim, the source excerpts and the decision live in the behandlings-
+ * visning the row links to (Show.jsx, ?claim_id= / ?finding_id=), so none of it is repeated here;
+ * nor is the run's own explanation, which «Status og oppfølging» above already gives.
  */
 function RunFindingsPanel({ panelId, state, onRetry, tw, ta = {}, locale, focusFindingId = null }) {
     // Defaults to 'open' so a run with many historically-resolved findings doesn't bury the
     // ones that still need attention — 'resolved' (Løst) remains one click away via the filter
     // chips below, unchanged.
     const [localFilter, setLocalFilter] = useState('open');
-    const [expandedFindingIds, setExpandedFindingIds] = useState(() => new Set());
-    // The row a "Tilbake til funn" deep link points at: expanded, scrolled to, and briefly ringed.
+    // The row a "Tilbake til funn" deep link points at: scrolled to, focused, and briefly ringed.
     const [focusedRowId, setFocusedRowId] = useState(null);
     const focusRowRef = useRef(null);
     const appliedFocusRef = useRef(null);
@@ -3793,14 +3807,13 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, ta = {}, locale, focusF
 
         appliedFocusRef.current = focusFindingId;
         setLocalFilter((current) => focusedFindingLocalFilter(finding, current));
-        setExpandedFindingIds((current) => new Set(current).add(finding.id));
         setFocusedRowId(finding.id);
     }, [findingsData, focusFindingId]);
 
-    // Scroll only after the row exists in the DOM — the filter change and the expansion above both
-    // have to render first, otherwise the target is still filtered away and there is nothing to
-    // scroll to. The ring is temporary: it marks where the user landed without becoming permanent
-    // UI state that later has to be cleared by hand.
+    // Scroll only after the row exists in the DOM — the filter change above has to render first,
+    // otherwise the target is still filtered away and there is nothing to scroll to. The ring is
+    // temporary: it marks where the user landed without becoming permanent UI state that later
+    // has to be cleared by hand.
     useEffect(() => {
         if (focusedRowId === null || !focusRowRef.current) {
             return undefined;
@@ -3815,19 +3828,6 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, ta = {}, locale, focusF
 
         return () => clearTimeout(timer);
     }, [focusedRowId]);
-
-    const toggleFindingExpanded = (findingId) => {
-        setExpandedFindingIds((prev) => {
-            const next = new Set(prev);
-            if (next.has(findingId)) {
-                next.delete(findingId);
-            } else {
-                next.add(findingId);
-            }
-
-            return next;
-        });
-    };
 
     if (!state || state.status === 'loading') {
         return (
@@ -3854,212 +3854,110 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, ta = {}, locale, focusF
     }
 
     const findings = state.data?.findings ?? [];
-    const summary = state.data?.summary ?? {};
     const visibleFindings = findings.filter((f) => matchesFindingsLocalFilter(f, localFilter));
 
     return (
-        <div id={panelId} className="space-y-4">
-            <div className="space-y-1.5">
-                <h3 className="text-lg font-semibold text-slate-800">{tw.runs_findings_heading ?? 'Kvalitetsfunn'}</h3>
-                <p className="text-base leading-6 text-slate-700">
-                    {(tw.runs_findings_total_label ?? ':count funn totalt').replace(':count', summary.total ?? 0)}
-                    {' · '}
-                    {summary.open_blocking > 0 && `${summary.open_blocking} ${tw.runs_findings_open_blocking ?? 'åpne blokkerende'} · `}
-                    {summary.open_qa_review > 0 && `${summary.open_qa_review} ${tw.runs_findings_open_qa_review ?? 'åpne QA-punkter (blokkerer ikke Wiki)'} · `}
-                    {summary.open_non_blocking > 0 && `${summary.open_non_blocking} ${tw.runs_findings_open_non_blocking ?? 'åpne ikke-blokkerende'} · `}
-                    {summary.best_practice_pending > 0 && `${summary.best_practice_pending} ${tw.runs_findings_best_practice_pending_label ?? 'forslag venter på vurdering'} · `}
-                    {summary.resolved > 0 && `${summary.resolved} ${tw.runs_findings_resolved ?? 'løst'} · `}
-                    {summary.informative > 0 && `${summary.informative} ${tw.runs_findings_informative ?? 'informativt'} · `}
-                    {summary.superseded > 0 && `${summary.superseded} ${tw.runs_findings_superseded ?? 'ikke lenger aktuelt'} · `}
-                </p>
-                {summary.explanation && (
-                    <p className="text-base font-medium leading-6 text-slate-700">{summary.explanation}</p>
-                )}
-            </div>
-
+        <div id={panelId} className="space-y-3">
             {/* Filter chips are toggle buttons in a named group; the pressed one is said, not only
-                shown by its dark fill (A11Y-117). */}
+                shown by its dark fill (A11Y-117). Each carries its own count, which replaces the
+                separate summary sentence that repeated the same numbers. */}
             {findings.length > 0 && (
                 <div role="group" aria-label={ta.wiki_findings_filter_label ?? 'Vis funn'} className="flex flex-wrap gap-2">
                     {FINDINGS_LOCAL_FILTERS.map((filterKey) => (
                         <button
                             key={filterKey}
                             type="button"
+                            data-findings-filter={filterKey}
                             aria-pressed={localFilter === filterKey}
                             onClick={() => setLocalFilter(filterKey)}
-                            className={`rounded-full px-4 py-2.5 text-base font-semibold leading-6 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500 ${
+                            className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-base font-semibold leading-6 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500 ${
                                 localFilter === filterKey
                                     ? 'bg-slate-800 text-white'
                                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                             }`}
                         >
                             {findingsLocalFilterLabel(filterKey, tw)}
+                            <span className="tabular-nums">{findings.filter((f) => matchesFindingsLocalFilter(f, filterKey)).length}</span>
                         </button>
                     ))}
                 </div>
             )}
 
             <ScrollRegion label={tw.runs_findings_heading ?? 'Kvalitetsfunn'} edgeRoom={false} className="rounded-xl border border-slate-200 bg-white">
-                <table className="min-w-full divide-y divide-slate-100 text-base leading-6">
+                <table data-run-findings-table className="w-full min-w-[52rem] table-fixed lg:min-w-0 divide-y divide-slate-100 text-base leading-6">
                     <caption className="sr-only">{tw.runs_findings_heading ?? 'Kvalitetsfunn'}</caption>
                     <thead className="bg-slate-50 text-base font-semibold uppercase tracking-wide text-slate-600">
                         <tr className="text-left">
-                            <th scope="col" className="px-4 py-3">{tw.runs_findings_col_finding ?? 'Funn'}</th>
-                            <th scope="col" className="px-4 py-3">{tw.runs_pages_col_page ?? 'Wiki-side'}</th>
-                            <th scope="col" className="px-4 py-3">{tw.quality_col_severity ?? 'Alvorlighet'}</th>
-                            <th scope="col" className="px-4 py-3">{tw.runs_findings_col_status ?? 'Status'}</th>
-                            <th scope="col" className="px-4 py-3 text-right">{tw.runs_pages_col_action ?? 'Handling'}</th>
+                            <th scope="col" className="w-[26%] px-4 py-2.5">{tw.runs_findings_col_finding ?? 'Funn'}</th>
+                            <th scope="col" className="px-4 py-2.5">{tw.runs_pages_col_page ?? 'Wiki-side'}</th>
+                            <th scope="col" className="w-[8.5rem] px-3 py-2.5">{tw.quality_col_severity ?? 'Alvorlighet'}</th>
+                            <th scope="col" className="w-40 px-3 py-2.5">{tw.runs_findings_col_status ?? 'Status'}</th>
+                            <th scope="col" className="w-32 px-2 py-2.5 text-right">{tw.runs_pages_col_action ?? 'Handling'}</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
+                        {visibleFindings.length === 0 && (
+                            <tr>
+                                <td colSpan={5} className="px-4 py-3 text-slate-600">
+                                    {tw.runs_findings_filter_empty ?? 'Ingen funn i dette utvalget.'}
+                                </td>
+                            </tr>
+                        )}
                         {visibleFindings.map((finding) => {
-                            const isClaimFinding = CLAIM_FINDING_CATEGORIES.has(finding.category);
-                            const isExpanded = isClaimFinding && expandedFindingIds.has(finding.id);
                             const isFocused = focusedRowId === finding.id;
+                            const label = finding.category_label || finding.title;
 
                             return (
-                                <Fragment key={finding.id}>
-                                    <tr
-                                        ref={isFocused ? focusRowRef : null}
-                                        className={`align-top text-slate-700 transition-colors duration-500 ${
-                                            isFocused ? 'bg-violet-50 ring-2 ring-inset ring-violet-300' : ''
-                                        }`}
-                                    >
-                                        <td className="max-w-[360px] px-4 py-3">
-                                            <div className="flex items-start gap-2">
-                                                {isClaimFinding && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => toggleFindingExpanded(finding.id)}
-                                                        aria-expanded={isExpanded}
-                                                        aria-label={`${isExpanded
-                                                            ? (tw.claim_finding_collapse_details ?? 'Skjul detaljer')
-                                                            : (tw.claim_finding_expand_details ?? 'Vis detaljer')}: ${(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', formatFindingUserId(finding.id))}`}
-                                                        aria-controls={`finding-${finding.id}-detail`}
-                                                        className="mt-0.5 shrink-0 select-none rounded p-2 text-base leading-6 text-slate-600 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
-                                                    >
-                                                        <span aria-hidden="true">{isExpanded ? '▾' : '▸'}</span>
-                                                    </button>
-                                                )}
-                                                <div className="min-w-0 flex-1 space-y-1">
-                                                    <span className="block font-mono text-sm font-semibold text-slate-600">
-                                                        {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', formatFindingUserId(finding.id))}
-                                                    </span>
-                                                    {finding.category_label && (
-                                                        <span className="inline-flex items-center rounded-full bg-sky-50 px-3 py-1 text-base font-semibold uppercase tracking-wide leading-6 text-sky-800">
-                                                            {finding.category_label}
-                                                        </span>
-                                                    )}
-                                                    <span className="block text-base leading-6 font-semibold text-slate-900">{finding.title}</span>
-                                                    {finding.category === 'best_practice_suggestion'
-                                                        && resolveWikiFindingSecondaryText(finding.title, finding.section_text) && (
-                                                        <span className="block text-base leading-6 text-slate-600">
-                                                            {resolveWikiFindingSecondaryText(finding.title, finding.section_text)}
-                                                        </span>
-                                                    )}
-                                                    <span className="block text-base leading-6 text-slate-600">
-                                                        {finding.category === 'best_practice_suggestion' && (
-                                                            <span className="font-medium text-slate-700">{tw.runs_findings_best_practice_reason_label ?? 'Begrunnelse:'} </span>
-                                                        )}
-                                                        {finding.explanation}
-                                                    </span>
-                                                    {finding.recommended_action && (
-                                                        <span className="block text-base leading-6 text-slate-600">
-                                                            {finding.recommended_action}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="max-w-[240px] px-4 py-3">
-                                            {finding.scope === 'run' ? (
-                                                <span className="text-base leading-6 text-slate-600">{tw.runs_findings_scope_run ?? 'Gjelder hele kjøringen'}</span>
-                                            ) : (
-                                                <span className="block break-words text-base leading-6" title={finding.page_title ?? ''}>{finding.page_title ?? '—'}</span>
-                                            )}
-                                        </td>
-                                        <td className="px-4 py-3">
-                                            <span className={`${FINDING_BADGE} ${FINDING_SEVERITY_STYLES[finding.severity] ?? 'bg-slate-100 text-slate-700'}`}>
-                                                {finding.severity_label}
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-3">
-                                            <div className="space-y-1.5">
-                                                <span className={`${FINDING_BADGE} ${FINDING_STATUS_STYLES[finding.status] ?? 'bg-slate-100 text-slate-700'}`}>
-                                                    {finding.status_label}
-                                                </span>
-                                                {isClaimFinding ? (
-                                                    <>
-                                                        {finding.system_recommends_blocking && (
-                                                            <span className="block text-base leading-6 text-amber-800">
-                                                                {tw.claim_finding_system_recommends_blocking ?? 'Systemet anbefaler blokkering'}
-                                                            </span>
-                                                        )}
-                                                        <span className="block text-base leading-6 text-slate-600">
-                                                            {findingBlockingStatusLabel(finding, tw)}
-                                                        </span>
-                                                    </>
-                                                ) : typeof finding.blocks_run === 'boolean' && (
-                                                    <span className="block text-base leading-6 text-slate-600" title={finding.blocking_reason ?? ''}>
-                                                        {finding.blocks_run
-                                                            ? (tw.runs_findings_blocks_run ?? 'Blokkerer kjøringen')
-                                                            : (tw.runs_findings_blocks_none ?? 'Blokkerer ikke')}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td className="px-4 py-3 text-right whitespace-nowrap">
-                                            {finding.url && finding.action ? (
-                                                <Link
-                                                    href={finding.url}
-                                                    className="inline-flex items-center rounded-lg px-3 py-2 text-base font-semibold leading-6 text-violet-700 underline decoration-violet-300 decoration-2 underline-offset-2 transition hover:bg-violet-50 hover:text-violet-800 hover:decoration-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
-                                                >
-                                                    {finding.action_label}
-                                                </Link>
-                                            ) : (
-                                                <span className="text-base leading-6 text-slate-600">—</span>
-                                            )}
-                                        </td>
-                                    </tr>
-                                    {isExpanded && (
-                                        <tr key={`${finding.id}-detail`} id={`finding-${finding.id}-detail`} className="bg-slate-50/60 text-slate-700">
-                                            <td colSpan={5} className="px-4 py-4">
-                                                <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 text-base leading-6">
-                                                    <div className="font-mono text-sm font-semibold text-slate-600">
-                                                        {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', formatFindingUserId(finding.id))}
-                                                    </div>
-                                                    <div>
-                                                        <span className="font-semibold text-slate-700">
-                                                            {tw.claim_finding_claim_text_label ?? 'Påstand'}:
-                                                        </span>{' '}
-                                                        <span className="text-slate-800">{finding.claim_text || '—'}</span>
-                                                    </div>
-                                                    <div>
-                                                        <span className="font-semibold text-slate-700">
-                                                            {tw.claim_finding_source_excerpt_label ?? 'Kildeutdrag'}:
-                                                        </span>
-                                                        {finding.has_source_excerpt ? (
-                                                            <ul className="mt-2 space-y-2">
-                                                                {finding.source_excerpts.map((ref, index) => (
-                                                                    <li key={index} className="rounded border border-slate-100 bg-slate-50 px-3 py-2">
-                                                                        {ref.page_reference && (
-                                                                            <span className="mr-1 font-medium text-slate-700">{ref.page_reference}:</span>
-                                                                        )}
-                                                                        <span className="text-slate-700">{ref.excerpt}</span>
-                                                                    </li>
-                                                                ))}
-                                                            </ul>
-                                                        ) : (
-                                                            <p className="mt-2 italic text-slate-600">
-                                                                {tw.claim_finding_no_source_excerpt ?? 'Systemet fant ingen sikker kildetekst for denne påstanden.'}
-                                                            </p>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    )}
-                                </Fragment>
+                                <tr
+                                    key={finding.id}
+                                    ref={isFocused ? focusRowRef : null}
+                                    data-finding-row={finding.id}
+                                    className={`align-middle text-slate-700 transition-colors duration-500 ${
+                                        isFocused ? 'bg-violet-50 ring-2 ring-inset ring-violet-300' : ''
+                                    }`}
+                                >
+                                    <td className="px-4 py-2">
+                                        <span className="block break-words font-semibold text-slate-900" title={finding.title && finding.title !== label ? finding.title : undefined}>
+                                            <span className="font-mono text-sm text-slate-600">#{formatFindingUserId(finding.id)}</span>
+                                            {label && <> · {label}</>}
+                                        </span>
+                                        {/* Without a behandlingsvisning to open, the row is the only place
+                                            the explanation can be read — kept, but held to two lines. */}
+                                        {!finding.url && finding.explanation && (
+                                            <span className="line-clamp-2 text-slate-600" title={finding.explanation}>{finding.explanation}</span>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-2">
+                                        {finding.scope === 'run' ? (
+                                            <span className="text-slate-600">{tw.runs_findings_scope_run ?? 'Gjelder hele kjøringen'}</span>
+                                        ) : (
+                                            <span className="line-clamp-3 break-words" title={finding.page_title ?? ''}>{finding.page_title ?? '—'}</span>
+                                        )}
+                                    </td>
+                                    <td className="px-3 py-2">
+                                        <span className={`${FINDING_BADGE} ${FINDING_SEVERITY_STYLES[finding.severity] ?? 'bg-slate-100 text-slate-700'}`}>
+                                            {finding.severity_label}
+                                        </span>
+                                    </td>
+                                    <td className="px-3 py-2">
+                                        <span className={`${FINDING_BADGE} ${FINDING_STATUS_STYLES[finding.status] ?? 'bg-slate-100 text-slate-700'}`}>
+                                            {finding.status_label}
+                                        </span>
+                                    </td>
+                                    <td className="px-2 py-2 text-right">
+                                        {finding.url && finding.action ? (
+                                            <Link
+                                                href={finding.url}
+                                                aria-label={`${finding.action_label}: ${(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', formatFindingUserId(finding.id))}`}
+                                                className="inline-block rounded-lg px-2 py-0.5 text-right text-base font-semibold leading-6 text-violet-700 underline decoration-violet-300 decoration-2 underline-offset-2 transition hover:bg-violet-50 hover:text-violet-800 hover:decoration-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
+                                            >
+                                                {finding.action_label}
+                                            </Link>
+                                        ) : (
+                                            <span className="text-slate-600">—</span>
+                                        )}
+                                    </td>
+                                </tr>
                             );
                         })}
                     </tbody>

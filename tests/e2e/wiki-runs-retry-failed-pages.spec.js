@@ -63,8 +63,22 @@ test.describe.serial('Kjøringer: Prøv igjen for feilede sider', () => {
         return requests;
     }
 
-    function mainRow(page, runId) {
-        return page.locator(`[data-run-item][data-run-id="${runId}"]`).first().locator('[data-run-main-row]');
+    /**
+     * The collapsed row says «1 feil» under its status; the failed-pages explanation
+     * and its retry live in the row's detail view, opened from «Vis detaljer» under Handlinger.
+     */
+    async function openDetails(page, runId) {
+        const item = page.locator(`[data-run-item][data-run-id="${runId}"]`).first();
+        const mainRow = item.locator('[data-run-main-row]');
+        const toggle = mainRow.locator('[data-run-details-toggle]');
+
+        await expect(mainRow.locator('[data-run-follow-up]')).toHaveText('1 feil');
+        await expect(toggle).toHaveAccessibleName('Vis detaljer');
+        await expect(toggle).toHaveAccessibleDescription(/E2E Retry Failed Pages/);
+        await toggle.click();
+        await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+        return item.locator('[data-run-status-details]');
     }
 
     async function openRuns(page, errors) {
@@ -80,13 +94,49 @@ test.describe.serial('Kjøringer: Prøv igjen for feilede sider', () => {
         const errors = [];
         await openRuns(page, errors);
 
-        const row = mainRow(page, planDefectRunId);
+        const row = await openDetails(page, planDefectRunId);
         const block = row.locator('[data-run-failed-pages="1"]');
 
         await expect(block).toBeVisible();
         await expect(block.getByText('1 side(r) kunne ikke genereres og er ufullstendige.')).toBeVisible();
         await expect(block.getByText(/Feilen skyldes sideplanen eller kildegrunnlaget/)).toBeVisible();
         await expect(row.getByRole('button', { name: 'Prøv igjen for feilede sider' })).toHaveCount(0);
+
+        // One detail view: the progress and the pages are in it, and the row's Sider count
+        // closes the view it opened.
+        const item = page.locator(`[data-run-item][data-run-id="${planDefectRunId}"]`).first();
+        await expect(item.locator('[data-run-progress-row]')).toBeVisible();
+        await expect(item.locator('[data-run-section="pages"]')).toHaveAttribute('aria-pressed', 'true');
+        await expect(item.getByRole('heading', { name: 'Berørte Wiki-sider' })).toBeVisible();
+        const pagesCount = item.locator('[data-run-main-row]').getByRole('button', { name: 'Vis 2 berørte Wiki-sider' });
+        await pagesCount.click();
+        await expect(item.locator('[data-run-detail-panel]')).toHaveCount(0);
+        await pagesCount.click();
+        await expect(item.locator('[data-run-progress-row]')).toBeVisible();
+        expect(errors).toEqual([]);
+    });
+
+    test('«Vis detaljer» under Handlinger opens and closes the detail view, also from the keyboard', async ({ page }) => {
+        const errors = [];
+        await openRuns(page, errors);
+
+        const item = page.locator(`[data-run-item][data-run-id="${transientRunId}"]`).first();
+        const button = item.locator('[data-run-main-row]').getByRole('button', { name: 'Vis detaljer' });
+
+        await expect(button).toHaveAttribute('aria-expanded', 'false');
+        await expect(item.locator('[data-run-detail-panel]')).toHaveCount(0);
+
+        await button.click();
+        const hide = item.locator('[data-run-main-row]').getByRole('button', { name: 'Skjul detaljer' });
+        await expect(hide).toHaveAttribute('aria-expanded', 'true');
+        await expect(item.locator('[data-run-status-details]')).toBeVisible();
+        await expect(item.locator('[data-run-progress-row]')).toBeVisible();
+        await expect(item.getByRole('button', { name: 'Prøv igjen for feilede sider' })).toBeVisible();
+
+        await hide.focus();
+        await page.keyboard.press('Enter');
+        await expect(item.locator('[data-run-detail-panel]')).toHaveCount(0);
+        await expect(button).toBeFocused();
         expect(errors).toEqual([]);
     });
 
@@ -95,7 +145,7 @@ test.describe.serial('Kjøringer: Prøv igjen for feilede sider', () => {
         const requests = await interceptRetry(page, { success: SUCCESS });
         await openRuns(page, errors);
 
-        const row = mainRow(page, transientRunId);
+        const row = await openDetails(page, transientRunId);
         await expect(row.getByText('Feilen ser ut til å være midlertidig.')).toBeVisible();
 
         const retry = row.getByRole('button', { name: 'Prøv igjen for feilede sider' });
@@ -121,7 +171,7 @@ test.describe.serial('Kjøringer: Prøv igjen for feilede sider', () => {
         const requests = await interceptRetry(page, { error: NOT_ALLOWED });
         await openRuns(page, errors);
 
-        await mainRow(page, transientRunId).getByRole('button', { name: 'Prøv igjen for feilede sider' }).click();
+        await (await openDetails(page, transientRunId)).getByRole('button', { name: 'Prøv igjen for feilede sider' }).click();
         const dialog = page.getByRole('dialog', { name: 'Prøv igjen for feilede sider?' });
         await dialog.getByRole('button', { name: 'Prøv igjen', exact: true }).click();
 

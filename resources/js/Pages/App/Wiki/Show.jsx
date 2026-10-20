@@ -1655,6 +1655,12 @@ export default function WikiShow({
             return claim.finding_explanation;
         }
 
+        // A Kjøringer QA finding outside a source-based block: its own explanation is the only
+        // place the reason is given — the run's findings list links here instead of repeating it.
+        if (claim.content_origin === 'unsupported_generated_content' && claim.finding_explanation) {
+            return claim.finding_explanation;
+        }
+
         if (claim.content_origin === 'internal_error' || claim.content_origin === 'unsupported_generated_content') {
             return tw.claim_finding_no_source_excerpt ?? 'Systemet fant ingen sikker kildetekst for denne påstanden.';
         }
@@ -1685,7 +1691,9 @@ export default function WikiShow({
         const { showClaimText = true } = options;
         const isInlineReview = options.inlineReview === true;
         const isOpenGroup = group === 'open';
-        const problemLabel = isOpenGroup ? claimProblemLabel(claim) : '';
+        // A decided QA finding keeps its explanation: the Kjøringer findings list still links here.
+        const keepsFindingExplanation = claim.content_origin === 'unsupported_generated_content' && !!claim.finding_explanation;
+        const problemLabel = isOpenGroup || keepsFindingExplanation ? claimProblemLabel(claim) : '';
         const isPendingDecision = claim.approval_status === 'pending';
         const showDecisionBadge = claim.approval_status !== 'pending';
         const sourceDraft = claimSourceDrafts[claim.id] ?? {};

@@ -424,3 +424,40 @@ export function getTransientFailureCopy(run, tw = {}) {
 
     return { primaryMessage, failedInPhase, attemptSummary, documentPreservedNote, technicalDetails: errorMessage || null };
 }
+
+/**
+ * The one short line the collapsed Kjøringer row shows under its status badge, when the run has
+ * more to say than fits there. The full explanation (RunActivityBlock: escalation reasons, failed
+ * pages, retry actions, technical details, the stalled explanation) is shown only in the row's
+ * expanded detail panel; this line is what opens it. Null when there is nothing to expand — the
+ * row then keeps its plain «Siste fremdrift» line.
+ *
+ * Derived only from fields the row already carries; it never says anything the detail panel does
+ * not say in full.
+ */
+export function getRunCompactSummary(run, tw = {}) {
+    if (!run) return null;
+
+    const failedPagesCount = run.failed_pages?.count ?? 0;
+
+    // Failed pages only (run.failed_pages, from the backend); QA findings have their own column.
+    if (failedPagesCount > 0) {
+        return failedPagesCount === 1
+            ? (tw.run_compact_failed_pages_one ?? '1 feil')
+            : (tw.run_compact_failed_pages_many ?? ':count feil').replace(':count', String(failedPagesCount));
+    }
+
+    if (run.status === 'escalated') {
+        return tw.run_compact_escalated ?? 'Krever oppfølging';
+    }
+
+    if (run.status === 'failed') {
+        if (run.failed_phase === 'maintainer_decision' && run.transient_failure) {
+            return tw.run_compact_failed_transient ?? 'Midlertidig feil';
+        }
+
+        return tw.run_compact_failed ?? 'Stoppet med feil';
+    }
+
+    return null;
+}
