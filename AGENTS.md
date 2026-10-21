@@ -54,6 +54,23 @@ Bruk heller formuleringer som:
 
 Alle nye sider, tekster og funksjoner skal vurderes mot denne posisjoneringen før implementering.
 
+## Brukeropplevelse – førende utviklingsprinsipp
+
+Procynia skal kombinere avansert funksjonalitet med enkel og intuitiv brukeropplevelse. Brukeren skal alltid forstå hva som har skjedd, hva som gjenstår og hva neste handling er, uten å måtte forstå systemets interne prosesser.
+
+Gjelder alle moduler:
+
+- **Brukerreisen først.** Start med hva brukeren vil oppnå, og vurder hele arbeidsflyten fra start til slutt – ikke bare én komponent eller ett skjermbilde.
+- **Enkelhet fremfor kompleksitet.** Ikke innfør unødvendige statuser, godkjenningsnivåer, knapper eller mellomsteg.
+- **Tydelig status og neste handling.** Brukeren skal se hva som har skjedd, hva som er ferdig, hva som gjenstår, hvem som eventuelt må gjøre noe, og hva neste handling er. Når ingen handling trengs, skal systemet si det tydelig.
+- **Ingen falske oppfølgingsbehov.** Skill mellom faktisk feil, historikk og valgfri forbedring. Historiske feil, løste problemer og rådgivende forslag skal ikke vises som aktive blokkeringer.
+- **Teknisk kompleksitet i bakgrunnen.** Tekniske tilstander, interne prosessnavn og feildetaljer skal ikke dominere normalvisningen. Bruk forståelig språk; tekniske detaljer hører hjemme i eksisterende detaljvisninger.
+- **Handlinger må kunne gjennomføres.** Vis ikke en handling som fører til en blindvei. En oppgave skal ha en reell mottaker, nødvendige rettigheter og en gjennomførbar vei til ferdigstillelse.
+- **Gjenbruk før nyutvikling.** Undersøk eksisterende funksjonalitet først. Unngå parallelle tjenester, unødvendige modeller og nye administrative arbeidsflyter.
+- **Test brukerreisen.** Ved endringer i arbeidsflyter skal målrettede tester med isolerte testdata også vise at brukeren kan fullføre oppgaven: tilgang, status, handling og sluttresultat. Test regime under gjelder fortsatt.
+
+Enkelhet oppnås i presentasjon og arbeidsflyt, aldri ved å svekke eksisterende tilgangs-, godkjennings-, sporbarhets- eller databeskyttelseskrav.
+
 ## Enterprise Wiki architecture invariants
 
 For alt arbeid som berører Enterprise Wiki, retrieval, Q&A, requirement research eller wiki-vedlikehold, er disse reglene bindende:
