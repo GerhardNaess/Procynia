@@ -333,8 +333,9 @@ test.describe.serial('WCAG Fase 5 — Enterprise Wiki', () => {
         await expectNoAxeViolations(page, 'main', 'kildedokumenter');
 
         await page.goto('/app/wiki?tab=runs');
-        // The progress is shown in a run's detail view, opened from «Vis detaljer».
+        // The progress is shown in a run's detail view, opened from «Vis detaljer», under «Vis flere detaljer».
         await page.getByRole('button', { name: 'Vis detaljer', exact: true }).first().click();
+        await page.getByRole('button', { name: 'Vis flere detaljer', exact: true }).first().click();
         const progress = page.getByRole('list', { name: /Fremdrift for kjøring/ }).first();
         await expect(progress.getByRole('listitem').first()).toContainText('fullført');
         await expectNoAxeViolations(page, 'main', 'kjøringer');

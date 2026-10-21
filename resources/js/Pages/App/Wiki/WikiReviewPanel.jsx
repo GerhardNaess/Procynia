@@ -289,6 +289,9 @@ export default function WikiReviewPanel({
     tw = {},
     isSystemOwner = false,
     currentUserId = null,
+    // A Kjøringer URL the page was opened from (navigation_origin 'runs'); sent with a review
+    // decision so the redirect keeps «Tilbake til Kjøringer».
+    runsBackUrl = null,
 }) {
     const [processing, setProcessing] = useState(null);
     const [actionError, setActionError] = useState(null);
@@ -427,13 +430,14 @@ export default function WikiReviewPanel({
     const submit = () => run('submit', `/app/wiki/${page.slug}/submit`, { reviewer_user_id: Number(reviewerId) });
     const reopen = () => run('reopen', `/app/wiki/${page.slug}/submit`);
     const assignQa = () => run('qa', `/app/wiki/${page.slug}/qa-assignment`, { qa_user_id: Number(qaUserId) });
-    const approve = () => run('approve', `/app/wiki/${page.slug}/approve`);
+    const runsReturn = runsBackUrl ? { back_url: runsBackUrl } : {};
+    const approve = () => run('approve', `/app/wiki/${page.slug}/approve`, runsReturn);
     const requestChanges = () => {
         const trimmed = reason.trim();
 
         if (trimmed.length < MIN_REASON) return;
 
-        run('reject', `/app/wiki/${page.slug}/reject`, { reason: trimmed });
+        run('reject', `/app/wiki/${page.slug}/reject`, { reason: trimmed, ...runsReturn });
     };
 
     const busy = processing !== null;

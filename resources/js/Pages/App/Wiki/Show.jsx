@@ -382,6 +382,7 @@ const WIKI_SECONDARY_BACK_LINK_CLASS =
 const WIKI_BACK_LINK_LABELS = {
     finding: (tw) => tw.review_reference_back_to_findings ?? 'Tilbake til funn',
     graph: (tw) => tw.back_to_graph ?? 'Tilbake til Grafvisning',
+    runs: (tw) => tw.back_to_runs ?? 'Tilbake til Kjøringer',
     wiki: (tw) => tw.back ?? 'Tilbake til Wiki',
 };
 
@@ -2840,6 +2841,7 @@ export default function WikiShow({
                     tw={tw}
                     isSystemOwner={isSystemOwner}
                     currentUserId={auth.user?.id ?? null}
+                    runsBackUrl={navigationOrigin?.context === 'runs' ? navigationOrigin.back_url : null}
                 />
 
                 {(reviewReference || hasStructureFinding) && (

@@ -2037,9 +2037,9 @@ XML;
         $this->assertStringStartsWith('[EnterpriseWikiPageUnderReviewException]', (string) $pivot->generation_error);
         $this->assertNull($pivot->generated_page_version_id);
         $this->assertSame(
-            EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_TRANSIENT,
+            EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_REVIEW_DEFERRED,
             EnterpriseWikiPageGenerationFailureRecoveryService::failureKind($pivot->generation_error),
-            'the deferral lasts as long as the review, so a later retry is the way to apply it',
+            'the deferral is no technical fault: it lasts as long as the review, and a retry after it applies the update',
         );
         Queue::assertPushed(FinalizeEnterpriseWikiPageGeneration::class, fn ($job) => $job->runId === $run->id);
     }

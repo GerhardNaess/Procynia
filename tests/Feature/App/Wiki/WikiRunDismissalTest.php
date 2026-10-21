@@ -267,12 +267,45 @@ class WikiRunDismissalTest extends TestCase
         };
 
         $this->assertSame([$open->id], $ids('needs_follow_up'));
+        // «Fullført» is one word: an escalated run whose follow-up is done is listed with the
+        // completed ones. The older completed_with_remarks link still finds it.
+        $this->assertSame(collect([$completed->id, $done->id])->sort()->values()->all(), $ids('completed'));
         $this->assertSame([$done->id], $ids('completed_with_remarks'));
         $this->assertSame([$queued->id], $ids('waiting'));
         $this->assertSame([$generating->id], $ids('in_progress'));
-        $this->assertSame([$completed->id], $ids('completed'));
         // A link with a stored status still works.
         $this->assertSame(collect([$done->id, $open->id])->sort()->values()->all(), $ids('escalated'));
+    }
+
+    /**
+     * Runs #27–#29: recorded as completed, but by their own record never ran — no start, no end,
+     * no page plan, no pages, no error. They have nothing to show or follow up, so the list leaves
+     * them out. Anything that started, failed, or produced a page stays.
+     */
+    public function test_a_run_recorded_as_completed_that_never_ran_is_left_out_of_the_list(): void
+    {
+        [$customer, $owner, $document] = $this->tenant();
+        $neverRan = $this->ingestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED, ['maintainer_decision_status' => null]);
+        $started = $this->ingestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED, ['maintainer_decision_status' => null, 'started_at' => now()->subMinute()]);
+        $withError = $this->ingestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED, ['maintainer_decision_status' => null, 'error_message' => 'Noe gikk galt.']);
+        $withPage = $this->ingestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED, ['maintainer_decision_status' => null]);
+        EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $withPage->id,
+            'enterprise_wiki_page_id' => $this->createWikiPage($customer, 'Produsert')->id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+            'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+        ]);
+        $failed = $this->ingestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_FAILED, ['maintainer_decision_status' => null]);
+
+        $ids = collect(data_get($this->actingAs($owner)->get('/app/wiki?tab=runs')->viewData('page'), 'props.runs'))->pluck('id');
+
+        $this->assertNotContains($neverRan->id, $ids);
+        foreach ([$started, $withError, $withPage, $failed] as $run) {
+            $this->assertContains($run->id, $ids);
+        }
+        // Left out of the list only: the record itself is untouched.
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $neverRan->fresh()->status);
+        $this->assertNull($neverRan->fresh()->dismissed_at);
     }
 
     public function test_the_documents_latest_run_is_read_the_same_way(): void

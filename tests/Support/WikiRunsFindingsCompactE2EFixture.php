@@ -291,7 +291,15 @@ class WikiRunsFindingsCompactE2EFixture
             'generation_error' => 'unknown',
         ]);
 
+        // Recorded as completed, but never ran: no start, no end, no page plan, no pages (runs #27–#29).
+        $neverRan = $make(EnterpriseWikiIngestRun::STATUS_COMPLETED, [
+            'maintainer_decision_status' => null,
+            'started_at' => null,
+            'finished_at' => null,
+        ]);
+
         return [
+            'never_ran' => $neverRan->id,
             'escalated_failed_page' => $escalatedFailedPage->id,
             'failed' => $failed->id,
             'completed' => $completed->id,

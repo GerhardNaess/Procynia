@@ -37,6 +37,9 @@ final readonly class EnterpriseWikiRunRecoveryResult implements JsonSerializable
      */
     public const CODE_PLAN_DEFECT = 'plan_defect';
 
+    /** A failed page is in review now: its update is refused until that review is closed. */
+    public const CODE_PAGE_UNDER_REVIEW = 'page_under_review';
+
     /** @param  string[]  $incompleteSteps */
     public function __construct(
         public string $outcome,

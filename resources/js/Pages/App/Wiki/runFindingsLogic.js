@@ -91,14 +91,15 @@ export function focusedFindingLocalFilter(finding, currentFilter) {
  *     review_reference / structure_finding. Highest priority because it is the middle of an active
  *     review workflow: the reviewer is handling that finding and must get back to it, and the
  *     context survives every approve/reject/edit action on the page.
- *  2. 'graph'   — opened from the graph view, which sends its own return URL along.
+ *  2. 'graph'   — opened from the graph view, which sends its own return URL along; 'runs' —
+ *                opened from a run's detail view, which does the same.
  *  3. 'wiki'    — no context at all: the plain Wiki page list, exactly as before.
  *
  * Every URL here is validated SERVER-SIDE (PreservesWikiReviewReturnUrl) before it ever reaches
  * this function, so it is always one of this app's own destinations — this helper decides the
  * label and the precedence, never whether a URL is safe to render.
  *
- * @returns {{href: string, isFindingReturn: boolean, context: 'finding'|'graph'|'wiki'}}
+ * @returns {{href: string, isFindingReturn: boolean, context: 'finding'|'graph'|'runs'|'wiki'}}
  */
 export function resolveWikiBackLink(reviewReference, structureFinding, navigationOrigin = null) {
     const findingUrl = reviewReference?.back_url ?? structureFinding?.back_url ?? null;
@@ -111,14 +112,16 @@ export function resolveWikiBackLink(reviewReference, structureFinding, navigatio
     // An origin the server did not recognise never reaches us as a context — normalizeGraphReturnUrl()
     // degrades it to null — but a blank or non-string back_url is still guarded here, so an unknown
     // origin can only ever fall through to the plain Wiki link rather than render an empty href.
-    const originHref = navigationOrigin?.context === 'graph' && typeof navigationOrigin.back_url === 'string'
+    const originContext = ['graph', 'runs'].includes(navigationOrigin?.context) ? navigationOrigin.context : null;
+    const originHref = originContext && typeof navigationOrigin.back_url === 'string'
         ? navigationOrigin.back_url.trim()
         : '';
 
     if (originHref !== '') {
         // Ordinary navigation, not a workflow return: it keeps the discreet secondary style that
-        // "Tilbake til Wiki" has always used, which is why isFindingReturn stays false.
-        return { href: originHref, isFindingReturn: false, context: 'graph' };
+        // "Tilbake til Wiki" has always used, which is why isFindingReturn stays false. 'runs' is a
+        // page opened from a run's detail view, and leads back to that run.
+        return { href: originHref, isFindingReturn: false, context: originContext };
     }
 
     return { href: '/app/wiki', isFindingReturn: false, context: 'wiki' };
@@ -471,6 +474,11 @@ export function getRunCompactSummary(run, tw = {}) {
 
     const failedPagesCount = run.failed_pages?.count ?? 0;
 
+    // A page whose update waits for its open review is not a fault: it says what it waits for.
+    if (failedPagesCount > 0 && (run.failed_pages.pages ?? []).some((page) => page.in_review)) {
+        return tw.run_compact_waiting_for_review ?? 'Venter på gjennomgang';
+    }
+
     // Failed pages only (run.failed_pages, from the backend); QA findings have their own column.
     if (failedPagesCount > 0) {
         return failedPagesCount === 1
@@ -478,7 +486,7 @@ export function getRunCompactSummary(run, tw = {}) {
             : (tw.run_compact_failed_pages_many ?? ':count feil').replace(':count', String(failedPagesCount));
     }
 
-    // An escalated run's badge already says «Krever oppfølging» or «Oppfølging fullført»
+    // An escalated run's badge already says «Krever oppfølging» or «Fullført»
     // (runStatusKey()), and its QA findings have their own column, so the line repeats neither.
     if (run.status === 'escalated') {
         return null;
@@ -502,9 +510,10 @@ export function getRunCompactSummary(run, tw = {}) {
  * and the backend's follow-up reading — never a new decision of its own:
  *   queued → 'waiting'; every other status the pipeline still moves on its own → 'in_progress';
  *   completed (and the legacy awaiting_document_owner_approval, which only ever meant finished) →
- *   'completed'; escalated → 'completed_with_remarks' only when follow_up_complete is true
- *   (EnterpriseWikiRunFindingsService::escalationFollowUpComplete()), otherwise — unknown included —
- *   'needs_follow_up'; failed, cancelled and decision_only keep their own word.
+ *   'completed'; escalated → 'completed' too when follow_up_complete is true
+ *   (EnterpriseWikiRunFindingsService::escalationFollowUpComplete()) — nothing is left, and that it
+ *   was held for follow-up once is said in the details, not as a second «done» word — otherwise,
+ *   unknown included, 'needs_follow_up'; failed, cancelled and decision_only keep their own word.
  * The stored status itself is never changed or hidden; this is only what it is called.
  *
  * @param {{status?: string, follow_up_complete?: boolean|null}|null} run
@@ -516,7 +525,7 @@ export function runStatusKey(run) {
     if (status === 'queued') return 'waiting';
     if (ACTIVE_WIKI_RUN_STATUSES.includes(status)) return 'in_progress';
     if (status === 'completed' || status === 'awaiting_document_owner_approval') return 'completed';
-    if (status === 'escalated') return run?.follow_up_complete === true ? 'completed_with_remarks' : 'needs_follow_up';
+    if (status === 'escalated') return run?.follow_up_complete === true ? 'completed' : 'needs_follow_up';
     if (status === 'failed' || status === 'cancelled' || status === 'decision_only') return status;
 
     return 'unknown';
@@ -527,9 +536,238 @@ export const RUN_STATUS_FILTER_KEYS = [
     'waiting',
     'in_progress',
     'completed',
-    'completed_with_remarks',
     'needs_follow_up',
     'failed',
     'cancelled',
     'decision_only',
 ];
+
+const FAILED_PAGES_REASON_COPY = {
+    transient: ['run_failed_pages_kind_transient', 'Feilen ser ut til å være midlertidig.'],
+    unknown: ['run_failed_pages_kind_unknown', 'Årsaken er ikke kjent, og et nytt forsøk kan gi samme resultat.'],
+    plan_defect: ['run_failed_pages_kind_plan_defect', 'Feilen skyldes sideplanen eller kildegrunnlaget, ikke et midlertidig problem. Et nytt forsøk ville gitt samme resultat, og tilbys derfor ikke.'],
+};
+
+function countText(count, one, many) {
+    return (count === 1 ? one : many).replace(':count', String(count));
+}
+
+function quotedTitles(pages) {
+    return pages.map((page) => `«${page.title}»`).join(', ');
+}
+
+/**
+ * The «Kvalitetsfunn» half of what is already done, or null when there is nothing worth saying —
+ * no findings at all, or some still open (those are the task, not the done part).
+ */
+function findingsDoneText(run, tw) {
+    const total = run.lint_count ?? 0;
+
+    if (total === 0 || (run.findings_open_count ?? 0) > 0) {
+        return null;
+    }
+
+    if ((run.findings_resolved_count ?? 0) !== total) {
+        return tw.run_next_done_findings_none_open ?? 'Ingen kvalitetsfunn krever behandling.';
+    }
+
+    if (total === 1) return tw.run_next_done_findings_one ?? 'Kvalitetsfunnet er ferdigbehandlet.';
+    if (total === 2) return tw.run_next_done_findings_two ?? 'Begge kvalitetsfunnene er ferdigbehandlet.';
+
+    return (tw.run_next_done_findings_many ?? 'Alle :count kvalitetsfunnene er ferdigbehandlet.').replace(':count', String(total));
+}
+
+/**
+ * The first thing a run's detail view says: what happened, what to do about it, and what is
+ * already done — one heading, one or two sentences, at most one main action.
+ *
+ * Presentation only. Every decision it rests on comes from the backend row: whether a retry may be
+ * offered (failed_pages.can_retry, can_retry_maintainer_decision), whether a review blocks it
+ * (failed_pages.blocked_by_review, pages[].in_review), whether this person may act at all
+ * (may_manage), how many findings are open (findings_open_count) and whether an escalation's
+ * follow-up is done (runStatusKey()). Nothing here re-derives any of them.
+ *
+ * Open findings come first: a retry runs QA again, so they are handled before failed pages — but
+ * the failed pages are still named, never hidden behind them.
+ *
+ * @returns {{
+ *   key: string,
+ *   title: string,
+ *   lines: string[],
+ *   recommendation: string|null,
+ *   action: {kind: 'open_page'|'retry_failed_pages'|'retry_maintainer_decision'|'review_findings', label: string, href?: string}|null,
+ *   actionNote: string|null,
+ *   done: string|null,
+ * }}
+ */
+export function getRunNextStep(run, tw = {}) {
+    const statusKey = runStatusKey(run);
+    const noAction = tw.run_next_no_action ?? 'Ingen handling nødvendig.';
+    const done = findingsDoneText(run ?? {}, tw);
+    const step = (key, title, rest = {}) => ({
+        key,
+        title,
+        lines: [],
+        recommendation: null,
+        action: null,
+        actionNote: null,
+        done,
+        ...rest,
+    });
+
+    if (statusKey === 'waiting') {
+        return step('waiting', tw.run_next_waiting_title ?? 'Kjøringen venter på å starte', {
+            lines: [tw.run_next_waiting_text ?? 'Kjøringen starter av seg selv. Ingen handling nødvendig.'],
+        });
+    }
+
+    if (statusKey === 'in_progress') {
+        return step('in_progress', tw.run_next_in_progress_title ?? 'Kjøringen pågår', {
+            lines: [tw.run_next_in_progress_text ?? 'Procynia arbeider med kjøringen. Ingen handling nødvendig.'],
+        });
+    }
+
+    if (statusKey === 'decision_only') {
+        return step('decision_only', tw.run_next_decision_only_title ?? 'Sideplanen er lagret', {
+            lines: [tw.run_next_decision_only_text ?? 'Kjøringen registrerte en sideplan uten å starte hele behandlingen. Ingen handling nødvendig her.'],
+        });
+    }
+
+    if (statusKey === 'cancelled') {
+        return step('cancelled', tw.run_next_cancelled_title ?? 'Kjøringen ble avbrutt', {
+            lines: [tw.run_next_cancelled_text ?? 'Wiki-innhold som allerede var laget, er beholdt. Ingen handling nødvendig.'],
+        });
+    }
+
+    const mayManage = run.may_manage === true;
+    const needsManager = tw.run_next_needs_manager ?? 'En bruker med ansvar for kildedokumentet må utføre denne handlingen.';
+
+    // A temporary failure while planning the pages: the one failure with its own retry.
+    if (statusKey === 'failed' && run.failed_phase === 'maintainer_decision' && run.transient_failure) {
+        const transient = getTransientFailureCopy(run, tw);
+        const canRetry = run.can_retry_maintainer_decision === true;
+
+        return step('decision_failed', tw.run_next_decision_failed_title ?? 'Sideplanleggingen ble ikke fullført', {
+            lines: [transient.primaryMessage],
+            recommendation: canRetry ? (tw.run_next_decision_failed_recommendation ?? 'Start sideplanleggingen på nytt. Du trenger ikke laste opp dokumentet igjen.') : null,
+            action: canRetry ? { kind: 'retry_maintainer_decision', label: tw.run_retry_maintainer_decision_button ?? 'Prøv sideplanleggingen på nytt' } : null,
+            actionNote: canRetry ? null : (mayManage ? null : needsManager),
+        });
+    }
+
+    const failedPages = (run.failed_pages?.count ?? 0) > 0 ? run.failed_pages : null;
+    const pagesInReview = (failedPages?.pages ?? []).filter((page) => page.in_review);
+    const openFindings = run.findings_open_count ?? 0;
+
+    // The failed-pages half, as one sentence: what it says when it is not the main task.
+    const failedPagesSentence = () => {
+        if (pagesInReview.length > 0) {
+            return (tw.run_next_also_review ?? 'I tillegg kunne :titles ikke oppdateres fordi artikkelen er til gjennomgang.')
+                .replace(':titles', quotedTitles(pagesInReview));
+        }
+
+        return countText(
+            failedPages.count,
+            tw.run_next_also_pages_one ?? 'I tillegg ble én Wiki-side ikke laget eller oppdatert. Følg opp den etter at kvalitetsfunnene er behandlet.',
+            tw.run_next_also_pages_many ?? 'I tillegg ble :count Wiki-sider ikke laget eller oppdatert. Følg opp dem etter at kvalitetsfunnene er behandlet.',
+        );
+    };
+
+    if (openFindings > 0) {
+        return step('findings', countText(
+            openFindings,
+            tw.run_next_findings_title_one ?? 'Ett kvalitetsfunn trenger vurdering',
+            tw.run_next_findings_title_many ?? ':count kvalitetsfunn trenger vurdering',
+        ), {
+            lines: failedPages ? [failedPagesSentence()] : [],
+            recommendation: tw.run_next_findings_recommendation ?? 'Åpne kvalitetsfunnene og ta stilling til hvert av dem.',
+            action: { kind: 'review_findings', label: tw.run_next_findings_action ?? 'Behandle kvalitetsfunn' },
+            done: null,
+        });
+    }
+
+    if (failedPages && pagesInReview.length > 0) {
+        const linked = pagesInReview.find((page) => typeof page.url === 'string' && page.url !== '');
+
+        return step('review_blocked', countText(
+            pagesInReview.length,
+            tw.run_next_review_title_one ?? 'Én Wiki-artikkel venter på gjennomgang',
+            tw.run_next_review_title_many ?? ':count Wiki-artikler venter på gjennomgang',
+        ), {
+            lines: [(tw.run_next_review_text ?? 'Procynia kunne ikke oppdatere :titles fordi artikkelen er til gjennomgang.')
+                .replace(':titles', quotedTitles(pagesInReview))],
+            recommendation: linked
+                ? (tw.run_next_review_recommendation ?? 'Åpne artikkelen. Den tildelte kontrolløren må fullføre gjennomgangen før oppdateringen kan prøves igjen.')
+                : (tw.run_next_review_recommendation_no_link ?? 'Den tildelte kontrolløren må fullføre gjennomgangen av artikkelen før oppdateringen kan prøves igjen.'),
+            action: linked
+                ? { kind: 'open_page', label: (tw.run_next_review_action ?? 'Åpne «:title»').replace(':title', linked.title), href: linked.url }
+                : null,
+            actionNote: mayManage
+                ? (tw.run_next_review_note ?? 'Oppdateringen kan prøves igjen når gjennomgangen er avsluttet.')
+                : (tw.run_next_review_note_other ?? 'Når gjennomgangen er avsluttet, kan en bruker med ansvar for kildedokumentet prøve oppdateringen igjen.'),
+        });
+    }
+
+    if (failedPages) {
+        const canRetry = failedPages.can_retry === true;
+        const retryAction = canRetry ? { kind: 'retry_failed_pages', label: tw.run_retry_failed_pages_button ?? 'Prøv igjen for feilede sider' } : null;
+        const unavailableNote = canRetry || failedPages.failure_kind === 'plan_defect'
+            ? null
+            : (mayManage ? (tw.run_next_retry_unavailable ?? 'Et nytt forsøk er ikke mulig akkurat nå.') : needsManager);
+
+        // Every failed page was an update an open review held back, and none is in review now.
+        if (failedPages.failure_kind === 'review_deferred') {
+            const pages = failedPages.pages ?? [];
+
+            return step('review_closed', tw.run_next_review_closed_title ?? 'Oppdateringen kan prøves igjen', {
+                lines: [pages.length > 0
+                    ? (tw.run_next_review_closed_text ?? 'Gjennomgangen av :titles er avsluttet, men oppdateringen fra denne kjøringen er ikke gjort ennå.').replace(':titles', quotedTitles(pages))
+                    : (tw.run_next_review_closed_text_untitled ?? 'Gjennomgangen er avsluttet, men oppdateringen fra denne kjøringen er ikke gjort ennå.')],
+                recommendation: canRetry ? (tw.run_next_review_closed_recommendation ?? 'Prøv oppdateringen igjen.') : null,
+                action: canRetry ? { kind: 'retry_failed_pages', label: tw.run_next_retry_update_action ?? 'Prøv oppdateringen igjen' } : null,
+                actionNote: unavailableNote,
+            });
+        }
+
+        // A recognised failure already names the pages and why (EnterpriseWikiRunFailurePresenter);
+        // otherwise the kind of failure says what a retry can do.
+        const recognised = Boolean(run.failure_summary?.title) && run.failure_summary.kind !== 'unknown';
+        const [reasonKey, reasonFallback] = FAILED_PAGES_REASON_COPY[failedPages.failure_kind] ?? FAILED_PAGES_REASON_COPY.unknown;
+
+        return step('failed_pages', recognised
+            ? run.failure_summary.title
+            : countText(
+                failedPages.count,
+                tw.run_next_pages_title_one ?? 'Én Wiki-side ble ikke laget eller oppdatert',
+                tw.run_next_pages_title_many ?? ':count Wiki-sider ble ikke laget eller oppdatert',
+            ), {
+            lines: recognised ? [...(run.failure_summary.lines ?? [])] : [tw[reasonKey] ?? reasonFallback],
+            recommendation: canRetry ? (tw.run_next_pages_recommendation ?? 'Prøv igjen for sidene som feilet. Sider som allerede er ferdige, beholdes.') : null,
+            action: retryAction,
+            actionNote: unavailableNote,
+        });
+    }
+
+    if (statusKey === 'completed' && run.status === 'escalated') {
+        // The backend's explanation says why the run was held and that nothing is left; it already
+        // says the findings are handled, so the «done» line would only repeat it.
+        return step('follow_up_complete', tw.run_next_follow_up_complete_title ?? 'Oppfølgingen er fullført', run.findings_explanation
+            ? { lines: [run.findings_explanation], done: null }
+            : { lines: [noAction] });
+    }
+
+    if (statusKey === 'completed') {
+        return step('completed', tw.run_next_completed_title ?? 'Kjøringen er fullført', { lines: [noAction] });
+    }
+
+    // Stopped or held for follow-up, with nothing on this screen that resolves it: the backend's
+    // own explanation, said plainly, and no invented action.
+    const explanation = getRunFailureLines(run)?.slice(1).map(([, text]) => text)
+        ?? (run.findings_explanation ? [run.findings_explanation] : []);
+
+    return step(statusKey === 'failed' ? 'failed' : 'follow_up', statusKey === 'failed'
+        ? (run.failure_summary?.title ?? tw.run_next_failed_title ?? 'Kjøringen stoppet med en feil')
+        : (tw.run_next_follow_up_title ?? 'Kjøringen trenger oppfølging'), {
+        lines: [...explanation, tw.run_next_no_known_action ?? 'Det finnes ingen handling for dette i Kjøringer.'],
+    });
+}

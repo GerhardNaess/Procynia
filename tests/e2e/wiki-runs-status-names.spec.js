@@ -7,8 +7,8 @@ const SCREENSHOT_DIR = process.env.E2E_SCREENSHOT_DIR ?? null;
 
 /**
  * Wiki → Kjøringer: every run says in one plain word whether it is finished, in progress, failed
- * or needs follow-up. The stored status is unchanged; an escalated run reads «Fullført – med
- * merknader» only when the backend confirms nothing is left, otherwise «Krever oppfølging».
+ * or needs follow-up. The stored status is unchanged; an escalated run reads «Fullført» only when
+ * the backend confirms nothing is left, otherwise «Krever oppfølging».
  */
 test.describe.serial('Kjøringer: forståelige statusnavn', () => {
     let customerId;
@@ -27,10 +27,11 @@ test.describe.serial('Kjøringer: forståelige statusnavn', () => {
     const EXPECTED = {
         completed: ['Fullført', 'emerald', null],
         failed: ['Feilet', 'rose', null],
-        active: ['I arbeid', 'sky', null],
+        active: ['Pågår', 'sky', null],
         escalated_open: ['Krever oppfølging', 'amber', null],
         escalated_failed_page: ['Krever oppfølging', 'amber', '1 feil'],
-        escalated_done: ['Oppfølging fullført', 'slate', null],
+        // Follow-up done: one «done» word, the same as a completed run.
+        escalated_done: ['Fullført', 'emerald', null],
         cancelled: ['Avbrutt', 'slate', null],
     };
 
@@ -55,6 +56,9 @@ test.describe.serial('Kjøringer: forståelige statusnavn', () => {
                     await expect(cell, key).not.toContainText(word);
                 }
             }
+
+            // A run that by its own record never ran is not in the list.
+            await expect(page.locator(`[data-run-item][data-run-id="${ids.never_ran}"]`)).toHaveCount(0);
 
             if (width >= 1024) {
                 // «Krever oppfølging» fits the status column without a taller row.
@@ -82,6 +86,8 @@ test.describe.serial('Kjøringer: forståelige statusnavn', () => {
         const open = async (key) => {
             const item = page.locator(`[data-run-item][data-run-id="${ids[key]}"]`).first();
             await item.locator('[data-run-main-row] [data-run-details-toggle]').click();
+            // The progress and its history note are under «Vis flere detaljer».
+            await item.getByRole('button', { name: 'Vis flere detaljer' }).click();
 
             return item;
         };
@@ -116,7 +122,7 @@ test.describe.serial('Kjøringer: forståelige statusnavn', () => {
 
         const filter = page.getByRole('combobox', { name: 'Status' });
         const options = await filter.locator('option').allTextContents();
-        expect(options).toEqual(['Alle statuser', 'Venter', 'I arbeid', 'Fullført', 'Oppfølging fullført', 'Krever oppfølging', 'Feilet', 'Avbrutt', 'Sideplan lagret']);
+        expect(options).toEqual(['Alle statuser', 'Venter', 'Pågår', 'Fullført', 'Krever oppfølging', 'Feilet', 'Avbrutt', 'Sideplan lagret']);
 
         await filter.selectOption({ label: 'Krever oppfølging' });
         await expect(page).toHaveURL(/run_status=needs_follow_up/);
@@ -124,9 +130,10 @@ test.describe.serial('Kjøringer: forståelige statusnavn', () => {
         await expect(page.locator(`[data-run-item][data-run-id="${ids.escalated_failed_page}"]`)).toHaveCount(1);
         await expect(page.locator(`[data-run-item][data-run-id="${ids.escalated_done}"]`)).toHaveCount(0);
 
-        await filter.selectOption({ label: 'Oppfølging fullført' });
-        await expect(page).toHaveURL(/run_status=completed_with_remarks/);
+        await filter.selectOption({ label: 'Fullført' });
+        await expect(page).toHaveURL(/run_status=completed/);
         await expect(page.locator(`[data-run-item][data-run-id="${ids.escalated_done}"]`)).toHaveCount(1);
+        await expect(page.locator(`[data-run-item][data-run-id="${ids.completed}"]`)).toHaveCount(1);
         await expect(page.locator(`[data-run-item][data-run-id="${ids.escalated_open}"]`)).toHaveCount(0);
 
         // Stored statuses are untouched.

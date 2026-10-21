@@ -95,16 +95,17 @@ test.describe.serial('Kjøringer: Prøv igjen for feilede sider', () => {
         await openRuns(page, errors);
 
         const row = await openDetails(page, planDefectRunId);
-        const block = row.locator('[data-run-failed-pages="1"]');
 
-        await expect(block).toBeVisible();
-        await expect(block.getByText('1 side(r) kunne ikke genereres og er ufullstendige.')).toBeVisible();
-        await expect(block.getByText(/Feilen skyldes sideplanen eller kildegrunnlaget/)).toBeVisible();
-        await expect(row.getByRole('button', { name: 'Prøv igjen for feilede sider' })).toHaveCount(0);
+        await expect(row.getByRole('heading', { level: 3 })).toHaveText('Én Wiki-side ble ikke laget eller oppdatert');
+        await expect(row.getByText(/Feilen skyldes sideplanen eller kildegrunnlaget/)).toBeVisible();
+        await expect(row.locator('[data-run-primary-action]')).toHaveCount(0);
 
-        // One detail view: the progress and the pages are in it, and the row's Sider count
-        // closes the view it opened.
+        // One detail view: the progress and the pages are under «Vis flere detaljer», still with no
+        // retry, and the row's Sider count closes the view it opened.
         const item = page.locator(`[data-run-item][data-run-id="${planDefectRunId}"]`).first();
+        await item.getByRole('button', { name: 'Vis flere detaljer' }).click();
+        await expect(item.locator('[data-run-failed-pages="1"]')).toBeVisible();
+        await expect(item.getByRole('button', { name: 'Prøv igjen for feilede sider' })).toHaveCount(0);
         await expect(item.locator('[data-run-progress-row]')).toBeVisible();
         await expect(item.locator('[data-run-section="pages"]')).toHaveAttribute('aria-pressed', 'true');
         await expect(item.getByRole('heading', { name: 'Berørte Wiki-sider' })).toBeVisible();
@@ -130,8 +131,9 @@ test.describe.serial('Kjøringer: Prøv igjen for feilede sider', () => {
         const hide = item.locator('[data-run-main-row]').getByRole('button', { name: 'Skjul detaljer' });
         await expect(hide).toHaveAttribute('aria-expanded', 'true');
         await expect(item.locator('[data-run-status-details]')).toBeVisible();
-        await expect(item.locator('[data-run-progress-row]')).toBeVisible();
-        await expect(item.getByRole('button', { name: 'Prøv igjen for feilede sider' })).toBeVisible();
+        // The retry is the one main action; the progress waits under «Vis flere detaljer».
+        await expect(item.locator('[data-run-primary-action]')).toHaveText('Prøv igjen for feilede sider');
+        await expect(item.locator('[data-run-progress-row]')).toHaveCount(0);
 
         await hide.focus();
         await page.keyboard.press('Enter');

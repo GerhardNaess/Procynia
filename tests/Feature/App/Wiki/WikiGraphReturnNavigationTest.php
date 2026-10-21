@@ -189,6 +189,33 @@ class WikiGraphReturnNavigationTest extends TestCase
             ->assertInertia(fn ($inertia) => $inertia->where('navigation_origin', null));
     }
 
+    /**
+     * A page opened from a run's detail view («Åpne» on an article whose update waits for its
+     * review) leads back to that run — a Kjøringer URL naming no finding.
+     */
+    public function test_article_opened_from_a_run_returns_to_that_run(): void
+    {
+        [$user, $page] = $this->articleAndViewer();
+
+        $this->actingAs($user)
+            ->get("/app/wiki/{$page->slug}?back_url=".urlencode('/app/wiki?tab=runs&focus_run=963'))
+            ->assertOk()
+            ->assertInertia(fn ($inertia) => $inertia
+                ->where('navigation_origin.context', 'runs')
+                ->where('navigation_origin.back_url', '/app/wiki?tab=runs&focus_run=963')
+            );
+    }
+
+    public function test_an_off_site_runs_url_is_never_a_return_link(): void
+    {
+        [$user, $page] = $this->articleAndViewer();
+
+        $this->actingAs($user)
+            ->get("/app/wiki/{$page->slug}?back_url=".urlencode('https://evil.example.com/app/wiki?tab=runs&focus_run=1'))
+            ->assertOk()
+            ->assertInertia(fn ($inertia) => $inertia->where('navigation_origin', null));
+    }
+
     /** @return array{User, EnterpriseWikiPage} */
     private function articleAndViewer(): array
     {

@@ -34,7 +34,7 @@ describe('the page reads what the backend actually sends', () => {
     test('requests carry the payloads the endpoints now require', () => {
         // Empty bodies would 422: submit needs a reviewer, a return needs a reason.
         assert.match(panel, /\/submit`, \{ reviewer_user_id: Number\(reviewerId\) \}/);
-        assert.match(panel, /\/reject`, \{ reason: trimmed \}/);
+        assert.match(panel, /\/reject`, \{ reason: trimmed(, \.\.\.runsReturn)? \}/);
     });
 });
 
@@ -526,7 +526,7 @@ describe('source approval is not part of publishing', () => {
 
     test('sending the page back is now the dialog\'s only caller', () => {
         assert.ok(!panel.includes('isPageReturn'), 'no branch for a second caller');
-        assert.match(panel, /run\('reject', `\/app\/wiki\/\$\{page\.slug\}\/reject`, \{ reason: trimmed \}\)/);
+        assert.match(panel, /run\('reject', `\/app\/wiki\/\$\{page\.slug\}\/reject`, \{ reason: trimmed, \.\.\.runsReturn \}\)/);
         assert.match(panel, /review_send_back \?\? 'Send tilbake'/);
     });
 

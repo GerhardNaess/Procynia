@@ -33,7 +33,12 @@ test.describe.serial('Kjøringer: fjern fra oversikten', () => {
         await toggle.click();
         await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 
-        return runRow(page, runId).locator('[data-run-status-details]');
+        // «Fjern fra oversikten» is a secondary action, under «Vis flere detaljer».
+        const panel = runRow(page, runId).locator('[data-run-detail-panel]');
+        await panel.getByRole('button', { name: 'Vis flere detaljer' }).click();
+        await expect(panel.locator('[data-run-more-details-panel]')).toBeVisible();
+
+        return panel;
     }
 
     async function storedRun(runId) {

@@ -21,8 +21,8 @@ use Tests\TestCase;
  * misleading "needs_resync" message for ANY escalated/failed run with no open blocking findings —
  * even when 14 claims were genuinely still unverified (verification_incomplete), because it only
  * ever checked the lint findings table, never incomplete_steps. These tests prove the explanation
- * now distinguishes: (1) genuinely stale status (nothing left incomplete — the old message is
- * still correct here), from (2) verification_incomplete with claims genuinely still unverified,
+ * now distinguishes: (1) genuinely stale status (nothing left incomplete and QA passes on the run
+ * as it is now — said to be settled, no longer "not updated yet"), from (2) verification_incomplete with claims genuinely still unverified,
  * further split into "will resume automatically" vs "requires new processing" based on
  * EnterpriseWikiEscalatedRunRecoveryService's own real decision. All fixtures are synthetic; run
  * 585's real data/IDs are never used.
@@ -64,17 +64,21 @@ class EnterpriseWikiRunFindingsEscalatedExplanationTest extends TestCase
         );
     }
 
-    public function test_explanation_stays_generic_needs_resync_when_genuinely_stale(): void
+    public function test_explanation_says_nothing_is_left_when_genuinely_stale_and_qa_passes_now(): void
     {
         $customer = $this->createCustomer();
         $user = $this->createUser($customer);
-        // No unverified claims and intact content — nothing incomplete, status is just stale.
+        // No unverified claims and intact content — nothing incomplete, status is just stale. QA
+        // judged on the run as it is now passes, so the run is settled rather than "not updated
+        // yet" (EnterpriseWikiRunFindingsService::escalationSettledWithoutQaFinding()); its two new
+        // pages are still drafts, which is ordinary Wiki work.
         $run = $this->createEscalatedRun($customer, unverifiedClaims: 0);
 
         $explanation = $this->fetchExplanation($user, $run);
 
         $this->assertSame(
-            __('procynia.wiki.runs_findings_explanation_needs_resync'),
+            __('procynia.wiki.runs_findings_explanation_settled').' '
+                .trans_choice('procynia.wiki.runs_findings_explanation_settled_drafts', 2, ['count' => 2]),
             $explanation,
         );
     }

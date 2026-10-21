@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use App\Services\EnterpriseWiki\EnterpriseWikiPatchTargetResolver;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Collection;
 
 /**
  * `generated_page_version_id` is a historical, immutable pointer to the EnterpriseWikiPageVersion
@@ -110,5 +112,52 @@ class EnterpriseWikiIngestRunPage extends Model
             self::GENERATION_STATUS_COMPLETED,
             self::GENERATION_STATUS_FAILED,
         ], true);
+    }
+
+    /**
+     * A failed patch row for a page the run's decision only ever said to leave alone.
+     *
+     * Before 6419ccb3 the patch engine recorded a page in review as a deferred update even when
+     * every target on it was `preserve` (run 963: page 69). Nothing was ever going to change on
+     * that page, so the row is history, not work: it is not a failed page, not a reason to retry,
+     * and not an incomplete step. The row itself stays as it was — only the reading changes.
+     *
+     * Decided from the stored plan alone, never from generation_error: a later wrong-job retry
+     * rewrote that text on the very row this exists for. Every target on the page must be
+     * `preserve`; one replace or amend, or an operation that cannot be read, keeps the row a real
+     * failure.
+     *
+     * @param  array<string, mixed>  $decision  the run's maintainer_decision_json
+     */
+    public function isFailedNoChangePatch(array $decision): bool
+    {
+        if ($this->action !== self::ACTION_PATCHED
+            || $this->generation_status !== self::GENERATION_STATUS_FAILED
+            || $this->generated_page_version_id !== null) {
+            return false;
+        }
+
+        $operations = EnterpriseWikiPatchTargetResolver::operationsForPage($decision, (int) $this->enterprise_wiki_page_id);
+
+        return $operations !== null
+            && $operations !== []
+            && array_unique($operations) === ['preserve'];
+    }
+
+    /**
+     * Failed for real: generation_status=failed, minus isFailedNoChangePatch(). The one reading of
+     * "this run still has a page that did not happen" every reader shares — the retry service,
+     * post-ingest QA, the follow-up rule and Kjøringer.
+     *
+     * @param  Collection<int, self>  $pivots
+     * @param  array<string, mixed>  $decision  the run's maintainer_decision_json
+     * @return Collection<int, self>
+     */
+    public static function outstandingFailures(Collection $pivots, array $decision): Collection
+    {
+        return $pivots
+            ->filter(fn (self $pivot): bool => $pivot->generation_status === self::GENERATION_STATUS_FAILED
+                && ! $pivot->isFailedNoChangePatch($decision))
+            ->values();
     }
 }

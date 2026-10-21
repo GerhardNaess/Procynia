@@ -44,16 +44,21 @@ test.describe.serial('Kjøringer: forståelig feilmelding for en stoppet kjørin
         const status = row.locator('[data-run-status-details]');
         await expect(status).toBeVisible();
 
-        await expect(status.locator('li')).toHaveText([
-            'Kunne ikke generere artikkelen',
+        await expect(status.getByRole('heading', { level: 3 })).toHaveText('Kunne ikke generere artikkelen');
+        await expect(status.locator('p')).toHaveText([
             `Artikkelen «${TITLE}» mangler kildegrunnlag for fem planlagte avsnitt.`,
             'Kjøringen ble stoppet for å unngå å generere innhold uten tilstrekkelig dokumentasjon.',
+            'Det finnes ingen handling for dette i Kjøringer.',
         ]);
+        // Nothing on this screen resolves it, so nothing is offered.
+        await expect(status.locator('[data-run-primary-action]')).toHaveCount(0);
         for (const fragment of TECHNICAL) {
             await expect(row).not.toContainText(fragment);
         }
 
-        // Where it stopped: planning and structure finished, «Sider» failed, the rest never ran.
+        // Where it stopped, under «Vis flere detaljer»: planning and structure finished, «Sider»
+        // failed, the rest never ran.
+        await row.getByRole('button', { name: 'Vis flere detaljer' }).click();
         await expect(row.locator('[data-progress-step]').first()).toBeVisible();
         expect(await row.locator('[data-progress-step]').evaluateAll((els) => els.map((el) => el.dataset.progressState)))
             .toEqual(['done', 'done', 'done', 'error', 'empty', 'empty']);
@@ -63,11 +68,14 @@ test.describe.serial('Kjøringer: forståelig feilmelding for en stoppet kjørin
         }
 
         // The original diagnostics, on request only, and closed again on request.
-        const toggle = status.getByRole('button', { name: 'Vis tekniske detaljer' });
+        const other = row.locator('[data-run-other-actions]');
+        const toggle = other.locator('button[aria-expanded]');
+        await expect(toggle).toHaveText('Vis tekniske detaljer');
         await expect(toggle).toHaveAttribute('aria-expanded', 'false');
         await toggle.click();
         await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-        await expect(status.getByText(storedMessage, { exact: true })).toBeVisible();
+        await expect(toggle).toHaveText('Skjul tekniske detaljer');
+        await expect(other.getByText(storedMessage, { exact: true })).toBeVisible();
 
         if (SCREENSHOT_DIR) {
             await row.screenshot({ path: `${SCREENSHOT_DIR}/run-failure-explanation-details-1366.png` });
@@ -75,7 +83,7 @@ test.describe.serial('Kjøringer: forståelig feilmelding for en stoppet kjørin
 
         await toggle.click();
         await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-        await expect(status.getByText(storedMessage, { exact: true })).toHaveCount(0);
+        await expect(other.getByText(storedMessage, { exact: true })).toHaveCount(0);
 
         const overflows = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
         expect(overflows).toBe(false);

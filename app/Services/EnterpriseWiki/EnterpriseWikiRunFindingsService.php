@@ -60,6 +60,7 @@ class EnterpriseWikiRunFindingsService
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
         private readonly EnterpriseWikiBestPracticeSectionService $sectionService,
         private readonly EnterpriseWikiEscalatedRunRecoveryService $recoveryService,
+        private readonly EnterpriseWikiPostIngestQaService $qaService,
     ) {}
 
     /**
@@ -856,11 +857,8 @@ class EnterpriseWikiRunFindingsService
             };
         }
 
-        $qaFollowUp = $this->qaFollowUpState(
-            $run,
-            $currentVersionIdByPageId,
-            $openBlocking + $openQaReview + $openNonBlocking + $bestPracticePending,
-        );
+        $openFindings = $openBlocking + $openQaReview + $openNonBlocking + $bestPracticePending;
+        $qaFollowUp = $this->qaFollowUpState($run, $currentVersionIdByPageId, $openFindings);
 
         return [
             'total' => $total,
@@ -872,9 +870,11 @@ class EnterpriseWikiRunFindingsService
             'superseded' => $superseded,
             'best_practice_pending' => $bestPracticePending,
             'qa_follow_up' => $qaFollowUp,
-            'explanation' => $qaFollowUp === self::QA_FOLLOW_UP_COMPLETE
-                ? __('procynia.wiki.runs_findings_explanation_follow_up_complete')
-                : $this->buildExplanation($run, $total, $openBlocking, $openQaReview),
+            'explanation' => match (true) {
+                $qaFollowUp === self::QA_FOLLOW_UP_COMPLETE => __('procynia.wiki.runs_findings_explanation_follow_up_complete'),
+                $qaFollowUp === null && $this->escalationSettledWithoutQaFinding($run, $openFindings) => $this->settledExplanation($run),
+                default => $this->buildExplanation($run, $total, $openBlocking, $openQaReview),
+            },
         ];
     }
 
@@ -956,10 +956,9 @@ class EnterpriseWikiRunFindingsService
      */
     private function reviewDeferredPageTitles(EnterpriseWikiIngestRun $run): array
     {
-        $pageIds = EnterpriseWikiIngestRunPage::query()
-            ->where('enterprise_wiki_ingest_run_id', $run->id)
-            ->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED)
-            ->where('generation_error', 'like', '%'.EnterpriseWikiPageGenerationFailureRecoveryService::REVIEW_DEFERRAL_MARKER.'%')
+        $pageIds = $this->outstandingFailedPivots($run)
+            ->filter(static fn (EnterpriseWikiIngestRunPage $pivot): bool => EnterpriseWikiPageGenerationFailureRecoveryService::failureKindForPivot($pivot)
+                === EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_REVIEW_DEFERRED)
             ->pluck('enterprise_wiki_page_id');
 
         if ($pageIds->isEmpty()) {
@@ -1038,10 +1037,13 @@ class EnterpriseWikiRunFindingsService
     }
 
     /**
-     * Whether an escalated run has nothing left to follow up: QA's own follow-up state says complete
-     * (qaFollowUpState()) and no page failed to generate. Kjøringer reads this for «Fullført – med
-     * merknader» and «Fjern fra oversikten» alike. Anything else — including a run this cannot judge —
-     * still needs follow-up. Never changes the run's stored status.
+     * Whether an escalated run has nothing left to follow up: no page of it failed for real
+     * (EnterpriseWikiIngestRunPage::outstandingFailures()), and QA has nothing open — either its
+     * own follow-up state says complete (qaFollowUpState()), or there was no quality finding to
+     * follow up and QA passes on the run as it is now (escalationSettledWithoutQaFinding()).
+     * Kjøringer reads this for «Fullført – med merknader» and «Fjern fra oversikten» alike. Anything
+     * else — including a run this cannot judge — still needs follow-up. Never changes the run's
+     * stored status.
      *
      * @param  array<string, mixed>|null  $summary  buildForRun()['summary'], when the caller has it
      */
@@ -1053,11 +1055,78 @@ class EnterpriseWikiRunFindingsService
 
         $summary ??= $this->buildForRun($run, null, false)['summary'];
 
-        return ($summary['qa_follow_up'] ?? null) === self::QA_FOLLOW_UP_COMPLETE
-            && ! EnterpriseWikiIngestRunPage::query()
+        if ($this->outstandingFailedPivots($run)->isNotEmpty()) {
+            return false;
+        }
+
+        return match ($summary['qa_follow_up'] ?? null) {
+            self::QA_FOLLOW_UP_COMPLETE => true,
+            null => $this->escalationSettledWithoutQaFinding($run, (int) ($summary['open_blocking'] ?? 0)
+                + (int) ($summary['open_qa_review'] ?? 0)
+                + (int) ($summary['open_non_blocking'] ?? 0)
+                + (int) ($summary['best_practice_pending'] ?? 0)),
+            default => false,
+        };
+    }
+
+    /**
+     * An escalated run with no quality finding to follow up (qaFollowUpState() null) is settled only
+     * when QA, judged on the run as it is NOW, passes — never because the stored verdict is quiet.
+     *
+     * The stored qa_result cannot answer this: a run that escalated on an unfinished step (run 963:
+     * page_generation_incomplete, from a row that was never real work) stopped QA before its quality
+     * controls ran, so "no quality finding" there means "not checked", not "fine". evaluate() is the
+     * same pure, read-only, AI-free judgement post-ingest QA persists, so a control that cannot run,
+     * a step still unfinished, a critical defect or a new quality finding all keep the follow-up
+     * open. Open findings in this panel, and any page that failed for real, keep it open too.
+     */
+    private function escalationSettledWithoutQaFinding(EnterpriseWikiIngestRun $run, int $openFindings): bool
+    {
+        if ($run->status !== EnterpriseWikiIngestRun::STATUS_ESCALATED || $openFindings > 0) {
+            return false;
+        }
+
+        return $this->outstandingFailedPivots($run)->isEmpty()
+            && $this->qaService->evaluate($run)['verdict'] === EnterpriseWikiIngestRun::QA_STATUS_PASSED;
+    }
+
+    /**
+     * What a settled run says instead of an escalation reason: nothing is left, and — when it made
+     * new pages that are still drafts — that publishing them is ordinary Wiki work, not a gap in
+     * the run.
+     */
+    private function settledExplanation(EnterpriseWikiIngestRun $run): string
+    {
+        $drafts = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('action', EnterpriseWikiIngestRunPage::ACTION_CREATED)
+            ->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED)
+            ->whereHas('page', fn ($query) => $query
+                ->where('customer_id', $run->customer_id)
+                ->where('status', EnterpriseWikiPage::STATUS_DRAFT))
+            ->count();
+
+        $settled = __('procynia.wiki.runs_findings_explanation_settled');
+
+        return $drafts > 0
+            ? $settled.' '.trans_choice('procynia.wiki.runs_findings_explanation_settled_drafts', $drafts, ['count' => $drafts])
+            : $settled;
+    }
+
+    /**
+     * The run's rows that failed for real — EnterpriseWikiIngestRunPage::outstandingFailures().
+     *
+     * @return Collection<int, EnterpriseWikiIngestRunPage>
+     */
+    private function outstandingFailedPivots(EnterpriseWikiIngestRun $run): Collection
+    {
+        return EnterpriseWikiIngestRunPage::outstandingFailures(
+            EnterpriseWikiIngestRunPage::query()
                 ->where('enterprise_wiki_ingest_run_id', $run->id)
                 ->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED)
-                ->exists();
+                ->get(),
+            (array) ($run->maintainer_decision_json ?? []),
+        );
     }
 
     private function buildEscalatedOrFailedExplanation(EnterpriseWikiIngestRun $run): string

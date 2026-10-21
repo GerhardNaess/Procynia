@@ -70,6 +70,14 @@ class WikiController extends Controller
             EnterpriseWikiIngestRun::STATUS_POST_CLAIM_VERIFICATION,
             EnterpriseWikiIngestRun::STATUS_QA,
         ],
+        // «Fullført» is every run nothing is left on: a completed run, and an escalated one whose
+        // follow-up is done (the row filter below reads which). completed_with_remarks stays
+        // accepted for existing links.
+        'completed' => [
+            EnterpriseWikiIngestRun::STATUS_COMPLETED,
+            EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL,
+            EnterpriseWikiIngestRun::STATUS_ESCALATED,
+        ],
         'needs_follow_up' => [EnterpriseWikiIngestRun::STATUS_ESCALATED],
         'completed_with_remarks' => [EnterpriseWikiIngestRun::STATUS_ESCALATED],
     ];
@@ -849,6 +857,19 @@ class WikiController extends Controller
             // «Fjern fra oversikten»: only this list leaves cleared runs out. Everything else —
             // queue, scheduler, recovery, a document's latest run, page provenance — still reads them.
             ->whereNull('enterprise_wiki_ingest_runs.dismissed_at')
+            // A run recorded as completed that by its own record never ran — never started, never
+            // finished, no page plan, no pages, no error — has nothing to show or follow up (runs
+            // #27–#29 were inserted that way, not by the pipeline, which always sets started_at).
+            // Left out of this list only; a run that started, failed or produced anything stays.
+            ->whereNot(fn ($neverRan) => $neverRan
+                ->where('enterprise_wiki_ingest_runs.status', EnterpriseWikiIngestRun::STATUS_COMPLETED)
+                ->whereNull('enterprise_wiki_ingest_runs.started_at')
+                ->whereNull('enterprise_wiki_ingest_runs.finished_at')
+                ->whereNull('enterprise_wiki_ingest_runs.maintainer_decision_status')
+                ->whereNull('enterprise_wiki_ingest_runs.error_message')
+                ->whereNotExists(fn ($runPage) => $runPage->selectRaw('1')
+                    ->from('enterprise_wiki_ingest_run_pages')
+                    ->whereColumn('enterprise_wiki_ingest_run_pages.enterprise_wiki_ingest_run_id', 'enterprise_wiki_ingest_runs.id')))
             ->orderByDesc('enterprise_wiki_ingest_runs.created_at');
 
         if ($runStatus !== null) {
@@ -893,6 +914,13 @@ class WikiController extends Controller
                 /** @var EnterpriseWikiDocument|null $document */
                 $document = $docsById->get($run->source_id);
 
+                // Whether this person may act on the run's document at all — the authorization
+                // half every action below shares. Sent on its own so the detail view can say that
+                // someone else has to act, instead of only leaving a button out.
+                $mayManage = $document instanceof EnterpriseWikiDocument
+                    && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE)
+                    && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false);
+
                 return [
                     'id' => $run->id,
                     'status' => $run->status,
@@ -909,15 +937,11 @@ class WikiController extends Controller
                     'maintainer_decision_status' => $run->maintainer_decision_status,
                     'source_document_filename' => $document?->original_filename,
                     'source_id' => $run->source_id,
-                    'can_cancel' => $run->isCancellable()
-                        && $document instanceof EnterpriseWikiDocument
-                        && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE)
-                        && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false),
+                    'may_manage' => $mayManage,
+                    'can_cancel' => $run->isCancellable() && $mayManage,
                     // «Fjern fra oversikten»: the same authorization as can_cancel, plus the one
                     // state rule the dismiss request checks again (EnterpriseWikiRunDismissalService).
-                    'can_dismiss' => $document instanceof EnterpriseWikiDocument
-                        && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE)
-                        && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false)
+                    'can_dismiss' => $mayManage
                         && $this->runDismissalService->refusal($run, $summary) === null,
                     // Wiki run-592/run-593: only true when
                     // EnterpriseWikiMaintainerDecisionFailureRecoveryService itself would actually
@@ -927,11 +951,9 @@ class WikiController extends Controller
                     // must match the same flag retryMaintainerDecision() calls attempt() with,
                     // otherwise the button's visibility and the action's real eligibility disagree.
                     'can_retry_maintainer_decision' => $run->status === EnterpriseWikiIngestRun::STATUS_FAILED
-                        && $document instanceof EnterpriseWikiDocument
-                        && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE)
-                        && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false)
+                        && $mayManage
                         && $this->maintainerDecisionRecoveryService->evaluate($run->id, allowManualOverride: true)->isResumed(),
-                    'failed_pages' => $this->failedPagesSummaryForRun($run, $document, $user),
+                    'failed_pages' => $this->failedPagesSummaryForRun($run, $mayManage),
                     'error_message' => $run->error_message,
                     // What Kjøringer says about a stopped run, in the reader's language. The stored
                     // error_message above stays the diagnostics behind «Vis tekniske detaljer».
@@ -954,6 +976,12 @@ class WikiController extends Controller
                     'findings_open_qa_review_count' => $summary['open_qa_review'],
                     'findings_open_non_blocking_count' => $summary['open_non_blocking'] + $summary['best_practice_pending'],
                     'findings_explanation' => $summary['explanation'] ?? null,
+                    // The findings still waiting for a decision — exactly what the findings panel's
+                    // «Åpne» filter lists — and the ones already decided, so the detail view can say
+                    // which is which without adding the buckets up itself.
+                    'findings_open_count' => $summary['open_blocking'] + $summary['open_qa_review']
+                        + $summary['open_non_blocking'] + $summary['best_practice_pending'],
+                    'findings_resolved_count' => $summary['resolved'],
                     // What the run still asks of anyone now, beside qa_status, which records what
                     // happened during the run and is not rewritten by later decisions.
                     'qa_follow_up' => $summary['qa_follow_up'] ?? null,
@@ -978,6 +1006,8 @@ class WikiController extends Controller
                 // The two readings of an escalated run are computed per row, not stored, so that
                 // part of the filter is applied to the rows themselves.
                 ->filter(fn (array $row): bool => match ($runStatus) {
+                    'completed' => $row['status'] !== EnterpriseWikiIngestRun::STATUS_ESCALATED
+                        || $row['follow_up_complete'] === true,
                     'needs_follow_up' => $row['follow_up_complete'] !== true,
                     'completed_with_remarks' => $row['follow_up_complete'] === true,
                     default => true,
@@ -1027,9 +1057,12 @@ class WikiController extends Controller
             ->filter(fn (EnterpriseWikiIngestRunPage $runPage): bool => $runPage->page instanceof EnterpriseWikiPage
                 && (int) $runPage->page->customer_id === $customerId);
 
-        $rows = $runPages->map(fn (EnterpriseWikiIngestRunPage $runPage): array => $this->buildRunPageRow($runPage, $user))->values();
+        $decision = (array) ($run->maintainer_decision_json ?? []);
+        $rows = $runPages->map(fn (EnterpriseWikiIngestRunPage $runPage): array => $this->buildRunPageRow($runPage, $user, $decision))->values();
 
-        $doneStates = ['approved', 'rejected', 'superseded'];
+        // A superseded version is history, not a decision anybody took, so it is neither "done" nor
+        // "awaiting" — it is counted on its own.
+        $doneStates = ['approved', 'rejected'];
         // Not yet a final owner decision — either genuinely still processing (technical), or
         // fully generated/usable with only voluntary QA signals still open (qa_review_open).
         // Neither state blocks the Wiki page itself since v0.10 (docs/enterprise-llm-wiki-plan.md,
@@ -1038,7 +1071,8 @@ class WikiController extends Controller
 
         $doneCount = $rows->filter(fn (array $row): bool => in_array($row['document_owner_status']['state'], $doneStates, true))->count();
         $pendingReviewCount = $rows->filter(fn (array $row): bool => in_array($row['document_owner_status']['state'], $pendingReviewStates, true))->count();
-        $awaitingCount = $rows->count() - $doneCount - $pendingReviewCount;
+        $supersededCount = $rows->filter(fn (array $row): bool => $row['document_owner_status']['state'] === 'superseded')->count();
+        $awaitingCount = $rows->count() - $doneCount - $pendingReviewCount - $supersededCount;
 
         return response()->json([
             'pages' => $rows->all(),
@@ -1047,6 +1081,7 @@ class WikiController extends Controller
                 'done' => $doneCount,
                 'awaiting_document_owner' => $awaitingCount,
                 'pending_review' => $pendingReviewCount,
+                'superseded' => $supersededCount,
             ],
             'stall_explanation' => $this->runStallExplanation($run, $awaitingCount),
         ]);
@@ -1237,9 +1272,11 @@ class WikiController extends Controller
         ]);
 
         if (! $result->isResumed()) {
-            return $this->redirectToWikiTab($request)->with('error', $result->code === EnterpriseWikiRunRecoveryResult::CODE_PLAN_DEFECT
-                ? __('procynia.wiki.run_retry_failed_pages_plan_defect')
-                : __('procynia.wiki.run_retry_failed_pages_not_allowed'));
+            return $this->redirectToWikiTab($request)->with('error', match ($result->code) {
+                EnterpriseWikiRunRecoveryResult::CODE_PLAN_DEFECT => __('procynia.wiki.run_retry_failed_pages_plan_defect'),
+                EnterpriseWikiRunRecoveryResult::CODE_PAGE_UNDER_REVIEW => __('procynia.wiki.run_retry_failed_pages_under_review'),
+                default => __('procynia.wiki.run_retry_failed_pages_not_allowed'),
+            });
         }
 
         return $this->redirectToWikiTab($request)
@@ -1248,43 +1285,74 @@ class WikiController extends Controller
 
     /**
      * The Kjøringer row's view of the pages a run failed to generate: how many, what kind of
-     * failure (plan defect / transient / unknown — EnterpriseWikiPageGenerationFailureRecoveryService::failureKind(),
-     * the most severe one wins), and whether "Prøv igjen for feilede sider" may be offered to this
-     * user — decided by the recovery service's own evaluate(), never re-derived here. Null when the
-     * run has no failed page. The raw generation error stays behind the existing technical details.
+     * failure (plan defect / unknown / transient / review deferral —
+     * EnterpriseWikiPageGenerationFailureRecoveryService::failureKind(), the most severe one wins),
+     * and whether "Prøv igjen for feilede sider" may be offered to this user — decided by the
+     * recovery service's own evaluate(), never re-derived here. Null when the run has no failed page.
+     * The raw generation error stays behind the existing technical details.
      *
-     * @return array{count: int, failure_kind: string, can_retry: bool}|null
+     * `blocked_by_review` says the retry waits for a review that is open now, and `pages` names the
+     * failed pages — each with its own Wiki link (opened with a way back to this run) and whether it
+     * is in review now — so the detail view can send the reader to the page that has to move first.
+     * Pages are read within the run's own customer only.
+     *
+     * @return array{count: int, failure_kind: string, can_retry: bool, blocked_by_review: bool, pages: list<array{title: string, url: string, in_review: bool}>}|null
      */
-    private function failedPagesSummaryForRun(EnterpriseWikiIngestRun $run, ?EnterpriseWikiDocument $document, ?User $user): ?array
+    private function failedPagesSummaryForRun(EnterpriseWikiIngestRun $run, bool $mayManage): ?array
     {
         if (! in_array($run->status, [EnterpriseWikiIngestRun::STATUS_FAILED, EnterpriseWikiIngestRun::STATUS_ESCALATED], true)) {
             return null;
         }
 
-        $errors = EnterpriseWikiIngestRunPage::query()
-            ->where('enterprise_wiki_ingest_run_id', $run->id)
-            ->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED)
-            ->pluck('generation_error');
+        // Only rows that failed for real: a failed row for a page the decision only said to leave
+        // alone (EnterpriseWikiIngestRunPage::isFailedNoChangePatch(), run 963) is history, and is
+        // neither counted, named nor offered a retry here — the same reading the retry itself uses.
+        $failed = EnterpriseWikiIngestRunPage::outstandingFailures(
+            EnterpriseWikiIngestRunPage::query()
+                ->where('enterprise_wiki_ingest_run_id', $run->id)
+                ->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED)
+                ->orderBy('id')
+                ->get(),
+            (array) ($run->maintainer_decision_json ?? []),
+        );
 
-        if ($errors->isEmpty()) {
+        if ($failed->isEmpty()) {
             return null;
         }
 
-        $kinds = $errors->map(fn (?string $error): string => EnterpriseWikiPageGenerationFailureRecoveryService::failureKind($error));
+        $kinds = $failed->map(fn (EnterpriseWikiIngestRunPage $pivot): string => EnterpriseWikiPageGenerationFailureRecoveryService::failureKindForPivot($pivot));
         $failureKind = match (true) {
             $kinds->contains(EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_PLAN_DEFECT) => EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_PLAN_DEFECT,
             $kinds->contains(EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_UNKNOWN) => EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_UNKNOWN,
-            default => EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_TRANSIENT,
+            $kinds->contains(EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_TRANSIENT) => EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_TRANSIENT,
+            default => EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_REVIEW_DEFERRED,
         };
 
-        $mayManage = $document instanceof EnterpriseWikiDocument
-            && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE)
-            && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false);
+        $recovery = $this->pageGenerationRecoveryService->evaluate($run->id);
+
+        $pagesById = EnterpriseWikiPage::query()
+            ->where('customer_id', $run->customer_id)
+            ->whereIn('id', $failed->pluck('enterprise_wiki_page_id')->filter()->unique())
+            ->get(['id', 'slug', 'title', 'status'])
+            ->keyBy('id');
+        $backUrl = '/app/wiki?'.http_build_query(['tab' => 'runs', 'focus_run' => $run->id]);
 
         return [
-            'count' => $errors->count(),
+            'count' => $failed->count(),
             'failure_kind' => $failureKind,
-            'can_retry' => $mayManage && $this->pageGenerationRecoveryService->evaluate($run->id)->isResumed(),
+            'can_retry' => $mayManage && $recovery->isResumed(),
+            'blocked_by_review' => $recovery->code === EnterpriseWikiRunRecoveryResult::CODE_PAGE_UNDER_REVIEW,
+            'pages' => $failed
+                ->map(fn (EnterpriseWikiIngestRunPage $pivot): ?EnterpriseWikiPage => $pagesById->get($pivot->enterprise_wiki_page_id))
+                ->filter()
+                ->unique('id')
+                ->map(fn (EnterpriseWikiPage $page): array => [
+                    'title' => (string) $page->title,
+                    'url' => route('app.wiki.show', ['slug' => $page->slug, 'back_url' => $backUrl], false),
+                    'in_review' => $page->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW,
+                ])
+                ->values()
+                ->all(),
         ];
     }
 
@@ -1404,13 +1472,19 @@ class WikiController extends Controller
     }
 
     /**
+     * @param  array<string, mixed>  $decision  the run's maintainer_decision_json
      * @return array{
      *     page_id: int, title: string, slug: string, url: string, page_type: string,
      *     page_version_id: ?int, version_number: ?int, action: string, is_current_version: bool,
-     *     document_owner_status: array, can_handle: bool, decided_at: ?string, decided_by_name: ?string
+     *     document_owner_status: array, can_handle: bool, decided_at: ?string, decided_by_name: ?string,
+     *     result: string, page_status: string
      * }
+     *
+     * `document_owner_status`, `can_handle` and the decided fields are kept for the record; Kjøringer
+     * shows `result` (what the run actually did to the page) and `page_status` (the article as it
+     * is now) instead, because document-owner rows no longer decide anything a reader can act on.
      */
-    private function buildRunPageRow(EnterpriseWikiIngestRunPage $runPage, ?User $user): array
+    private function buildRunPageRow(EnterpriseWikiIngestRunPage $runPage, ?User $user, array $decision): array
     {
         $page = $runPage->page;
         $version = $runPage->generatedPageVersion;
@@ -1422,6 +1496,8 @@ class WikiController extends Controller
             'url' => route('app.wiki.show', $page->slug),
             'page_type' => $page->page_type,
             'action' => $runPage->action,
+            'result' => $this->runPageResult($runPage, $decision),
+            'page_status' => (string) $page->status,
             'page_version_id' => $version?->id,
             'version_number' => $version?->version_number,
             'is_current_version' => $version !== null && (bool) $version->is_current,
@@ -1464,6 +1540,42 @@ class WikiController extends Controller
      * pretend a reason applies when the underlying count is actually zero (a stale/unreconciled
      * run status is reported as needing resync, not given a fabricated explanation).
      */
+    /**
+     * What the run actually did to one page — never the plan's `action` alone, which says what it
+     * set out to do. `updated` needs a version this run wrote; a patch row whose plan only said to
+     * leave the page alone is `no_change`; a waiting update is `deferred`; a row that failed for any
+     * other reason is `not_created`/`not_updated`. A completed row without a version cannot be
+     * stated with certainty and is `unknown`.
+     *
+     * @param  array<string, mixed>  $decision  the run's maintainer_decision_json
+     * @return 'created'|'updated'|'no_change'|'deferred'|'not_created'|'not_updated'|'in_progress'|'unknown'
+     */
+    private function runPageResult(EnterpriseWikiIngestRunPage $runPage, array $decision): string
+    {
+        if ($runPage->generation_status === EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED) {
+            if ($runPage->generated_page_version_id === null) {
+                return 'unknown';
+            }
+
+            return $runPage->action === EnterpriseWikiIngestRunPage::ACTION_CREATED ? 'created' : 'updated';
+        }
+
+        if ($runPage->generation_status !== EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED) {
+            return 'in_progress';
+        }
+
+        if ($runPage->isFailedNoChangePatch($decision)) {
+            return 'no_change';
+        }
+
+        if (EnterpriseWikiPageGenerationFailureRecoveryService::failureKindForPivot($runPage)
+            === EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_REVIEW_DEFERRED) {
+            return 'deferred';
+        }
+
+        return $runPage->action === EnterpriseWikiIngestRunPage::ACTION_CREATED ? 'not_created' : 'not_updated';
+    }
+
     private function runStallExplanation(EnterpriseWikiIngestRun $run, int $awaitingCount): ?string
     {
         if ($run->status !== EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL) {
@@ -1869,9 +1981,15 @@ class WikiController extends Controller
         // travels in the address, so every render of this URL resolves the same destination.
         // Null for a page opened straight from the Wiki list — the plain "Tilbake til Wiki".
         $graphReturnUrl = is_string($rawBackUrl) ? $this->normalizeGraphReturnUrl($rawBackUrl) : null;
-        $navigationOrigin = $graphReturnUrl !== null
-            ? ['context' => 'graph', 'back_url' => $graphReturnUrl]
-            : null;
+        // A Kjøringer URL that names no finding is a page opened from a run's detail view («Åpne» on
+        // a page whose update waits for its review): its back link leads to that run. A URL that
+        // does name a finding stays the finding context's alone (review_reference/structure_finding).
+        parse_str((string) parse_url((string) $backUrl, PHP_URL_QUERY), $backUrlQuery);
+        $navigationOrigin = match (true) {
+            $graphReturnUrl !== null => ['context' => 'graph', 'back_url' => $graphReturnUrl],
+            $backUrl !== null && ! array_key_exists('focus_finding', $backUrlQuery) => ['context' => 'runs', 'back_url' => $backUrl],
+            default => null,
+        };
         $reviewReference = ($rawReviewClaimId !== null && $rawReviewClaimId !== '' && is_numeric($rawReviewClaimId))
             ? $this->buildReviewReference((int) $rawReviewClaimId, $page, $currentVersion, $canApproveWikiClaims, $backUrl)
             : null;
@@ -2949,7 +3067,7 @@ class WikiController extends Controller
      * Approve a page in pending_review → approved.
      * Requires the approve_wiki_pages capability; System Owner passes as an override.
      */
-    public function approve(string $slug): RedirectResponse
+    public function approve(Request $request, string $slug): RedirectResponse
     {
         $user = $this->customerContext->currentUser();
 
@@ -3006,7 +3124,7 @@ class WikiController extends Controller
             // worth more after the decision than before it.
         });
 
-        return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Wiki-siden er godkjent.');
+        return redirect()->route('app.wiki.show', $this->wikiShowRouteParamsKeepingRunsReturn($request, $page->slug))->with('success', 'Wiki-siden er godkjent.');
     }
 
     /**
@@ -3073,7 +3191,7 @@ class WikiController extends Controller
 
         $page->refresh();
 
-        return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Wiki-siden er avvist.');
+        return redirect()->route('app.wiki.show', $this->wikiShowRouteParamsKeepingRunsReturn($request, $page->slug))->with('success', 'Wiki-siden er avvist.');
     }
 
     /**

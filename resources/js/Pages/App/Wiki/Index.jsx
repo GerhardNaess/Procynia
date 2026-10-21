@@ -14,13 +14,11 @@ import {
     RUN_TIMELINE_STEPS,
     matchesFindingsLocalFilter,
     getRunTimelineState,
-    getEscalationCopy,
-    getRunFailureLines,
     runStatusKey,
     RUN_STATUS_FILTER_KEYS,
-    getTransientFailureCopy,
     isRunStalled,
     getRunCompactSummary,
+    getRunNextStep,
     formatFindingUserId,
     isActiveWikiRun,
     hasActiveWikiRunForTab,
@@ -46,7 +44,7 @@ const BADGE = 'inline-flex items-center rounded-full px-2.5 py-0.5 text-base fon
 // Fixed widths only where the content is known (ID, counts, dates, the one action); the status
 // column holds a badge and one short line, so document and status share what is left.
 const RUNS_GRID_TEMPLATE = 'minmax(0,2.5rem) minmax(0,1.3fr) minmax(0,1.7fr) minmax(0,6.5rem) minmax(0,3rem) minmax(0,3rem) minmax(0,5.5rem) minmax(0,5.5rem) minmax(0,8rem)';
-// BADGE never wraps; «Sidestruktur opprettet» must, or it runs into the Sider column.
+// BADGE never wraps; WRAPPING_BADGE does, so a longer word never runs into the Sider column.
 const WRAPPING_BADGE = 'inline-flex max-w-full items-center rounded-xl px-2 py-0.5 text-sm font-semibold leading-5 break-words';
 // A run's status in Kjøringer: the size of BADGE, but it wraps inside the status column instead of
 // running into the next one.
@@ -287,15 +285,16 @@ function RunTimeline({ run, tw, ta = {} }) {
     );
 }
 
+// The part of «Vis flere detaljer» that opens first: the findings when some are still open, then
+// the pages, then any findings at all — 'details' when the run has neither.
 function defaultRunDetailSection(run) {
     const findings = run.lint_count ?? 0;
-    const needsAttention = (run.findings_open_blocking_count ?? 0) > 0 || ['escalated', 'failed'].includes(run.status);
 
-    if (findings > 0 && needsAttention) return 'findings';
+    if ((run.findings_open_count ?? 0) > 0) return 'findings';
     if ((run.pages_count ?? 0) > 0) return 'pages';
     if (findings > 0) return 'findings';
 
-    return 'overview';
+    return 'details';
 }
 
 const CHEVRON_PATH = 'M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z';
@@ -318,6 +317,9 @@ function RunListItem({
     onDismissRun = null,
     onFetchRunPages,
     onFetchRunFindings,
+    onToggleMoreDetails,
+    onReviewFindings,
+    findingsPanelKey = 0,
     focusFindingId,
 }) {
     const statusCls = runStatusClass(run);
@@ -326,9 +328,12 @@ function RunListItem({
     // The collapsed row answers «what is the status» and «does it need follow-up»: the badge and at
     // most one short line. Everything else is in the row's one detail view.
     const compactSummary = getRunCompactSummary(run, tw);
-    // activePanel: null (closed) | 'overview' | 'pages' | 'findings' — the last two are the open
-    // view with that section of «Sider og QA-funn» shown.
+    // activePanel: null (closed) | 'overview' (what to do, «Vis flere detaljer» closed) | 'details' |
+    // 'pages' | 'findings' — the last three are «Vis flere detaljer» open, on that section of
+    // «Sider og QA-funn».
     const detailsOpen = activePanel !== null;
+    const moreDetailsOpen = detailsOpen && activePanel !== 'overview';
+    const moreDetailsId = `${panelId}-more`;
     const documentId = `run-${run.id}-document`;
 
     const renderStatusCell = () => (
@@ -336,7 +341,7 @@ function RunListItem({
             <div className="flex flex-wrap items-center gap-1.5">
                 <span
                     className={statusBadgeClass}
-                    title={run.status === 'escalated' ? (run.failure_summary?.title || run.findings_explanation || undefined) : undefined}
+                    title={runStatusKey(run) === 'needs_follow_up' ? (run.failure_summary?.title || run.findings_explanation || undefined) : undefined}
                 >
                     {runStatusLabel(run, tw)}
                 </span>
@@ -355,10 +360,11 @@ function RunListItem({
     );
 
     const renderDecisionBadge = () => {
+        // Neutral: the status badge is the one coloured answer a row gives.
         if (run.maintainer_decision_status === 'applied') {
             return (
-                <span className={`${WRAPPING_BADGE} bg-emerald-100 text-emerald-700`}>
-                    {tw.run_decision_applied ?? 'Sidestruktur opprettet'}
+                <span className={`${WRAPPING_BADGE} bg-slate-100 text-slate-700`}>
+                    {tw.run_decision_applied ?? 'Opprettet'}
                 </span>
             );
         }
@@ -397,9 +403,17 @@ function RunListItem({
         return <span className="text-slate-600" title={tw.runs_pages_none ?? 'Ingen Wiki-sider'}>0</span>;
     };
 
+    // The count is every finding the run has; the line under it says how many are still open, so ten
+    // decided findings never read like ten problems.
+    const findingsOpen = run.findings_open_count ?? 0;
+    const findingsOpenHint = findingsOpen > 0
+        ? (tw.runs_findings_open_hint ?? ':count åpne').replace(':count', String(findingsOpen))
+        : null;
+
     const renderFindingsCell = (compact = false) => {
         if (run.lint_count > 0) {
             return (
+                <span className={`inline-flex flex-col ${compact ? 'items-start' : 'items-center'}`}>
                 <button
                     type="button"
                     onClick={() => onTogglePanel(run, 'findings', true)}
@@ -409,12 +423,16 @@ function RunListItem({
                         ? (tw.runs_findings_toggle_open_with_blocking ?? 'Vis :count kvalitetsfunn, hvorav :blocking blokkerende')
                             .replace(':count', run.lint_count)
                             .replace(':blocking', run.findings_open_blocking_count)
-                        : (tw.runs_findings_toggle_open ?? 'Vis :count kvalitetsfunn').replace(':count', run.lint_count)}
+                        : (findingsOpen > 0
+                            ? (tw.runs_findings_toggle_some_open ?? 'Vis :count kvalitetsfunn, hvorav :open åpne')
+                                .replace(':count', run.lint_count)
+                                .replace(':open', findingsOpen)
+                            : (tw.runs_findings_toggle_all_handled ?? 'Vis :count kvalitetsfunn, alle ferdigbehandlet').replace(':count', run.lint_count))}
                     title={(run.findings_open_blocking_count ?? 0) > 0
                         ? (tw.runs_findings_count_tooltip_blocking ?? ':total funn totalt, :blocking av dem blokkerer fullføring')
                             .replace(':total', run.lint_count)
                             .replace(':blocking', run.findings_open_blocking_count)
-                        : undefined}
+                        : (findingsOpen > 0 ? undefined : (tw.runs_findings_all_handled ?? 'Alle funn er ferdigbehandlet'))}
                     className={`inline-flex items-center gap-1 rounded-md py-1 font-semibold transition focus:outline-none focus-visible:ring-2 ${findingsCountToneClass(run)} ${compact ? 'pr-2 text-sm' : 'min-w-[2.75rem] justify-center px-2'}`}
                 >
                     {run.lint_count}
@@ -422,6 +440,12 @@ function RunListItem({
                         <path fillRule="evenodd" d={CHEVRON_PATH} clipRule="evenodd" />
                     </svg>
                 </button>
+                {findingsOpenHint && (
+                    <span data-run-findings-open-hint aria-hidden="true" className="whitespace-nowrap text-xs font-medium leading-4 text-amber-800">
+                        {findingsOpenHint}
+                    </span>
+                )}
+                </span>
             );
         }
 
@@ -535,7 +559,7 @@ function RunListItem({
 
                 <dl className="grid grid-cols-3 gap-x-3 gap-y-2 text-sm leading-5 text-slate-600">
                     <div className="min-w-0">
-                        <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_decision ?? 'Beslutning'}</dt>
+                        <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tw.runs_col_decision ?? 'Sideplan'}</dt>
                         <dd className="mt-1">{renderDecisionBadge()}</dd>
                     </div>
                     <div className="min-w-0">
@@ -561,7 +585,7 @@ function RunListItem({
                 <div
                     id={panelId}
                     data-run-detail-panel
-                    className="divide-y divide-slate-200 border-t border-slate-200 bg-slate-50/70 px-4 lg:px-6"
+                    className="border-t border-slate-200 bg-slate-50/70 px-4 lg:px-6"
                 >
                     <RunStatusFollowUp
                         run={run}
@@ -570,78 +594,110 @@ function RunListItem({
                         headingId={`${panelId}-status`}
                         onRetryMaintainerDecision={onRetryMaintainerDecision}
                         onRetryFailedPages={onRetryFailedPages}
-                        onDismiss={onDismissRun}
+                        onReviewFindings={onReviewFindings}
                     />
 
-                    {run.status !== 'decision_only' && (
-                        <section data-run-progress-row aria-labelledby={`${panelId}-progress`} className="py-4">
-                            <h3 id={`${panelId}-progress`} className="mb-2 text-base font-semibold leading-6 text-slate-900">
-                                {tw.run_detail_progress_heading ?? 'Fremdrift'}
-                            </h3>
-                            {/* Scrolls sideways on a narrow screen; reachable from the keyboard while it does. */}
-                            <ScrollRegion
-                                data-progress-scroll-area=""
-                                label={(ta.wiki_run_progress_label ?? 'Fremdrift for kjøring :id').replace(':id', String(run.id))}
-                                className="min-w-0 max-w-full"
-                            >
-                                <RunTimeline run={run} tw={tw} ta={ta} />
-                            </ScrollRegion>
-                            {/* The timeline is how the run itself ended — an escalation stays marked at
-                                QA. Said once, here, when the follow-up done since then is confirmed. */}
-                            {run.status === 'escalated' && run.follow_up_complete === true && (
-                                <p data-run-progress-history-note className="mt-2 text-base leading-6 text-slate-600">
-                                    {tw.run_progress_history_note ?? 'Fremdriften viser resultatet fra den opprinnelige kjøringen. QA-oppfølgingen er senere fullført.'}
-                                </p>
-                            )}
-                        </section>
-                    )}
+                    <div className="pb-4">
+                        <button
+                            type="button"
+                            data-run-more-details
+                            onClick={() => onToggleMoreDetails(run)}
+                            aria-expanded={moreDetailsOpen}
+                            aria-controls={moreDetailsId}
+                            className="inline-flex items-center gap-1.5 rounded text-base font-semibold leading-6 text-slate-700 underline decoration-slate-300 underline-offset-2 transition hover:text-violet-700 hover:decoration-violet-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                        >
+                            <svg className={`h-4 w-4 transition-transform ${moreDetailsOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                <path fillRule="evenodd" d={CHEVRON_PATH} clipRule="evenodd" />
+                            </svg>
+                            {moreDetailsOpen
+                                ? (tw.run_more_details_hide ?? 'Skjul flere detaljer')
+                                : (tw.run_more_details_show ?? 'Vis flere detaljer')}
+                        </button>
+                    </div>
 
-                    {(run.pages_count > 0 || run.lint_count > 0) && (
-                        <section data-run-pages-findings aria-labelledby={`${panelId}-sections`} className="space-y-3 py-4">
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                                <h3 id={`${panelId}-sections`} className="text-base font-semibold leading-6 text-slate-900">
-                                    {tw.run_detail_sections_heading ?? 'Sider og QA-funn'}
-                                </h3>
-                                <div className="flex flex-wrap gap-2">
-                                    {[
-                                        ['pages', tw.runs_col_pages ?? 'Sider', run.pages_count],
-                                        ['findings', tw.runs_col_lint ?? 'Funn', run.lint_count],
-                                    ].map(([section, label, count]) => (
-                                        <button
-                                            key={section}
-                                            type="button"
-                                            data-run-section={section}
-                                            onClick={() => onSelectSection(run, section)}
-                                            aria-pressed={activePanel === section}
-                                            aria-disabled={count > 0 ? undefined : true}
-                                            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 text-base font-semibold leading-6 text-slate-700 transition hover:border-violet-300 hover:text-violet-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 aria-pressed:border-violet-300 aria-pressed:bg-violet-50 aria-pressed:text-violet-700 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-                                        >
-                                            {label}
-                                            <span className="tabular-nums">{count}</span>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                            {activePanel === 'pages' && (
-                                <RunAffectedPagesPanel
-                                    panelId={`${panelId}-pages`}
-                                    state={runPagesState[run.id]}
-                                    onRetry={() => onFetchRunPages(run.id)}
-                                    tw={tw}
-                                />
+                    {moreDetailsOpen && (
+                        <div id={moreDetailsId} data-run-more-details-panel className="divide-y divide-slate-200 border-t border-slate-200">
+                            {run.status !== 'decision_only' && (
+                                <section data-run-progress-row aria-labelledby={`${panelId}-progress`} className="py-4">
+                                    <h3 id={`${panelId}-progress`} className="mb-2 text-base font-semibold leading-6 text-slate-900">
+                                        {tw.run_detail_progress_heading ?? 'Fremdrift'}
+                                    </h3>
+                                    {/* Scrolls sideways on a narrow screen; reachable from the keyboard while it does. */}
+                                    <ScrollRegion
+                                        data-progress-scroll-area=""
+                                        label={(ta.wiki_run_progress_label ?? 'Fremdrift for kjøring :id').replace(':id', String(run.id))}
+                                        className="min-w-0 max-w-full"
+                                    >
+                                        <RunTimeline run={run} tw={tw} ta={ta} />
+                                    </ScrollRegion>
+                                    {/* The timeline is how the run itself ended — an escalation stays marked at
+                                        QA. Said once, here, when the follow-up done since then is confirmed. */}
+                                    {run.status === 'escalated' && run.follow_up_complete === true && (
+                                        <p data-run-progress-history-note className="mt-2 text-base leading-6 text-slate-600">
+                                            {tw.run_progress_history_note ?? 'Fremdriften viser resultatet fra den opprinnelige kjøringen. QA-oppfølgingen er senere fullført.'}
+                                        </p>
+                                    )}
+                                </section>
                             )}
-                            {activePanel === 'findings' && (
-                                <RunFindingsPanel
-                                    panelId={`${panelId}-findings`}
-                                    state={runFindingsState[run.id]}
-                                    onRetry={() => onFetchRunFindings(run.id)}
-                                    tw={tw}
-                                    ta={ta}
-                                    locale={locale}
-                                    focusFindingId={focusFindingId}
-                                />
+
+                            {(run.pages_count > 0 || run.lint_count > 0) && (
+                                <section data-run-pages-findings aria-labelledby={`${panelId}-sections`} className="space-y-3 py-4">
+                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                                        {/* tabIndex -1: where «Behandle kvalitetsfunn» moves focus. */}
+                                        <h3 id={`${panelId}-sections`} tabIndex={-1} className="text-base font-semibold leading-6 text-slate-900 focus:outline-none">
+                                            {tw.run_detail_sections_heading ?? 'Sider og QA-funn'}
+                                        </h3>
+                                        <div className="flex flex-wrap gap-2">
+                                            {[
+                                                ['pages', tw.runs_col_pages ?? 'Sider', run.pages_count],
+                                                ['findings', tw.runs_col_lint ?? 'Funn', run.lint_count],
+                                            ].map(([section, label, count]) => (
+                                                <button
+                                                    key={section}
+                                                    type="button"
+                                                    data-run-section={section}
+                                                    onClick={() => onSelectSection(run, section)}
+                                                    aria-pressed={activePanel === section}
+                                                    aria-disabled={count > 0 ? undefined : true}
+                                                    className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 text-base font-semibold leading-6 text-slate-700 transition hover:border-violet-300 hover:text-violet-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 aria-pressed:border-violet-300 aria-pressed:bg-violet-50 aria-pressed:text-violet-700 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                                                >
+                                                    {label}
+                                                    <span className="tabular-nums">{count}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    {activePanel === 'pages' && (
+                                        <RunAffectedPagesPanel
+                                            panelId={`${panelId}-pages`}
+                                            state={runPagesState[run.id]}
+                                            onRetry={() => onFetchRunPages(run.id)}
+                                            tw={tw}
+                                        />
+                                    )}
+                                    {activePanel === 'findings' && (
+                                        <RunFindingsPanel
+                                            key={findingsPanelKey}
+                                            panelId={`${panelId}-findings`}
+                                            state={runFindingsState[run.id]}
+                                            onRetry={() => onFetchRunFindings(run.id)}
+                                            tw={tw}
+                                            ta={ta}
+                                            locale={locale}
+                                            focusFindingId={focusFindingId}
+                                            initialFilter={(run.findings_open_count ?? 0) > 0 ? 'open' : 'all'}
+                                        />
+                                    )}
+                                </section>
                             )}
-                        </section>
+
+                            <RunOtherActions
+                                run={run}
+                                tw={tw}
+                                onRetryFailedPages={onRetryFailedPages}
+                                onDismiss={onDismissRun}
+                            />
+                        </div>
                     )}
                 </div>
             )}
@@ -649,163 +705,150 @@ function RunListItem({
     );
 }
 
-const FAILED_PAGES_KIND_COPY = {
-    transient: ['run_failed_pages_kind_transient', 'Feilen ser ut til å være midlertidig.'],
-    unknown: ['run_failed_pages_kind_unknown', 'Årsaken er ikke kjent, og et nytt forsøk kan gi samme resultat.'],
-    plan_defect: ['run_failed_pages_kind_plan_defect', 'Feilen skyldes sideplanen eller kildegrunnlaget, ikke et midlertidig problem. Et nytt forsøk ville gitt samme resultat, og tilbys derfor ikke.'],
-};
+// The one main action of a run's detail view. Wraps instead of overflowing: it can carry a Wiki
+// article's title («Åpne «…»»), which has no fixed length.
+const RUN_PRIMARY_ACTION = `inline-flex min-h-10 max-w-full items-center rounded-lg border px-3.5 py-2 text-left text-base font-semibold leading-6 break-words shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 ${PRIMARY_COLOURS}`;
 
 const RUN_DETAIL_ACTION_BUTTON = 'inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-base font-semibold leading-6 text-violet-700 transition hover:border-violet-400 hover:bg-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400';
 
 /**
- * «Status og oppfølging» in a run's detail view: what happened, what needs follow-up, and the
- * actions for it. Every sentence comes from data the row already carries (escalation reasons,
- * failed_pages, findings counts, the transient-failure classification) — nothing is derived anew.
- * Raw error text sits behind «Vis tekniske detaljer» only — never the default explanation.
+ * The top of a run's detail view: what happened, what to do about it, and what is already done
+ * (getRunNextStep() chooses the words and the one main action from the row's backend data). The
+ * progress, pages, findings, technical details and the other actions are under «Vis flere detaljer».
  */
-function RunStatusFollowUp({ run, tw, locale, headingId, onRetryMaintainerDecision = null, onRetryFailedPages = null, onDismiss = null }) {
-    const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
-
-    const isEscalated = run.status === 'escalated';
-    const isTransientMaintainerFailure = run.status === 'failed'
-        && run.failed_phase === 'maintainer_decision'
-        && !!run.transient_failure;
-    const escalation = isEscalated ? getEscalationCopy(run, tw) : null;
-    // The translated explanation of a stopped run; its stored message stays behind «Vis tekniske
-    // detaljer» below (EnterpriseWikiRunFailurePresenter).
-    const failureLines = getRunFailureLines(run);
-    const transientFailure = isTransientMaintainerFailure ? getTransientFailureCopy(run, tw) : null;
-    const failedPages = run.failed_pages?.count ? run.failed_pages : null;
-    const blockingCount = run.findings_open_blocking_count ?? 0;
-    const totalFindings = run.lint_count ?? 0;
+function RunStatusFollowUp({ run, tw, locale, headingId, onRetryMaintainerDecision = null, onRetryFailedPages = null, onReviewFindings = null }) {
+    const next = getRunNextStep(run, tw);
     const seemsStalled = isRunStalled(run);
     const progressAt = run.last_progress_at ?? run.updated_at ?? run.started_at ?? run.created_at;
-
-    // Each line: [tone, text]. Tone 'primary' is the cause, 'alert' needs action, 'note' explains.
-    const lines = [];
-
-    if (escalation && failureLines) {
-        lines.push(...failureLines);
-        if (run.findings_explanation) lines.push(['note', run.findings_explanation]);
-    } else if (escalation) {
-        lines.push(['primary', escalation.primaryReason]);
-        if (escalation.secondaryReason) lines.push(['note', escalation.secondaryReason]);
-    } else if (transientFailure) {
-        lines.push(['alert', transientFailure.primaryMessage]);
-        lines.push(['note', [transientFailure.failedInPhase, transientFailure.attemptSummary, transientFailure.documentPreservedNote].filter(Boolean).join(' ')]);
-    } else if (run.status === 'failed') {
-        lines.push(...(failureLines ?? [['alert', tw.run_compact_failed ?? 'Stoppet med feil']]));
-    }
-
-    // A recognised failure already names the pages and why; the failed-pages sentence would say it
-    // again. Its retry action below stays.
-    if (failedPages && !(failureLines && run.failure_summary?.kind !== 'unknown')) {
-        const [kindKey, kindFallback] = FAILED_PAGES_KIND_COPY[failedPages.failure_kind] ?? FAILED_PAGES_KIND_COPY.unknown;
-        lines.push(['alert', `${(tw.run_failed_pages_summary ?? ':count side(r) kunne ikke genereres og er ufullstendige.').replace(':count', String(failedPages.count))} ${tw[kindKey] ?? kindFallback}`]);
-    }
-
-    if (blockingCount > 0) {
-        lines.push(['alert', escalation?.blockingSummary ?? (tw.ingest_activity_escalated_blocking ?? ':count av :total funn er fortsatt åpne og blokkerer fullføring.')
-            .replace(':count', blockingCount)
-            .replace(':total', totalFindings)]);
-    } else if (isEscalated && totalFindings > 0) {
-        lines.push(['note', (tw.run_detail_findings_not_blocking ?? ':count QA-funn er registrert. Ingen av dem blokkerer fullføring.').replace(':count', String(totalFindings))]);
-    } else if (isEscalated && !run.findings_explanation) {
-        // findings_explanation, when present, is already the cause above and says this same thing.
-        lines.push(['note', escalation.blockingSummary]);
-    }
+    const lines = [...next.lines];
 
     if (seemsStalled) {
-        lines.push(['warning', (tw.ingest_activity_stalled_explanation ?? 'Ingen registrert fremdrift siden :time. Kjøringen kan vente på en handling og er ikke nødvendigvis feilet.')
-            .replace(':time', `${formatDate(progressAt, locale)} ${formatTime(progressAt, locale) ?? ''}`.trim())]);
+        lines.push((tw.ingest_activity_stalled_explanation ?? 'Ingen registrert fremdrift siden :time. Kjøringen kan vente på en handling og er ikke nødvendigvis feilet.')
+            .replace(':time', `${formatDate(progressAt, locale)} ${formatTime(progressAt, locale) ?? ''}`.trim()));
     } else if (!run.finished_at && progressAt && isActiveWikiRun(run)) {
-        lines.push(['note', `${tw.ingest_activity_last_progress ?? 'Siste fremdrift'} ${formatRelativeProgress(progressAt, locale)}`]);
+        lines.push(`${tw.ingest_activity_last_progress ?? 'Siste fremdrift'} ${formatRelativeProgress(progressAt, locale)}`);
     }
 
-    if (lines.length === 0) {
-        lines.push(['note', tw.run_detail_no_follow_up ?? 'Ingen oppfølging er nødvendig.']);
-    }
-
-    // Raw text not already shown above, e.g. run 963's qa_last_error behind its friendly escalation.
-    const shownTexts = new Set(lines.map(([, text]) => text));
-    const technicalDetails = [...new Set([run.error_message, run.qa_last_error].filter(Boolean))]
-        .filter((text) => !shownTexts.has(text));
-
-    const toneClass = {
-        primary: 'font-medium text-slate-900',
-        alert: 'font-medium text-rose-800',
-        warning: 'text-amber-800',
-        note: 'text-slate-600',
+    const action = next.action;
+    const handleAction = (event) => {
+        if (action.kind === 'retry_failed_pages') onRetryFailedPages?.(run, event.currentTarget, 'failed_pages');
+        if (action.kind === 'retry_maintainer_decision') onRetryMaintainerDecision?.(run, event.currentTarget);
+        if (action.kind === 'review_findings') onReviewFindings?.(run);
     };
-
-    const canRetryFailedPages = failedPages?.can_retry && onRetryFailedPages;
-    const canRetryDecision = isTransientMaintainerFailure && run.can_retry_maintainer_decision && onRetryMaintainerDecision;
-    // Offered only when the server says this run is finished, nothing about it is left to follow
-    // up, and this person may manage its document (can_dismiss — checked again on the request).
-    const canDismiss = run.can_dismiss === true && onDismiss;
 
     return (
         // Not a live region (A11Y-112): it was re-rendered on every 5 s poll. A status change is said
         // once by useRunStatusAnnouncements in the list; the text here is there to be read.
-        <section data-run-status-details aria-labelledby={headingId} className="min-w-0 max-w-full space-y-2 py-4">
-            <h3 id={headingId} className="text-base font-semibold leading-6 text-slate-900">
-                {tw.run_detail_status_heading ?? 'Status og oppfølging'}
-            </h3>
-            <ul className="max-w-3xl space-y-1" data-run-failed-pages={failedPages?.count || undefined}>
-                {lines.map(([tone, text]) => (
-                    <li key={text} className={`break-words text-base leading-6 ${toneClass[tone]}`}>{text}</li>
+        <section data-run-status-details data-run-next-step={next.key} aria-labelledby={headingId} className="min-w-0 max-w-full space-y-3 py-4">
+            <div className="max-w-3xl space-y-1">
+                {/* tabIndex -1: where the way back from a Wiki page opened here lands focus. */}
+                <h3 id={headingId} tabIndex={-1} className="break-words text-lg font-semibold leading-7 text-slate-900 focus:outline-none">
+                    {next.title}
+                </h3>
+                {lines.map((text) => (
+                    <p key={text} className="break-words text-base leading-6 text-slate-700">{text}</p>
                 ))}
-            </ul>
+            </div>
 
-            {(canRetryFailedPages || canRetryDecision || technicalDetails.length > 0 || canDismiss) && (
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1">
-                    {canRetryFailedPages && (
-                        <button
-                            type="button"
-                            onClick={(event) => onRetryFailedPages(run, event.currentTarget, 'failed_pages')}
-                            className={RUN_DETAIL_ACTION_BUTTON}
-                        >
-                            {tw.run_retry_failed_pages_button ?? 'Prøv igjen for feilede sider'}
-                        </button>
+            {(next.recommendation || action || next.actionNote) && (
+                <div data-run-next-action className="max-w-3xl space-y-2">
+                    {next.recommendation && (
+                        <>
+                            <h4 className="text-base font-semibold leading-6 text-slate-900">
+                                {tw.run_next_what_to_do ?? 'Hva bør du gjøre?'}
+                            </h4>
+                            <p className="break-words text-base leading-6 text-slate-700">{next.recommendation}</p>
+                        </>
                     )}
-                    {canRetryDecision && (
-                        <button
-                            type="button"
-                            onClick={(event) => onRetryMaintainerDecision(run, event.currentTarget)}
-                            className={RUN_DETAIL_ACTION_BUTTON}
-                        >
-                            {tw.run_retry_maintainer_decision_button ?? 'Prøv sideplanleggingen på nytt'}
+                    {action && (action.kind === 'open_page' ? (
+                        <Link href={action.href} data-run-primary-action={action.kind} className={RUN_PRIMARY_ACTION}>
+                            {action.label}
+                        </Link>
+                    ) : (
+                        <button type="button" data-run-primary-action={action.kind} onClick={handleAction} className={RUN_PRIMARY_ACTION}>
+                            {action.label}
                         </button>
-                    )}
-                    {technicalDetails.length > 0 && (
-                        <button
-                            type="button"
-                            onClick={() => setShowTechnicalDetails((current) => !current)}
-                            aria-expanded={showTechnicalDetails}
-                            className="rounded text-base font-semibold leading-6 text-slate-600 underline decoration-dotted underline-offset-2 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
-                        >
-                            {tw.run_technical_details_toggle ?? 'Vis tekniske detaljer'}
-                        </button>
-                    )}
-                    {canDismiss && (
-                        <button
-                            type="button"
-                            data-run-dismiss
-                            onClick={(event) => onDismiss(run, event.currentTarget)}
-                            className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-base font-semibold leading-6 text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
-                        >
-                            {tw.run_dismiss_button ?? 'Fjern fra oversikten'}
-                        </button>
+                    ))}
+                    {next.actionNote && (
+                        <p data-run-action-note className="break-words text-base leading-6 text-slate-600">{next.actionNote}</p>
                     )}
                 </div>
             )}
+
+            {next.done && (
+                <p data-run-done className="flex max-w-3xl items-start gap-2 text-base leading-6 text-slate-700">
+                    <svg className="mt-1 h-4 w-4 shrink-0 text-emerald-600" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
+                    </svg>
+                    <span className="break-words">{next.done}</span>
+                </p>
+            )}
+        </section>
+    );
+}
+
+/**
+ * The last part of «Vis flere detaljer»: the run's raw diagnostics behind «Vis tekniske detaljer»,
+ * the failed-page retry when it is not already the main action above, and «Fjern fra oversikten».
+ * Each is offered exactly as before — the backend decides (can_retry, can_dismiss).
+ */
+function RunOtherActions({ run, tw, onRetryFailedPages = null, onDismiss = null }) {
+    const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
+    const next = getRunNextStep(run, tw);
+
+    // Raw text, e.g. run 963's qa_last_error behind its plain explanation.
+    const technicalDetails = [...new Set([run.error_message, run.qa_last_error].filter(Boolean))];
+    const canRetryFailedPages = run.failed_pages?.can_retry === true && onRetryFailedPages && next.action?.kind !== 'retry_failed_pages';
+    // Offered only when the server says this run is finished, nothing about it is left to follow
+    // up, and this person may manage its document (can_dismiss — checked again on the request).
+    const canDismiss = run.can_dismiss === true && onDismiss;
+
+    if (!canRetryFailedPages && technicalDetails.length === 0 && !canDismiss) {
+        return null;
+    }
+
+    return (
+        <div data-run-other-actions className="space-y-2 py-4">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2" data-run-failed-pages={run.failed_pages?.count || undefined}>
+                {canRetryFailedPages && (
+                    <button
+                        type="button"
+                        onClick={(event) => onRetryFailedPages(run, event.currentTarget, 'failed_pages')}
+                        className={RUN_DETAIL_ACTION_BUTTON}
+                    >
+                        {tw.run_retry_failed_pages_button ?? 'Prøv igjen for feilede sider'}
+                    </button>
+                )}
+                {technicalDetails.length > 0 && (
+                    <button
+                        type="button"
+                        onClick={() => setShowTechnicalDetails((current) => !current)}
+                        aria-expanded={showTechnicalDetails}
+                        className="rounded text-base font-semibold leading-6 text-slate-600 underline decoration-dotted underline-offset-2 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                    >
+                        {showTechnicalDetails
+                            ? (tw.run_technical_details_hide ?? 'Skjul tekniske detaljer')
+                            : (tw.run_technical_details_toggle ?? 'Vis tekniske detaljer')}
+                    </button>
+                )}
+                {canDismiss && (
+                    <button
+                        type="button"
+                        data-run-dismiss
+                        onClick={(event) => onDismiss(run, event.currentTarget)}
+                        className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-base font-semibold leading-6 text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                    >
+                        {tw.run_dismiss_button ?? 'Fjern fra oversikten'}
+                    </button>
+                )}
+            </div>
 
             {showTechnicalDetails && technicalDetails.map((text) => (
                 <p key={text} className="max-w-3xl break-all rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-sm leading-6 text-slate-700">
                     {text}
                 </p>
             ))}
-        </section>
+        </div>
     );
 }
 
@@ -1089,8 +1132,22 @@ function getWikiSourcesHelpSections(tw) {
     ];
 }
 
+const RUNS_HELP_HOWTO_FALLBACK = [
+    ['1. Finn kjøringen', 'Finn kjøringen i listen. Status viser om den pågår, er fullført eller krever oppfølging.'],
+    ['2. Velg «Vis detaljer»', 'Øverst står hva som har skjedd. Under «Hva bør du gjøre?» står neste steg, og hva som allerede er ferdig.'],
+    ['3. Bruk den anbefalte handlingen', 'Velg knappen under «Hva bør du gjøre?», for eksempel «Behandle kvalitetsfunn», «Åpne» for en artikkel som er til gjennomgang, eller «Prøv oppdateringen igjen». Må en annen person utføre handlingen, står det hvem, og ingen knapp vises.'],
+    ['4. Velg «Vis flere detaljer» ved behov', 'Her finner du fremdriften, berørte sider, alle kvalitetsfunn med filtre, «Vis tekniske detaljer» og «Fjern fra oversikten».'],
+];
+
 function getWikiRunsHelpSections(tw) {
     return [
+        {
+            title: tw.runs_page_help_section_howto ?? 'Slik gjør du det',
+            items: [1, 2, 3, 4].map((step) => ({
+                title: tw[`runs_page_help_howto_${step}_title`] ?? RUNS_HELP_HOWTO_FALLBACK[step - 1][0],
+                text: tw[`runs_page_help_howto_${step}_text`] ?? RUNS_HELP_HOWTO_FALLBACK[step - 1][1],
+            })),
+        },
         {
             title: tw.runs_page_help_section_what ?? 'Hva er en behandlingskjøring?',
             items: [
@@ -1163,7 +1220,7 @@ function getWikiRunsHelpSections(tw) {
                 },
                 {
                     title: tw.runs_page_help_item_status_completed_title ?? 'Fullført',
-                    text: tw.runs_page_help_item_status_completed_text ?? 'Alle nødvendige behandlingssteg og ferdigkontroller er fullført.',
+                    text: tw.runs_page_help_item_status_completed_text ?? 'Ingen oppfølging gjenstår. Ble kjøringen stoppet for kontroll underveis og senere fulgt opp, står det i detaljene.',
                 },
                 {
                     title: tw.runs_page_help_item_status_failed_title ?? 'Feilet',
@@ -1172,10 +1229,6 @@ function getWikiRunsHelpSections(tw) {
                 {
                     title: tw.runs_page_help_item_status_escalated_title ?? 'Krever oppfølging',
                     text: tw.runs_page_help_item_status_escalated_text ?? 'Kjøringen ble stoppet for kontroll, og noe må følges opp før den kan regnes som avsluttet — for eksempel åpne QA-funn eller sider som ikke ble generert.',
-                },
-                {
-                    title: tw.runs_page_help_item_status_completed_with_remarks_title ?? 'Oppfølging fullført',
-                    text: tw.runs_page_help_item_status_completed_with_remarks_text ?? 'Kjøringen ble stoppet for kontroll underveis, men all oppfølging er gjort. Merknadene står i detaljene.',
                 },
                 {
                     title: tw.runs_page_help_item_status_decision_only_title ?? 'Beslutning lagret',
@@ -1273,9 +1326,8 @@ function getWikiRunsHelpSections(tw) {
 // The status words a run is shown with (runStatusKey() in runFindingsLogic.js decides which).
 const RUN_STATUS_FALLBACK_LABELS = {
     waiting: 'Venter',
-    in_progress: 'I arbeid',
+    in_progress: 'Pågår',
     completed: 'Fullført',
-    completed_with_remarks: 'Oppfølging fullført',
     needs_follow_up: 'Krever oppfølging',
     failed: 'Feilet',
     cancelled: 'Avbrutt',
@@ -1283,13 +1335,11 @@ const RUN_STATUS_FALLBACK_LABELS = {
     unknown: 'Ukjent status',
 };
 
-// Krever oppfølging is the warning; Oppfølging fullført is calm, but not the plain success
-// green; Feilet stays red and Fullført green.
+// Krever oppfølging is the warning; Feilet stays red and Fullført green.
 const RUN_STATUS_STYLES = {
     waiting: 'bg-slate-100 text-slate-700',
     in_progress: 'bg-sky-100 text-sky-700',
     completed: 'bg-emerald-100 text-emerald-700',
-    completed_with_remarks: 'bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-300',
     needs_follow_up: 'bg-amber-100 text-amber-800',
     failed: 'bg-rose-100 text-rose-700',
     cancelled: 'bg-slate-200 text-slate-600',
@@ -3043,7 +3093,8 @@ function findingsCountToneClass(run) {
         return 'text-rose-700 hover:bg-rose-50 focus-visible:ring-rose-400';
     }
 
-    if ((run.findings_open_non_blocking_count ?? 0) > 0 || (run.findings_open_qa_review_count ?? 0) > 0) {
+    // Amber exactly when findings are still open (the «:count åpne» line beside it); decided ones are calm.
+    if ((run.findings_open_count ?? 0) > 0) {
         return 'text-amber-700 hover:bg-amber-50 focus-visible:ring-amber-400';
     }
 
@@ -3182,11 +3233,17 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
         })),
         ta.wiki_run_status_changed ?? 'Kjøring for :name: :status.',
     );
-    // expandedRuns[runId] is null (closed) | 'overview' | 'pages' | 'findings'. Anything but null is
-    // the row's one detail view open; 'pages'/'findings' says which part of «Sider og QA-funn» it shows.
+    // expandedRuns[runId] is null (closed) | 'overview' | 'details' | 'pages' | 'findings'. Anything
+    // but null is the row's one detail view open; 'overview' is it with «Vis flere detaljer» closed,
+    // and 'pages'/'findings' says which part of «Sider og QA-funn» the open details show.
     const [expandedRuns, setExpandedRuns] = useState({});
     const [runPagesState, setRunPagesState] = useState({});
     const [runFindingsState, setRunFindingsState] = useState({});
+    // Bumped by «Behandle kvalitetsfunn» so the findings list starts over on «Åpne», whatever filter
+    // it was left on.
+    const [findingsPanelKeys, setFindingsPanelKeys] = useState({});
+    // An element id to move focus to once the next render has put it on the page.
+    const [pendingFocusId, setPendingFocusId] = useState(null);
     const [cancelTarget, setCancelTarget] = useState(null);
 
     const handleCancelClick = (run, trigger = null) => {
@@ -3377,15 +3434,35 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
         openPanel(run, (expandedRuns[run.id] ?? null) === panel ? null : panel);
     };
 
-    // The row's chevron: opens on the findings when they need attention, otherwise on the pages.
+    // «Vis detaljer»: opens on what to do about the run; the rest is under «Vis flere detaljer».
     const toggleDetails = (run) => {
-        if ((expandedRuns[run.id] ?? null) !== null) {
-            openPanel(run, null);
-            return;
-        }
-
-        openPanel(run, defaultRunDetailSection(run));
+        openPanel(run, (expandedRuns[run.id] ?? null) !== null ? null : 'overview');
     };
+
+    // «Vis flere detaljer» inside an open detail view: opens on the part that matters most, and
+    // closing it leaves the detail view itself open.
+    const toggleMoreDetails = (run) => {
+        openPanel(run, (expandedRuns[run.id] ?? 'overview') === 'overview' ? defaultRunDetailSection(run) : 'overview');
+    };
+
+    // «Behandle kvalitetsfunn»: the findings list on «Åpne», with focus on its heading.
+    const reviewFindings = (run) => {
+        setFindingsPanelKeys((current) => ({ ...current, [run.id]: (current[run.id] ?? 0) + 1 }));
+        openPanel(run, 'findings');
+        setPendingFocusId(`run-panel-${run.id}-sections`);
+    };
+
+    useEffect(() => {
+        if (pendingFocusId === null) return;
+
+        const target = document.getElementById(pendingFocusId);
+
+        if (target) {
+            setPendingFocusId(null);
+            target.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+            focusElement(target, { preventScroll: true });
+        }
+    });
 
     // The section switch inside an open detail view never closes it.
     const selectSection = (run, section) => {
@@ -3408,7 +3485,23 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
     const focusFindingId = filters.focus_finding ?? null;
 
     useEffect(() => {
-        if (focusRunId === null || focusFindingId === null) {
+        if (focusRunId === null) {
+            return;
+        }
+
+        // A run without a finding (?focus_run=… alone): the way back from a Wiki page opened from
+        // the run's detail view. It reopens that detail view, read fresh from the server.
+        if (focusFindingId === null) {
+            const runOnly = runs.find((candidate) => String(candidate.id) === String(focusRunId));
+
+            if (!runOnly || appliedFocusRef.current === `${focusRunId}:`) {
+                return;
+            }
+
+            appliedFocusRef.current = `${focusRunId}:`;
+            setExpandedRuns((current) => ({ ...current, [runOnly.id]: 'overview' }));
+            setPendingFocusId(`run-panel-${runOnly.id}-status`);
+
             return;
         }
 
@@ -3465,15 +3558,15 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
                 </select>
 
                 <select
-                    aria-label={ta.wiki_filter_decision ?? 'Beslutning'}
+                    aria-label={ta.wiki_filter_decision ?? 'Sideplan'}
                     value={filters.decision ?? ''}
                     onChange={(e) => navigate({ run_decision: e.target.value })}
                     className={`${RUNS_SELECT_CLS} max-w-full`}
                 >
-                    <option value="">{tw.runs_filter_decision_all ?? 'Alle beslutninger'}</option>
-                    <option value="pending">{tw.run_decision_pending ?? 'Venter'}</option>
-                    <option value="applied">{tw.run_decision_applied ?? 'Sidestruktur opprettet'}</option>
-                    <option value="none">{tw.runs_filter_decision_none ?? 'Ingen beslutning'}</option>
+                    <option value="">{tw.runs_filter_decision_all ?? 'Alle sideplaner'}</option>
+                    <option value="pending">{tw.runs_filter_decision_pending ?? 'Sideplan venter'}</option>
+                    <option value="applied">{tw.runs_filter_decision_applied ?? 'Sideplan opprettet'}</option>
+                    <option value="none">{tw.runs_filter_decision_none ?? 'Ingen sideplan'}</option>
                 </select>
 
                 {filters.src_id && (
@@ -3519,7 +3612,7 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
                         <div className="text-right">{tw.runs_col_id ?? 'ID'}</div>
                         <div>{tw.runs_col_document ?? 'Dokument'}</div>
                         <div>{tw.runs_col_status ?? 'Status'}</div>
-                        <div>{tw.runs_col_decision ?? 'Beslutning'}</div>
+                        <div>{tw.runs_col_decision ?? 'Sideplan'}</div>
                         <div className="text-center">{tw.runs_col_pages ?? 'Sider'}</div>
                         <div className="text-center">{tw.runs_col_lint ?? 'Funn'}</div>
                         <div>{tw.runs_col_created ?? 'Opprettet'}</div>
@@ -3551,6 +3644,9 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
                                     onDismissRun={handleDismissClick}
                                     onFetchRunPages={fetchRunPages}
                                     onFetchRunFindings={fetchRunFindings}
+                                    onToggleMoreDetails={toggleMoreDetails}
+                                    onReviewFindings={reviewFindings}
+                                    findingsPanelKey={findingsPanelKeys[run.id] ?? 0}
                                     focusFindingId={String(focusRunId ?? '') === String(run.id) ? focusFindingId : null}
                                 />
                             );
@@ -3710,17 +3806,27 @@ function RunsTab({ runs, runsFilters, tw, ta = {}, locale }) {
     );
 }
 
-const OWNER_STATUS_STYLES = {
-    approved: 'bg-emerald-100 text-emerald-700',
-    rejected: 'bg-rose-100 text-rose-700',
-    pending: 'bg-amber-100 text-amber-700',
-    mixed: 'bg-amber-100 text-amber-700',
-    missing_owner: 'bg-rose-100 text-rose-700',
-    awaiting_sync: 'bg-slate-100 text-slate-700',
-    qa_review_open: 'bg-slate-100 text-slate-700',
-    processing: 'bg-slate-100 text-slate-700',
-    processing_failed: 'bg-rose-100 text-rose-700',
-    superseded: 'bg-slate-100 text-slate-600',
+/**
+ * What the run actually did to a page (WikiController::runPageResult()) — never the plan's
+ * `action` alone. Neutral grey for history and for an outcome that cannot be stated with certainty.
+ */
+const RUN_PAGE_RESULT = {
+    created: ['runs_pages_result_created', 'Opprettet', 'bg-emerald-100 text-emerald-700'],
+    updated: ['runs_pages_result_updated', 'Oppdatert', 'bg-emerald-100 text-emerald-700'],
+    no_change: ['runs_pages_result_no_change', 'Ingen endring nødvendig', 'bg-slate-100 text-slate-600'],
+    deferred: ['runs_pages_result_deferred', 'Oppdatering utsatt', 'bg-amber-100 text-amber-700'],
+    not_created: ['runs_pages_result_not_created', 'Ikke opprettet', 'bg-rose-100 text-rose-700'],
+    not_updated: ['runs_pages_result_not_updated', 'Ikke oppdatert', 'bg-rose-100 text-rose-700'],
+    in_progress: ['runs_pages_result_in_progress', 'Pågår', 'bg-slate-100 text-slate-600'],
+    unknown: ['runs_pages_result_unknown', 'Ikke fastslått', 'bg-slate-100 text-slate-600'],
+};
+
+const RUN_PAGE_STATUS_LABELS = {
+    approved: ['status_approved', 'Publisert'],
+    pending_review: ['status_pending_review', 'Til gjennomgang'],
+    draft: ['status_draft', 'Utkast'],
+    rejected: ['status_rejected', 'Avvist'],
+    archived: ['status_archived', 'Arkivert'],
 };
 
 /**
@@ -3756,36 +3862,13 @@ function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
     }
 
     const pages = state.data?.pages ?? [];
-    const summary = state.data?.summary ?? {};
-    const stallExplanation = state.data?.stall_explanation;
 
-    const summaryParts = [
-        (tw.runs_pages_summary_done ?? ':done av :total ferdigbehandlet')
-            .replace(':done', summary.done ?? 0)
-            .replace(':total', summary.total ?? 0),
-    ];
-
-    if ((summary.awaiting_document_owner ?? 0) > 0) {
-        summaryParts.push(
-            (tw.runs_pages_summary_awaiting ?? ':count venter på Dokumenteier').replace(':count', summary.awaiting_document_owner),
-        );
-    }
-
-    if ((summary.pending_review ?? 0) > 0) {
-        summaryParts.push(
-            (tw.runs_pages_summary_pending_review ?? ':count under behandling eller med åpne QA-punkter').replace(':count', summary.pending_review),
-        );
-    }
-
+    // No «N av M ferdigbehandlet» line and no Dokumenteier status: a superseded version is not a
+    // decision anybody took, and document-owner rows no longer ask anything a reader can do. Each
+    // row says what the run did to the page and where the article stands now.
     return (
         <div id={panelId} className="space-y-3">
-            <div>
-                <h4 className="text-base font-semibold text-slate-800">{tw.runs_pages_heading ?? 'Berørte Wiki-sider'}</h4>
-                <p className="mt-1 text-base leading-6 text-slate-600">{summaryParts.join(' · ')}</p>
-                {stallExplanation && (
-                    <p className="mt-1 text-base font-medium leading-6 text-amber-700">{stallExplanation}</p>
-                )}
-            </div>
+            <h4 className="text-base font-semibold text-slate-800">{tw.runs_pages_heading ?? 'Berørte Wiki-sider'}</h4>
 
             <ScrollRegion label={tw.runs_pages_heading ?? 'Berørte Wiki-sider'} edgeRoom={false} className="rounded-xl border border-slate-200 bg-white">
                 <table className="min-w-full divide-y divide-slate-100 text-base leading-6">
@@ -3795,45 +3878,51 @@ function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
                             <th scope="col" className="px-3 py-2.5">{tw.runs_pages_col_page ?? 'Wiki-side'}</th>
                             <th scope="col" className="px-3 py-2.5">{tw.runs_pages_col_result ?? 'Resultat'}</th>
                             <th scope="col" className="px-3 py-2.5">{tw.runs_pages_col_version ?? 'Sideversjon'}</th>
-                            <th scope="col" className="px-3 py-2.5">{tw.runs_pages_col_owner_status ?? 'Dokumenteierstatus'}</th>
+                            <th scope="col" className="px-3 py-2.5">{tw.runs_pages_col_page_status ?? 'Wiki-status'}</th>
                             <th scope="col" className="px-3 py-2.5 text-right">{tw.runs_pages_col_action ?? 'Handling'}</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {pages.map((page) => (
-                            <tr key={page.page_id} className="text-slate-700">
-                                <td className="max-w-[240px] px-3 py-2.5">
-                                    <span className="block truncate font-medium text-slate-900" title={page.title}>
-                                        {page.title}
-                                    </span>
-                                </td>
-                                <td className="px-3 py-2.5">
-                                    <span className={`${BADGE} ${page.action === 'created' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
-                                        {page.action === 'created'
-                                            ? (tw.runs_pages_result_created ?? 'Opprettet')
-                                            : (tw.runs_pages_result_updated ?? 'Oppdatert')}
-                                    </span>
-                                </td>
-                                <td className="px-3 py-2.5 whitespace-nowrap text-slate-600">
-                                    {page.version_number
-                                        ? (tw.runs_pages_version_label ?? 'Versjon :number').replace(':number', page.version_number)
-                                        : '—'}
-                                </td>
-                                <td className="px-3 py-2.5">
-                                    <span className={`${BADGE} ${OWNER_STATUS_STYLES[page.document_owner_status?.state] ?? 'bg-slate-100 text-slate-600'}`}>
-                                        {page.document_owner_status?.label ?? '—'}
-                                    </span>
-                                </td>
-                                <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                                    <Link href={page.url} className="text-base font-medium leading-6 text-violet-700 hover:underline">
-                                        {page.can_handle
-                                            ? (tw.runs_pages_action_open_and_handle ?? 'Åpne og behandle')
-                                            : (tw.runs_pages_action_open ?? 'Åpne side')}
-                                        <span className="sr-only"> {page.title}</span>
-                                    </Link>
-                                </td>
-                            </tr>
-                        ))}
+                        {pages.map((page) => {
+                            const [resultKey, resultFallback, resultStyle] = RUN_PAGE_RESULT[page.result] ?? RUN_PAGE_RESULT.unknown;
+                            const [statusKey, statusFallback] = RUN_PAGE_STATUS_LABELS[page.page_status] ?? [null, page.page_status ?? '—'];
+
+                            return (
+                                <tr key={page.page_id} className="text-slate-700" data-testid="run-page-row">
+                                    <td className="max-w-[240px] px-3 py-2.5">
+                                        <span className="block truncate font-medium text-slate-900" title={page.title}>
+                                            {page.title}
+                                        </span>
+                                    </td>
+                                    <td className="px-3 py-2.5">
+                                        <span className={`${BADGE} ${resultStyle}`} data-testid="run-page-result">
+                                            {tw[resultKey] ?? resultFallback}
+                                        </span>
+                                    </td>
+                                    <td className="px-3 py-2.5 text-slate-600">
+                                        <span className="whitespace-nowrap">
+                                            {page.version_number
+                                                ? (tw.runs_pages_version_label ?? 'Versjon :number').replace(':number', page.version_number)
+                                                : '—'}
+                                        </span>
+                                        {page.version_number && !page.is_current_version && (
+                                            <span className="block text-slate-600">
+                                                {tw.runs_pages_version_superseded ?? 'Erstattet av nyere versjon'}
+                                            </span>
+                                        )}
+                                    </td>
+                                    <td className="px-3 py-2.5">
+                                        <StatusBadge status={page.page_status} label={statusKey ? (tw[statusKey] ?? statusFallback) : statusFallback} />
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                                        <Link href={page.url} className="text-base font-medium leading-6 text-violet-700 hover:underline">
+                                            {tw.runs_pages_action_open ?? 'Åpne side'}
+                                            <span className="sr-only"> {page.title}</span>
+                                        </Link>
+                                    </td>
+                                </tr>
+                            );
+                        })}
                     </tbody>
                 </table>
             </ScrollRegion>
@@ -3901,11 +3990,11 @@ function findingsLocalFilterLabel(filterKey, tw) {
  * visning the row links to (Show.jsx, ?claim_id= / ?finding_id=), so none of it is repeated here;
  * nor is the run's own explanation, which «Status og oppfølging» above already gives.
  */
-function RunFindingsPanel({ panelId, state, onRetry, tw, ta = {}, locale, focusFindingId = null }) {
-    // Defaults to 'open' so a run with many historically-resolved findings doesn't bury the
-    // ones that still need attention — 'resolved' (Løst) remains one click away via the filter
-    // chips below, unchanged.
-    const [localFilter, setLocalFilter] = useState('open');
+function RunFindingsPanel({ panelId, state, onRetry, tw, ta = {}, locale, focusFindingId = null, initialFilter = 'open' }) {
+    // 'open' while some finding is still open, so historically-resolved ones don't bury the ones
+    // that need attention — 'resolved' (Løst) remains one click away via the filter chips below.
+    // 'all' when none is open (initialFilter): a list that opens empty reads as "nothing here".
+    const [localFilter, setLocalFilter] = useState(initialFilter);
     // The row a "Tilbake til funn" deep link points at: scrolled to, focused, and briefly ringed.
     const [focusedRowId, setFocusedRowId] = useState(null);
     const focusRowRef = useRef(null);

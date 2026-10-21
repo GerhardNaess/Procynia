@@ -32,7 +32,7 @@ test.describe.serial('Kjøringer run row readability', () => {
         const mainRow = row.locator('[data-run-main-row]');
         await expect(row).toBeVisible();
 
-        const statusPill = mainRow.getByText('I arbeid', { exact: true });
+        const statusPill = mainRow.getByText('Pågår', { exact: true });
         await expect(statusPill).toBeVisible();
         expect(await statusPill.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
 
@@ -62,6 +62,10 @@ test.describe.serial('Kjøringer run row readability', () => {
         await toggle.focus();
         await page.keyboard.press('Enter');
         await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+        // The detail view opens on what to do; the progress is under «Vis flere detaljer».
+        await expect(desktopTimeline).toHaveCount(0);
+        await row.getByRole('button', { name: 'Vis flere detaljer' }).focus();
+        await page.keyboard.press('Enter');
         await expect(desktopTimeline).toBeVisible();
         // Six steps since 5d26caf2 retired the document-owner step, which nothing could reach.
         await expect(desktopTimeline.locator('[data-progress-step]')).toHaveCount(6);

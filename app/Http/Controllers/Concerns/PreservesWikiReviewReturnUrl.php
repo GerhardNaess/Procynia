@@ -156,4 +156,19 @@ trait PreservesWikiReviewReturnUrl
 
         return $parameters;
     }
+
+    /**
+     * Route parameters for a review decision (approve, send back) on a page opened from a run's
+     * detail view: the validated Kjøringer back_url is carried through the redirect, so «Tilbake til
+     * Kjøringer» is still there after the decision. Without one — or with one that fails
+     * validation — the redirect keeps its original bare-slug shape.
+     *
+     * @return array<string, mixed>
+     */
+    protected function wikiShowRouteParamsKeepingRunsReturn(Request $request, string $slug): array
+    {
+        $backUrl = $this->reviewBackUrlFromRequest($request);
+
+        return $backUrl === null ? ['slug' => $slug] : ['slug' => $slug, 'back_url' => $backUrl];
+    }
 }

@@ -63,6 +63,28 @@ class EnterpriseWikiPublishedVersionTest extends TestCase
         $this->assertSame($working->id, (int) $page->published_version_id);
     }
 
+    // A review decision on a page opened from Kjøringer keeps its way back to the run.
+    public function test_approving_a_page_opened_from_a_run_keeps_the_way_back_to_it(): void
+    {
+        [, $reviewer, $page] = $this->pageWithWorkingVersion(EnterpriseWikiPage::STATUS_PENDING_REVIEW);
+        $backUrl = '/app/wiki?tab=runs&focus_run=963';
+
+        $this->actingAs($reviewer)
+            ->patch("/app/wiki/{$page->slug}/approve", ['back_url' => $backUrl])
+            ->assertRedirect(route('app.wiki.show', ['slug' => $page->slug, 'back_url' => $backUrl]));
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->fresh()->status);
+    }
+
+    public function test_an_unrecognised_back_url_on_a_review_decision_is_dropped(): void
+    {
+        [, $reviewer, $page] = $this->pageWithWorkingVersion(EnterpriseWikiPage::STATUS_PENDING_REVIEW);
+
+        $this->actingAs($reviewer)
+            ->patch("/app/wiki/{$page->slug}/reject", ['reason' => 'Trenger mer kildegrunnlag.', 'back_url' => 'https://evil.example.com/app/wiki?tab=runs'])
+            ->assertRedirect(route('app.wiki.show', $page->slug));
+    }
+
     // A. a new run replaces the working version and leaves the published one alone
     public function test_a_new_working_version_does_not_disturb_the_published_one(): void
     {

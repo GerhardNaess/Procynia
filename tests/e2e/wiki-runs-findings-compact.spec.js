@@ -40,6 +40,11 @@ test.describe.serial('Kjøringer: kompakt QA-funnliste', () => {
         await page.keyboard.press('Enter');
         await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 
+        // Open findings are the run's task: «Behandle kvalitetsfunn» opens them, from the keyboard too.
+        const handle = row.locator('[data-run-primary-action="review_findings"]');
+        await handle.focus();
+        await page.keyboard.press('Enter');
+
         return row;
     }
 
@@ -47,7 +52,7 @@ test.describe.serial('Kjøringer: kompakt QA-funnliste', () => {
         await page.setViewportSize({ width: 1366, height: 900 });
         const row = await openRunWithKeyboard(page);
 
-        // An escalated run with findings opens on Funn.
+        // «Behandle kvalitetsfunn» opens Funn.
         await expect(row.locator('[data-run-section="findings"]')).toHaveAttribute('aria-pressed', 'true');
         const table = row.locator('[data-run-findings-table]');
         await expect(table).toBeVisible();
@@ -78,8 +83,8 @@ test.describe.serial('Kjøringer: kompakt QA-funnliste', () => {
         await expect(table).not.toContainText('Systemet anbefaler');
         await expect(table.locator('[aria-expanded]')).toHaveCount(0);
 
-        // The run's explanation is said once, in «Status og oppfølging», not again above the table.
-        const statusText = (await row.locator('[data-run-status-details] li').first().textContent()).trim();
+        // What the run asks for is said once, at the top of the detail view, not again above the table.
+        const statusText = (await row.locator('[data-run-status-details] h3').first().textContent()).trim();
         const occurrences = (await detail.textContent()).split(statusText).length - 1;
         expect(occurrences).toBe(1);
 
@@ -88,12 +93,30 @@ test.describe.serial('Kjøringer: kompakt QA-funnliste', () => {
         await expect(row.getByText('QA gate escalated', { exact: false })).toHaveCount(0);
         await technicalToggle.click();
         await expect(row.getByText('QA gate escalated', { exact: false })).toBeVisible();
-        await technicalToggle.click();
+        await row.getByRole('button', { name: 'Skjul tekniske detaljer' }).click();
+        await expect(row.getByText('QA gate escalated', { exact: false })).toHaveCount(0);
 
         if (SCREENSHOT_DIR) {
             await row.screenshot({ path: `${SCREENSHOT_DIR}/runs-findings-compact-1366.png` });
         }
     });
+
+    // The count is every finding; the line under it says how many are still open, so decided
+    // findings never read like open problems.
+    for (const width of [1366, 390]) {
+        test(`the Funn count says how many of the findings are still open at ${width}px`, async ({ page }) => {
+            await page.setViewportSize({ width, height: 900 });
+            await loginAsWikiReader(page);
+            await page.goto('/app/wiki?tab=runs');
+            const container = width < 1024 ? '[data-run-mobile-card]' : '[data-run-main-row]';
+            const cell = page.locator(`[data-run-item][data-run-id="${runId}"]`).first().locator(container);
+
+            const count = cell.getByRole('button', { name: 'Vis 6 kvalitetsfunn, hvorav 4 åpne' });
+            await expect(count).toBeVisible();
+            expect(await count.getAttribute('class')).toContain('text-amber-700');
+            await expect(cell.locator('[data-run-findings-open-hint]')).toHaveText('4 åpne');
+        });
+    }
 
     test('Funn filters show the matching rows and say their counts', async ({ page }) => {
         await page.setViewportSize({ width: 1366, height: 900 });
@@ -355,7 +378,7 @@ test.describe.serial('Kjøringer: kompakt QA-funnliste', () => {
 
 /**
  * Scenario H: the run escalated on a QA finding. Handling the last open one completes its QA
- * follow-up: the row moves from «Krever oppfølging» to «Oppfølging fullført», while the stored
+ * follow-up: the row moves from «Krever oppfølging» to «Fullført», while the stored
  * status stays escalated — it records what happened during the run.
  */
 test.describe.serial('Kjøringer: QA-oppfølging fullført på en eskalert kjøring', () => {
@@ -382,10 +405,27 @@ test.describe.serial('Kjøringer: QA-oppfølging fullført på en eskalert kjør
         // The badge says it; no second line repeats it or asks for more.
         await expect(mainRow.locator('[data-run-follow-up]')).toHaveCount(0);
         await expect(mainRow).not.toContainText(statusLabel === 'Krever oppfølging' ? 'Fullført' : 'Krever oppfølging');
+        // The Funn count is calm once nothing is open, and only says «åpne» while something is.
+        const hint = mainRow.locator('[data-run-findings-open-hint]');
+        if (openCount > 0) {
+            await expect(hint).toHaveText(`${openCount} åpne`);
+        } else {
+            await expect(hint).toHaveCount(0);
+            await expect(mainRow.getByRole('button', { name: /alle ferdigbehandlet$/ })).toHaveClass(/text-slate-600/);
+        }
 
         const toggle = mainRow.locator('[data-run-details-toggle]');
         if ((await toggle.getAttribute('aria-expanded')) !== 'true') {
             await toggle.click();
+        }
+        // The findings are under «Vis flere detaljer» unless a finding link already opened them.
+        const more = row.getByRole('button', { name: 'Vis flere detaljer' });
+        if (await more.count()) {
+            await more.click();
+        }
+        const findingsSection = row.locator('[data-run-section="findings"]');
+        if ((await findingsSection.getAttribute('aria-pressed')) !== 'true') {
+            await findingsSection.click();
         }
         await row.locator('[data-findings-filter="all"]').click();
         await expect(row.locator(`[data-finding-row="claim-defect-${claimId}"]`)).toContainText(findingStatus);
@@ -407,11 +447,11 @@ test.describe.serial('Kjøringer: QA-oppfølging fullført på en eskalert kjør
         await expect(page.locator('#procynia-live-toast')).toContainText('Påstanden er godkjent, og teksten er beholdt. QA-funnet er ferdigbehandlet.');
 
         await page.getByRole('link', { name: 'Tilbake til funn' }).first().click();
-        await expectRunState(page, { statusLabel: 'Oppfølging fullført', findingStatus: 'Godkjent', openCount: 0 });
+        await expectRunState(page, { statusLabel: 'Fullført', findingStatus: 'Godkjent', openCount: 0 });
         await expect(runRow(page).locator('[data-run-detail-panel]')).toContainText('Alle QA-funnene er nå behandlet');
 
         await page.reload();
-        await expectRunState(page, { statusLabel: 'Oppfølging fullført', findingStatus: 'Godkjent', openCount: 0 });
+        await expectRunState(page, { statusLabel: 'Fullført', findingStatus: 'Godkjent', openCount: 0 });
 
         // The run's recorded history is unchanged.
         const { stdout } = await tinker(`echo json_encode(\\App\\Models\\EnterpriseWikiIngestRun::find(${runId})->only(['status', 'qa_status', 'qa_result']));`);
@@ -426,7 +466,8 @@ test.describe.serial('Kjøringer: QA-oppfølging fullført på en eskalert kjør
         await page.goto('/app/wiki?tab=runs');
 
         const card = runRow(page).locator('[data-run-mobile-card]');
-        await expect(card).toContainText('Oppfølging fullført');
+        await expect(card).toContainText('Fullført');
+        await expect(card).not.toContainText('Krever oppfølging');
         await expect(card.locator('[data-run-follow-up]')).toHaveCount(0);
 
         if (SCREENSHOT_DIR) {

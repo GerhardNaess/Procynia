@@ -18,6 +18,7 @@ import {
     resolveFocusedFinding,
     focusedFindingLocalFilter,
     resolveWikiBackLink,
+    getRunNextStep,
 } from './runFindingsLogic.js';
 
 describe('formatFindingUserId', () => {
@@ -893,8 +894,9 @@ describe('runStatusKey — the one status word a run is shown with', () => {
         }
     });
 
-    test('an escalated run is «Oppfølging fullført» only when the backend confirms nothing is left', () => {
-        assert.equal(runStatusKey({ status: 'escalated', follow_up_complete: true }), 'completed_with_remarks');
+    test('an escalated run is «Fullført» only when the backend confirms nothing is left', () => {
+        // One «done» word: that it was held for follow-up once is said in the details.
+        assert.equal(runStatusKey({ status: 'escalated', follow_up_complete: true }), 'completed');
         assert.equal(runStatusKey({ status: 'escalated', follow_up_complete: false }), 'needs_follow_up');
         // Uncertain — no reading at all, or a QA count alone — needs follow-up.
         assert.equal(runStatusKey({ status: 'escalated' }), 'needs_follow_up');
@@ -902,7 +904,173 @@ describe('runStatusKey — the one status word a run is shown with', () => {
     });
 
     test('the filter offers the words the rows show, once each', () => {
-        assert.deepEqual(RUN_STATUS_FILTER_KEYS, ['waiting', 'in_progress', 'completed', 'completed_with_remarks', 'needs_follow_up', 'failed', 'cancelled', 'decision_only']);
+        assert.deepEqual(RUN_STATUS_FILTER_KEYS, ['waiting', 'in_progress', 'completed', 'needs_follow_up', 'failed', 'cancelled', 'decision_only']);
         assert.equal(new Set(RUN_STATUS_FILTER_KEYS).size, RUN_STATUS_FILTER_KEYS.length);
+    });
+});
+
+describe('getRunNextStep — what a run\'s detail view says first', () => {
+    // Run 963 as the Kjøringer row carries it: escalated, «Incident Commander» held back by its
+    // open review (so the backend refuses the retry), and both QA findings decided.
+    const run963 = (overrides = {}) => ({
+        id: 963,
+        status: 'escalated',
+        follow_up_complete: false,
+        may_manage: true,
+        lint_count: 2,
+        findings_open_count: 0,
+        findings_resolved_count: 2,
+        failed_pages: {
+            count: 1,
+            failure_kind: 'review_deferred',
+            can_retry: false,
+            blocked_by_review: true,
+            pages: [{ title: 'Incident Commander', url: '/app/wiki/incident-commander?back_url=%2Fapp%2Fwiki%3Ftab%3Druns%26focus_run%3D963', in_review: true }],
+        },
+        ...overrides,
+    });
+
+    test('#963: the article in review is the task — open it, no retry, findings already done', () => {
+        const next = getRunNextStep(run963());
+
+        assert.equal(next.key, 'review_blocked');
+        assert.equal(next.title, 'Én Wiki-artikkel venter på gjennomgang');
+        assert.deepEqual(next.lines, ['Procynia kunne ikke oppdatere «Incident Commander» fordi artikkelen er til gjennomgang.']);
+        assert.match(next.recommendation, /tildelte kontrolløren må fullføre gjennomgangen/);
+        assert.deepEqual(next.action, {
+            kind: 'open_page',
+            label: 'Åpne «Incident Commander»',
+            href: '/app/wiki/incident-commander?back_url=%2Fapp%2Fwiki%3Ftab%3Druns%26focus_run%3D963',
+        });
+        assert.equal(next.actionNote, 'Oppdateringen kan prøves igjen når gjennomgangen er avsluttet.');
+        assert.equal(next.done, 'Begge kvalitetsfunnene er ferdigbehandlet.');
+        // Never the wording of a technical fault.
+        assert.doesNotMatch(JSON.stringify(next), /midlertidig|ufullstendig/i);
+    });
+
+    test('#963 without a link to the page: no button, the reviewer is still named as the one to act', () => {
+        const next = getRunNextStep(run963({
+            failed_pages: { ...run963().failed_pages, pages: [{ title: 'Incident Commander', url: null, in_review: true }] },
+        }));
+
+        assert.equal(next.action, null);
+        assert.match(next.recommendation, /tildelte kontrolløren/);
+    });
+
+    test('#963 for someone who may not manage the document: same message, and who retries afterwards', () => {
+        const next = getRunNextStep(run963({ may_manage: false }));
+
+        assert.equal(next.action.kind, 'open_page');
+        assert.match(next.actionNote, /bruker med ansvar for kildedokumentet/);
+    });
+
+    test('after the review is closed and the backend allows it, «Prøv oppdateringen igjen» is the main action', () => {
+        const next = getRunNextStep(run963({
+            failed_pages: { ...run963().failed_pages, can_retry: true, blocked_by_review: false, pages: [{ title: 'Incident Commander', url: '/x', in_review: false }] },
+        }));
+
+        assert.equal(next.key, 'review_closed');
+        assert.deepEqual(next.action, { kind: 'retry_failed_pages', label: 'Prøv oppdateringen igjen' });
+    });
+
+    test('a closed review does not by itself make the retry available — can_retry decides', () => {
+        const closed = { ...run963().failed_pages, can_retry: false, blocked_by_review: false, pages: [{ title: 'Incident Commander', url: '/x', in_review: false }] };
+
+        const manager = getRunNextStep(run963({ failed_pages: closed }));
+        assert.equal(manager.action, null);
+        assert.equal(manager.actionNote, 'Et nytt forsøk er ikke mulig akkurat nå.');
+
+        const reader = getRunNextStep(run963({ failed_pages: closed, may_manage: false }));
+        assert.equal(reader.action, null);
+        assert.match(reader.actionNote, /bruker med ansvar for kildedokumentet/);
+    });
+
+    test('open findings come first, with a button that opens them, and the failed page is still named', () => {
+        const next = getRunNextStep(run963({ findings_open_count: 2, findings_resolved_count: 0 }));
+
+        assert.equal(next.key, 'findings');
+        assert.equal(next.title, '2 kvalitetsfunn trenger vurdering');
+        assert.deepEqual(next.action, { kind: 'review_findings', label: 'Behandle kvalitetsfunn' });
+        assert.deepEqual(next.lines, ['I tillegg kunne «Incident Commander» ikke oppdateres fordi artikkelen er til gjennomgang.']);
+        assert.equal(next.done, null);
+    });
+
+    test('open findings beside ordinary failed pages: both needs are said', () => {
+        const next = getRunNextStep({
+            status: 'escalated',
+            may_manage: true,
+            lint_count: 1,
+            findings_open_count: 1,
+            failed_pages: { count: 2, failure_kind: 'transient', can_retry: true, blocked_by_review: false, pages: [] },
+        });
+
+        assert.equal(next.title, 'Ett kvalitetsfunn trenger vurdering');
+        assert.equal(next.action.kind, 'review_findings');
+        assert.match(next.lines[0], /2 Wiki-sider ikke laget eller oppdatert/);
+    });
+
+    test('an ordinary failed page offers «Prøv igjen for feilede sider» only when can_retry is true', () => {
+        const base = { status: 'escalated', may_manage: true, lint_count: 0, findings_open_count: 0 };
+        const transient = getRunNextStep({ ...base, failed_pages: { count: 1, failure_kind: 'transient', can_retry: true, pages: [] } });
+
+        assert.equal(transient.key, 'failed_pages');
+        assert.deepEqual(transient.action, { kind: 'retry_failed_pages', label: 'Prøv igjen for feilede sider' });
+        assert.deepEqual(transient.lines, ['Feilen ser ut til å være midlertidig.']);
+
+        const planDefect = getRunNextStep({ ...base, failed_pages: { count: 1, failure_kind: 'plan_defect', can_retry: false, pages: [] } });
+        assert.equal(planDefect.action, null);
+        assert.equal(planDefect.actionNote, null);
+        assert.match(planDefect.lines[0], /sideplanen eller kildegrunnlaget/);
+
+        const reader = getRunNextStep({ ...base, may_manage: false, failed_pages: { count: 1, failure_kind: 'transient', can_retry: false, pages: [] } });
+        assert.equal(reader.action, null);
+        assert.match(reader.actionNote, /bruker med ansvar for kildedokumentet/);
+    });
+
+    test('a temporary page-planning failure: retry only when the backend allows it', () => {
+        const run = { status: 'failed', failed_phase: 'maintainer_decision', transient_failure: true, may_manage: true, can_retry_maintainer_decision: true };
+
+        assert.equal(getRunNextStep(run).action.kind, 'retry_maintainer_decision');
+        assert.equal(getRunNextStep({ ...run, can_retry_maintainer_decision: false }).action, null);
+    });
+
+    test('finished, cancelled, in progress and followed-up runs ask nothing of anyone', () => {
+        for (const [run, key] of [
+            [{ status: 'completed', lint_count: 0 }, 'completed'],
+            [{ status: 'cancelled' }, 'cancelled'],
+            [{ status: 'generating_pages' }, 'in_progress'],
+            [{ status: 'queued' }, 'waiting'],
+            [{ status: 'escalated', follow_up_complete: true, lint_count: 2, findings_open_count: 0, findings_resolved_count: 2 }, 'follow_up_complete'],
+        ]) {
+            const next = getRunNextStep(run);
+
+            assert.equal(next.key, key);
+            assert.equal(next.action, null, key);
+            assert.equal(next.recommendation, null, key);
+        }
+
+        assert.equal(getRunNextStep({ status: 'completed', lint_count: 0 }).done, null);
+        assert.equal(getRunNextStep({ status: 'completed', lint_count: 3, findings_open_count: 0, findings_resolved_count: 1 }).done, 'Ingen kvalitetsfunn krever behandling.');
+    });
+
+    test('a run held for follow-up with nothing to act on says so plainly and invents no action', () => {
+        const next = getRunNextStep({ status: 'escalated', follow_up_complete: false, lint_count: 0, findings_open_count: 0, findings_explanation: 'Forklaring fra serveren.' });
+
+        assert.equal(next.key, 'follow_up');
+        assert.equal(next.action, null);
+        assert.deepEqual(next.lines, ['Forklaring fra serveren.', 'Det finnes ingen handling for dette i Kjøringer.']);
+    });
+
+    test('the collapsed row says what a page waits for, not «1 feil»', () => {
+        assert.equal(getRunCompactSummary(run963()), 'Venter på gjennomgang');
+        assert.equal(getRunCompactSummary(run963({ failed_pages: { ...run963().failed_pages, pages: [{ title: 'X', in_review: false }] } })), '1 feil');
+    });
+});
+
+describe('resolveWikiBackLink — a page opened from a run leads back to it', () => {
+    test("navigation_origin 'runs' gives the run's own Kjøringer URL", () => {
+        const link = resolveWikiBackLink(null, null, { context: 'runs', back_url: '/app/wiki?tab=runs&focus_run=963' });
+
+        assert.deepEqual(link, { href: '/app/wiki?tab=runs&focus_run=963', isFindingReturn: false, context: 'runs' });
     });
 });

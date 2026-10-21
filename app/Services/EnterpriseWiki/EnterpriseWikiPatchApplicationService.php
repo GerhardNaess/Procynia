@@ -154,6 +154,7 @@ class EnterpriseWikiPatchApplicationService
                 // pages' patches are independent — one unlocatable target must not silently abandon
                 // the rest, nor be retried as a rewrite.
                 $failures[] = $e->getMessage();
+                $this->recordStaleDeferredPatch($run, $pageId, $e);
 
                 Log::error('[WIKI_PATCH] Patch failed for page — no version written.', [
                     'run_id' => $run->id,
@@ -400,6 +401,28 @@ class EnterpriseWikiPatchApplicationService
             'run_id' => $run->id,
             'page_id' => $pageId,
         ]);
+    }
+
+    /**
+     * A deferred patch that, retried after its review, no longer applies to the page as it is now
+     * — the superseded text was edited away, the section is gone. Its existing failed row takes the
+     * new reason, so the run stops offering a retry that can only repeat it
+     * (EnterpriseWikiPageGenerationFailureRecoveryService::failureKindForPivot()).
+     *
+     * Only an existing failed row is touched. A patch failing on its first attempt has no row and
+     * gets none, exactly as before: that failure is logged and left to 8K-4.
+     */
+    private function recordStaleDeferredPatch(EnterpriseWikiIngestRun $run, int $pageId, EnterpriseWikiPatchApplicationException $e): void
+    {
+        EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $pageId)
+            ->where('action', EnterpriseWikiIngestRunPage::ACTION_PATCHED)
+            ->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED)
+            ->whereNull('generated_page_version_id')
+            ->update([
+                'generation_error' => mb_substr(sprintf('[%s] %s', class_basename($e), $e->getMessage()), 0, 1000),
+            ]);
     }
 
     /**

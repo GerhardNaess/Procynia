@@ -38,6 +38,8 @@ class WikiRetryFailedPagesControllerTest extends TestCase
 
     private const PLAN_DEFECT_ERROR = '[EnterpriseWikiPlannedSectionEvidenceMissingException] Run [26] page [110] (article): planned_section_no_evidence before generation: Formål og tidspunkt.';
 
+    private const REVIEW_DEFERRAL_ERROR = '[EnterpriseWikiPageUnderReviewException] Page [69] is in pending_review. An automated change never writes a new working version while a review is open — the update is deferred until the review is closed.';
+
     public function test_a_transient_failure_retries_only_the_failed_page(): void
     {
         Queue::fake();
@@ -200,13 +202,170 @@ class WikiRetryFailedPagesControllerTest extends TestCase
 
         $rows = collect($this->actingAs($owner)->get('/app/wiki?tab=runs')->assertOk()->viewData('page')['props']['runs'])->keyBy('id');
 
-        $this->assertSame(['count' => 1, 'failure_kind' => EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_TRANSIENT, 'can_retry' => true], $rows[$transientRun->id]['failed_pages']);
-        $this->assertSame(['count' => 1, 'failure_kind' => EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_PLAN_DEFECT, 'can_retry' => false], $rows[$planDefectRun->id]['failed_pages']);
+        $this->assertSame(EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_TRANSIENT, $rows[$transientRun->id]['failed_pages']['failure_kind']);
+        $this->assertTrue($rows[$transientRun->id]['failed_pages']['can_retry']);
+        $this->assertFalse($rows[$transientRun->id]['failed_pages']['blocked_by_review']);
+        $this->assertSame(EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_PLAN_DEFECT, $rows[$planDefectRun->id]['failed_pages']['failure_kind']);
+        $this->assertFalse($rows[$planDefectRun->id]['failed_pages']['can_retry']);
+        $this->assertTrue($rows[$transientRun->id]['may_manage']);
 
         // A reader sees why the pages are incomplete, never the action.
         $readerRows = collect($this->actingAs($reader)->get('/app/wiki?tab=runs')->assertOk()->viewData('page')['props']['runs'])->keyBy('id');
         $this->assertFalse($readerRows[$transientRun->id]['failed_pages']['can_retry']);
         $this->assertSame(EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_TRANSIENT, $readerRows[$transientRun->id]['failed_pages']['failure_kind']);
+        $this->assertFalse($readerRows[$transientRun->id]['may_manage'], 'the detail view can say someone else has to act');
+    }
+
+    // =========================================================================
+    // An update held back by an open review (run 963)
+    // =========================================================================
+
+    public function test_a_review_deferral_is_its_own_kind_and_never_a_temporary_fault(): void
+    {
+        $this->assertSame(
+            EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_REVIEW_DEFERRED,
+            EnterpriseWikiPageGenerationFailureRecoveryService::failureKind(self::REVIEW_DEFERRAL_ERROR),
+        );
+    }
+
+    public function test_the_row_names_the_page_in_review_links_to_it_and_offers_no_retry(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        [$run, $pages] = $this->createPartiallyCompletedRun($customer, self::REVIEW_DEFERRAL_ERROR);
+        $pages['article']->forceFill(['status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'title' => 'Incident Commander'])->save();
+
+        $row = collect($this->actingAs($owner)->get('/app/wiki?tab=runs')->assertOk()->viewData('page')['props']['runs'])->keyBy('id')[$run->id];
+
+        $this->assertSame(1, $row['failed_pages']['count']);
+        $this->assertSame(EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_REVIEW_DEFERRED, $row['failed_pages']['failure_kind']);
+        $this->assertFalse($row['failed_pages']['can_retry'], 'a retry while the review is open could only be refused again');
+        $this->assertTrue($row['failed_pages']['blocked_by_review']);
+        $this->assertSame([[
+            'title' => 'Incident Commander',
+            'url' => route('app.wiki.show', ['slug' => $pages['article']->slug, 'back_url' => '/app/wiki?tab=runs&focus_run='.$run->id], false),
+            'in_review' => true,
+        ]], $row['failed_pages']['pages']);
+        $this->assertTrue($row['may_manage']);
+        $this->assertSame(0, $row['findings_open_count']);
+        $this->assertSame(0, $row['findings_resolved_count']);
+        $this->assertFalse($row['follow_up_complete'], 'the update is still owed, so the run still needs follow-up');
+
+        // The link opens the page, and the page leads back to this run.
+        $this->actingAs($owner)->get($row['failed_pages']['pages'][0]['url'])
+            ->assertOk()
+            ->assertInertia(fn ($inertia) => $inertia
+                ->where('navigation_origin.context', 'runs')
+                ->where('navigation_origin.back_url', '/app/wiki?tab=runs&focus_run='.$run->id));
+    }
+
+    public function test_a_direct_retry_while_the_review_is_open_is_refused_in_words_and_dispatches_nothing(): void
+    {
+        Queue::fake();
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        [$run, $pages] = $this->createPartiallyCompletedRun($customer, self::REVIEW_DEFERRAL_ERROR);
+        $pages['article']->forceFill(['status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW])->save();
+        $before = $run->fresh()->only(['status', 'qa_status', 'qa_last_error', 'finished_at', 'error_message']);
+
+        $this->actingAs($owner)
+            ->patch("/app/wiki/runs/{$run->id}/retry-failed-pages", ['tab' => 'runs'])
+            ->assertRedirect('/app/wiki?tab=runs')
+            ->assertSessionHas('error', __('procynia.wiki.run_retry_failed_pages_under_review'));
+
+        // Nothing queued means no generation job and so no AI call; the run's history is untouched.
+        Queue::assertNothingPushed();
+        $this->assertEquals($before, $run->fresh()->only(['status', 'qa_status', 'qa_last_error', 'finished_at', 'error_message']));
+        $pivot = $this->pivot($run, $pages['article']);
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED, $pivot->generation_status);
+        $this->assertSame(self::REVIEW_DEFERRAL_ERROR, $pivot->generation_error);
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $pages['article']->fresh()->status);
+    }
+
+    public function test_a_page_that_entered_review_after_a_transient_failure_blocks_the_retry_too(): void
+    {
+        Queue::fake();
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        [$run, $pages] = $this->createPartiallyCompletedRun($customer, self::TRANSIENT_ERROR);
+        $pages['article']->forceFill(['status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW])->save();
+
+        $row = collect($this->actingAs($owner)->get('/app/wiki?tab=runs')->viewData('page')['props']['runs'])->keyBy('id')[$run->id];
+        $this->assertFalse($row['failed_pages']['can_retry']);
+        $this->assertTrue($row['failed_pages']['blocked_by_review']);
+
+        $this->actingAs($owner)->patch("/app/wiki/runs/{$run->id}/retry-failed-pages")
+            ->assertSessionHas('error', __('procynia.wiki.run_retry_failed_pages_under_review'));
+        Queue::assertNothingPushed();
+    }
+
+    public function test_once_the_review_is_closed_the_update_may_be_retried(): void
+    {
+        Queue::fake();
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        [$run, $pages] = $this->createPartiallyCompletedRun($customer, self::REVIEW_DEFERRAL_ERROR);
+        $pages['article']->forceFill(['status' => EnterpriseWikiPage::STATUS_APPROVED])->save();
+
+        $row = collect($this->actingAs($owner)->get('/app/wiki?tab=runs')->viewData('page')['props']['runs'])->keyBy('id')[$run->id];
+        $this->assertSame(EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_REVIEW_DEFERRED, $row['failed_pages']['failure_kind']);
+        $this->assertTrue($row['failed_pages']['can_retry']);
+        $this->assertFalse($row['failed_pages']['blocked_by_review']);
+        $this->assertFalse($row['failed_pages']['pages'][0]['in_review']);
+
+        $this->actingAs($owner)->patch("/app/wiki/runs/{$run->id}/retry-failed-pages")
+            ->assertSessionHas('success', __('procynia.wiki.run_retry_failed_pages_success'));
+        Queue::assertPushed(GenerateEnterpriseWikiAppliedPage::class, fn ($job) => $job->pageId === $pages['article']->id);
+    }
+
+    public function test_a_closed_review_does_not_bypass_the_other_retry_rules(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        [$run, $pages] = $this->createPartiallyCompletedRun($customer, self::REVIEW_DEFERRAL_ERROR);
+        $pages['article']->forceFill(['status' => EnterpriseWikiPage::STATUS_APPROVED])->save();
+        // Another page of the run still generating: the service refuses for that reason alone.
+        $this->pivot($run, $pages['summary'])->update(['generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_RUNNING]);
+
+        $row = collect($this->actingAs($owner)->get('/app/wiki?tab=runs')->viewData('page')['props']['runs'])->keyBy('id')[$run->id];
+        $this->assertFalse($row['failed_pages']['can_retry']);
+        $this->assertFalse($row['failed_pages']['blocked_by_review']);
+    }
+
+    public function test_a_reader_sees_the_page_in_review_but_is_offered_no_action(): void
+    {
+        Queue::fake();
+        $customer = $this->createCustomer();
+        $reader = $this->grantWikiPermissions($customer, $this->createBareUser($customer, User::BID_ROLE_CONTRIBUTOR), [CustomerPermissionCatalog::WIKI_VIEW]);
+        [$run, $pages] = $this->createPartiallyCompletedRun($customer, self::REVIEW_DEFERRAL_ERROR);
+        $pages['article']->forceFill(['status' => EnterpriseWikiPage::STATUS_APPROVED])->save();
+
+        $row = collect($this->actingAs($reader)->get('/app/wiki?tab=runs')->assertOk()->viewData('page')['props']['runs'])->keyBy('id')[$run->id];
+
+        $this->assertFalse($row['may_manage']);
+        $this->assertFalse($row['failed_pages']['can_retry'], 'a closed review never hands the retry to someone who may not manage the document');
+        $this->assertFalse($row['can_dismiss']);
+        $this->assertFalse($row['can_cancel']);
+        $this->assertCount(1, $row['failed_pages']['pages']);
+
+        $this->actingAs($reader)->patch("/app/wiki/runs/{$run->id}/retry-failed-pages")->assertForbidden();
+        Queue::assertNothingPushed();
+    }
+
+    public function test_a_failed_page_of_another_customer_is_never_named(): void
+    {
+        $customer = $this->createCustomer('Kunde A');
+        $other = $this->createCustomer('Kunde B');
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        [$run] = $this->createPartiallyCompletedRun($customer, self::REVIEW_DEFERRAL_ERROR);
+        [, $otherPages] = $this->createPartiallyCompletedRun($other, self::REVIEW_DEFERRAL_ERROR);
+        // A corrupt pivot pointing across customers must not leak the other customer's page.
+        $this->pivot($run, EnterpriseWikiPage::query()->where('customer_id', $customer->id)->where('page_type', EnterpriseWikiPage::PAGE_TYPE_ARTICLE)->firstOrFail())
+            ->update(['enterprise_wiki_page_id' => $otherPages['article']->id]);
+
+        $row = collect($this->actingAs($owner)->get('/app/wiki?tab=runs')->viewData('page')['props']['runs'])->keyBy('id')[$run->id];
+
+        $this->assertSame([], $row['failed_pages']['pages']);
     }
 
     public function test_a_completed_run_carries_no_failed_pages_summary(): void

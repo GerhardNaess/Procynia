@@ -3,6 +3,9 @@
 namespace Tests\Feature\App\Wiki;
 
 use App\Exceptions\EnterpriseWikiPatchTargetRegenerationBlockedException;
+use App\Jobs\EnterpriseWiki\ContinueEnterpriseWikiDocumentFlowAfterPages;
+use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
+use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -13,8 +16,12 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageGenerationFailureRecoveryService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageVersionWriter;
 use App\Services\EnterpriseWiki\EnterpriseWikiPatchApplicationService;
+use App\Services\EnterpriseWiki\EnterpriseWikiRunRecoveryResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -792,6 +799,121 @@ class EnterpriseWikiPatchApplicationTest extends TestCase
     }
 
     // =========================================================================
+    // A deferred patch, retried after its review closed (run 963)
+    // =========================================================================
+
+    public function test_a_deferred_patch_is_retried_through_the_patch_engine_never_page_generation(): void
+    {
+        [$run, $pages] = $this->deferredPatchScenario();
+        Bus::fake();
+
+        $result = app(EnterpriseWikiPageGenerationFailureRecoveryService::class)->attempt($run->id, 'test');
+
+        $this->assertTrue($result->isResumed(), $result->reason);
+        Bus::assertDispatched(ContinueEnterpriseWikiDocumentFlowAfterPages::class, fn ($job): bool => $job->runId === $run->id);
+        Bus::assertNotDispatched(GenerateEnterpriseWikiAppliedPage::class);
+        Bus::assertNotDispatched(FinalizeEnterpriseWikiPageGeneration::class);
+
+        $run = $run->fresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING, $run->status);
+        $pivot = $this->pivotFor($run, $pages['article']);
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED, $pivot->generation_status, 'the row is left for the engine, never reset to pending generation work');
+
+        // The continuation's patch step (EnterpriseWikiDocumentFlowService::performApplyPatchTargets()).
+        $this->service()->applyForRun($run);
+
+        $pivot = $this->pivotFor($run, $pages['article']);
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED, $pivot->generation_status);
+        $this->assertNotNull($pivot->generated_page_version_id);
+        $this->assertStringContainsString(self::NEW_A, $pages['article']->fresh()->currentVersion->content_markdown);
+        $this->assertStringContainsString(self::UNRELATED_SECTION, $pages['article']->fresh()->currentVersion->content_markdown);
+    }
+
+    public function test_a_retried_deferred_patch_is_applied_once_however_often_it_runs(): void
+    {
+        [$run, $pages] = $this->deferredPatchScenario();
+        Bus::fake();
+
+        app(EnterpriseWikiPageGenerationFailureRecoveryService::class)->attempt($run->id, 'test');
+        $this->service()->applyForRun($run->fresh());
+        $this->service()->applyForRun($run->fresh());
+        $this->service()->applyForRun($run->fresh());
+
+        $versions = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $pages['article']->id)->count();
+        $this->assertSame(2, $versions, 'the original version and exactly one patched version');
+        $this->assertSame(1, substr_count($pages['article']->fresh()->currentVersion->content_markdown, self::NEW_A));
+    }
+
+    public function test_a_deferred_patch_is_not_retried_while_the_page_is_in_review_again(): void
+    {
+        [$run, $pages] = $this->deferredPatchScenario();
+        $pages['article']->forceFill(['status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW])->save();
+
+        $result = app(EnterpriseWikiPageGenerationFailureRecoveryService::class)->evaluate($run->id);
+
+        $this->assertFalse($result->isResumed());
+        $this->assertSame(EnterpriseWikiRunRecoveryResult::CODE_PAGE_UNDER_REVIEW, $result->code);
+    }
+
+    public function test_a_deferred_patch_whose_text_was_edited_since_is_refused_and_not_offered_again(): void
+    {
+        [$run, $pages] = $this->deferredPatchScenario();
+        $article = $pages['article'];
+
+        // A person rewrote the superseded value while the patch waited: the stale plan must not
+        // overwrite it, nor be offered again as if it still applied.
+        $current = $article->currentVersion;
+        $blocks = array_map(
+            fn (array $block): array => array_merge($block, [
+                'markdown' => str_replace(self::OLD_A, 'terskelverdien er justert manuelt', (string) $block['markdown']),
+                'source_excerpt' => isset($block['source_excerpt']) ? str_replace(self::OLD_A, 'terskelverdien er justert manuelt', (string) $block['source_excerpt']) : null,
+            ]),
+            $current->content_blocks_json,
+        );
+        $manual = app(EnterpriseWikiPageVersionWriter::class)->writeNewCurrentVersion($article->id, [
+            'content_markdown' => str_replace(self::OLD_A, 'terskelverdien er justert manuelt', $current->content_markdown),
+            'content_blocks_json' => $blocks,
+        ]);
+        Bus::fake();
+
+        $this->assertTrue(app(EnterpriseWikiPageGenerationFailureRecoveryService::class)->attempt($run->id, 'test')->isResumed());
+        $this->service()->applyForRun($run->fresh());
+
+        $this->assertSame($manual->id, $article->fresh()->currentVersion->id, 'the newer manual version is kept');
+        $pivot = $this->pivotFor($run, $article);
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED, $pivot->generation_status);
+        $this->assertStringStartsWith('[EnterpriseWikiPatchApplicationException]', (string) $pivot->generation_error);
+        $this->assertSame(EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_PLAN_DEFECT, EnterpriseWikiPageGenerationFailureRecoveryService::failureKindForPivot($pivot));
+
+        // The continuation ends the run again (escalated: the patch did not happen).
+        $run->fresh()->forceFill(['status' => EnterpriseWikiIngestRun::STATUS_ESCALATED])->save();
+        $evaluation = app(EnterpriseWikiPageGenerationFailureRecoveryService::class)->evaluate($run->id);
+        $this->assertFalse($evaluation->isResumed());
+        $this->assertSame(EnterpriseWikiRunRecoveryResult::CODE_PLAN_DEFECT, $evaluation->code, $evaluation->reason);
+    }
+
+    public function test_a_deferred_patch_sent_to_the_wrong_job_by_an_earlier_retry_is_still_a_waiting_update(): void
+    {
+        [$run, $pages] = $this->deferredPatchScenario();
+        $pivot = $this->pivotFor($run, $pages['article']);
+        $pivot->forceFill([
+            'generation_error' => '[EnterpriseWikiPatchTargetRegenerationBlockedException] '.(new EnterpriseWikiPatchTargetRegenerationBlockedException($run->id, $pages['article']->id))->getMessage(),
+        ])->save();
+
+        $this->assertSame(EnterpriseWikiPageGenerationFailureRecoveryService::FAILURE_REVIEW_DEFERRED, EnterpriseWikiPageGenerationFailureRecoveryService::failureKindForPivot($pivot->fresh()));
+        $this->assertTrue(app(EnterpriseWikiPageGenerationFailureRecoveryService::class)->evaluate($run->id)->isResumed());
+    }
+
+    public function test_a_page_with_a_replace_beside_its_preserve_is_never_read_as_no_change(): void
+    {
+        [$run, $pages] = $this->deferredPatchScenario([$this->preserveTarget()]);
+        $pivot = $this->pivotFor($run, $pages['article']);
+
+        $this->assertFalse($pivot->isFailedNoChangePatch((array) $run->maintainer_decision_json));
+        $this->assertCount(1, EnterpriseWikiIngestRunPage::outstandingFailures(collect([$pivot]), (array) $run->maintainer_decision_json));
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 
@@ -806,6 +928,41 @@ class EnterpriseWikiPatchApplicationTest extends TestCase
             'customer_id' => $customerId,
             'is_active' => true,
         ]);
+    }
+
+    /**
+     * The run-963 shape with a real change: the article was in review, so its replace was
+     * deferred, the run escalated, and the review has since closed.
+     *
+     * @param  list<array<string, mixed>>  $extraTargets  further targets on the article
+     * @return array{0: EnterpriseWikiIngestRun, 1: array<string, EnterpriseWikiPage>}
+     */
+    private function deferredPatchScenario(array $extraTargets = []): array
+    {
+        [$run, $pages] = $this->scenario([$this->replaceTargetA(), ...$extraTargets]);
+        $article = $pages['article'];
+        $article->forceFill(['status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW])->save();
+
+        $this->service()->applyForRun($run);
+
+        $run->forceFill([
+            'status' => EnterpriseWikiIngestRun::STATUS_ESCALATED,
+            'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+            'finished_at' => now(),
+        ])->save();
+        $article->forceFill(['status' => EnterpriseWikiPage::STATUS_APPROVED])->save();
+
+        $this->assertStringStartsWith('[EnterpriseWikiPageUnderReviewException]', (string) $this->pivotFor($run, $article)->generation_error);
+
+        return [$run->fresh(), $pages];
+    }
+
+    private function pivotFor(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): EnterpriseWikiIngestRunPage
+    {
+        return EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->firstOrFail();
     }
 
     private function service(): EnterpriseWikiPatchApplicationService

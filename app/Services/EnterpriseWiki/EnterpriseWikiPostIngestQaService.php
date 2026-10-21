@@ -260,13 +260,14 @@ class EnterpriseWikiPostIngestQaService
         }
 
         $pageIds = $pivotRows->pluck('enterprise_wiki_page_id');
+        $decision = (array) ($run->maintainer_decision_json ?? []);
 
         // Arbeidspakke B (§7.1): the run's relations must be technically consistent with its text
         // before it may complete. Recorded whatever the verdict, so a result view can show it.
         $checks['link_integration'] = $this->linkIntegrationCheck->check($run);
 
         $incompleteSteps = [
-            ...$this->findIncompleteSteps($pivotRows, $pageIds),
+            ...$this->findIncompleteSteps($pivotRows, $pageIds, $decision),
             ...$this->findIncompleteLinkSteps($checks['link_integration']),
         ];
 
@@ -274,7 +275,7 @@ class EnterpriseWikiPostIngestQaService
             return [
                 'verdict' => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
                 'reason' => 'Run has unfinished continuation step(s) or an active reservation: '.implode(', ', $incompleteSteps).'.'
-                    .$this->failedPageGenerationReason($pivotRows),
+                    .$this->failedPageGenerationReason($pivotRows, $decision),
                 'incomplete_steps' => $incompleteSteps,
                 'critical_defects' => [],
                 'claim_qa_signals' => [],
@@ -684,13 +685,18 @@ class EnterpriseWikiPostIngestQaService
      * Anything not yet finished — active leases or checkpoints not yet set. A non-empty result
      * means the run cannot be safely judged yet, regardless of what its content looks like.
      *
+     * A failed row for a page the decision only said to leave alone is not unfinished generation
+     * (EnterpriseWikiIngestRunPage::isFailedNoChangePatch()): nothing was ever going to be written.
+     *
+     * @param  array<string, mixed>  $decision
      * @return list<string>
      */
-    private function findIncompleteSteps(Collection $pivotRows, Collection $pageIds): array
+    private function findIncompleteSteps(Collection $pivotRows, Collection $pageIds, array $decision): array
     {
         $reasons = [];
 
-        if ($pivotRows->contains(fn (EnterpriseWikiIngestRunPage $row) => $row->generation_status !== EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED)) {
+        if ($pivotRows->contains(fn (EnterpriseWikiIngestRunPage $row) => $row->generation_status !== EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED
+            && ! $row->isFailedNoChangePatch($decision))) {
             $reasons[] = 'page_generation_incomplete';
         }
 
@@ -748,10 +754,12 @@ class EnterpriseWikiPostIngestQaService
      * A partially completed run (docs/enterprise-wiki-knowledge-integration-plan.md §4.2) names the
      * pages that did not generate, so the escalation explains itself without a log lookup. The
      * per-page reason stays on the pivot's generation_error.
+     *
+     * @param  array<string, mixed>  $decision
      */
-    private function failedPageGenerationReason(Collection $pivotRows): string
+    private function failedPageGenerationReason(Collection $pivotRows, array $decision): string
     {
-        $failed = $pivotRows->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED);
+        $failed = EnterpriseWikiIngestRunPage::outstandingFailures($pivotRows, $decision);
 
         if ($failed->isEmpty()) {
             return '';

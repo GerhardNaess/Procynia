@@ -251,6 +251,54 @@ class EnterpriseWikiPatchTargetResolver
     }
 
     /**
+     * The operations a run's stored decision asked for on one page, across both places a target
+     * is recorded: the maintainer's own `patch_targets` and the ones cross-page reconciliation
+     * derived from them (`cross_page_reconciliation.derived_patch_targets`).
+     *
+     * Null when the answer cannot be stated with certainty: a target naming the page whose
+     * operation is missing or not one of replace/amend/preserve. A caller deciding whether a page
+     * was left untouched must then assume it was not — an unreadable plan is never read as
+     * "nothing to do". An empty list means the decision names no target on this page at all.
+     *
+     * @param  array<string, mixed>  $decision
+     * @return list<string>|null
+     */
+    public static function operationsForPage(array $decision, int $pageId): ?array
+    {
+        $targets = [
+            ...array_values((array) ($decision['patch_targets'] ?? [])),
+            ...array_values((array) data_get($decision, 'cross_page_reconciliation.derived_patch_targets', [])),
+        ];
+
+        $operations = [];
+
+        foreach ($targets as $target) {
+            if (! is_array($target)) {
+                continue;
+            }
+
+            $targetPageId = $target['target_page_id'] ?? null;
+
+            // A digit string still names the page: skipping it could hide a replace behind a
+            // preserve on the same page.
+            if (! (is_int($targetPageId) || (is_string($targetPageId) && ctype_digit($targetPageId)))
+                || (int) $targetPageId !== $pageId) {
+                continue;
+            }
+
+            $operation = $target['operation'] ?? null;
+
+            if (! in_array($operation, ['replace', 'amend', 'preserve'], true)) {
+                return null;
+            }
+
+            $operations[] = $operation;
+        }
+
+        return $operations;
+    }
+
+    /**
      * Verify, at DECISION time, the two things that decide whether a patch can actually be carried
      * out: that the target area can be located, and — for a `replace` — that the substance it claims
      * to supersede is genuinely there.

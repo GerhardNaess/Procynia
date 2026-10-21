@@ -2,6 +2,7 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Jobs\EnterpriseWiki\ContinueEnterpriseWikiDocumentFlowAfterPages;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Models\EnterpriseWikiIngestRun;
@@ -73,6 +74,19 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
     public const FAILURE_TRANSIENT = 'transient';
 
     public const FAILURE_UNKNOWN = 'unknown';
+
+    /** Not a fault: the update waited for an open review (REVIEW_DEFERRAL_MARKER). */
+    public const FAILURE_REVIEW_DEFERRED = 'review_deferred';
+
+    /**
+     * generation_error prefix the patch engine records when a deferred patch no longer applies to
+     * the page as it is now (EnterpriseWikiPatchApplicationService) — the plan is stale, so a retry
+     * would repeat it.
+     */
+    public const PATCH_APPLICATION_FAILURE_MARKER = 'EnterpriseWikiPatchApplicationException';
+
+    /** What page generation records when it is handed a patch target (it refuses, by design). */
+    private const REGENERATION_BLOCKED_MARKER = 'EnterpriseWikiPatchTargetRegenerationBlockedException';
 
     /** The page-generation crash sentinel interval (FinalizeEnterpriseWikiPageGeneration). */
     private const FINALIZE_SENTINEL_DELAY_SECONDS = 60;
@@ -200,12 +214,17 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
             ->with('page')
             ->get();
 
-        $failed = $pivots->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED);
+        $decisionJson = (array) ($run->maintainer_decision_json ?? []);
+
+        // A failed row for a page the decision only said to leave alone is history, not a failed
+        // page (EnterpriseWikiIngestRunPage::isFailedNoChangePatch()): it is neither retried nor
+        // counted among the other pages that must be settled.
+        $failed = EnterpriseWikiIngestRunPage::outstandingFailures($pivots, $decisionJson);
 
         if ($failed->isEmpty()) {
             return [
                 'result' => EnterpriseWikiRunRecoveryResult::notRecoverable(
-                    "Run [{$run->id}] has no page(s) with generation_status=failed — nothing for this service to retry."
+                    "Run [{$run->id}] has no page(s) with generation_status=failed that still need doing — nothing for this service to retry."
                 ),
                 'failedPivots' => $none,
             ];
@@ -215,9 +234,9 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
             fn (EnterpriseWikiIngestRunPage $p): bool => $p->generation_status === EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED
         );
 
-        $decisionJson = (array) ($run->maintainer_decision_json ?? []);
+        // A patch is not part of either generation wave: the continuation applies it.
         $failedHasInitialWavePage = $failed->contains(
-            fn (EnterpriseWikiIngestRunPage $p): bool => $this->isInitialWavePage($p->page, $decisionJson)
+            fn (EnterpriseWikiIngestRunPage $p): bool => ! self::isPatchPivot($p) && $this->isInitialWavePage($p->page, $decisionJson)
         );
 
         // Every other page must be settled. The one legitimate exception: when the whole initial
@@ -250,12 +269,28 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
         // Decision D3: never offer a retry that can only repeat a known plan defect. A transient or
         // unrecognised failure may be retried — by a person only (see the class docblock); the UI
         // says which of the two it is (failureKind()).
-        if ($failed->contains(fn (EnterpriseWikiIngestRunPage $p): bool => self::failureKind($p->generation_error) === self::FAILURE_PLAN_DEFECT)) {
+        if ($failed->contains(fn (EnterpriseWikiIngestRunPage $p): bool => self::failureKindForPivot($p) === self::FAILURE_PLAN_DEFECT)) {
             return [
                 'result' => EnterpriseWikiRunRecoveryResult::notRecoverable(
                     "Run [{$run->id}] has a page that failed on a plan defect — retrying would repeat it.",
                     [],
                     EnterpriseWikiRunRecoveryResult::CODE_PLAN_DEFECT,
+                ),
+                'failedPivots' => $none,
+            ];
+        }
+
+        // A page in review right now refuses every automated write before any AI call
+        // (EnterpriseWikiGenerateAppliedPagesService::guardAgainstOpenReview()), so a retry could
+        // only record the same deferral again. Read from the page as it is now, not from the stored
+        // error: a review opened after the failure blocks the retry just the same, and a closed one
+        // no longer does.
+        if ($failed->contains(fn (EnterpriseWikiIngestRunPage $p): bool => $p->page?->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW)) {
+            return [
+                'result' => EnterpriseWikiRunRecoveryResult::notRecoverable(
+                    "Run [{$run->id}] has a failed page that is in review — its update waits until the review is closed.",
+                    [],
+                    EnterpriseWikiRunRecoveryResult::CODE_PAGE_UNDER_REVIEW,
                 ),
                 'failedPivots' => $none,
             ];
@@ -273,20 +308,22 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
 
     /**
      * What a recorded page-generation error says about a retry: a plan defect repeats by
-     * construction; a transient failure is one EnterpriseWikiTransientFailureClassifier's
-     * allow-list recognises; anything else is unknown — never assumed to be either.
+     * construction; a review deferral is no fault at all; a transient failure is one
+     * EnterpriseWikiTransientFailureClassifier's allow-list recognises; anything else is unknown —
+     * never assumed to be either.
      *
      * @return self::FAILURE_*
      */
     public static function failureKind(?string $generationError): string
     {
-        // An update deferred by an open review is temporary by definition: it lasts exactly as long
-        // as the review, and a person's retry after that is the way to apply it. A retry while the
-        // review is still open is refused again before any AI call. Kept out of
-        // EnterpriseWikiTransientFailureClassifier on purpose — that allow-list also drives automatic
-        // retries, and nothing here should loop against a review.
+        // An update deferred by an open review is its own kind, not a temporary technical fault:
+        // the page is intact and the update waits for the review, which only a person closes. A
+        // retry while the review is still open is refused (decide()); after it, a person's retry is
+        // the way to apply it. Kept out of EnterpriseWikiTransientFailureClassifier on purpose —
+        // that allow-list also drives automatic retries, and nothing here should loop against a
+        // review.
         if ($generationError !== null && str_contains($generationError, self::REVIEW_DEFERRAL_MARKER)) {
-            return self::FAILURE_TRANSIENT;
+            return self::FAILURE_REVIEW_DEFERRED;
         }
 
         foreach (self::PLAN_DEFECT_MARKERS as $marker) {
@@ -298,6 +335,44 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
         return EnterpriseWikiTransientFailureClassifier::isTransient($generationError)
             ? self::FAILURE_TRANSIENT
             : self::FAILURE_UNKNOWN;
+    }
+
+    /**
+     * failureKind() for one failed row, aware of what kind of work the row records.
+     *
+     * A generated page is read from its error, as always. A patch row is not: the patch engine is
+     * the only thing that ever applies it, and it records a failure for exactly one reason — the
+     * page was in review — or, since a retry now re-runs it, because the patch no longer applies to
+     * the page as it is now (PATCH_APPLICATION_FAILURE_MARKER, a stale plan). The generation guard's
+     * refusal on a patch row (run 963) says only that an earlier retry sent it to the wrong job:
+     * the patch itself has still not been tried, so it is the same waiting update as before.
+     *
+     * Callers judging a run skip isFailedNoChangePatch() rows first; this does not repeat that.
+     *
+     * @return self::FAILURE_*
+     */
+    public static function failureKindForPivot(EnterpriseWikiIngestRunPage $pivot): string
+    {
+        if (! self::isPatchPivot($pivot)) {
+            return self::failureKind($pivot->generation_error);
+        }
+
+        $error = (string) $pivot->generation_error;
+
+        if (str_contains($error, self::PATCH_APPLICATION_FAILURE_MARKER)) {
+            return self::FAILURE_PLAN_DEFECT;
+        }
+
+        if (str_contains($error, self::REVIEW_DEFERRAL_MARKER) || str_contains($error, self::REGENERATION_BLOCKED_MARKER)) {
+            return self::FAILURE_REVIEW_DEFERRED;
+        }
+
+        return self::FAILURE_UNKNOWN;
+    }
+
+    private static function isPatchPivot(EnterpriseWikiIngestRunPage $pivot): bool
+    {
+        return $pivot->action === EnterpriseWikiIngestRunPage::ACTION_PATCHED;
     }
 
     /**
@@ -327,6 +402,23 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
      */
     private function resume(EnterpriseWikiIngestRun $run, Collection $failedPivots): void
     {
+        // A deferred patch is never handed to page generation: that job regenerates a page from the
+        // source alone and refuses a patch target by design (run 963). The patch engine applies it,
+        // and it runs in the continuation after pages (EnterpriseWikiDocumentFlowService::
+        // performApplyPatchTargets()), from the stored plan, against the page as it is now. Its row
+        // is left as it is — reset to pending it would be picked up as generation work — and the
+        // engine overwrites it once the patch is written, or records why it no longer applies.
+        $patchPivots = $failedPivots->filter(fn (EnterpriseWikiIngestRunPage $p): bool => self::isPatchPivot($p));
+        $generationPivots = $failedPivots->reject(fn (EnterpriseWikiIngestRunPage $p): bool => self::isPatchPivot($p));
+
+        if ($generationPivots->isEmpty()) {
+            $this->resumePatchesOnly($run, $patchPivots);
+
+            return;
+        }
+
+        $failedPivots = $generationPivots;
+
         $decisionJson = (array) ($run->maintainer_decision_json ?? []);
         $initialWaveFailed = $failedPivots->filter(
             fn (EnterpriseWikiIngestRunPage $p): bool => $this->isInitialWavePage($p->page, $decisionJson)
@@ -379,6 +471,35 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
 
         // The same crash sentinel a first attempt starts with.
         FinalizeEnterpriseWikiPageGeneration::dispatch($run->id, true)->delay(now()->addSeconds(self::FINALIZE_SENTINEL_DELAY_SECONDS));
+    }
+
+    /**
+     * Only deferred patches failed: no page needs generating, so the run goes straight back to the
+     * continuation that applies patches — the same status and the same job
+     * EnterpriseWikiEscalatedRunRecoveryService::resume() reopens a run with. The patch engine is
+     * idempotent per page (a row that already carries a version is skipped), plans against the
+     * current version, writes under the page lock and refuses a page in review, so re-running the
+     * continuation applies each waiting patch at most once. No AI call is involved in the patch.
+     *
+     * @param  Collection<int, EnterpriseWikiIngestRunPage>  $patchPivots
+     */
+    private function resumePatchesOnly(EnterpriseWikiIngestRun $run, Collection $patchPivots): void
+    {
+        $run->update([
+            'status' => EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING,
+            'finished_at' => null,
+            'error_message' => null,
+            'failed_phase' => null,
+            'transient_failure' => null,
+            'qa_status' => $run->qaStatusForResumedContinuation(),
+        ]);
+
+        Log::info('[WIKI_RUN_RECOVERY] Deferred patch(es) handed back to the continuation — no page generation.', [
+            'run_id' => $run->id,
+            'patched_page_ids' => $patchPivots->pluck('enterprise_wiki_page_id')->all(),
+        ]);
+
+        ContinueEnterpriseWikiDocumentFlowAfterPages::dispatch($run->id);
     }
 
     /**
