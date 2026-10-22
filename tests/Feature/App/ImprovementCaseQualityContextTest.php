@@ -223,7 +223,7 @@ class ImprovementCaseQualityContextTest extends TestCase
         // naming the case; the remaining links stay.
         $this->actingAs($editor)->delete("/app/quality/items/{$incident->id}")
             ->assertRedirect()
-            ->assertSessionHas('error', __('procynia.quality.errors.process_in_use_not_deletable'));
+            ->assertSessionHas('error', __('procynia.quality.errors.in_use_not_deletable'));
         $this->assertDatabaseHas('quality_items', ['id' => $incident->id]);
         $this->assertSame(2, ImprovementCaseProcess::query()->where('improvement_case_id', $case->id)->count() + ImprovementCaseActivity::query()->where('improvement_case_id', $case->id)->count());
         $this->assertNotNull($case->fresh());

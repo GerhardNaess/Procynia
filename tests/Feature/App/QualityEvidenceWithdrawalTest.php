@@ -100,7 +100,7 @@ class QualityEvidenceWithdrawalTest extends TestCase
         // It no longer counts, and still protects the control from being deleted.
         $register = $this->actingAs($editor)->get('/app/quality?tab=controls')->viewData('page')['props']['control_register'];
         $this->assertSame(0, $register[$world['control']->id]['evidence_count']);
-        $this->assertSame('procynia.quality.errors.control_with_history_not_deletable', app(QualityItemService::class)->deletionBlocker($world['control']));
+        $this->assertSame('procynia.quality.errors.in_use_not_deletable', app(QualityItemService::class)->deletionBlocker($world['control']));
     }
 
     public function test_a_withdrawal_is_final(): void
@@ -179,7 +179,7 @@ class QualityEvidenceWithdrawalTest extends TestCase
 
         app(QualityItemService::class)->unlinkDocument((int) $world['customer']->id, $link, $world['editor']);
         $this->assertTrue($link->fresh()->isWithdrawn());
-        $this->assertSame('procynia.quality.errors.item_with_evidence_not_deletable', app(QualityItemService::class)->deletionBlocker($process));
+        $this->assertSame('procynia.quality.errors.in_use_not_deletable', app(QualityItemService::class)->deletionBlocker($process));
 
         // Other capacities are links and go as before.
         $source = app(QualityItemService::class)->linkDocument((int) $world['customer']->id, $process, $world['document'], QualityItemDocument::RELATION_TYPE_SOURCE, null, $world['editor']);

@@ -304,7 +304,7 @@ class RiskQualityContextLinkTest extends TestCase
         foreach ([$payroll, $hiring] as $process) {
             $this->actingAs($editor)->delete("/app/quality/items/{$process->id}")
                 ->assertRedirect()
-                ->assertSessionHas('error', __('procynia.quality.errors.process_in_use_not_deletable'));
+                ->assertSessionHas('error', __('procynia.quality.errors.in_use_not_deletable'));
             $this->assertDatabaseHas('quality_items', ['id' => $process->id]);
         }
         $this->assertSame(1, RiskProcess::query()->where('risk_id', $risk->id)->count());

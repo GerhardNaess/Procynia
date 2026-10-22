@@ -82,10 +82,10 @@ class QualityCrossModuleLinkTest extends TestCase
             $this->assertNotNull(QualityItem::query()->find($item->id), $kind);
         }
 
-        $this->assertSame([__('procynia.quality.errors.process_in_use_not_deletable')], array_values(array_unique($messages[QualityItem::TYPE_PROCESS])));
-        $this->assertSame([__('procynia.quality.errors.control_in_use_not_deletable')], array_values(array_unique($messages[QualityItem::TYPE_CONTROL])));
+        $this->assertSame([__('procynia.quality.errors.in_use_not_deletable')], array_values(array_unique($messages[QualityItem::TYPE_PROCESS])));
+        $this->assertSame([__('procynia.quality.errors.in_use_not_deletable')], array_values(array_unique($messages[QualityItem::TYPE_CONTROL])));
 
-        foreach ([__('procynia.quality.errors.process_in_use_not_deletable'), __('procynia.quality.errors.control_in_use_not_deletable')] as $message) {
+        foreach ([__('procynia.quality.errors.in_use_not_deletable'), __('procynia.quality.errors.in_use_not_deletable')] as $message) {
             foreach (self::TELLTALES as $word) {
                 $this->assertStringNotContainsStringIgnoringCase($word, $message);
             }
@@ -107,14 +107,14 @@ class QualityCrossModuleLinkTest extends TestCase
 
         $response = $this->actingAs($deleter)->delete("/app/quality/items/{$control->id}?tab=controls");
         $response->assertRedirect('/app/quality?tab=controls')
-            ->assertSessionHas('error', __('procynia.quality.errors.control_in_use_not_deletable'));
+            ->assertSessionHas('error', __('procynia.quality.errors.in_use_not_deletable'));
         $this->assertNotNull(QualityItem::query()->find($control->id));
 
         $deleterRow = collect($this->actingAs($deleter)->get('/app/quality?tab=controls')->viewData('page')['props']['items'])->firstWhere('id', $control->id);
-        $this->assertSame(__('procynia.quality.errors.control_in_use_not_deletable'), $deleterRow['delete_blocked_message']);
+        $this->assertTrue($deleterRow['in_use']);
 
         $readerPage = $this->actingAs($reader)->get('/app/quality?tab=controls');
-        $this->assertNull(collect($readerPage->viewData('page')['props']['items'])->firstWhere('id', $control->id)['delete_blocked_message']);
+        $this->assertFalse(collect($readerPage->viewData('page')['props']['items'])->firstWhere('id', $control->id)['in_use']);
         $this->assertStringNotContainsString('Konfidensiell', $readerPage->getContent());
         // (The sentence itself ships with the page's translations for everyone; what must not reach a
         // reader is that it applies to this row.)
@@ -193,6 +193,31 @@ class QualityCrossModuleLinkTest extends TestCase
         DB::table('risk_controls')->where('risk_id', $riskId)->delete();
         app(QualityItemService::class)->deleteItem((int) $customer->id, $control, $owner);
         $this->assertNull(QualityItem::query()->find($control->id));
+    }
+
+    /**
+     * «Sett til Utgått» in the row menu is the ordinary status change (PATCH, quality.edit), for
+     * every kind of item in use — linked, approved or with evidence. One click, nothing else.
+     */
+    public function test_an_item_in_use_is_retired_with_the_ordinary_status_change(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->complianceContext();
+        $linked = $this->item($customer, QualityItem::TYPE_PROCESS, 'Koblet prosess');
+        $this->riskLink($customer, 'risk_processes', 'quality_item_id', $linked);
+        $withEvidence = $this->item($customer, QualityItem::TYPE_CONTROL, 'Kontroll med evidens');
+        app(QualityItemService::class)->addControlEvidence((int) $customer->id, $withEvidence, 'Skjema', null, null, $owner);
+        $editor = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW, CustomerPermissionCatalog::QUALITY_EDIT, CustomerPermissionCatalog::QUALITY_DELETE]);
+
+        $rows = collect($this->actingAs($editor)->get('/app/quality?tab=overview')->viewData('page')['props']['items'])->keyBy('id');
+
+        foreach ([$linked, $withEvidence] as $item) {
+            $this->assertTrue($rows[$item->id]['in_use']);
+            $this->actingAs($editor)->patch("/app/quality/items/{$item->id}", ['status' => QualityItem::STATUS_RETIRED])
+                ->assertSessionHasNoErrors();
+            $this->assertSame(QualityItem::STATUS_RETIRED, $item->fresh()->status);
+        }
+
+        $this->assertTrue(DB::table('risk_processes')->where('quality_item_id', $linked->id)->exists());
     }
 
     public function test_deleting_the_customer_takes_linked_items_along(): void

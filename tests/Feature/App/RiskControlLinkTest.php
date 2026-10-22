@@ -328,7 +328,7 @@ class RiskControlLinkTest extends TestCase
         // 2026-10-22), with a sentence that names neither the risk nor Risiko. Link and risk stay.
         $this->actingAs($user)->delete("/app/quality/items/{$control->id}")
             ->assertRedirect()
-            ->assertSessionHas('error', __('procynia.quality.errors.control_in_use_not_deletable'));
+            ->assertSessionHas('error', __('procynia.quality.errors.in_use_not_deletable'));
         $this->assertStringNotContainsString('Konfidensiell', (string) session('error'));
         $this->assertDatabaseHas('quality_items', ['id' => $control->id]);
         $this->assertDatabaseHas('risk_controls', ['risk_id' => $risk->id]);

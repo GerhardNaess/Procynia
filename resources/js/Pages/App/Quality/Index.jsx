@@ -129,6 +129,7 @@ export default function QualityIndex() {
                         register={controlRegister}
                         tq={tq}
                         canDelete={canDelete}
+                        canEdit={canEdit}
                         activeTab={activeTab}
                         statusLabels={statusLabels}
                         heading={tq.register?.heading ?? 'Kontrollregister'}
@@ -155,6 +156,7 @@ export default function QualityIndex() {
                             items={items}
                             tq={tq}
                             canDelete={canDelete}
+                            canEdit={canEdit}
                             activeTab={activeTab}
                             statusLabels={statusLabels}
                         />
@@ -165,6 +167,7 @@ export default function QualityIndex() {
                         register={controlRegister}
                         tq={tq}
                         canDelete={canDelete}
+                        canEdit={canEdit}
                         activeTab={activeTab}
                         typeLabels={typeLabels}
                         statusLabels={statusLabels}
@@ -279,7 +282,7 @@ function AttentionFinding({ finding, ta }) {
  * arbeidsinstrukser and sjekklister are the styrende dokumenter; processes and controls each get a
  * section of their own, so neither is ever presented as a document.
  */
-function OverviewSections({ items, register, tq, canDelete, activeTab, typeLabels, statusLabels }) {
+function OverviewSections({ items, register, tq, canDelete, canEdit = false, activeTab, typeLabels, statusLabels }) {
     const ts = tq.sections ?? {};
     const documents = items.filter((item) => ! NON_DOCUMENT_TYPES.includes(item.quality_type));
     const processes = items.filter((item) => item.quality_type === 'process');
@@ -291,6 +294,7 @@ function OverviewSections({ items, register, tq, canDelete, activeTab, typeLabel
                 items={documents}
                 tq={tq}
                 canDelete={canDelete}
+                canEdit={canEdit}
                 activeTab={activeTab}
                 typeLabels={typeLabels}
                 statusLabels={statusLabels}
@@ -299,6 +303,7 @@ function OverviewSections({ items, register, tq, canDelete, activeTab, typeLabel
                 items={processes}
                 tq={tq}
                 canDelete={canDelete}
+                canEdit={canEdit}
                 activeTab={activeTab}
                 statusLabels={statusLabels}
                 help={ts.processes_help ?? 'Hvordan virksomheten arbeider.'}
@@ -308,6 +313,7 @@ function OverviewSections({ items, register, tq, canDelete, activeTab, typeLabel
                 register={register}
                 tq={tq}
                 canDelete={canDelete}
+                canEdit={canEdit}
                 activeTab={activeTab}
                 statusLabels={statusLabels}
                 heading={ts.controls_heading ?? 'Kontroller'}
@@ -345,7 +351,7 @@ function ItemStatus({ item, tq, statusLabels }) {
     );
 }
 
-function ItemTable({ items, tq, canDelete, activeTab, typeLabels, statusLabels }) {
+function ItemTable({ items, tq, canDelete, canEdit = false, activeTab, typeLabels, statusLabels }) {
     const table = tq.table ?? {};
 
     return (
@@ -399,7 +405,7 @@ function ItemTable({ items, tq, canDelete, activeTab, typeLabels, statusLabels }
                                 <td className="py-3 text-slate-700">{item.wiki_link_count}</td>
                                 {canDelete && (
                                     <td className="py-3 pl-4 text-right">
-                                        <QualityItemActions tq={tq} item={item} tab={activeTab} />
+                                        <QualityItemActions tq={tq} item={item} tab={activeTab} canEdit={canEdit} />
                                     </td>
                                 )}
                             </tr>
@@ -415,7 +421,7 @@ function ItemTable({ items, tq, canDelete, activeTab, typeLabels, statusLabels }
  * Prosesser: how the virksomhet works. Owner, publication status, review and the Wiki behind each —
  * no type column, because every row is a process.
  */
-function ProcessTable({ items, tq, canDelete, activeTab, statusLabels, help = null }) {
+function ProcessTable({ items, tq, canDelete, canEdit = false, activeTab, statusLabels, help = null }) {
     const table = tq.table ?? {};
     const ts = tq.sections ?? {};
 
@@ -464,7 +470,7 @@ function ProcessTable({ items, tq, canDelete, activeTab, statusLabels, help = nu
                                 <td className="py-3 text-slate-700">{item.wiki_link_count}</td>
                                 {canDelete && (
                                     <td className="py-3 pl-4 text-right">
-                                        <QualityItemActions tq={tq} item={item} tab={activeTab} />
+                                        <QualityItemActions tq={tq} item={item} tab={activeTab} canEdit={canEdit} />
                                     </td>
                                 )}
                             </tr>
@@ -484,7 +490,7 @@ function ProcessTable({ items, tq, canDelete, activeTab, statusLabels, help = nu
  * Controls are listed whether they are placed or not — one that has been taken off every activity
  * is still a control the virksomhet has, and stays here until somebody deletes it.
  */
-function ControlRegister({ items, register, tq, canDelete, activeTab, statusLabels, heading, help, showPlacements = false }) {
+function ControlRegister({ items, register, tq, canDelete, canEdit = false, activeTab, statusLabels, heading, help, showPlacements = false }) {
     const tr = tq.register ?? {};
     const frequencyLabels = tq.frequencies ?? {};
     const notSet = <span className="text-slate-500">{tr.not_set ?? 'Ikke angitt'}</span>;
@@ -578,7 +584,7 @@ function ControlRegister({ items, register, tq, canDelete, activeTab, statusLabe
                                     )}
                                     {canDelete && (
                                         <td className="py-3 pl-4 text-right">
-                                            <QualityItemActions tq={tq} item={item} tab={activeTab} />
+                                            <QualityItemActions tq={tq} item={item} tab={activeTab} canEdit={canEdit} />
                                         </td>
                                     )}
                                 </tr>

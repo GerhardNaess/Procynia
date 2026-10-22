@@ -91,12 +91,12 @@ class QualityProcessVersionIntegrityTest extends TestCase
         ['owner' => $owner, 'approved' => $approved, 'draft' => $draft] = $this->world();
 
         $rows = collect($this->actingAs($owner)->get('/app/quality?tab=processes')->viewData('page')['props']['items'])->keyBy('id');
-        $this->assertSame(__('procynia.quality.errors.approved_process_not_deletable'), $rows[$approved->id]['delete_blocked_message']);
-        $this->assertNull($rows[$draft->id]['delete_blocked_message']);
+        $this->assertTrue($rows[$approved->id]['in_use']);
+        $this->assertFalse($rows[$draft->id]['in_use']);
 
         $this->actingAs($owner)->delete("/app/quality/items/{$approved->id}?tab=processes")
             ->assertRedirect('/app/quality?tab=processes')
-            ->assertSessionHas('error', __('procynia.quality.errors.approved_process_not_deletable'));
+            ->assertSessionHas('error', __('procynia.quality.errors.in_use_not_deletable'));
         $this->assertNotNull(QualityItem::query()->find($approved->id));
 
         // A process that was never approved is deleted as before.

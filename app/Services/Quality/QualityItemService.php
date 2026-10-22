@@ -318,30 +318,25 @@ class QualityItemService
     }
 
     /**
-     * Why each of these items may not be deleted, keyed by item id; an item that may be deleted has
-     * no entry. A few queries for the whole list, so the register can tell every row's menu.
+     * The items among these that are in use — retired («Utgått»), never deleted — keyed by item id,
+     * each with the one reason the person is given. An item that may be deleted has no entry. A
+     * few queries for the whole list, so the register can tell every row's menu.
      *
-     * What is retired («Utgått») rather than deleted, because deleting it would take history with it:
+     * In use means deleting it would take history along:
      *
-     *  - a process with an approved version (phase 0 step 12) — the versions are the record of what
-     *    was decided;
-     *  - an item with registered evidence, withdrawn evidence included (findings A19, A29) — the
-     *    evidence is the record that the work was carried out;
+     *  - a process with an approved version (phase 0 step 12);
+     *  - an item with registered evidence, removed evidence included (A19, A29);
      *  - a process or control another module points at — Risiko, Mål og KPI, Avvik og forbedringer,
-     *    Etterlevelse og revisjon (findings A19, A28, decided 2026-10-22). Those links are the other
-     *    module's record of relying on it, and they are kept.
+     *    Etterlevelse og revisjon (A19, A28, decided 2026-10-22). Those links are kept.
      *
      * Placements on activities, tools and Kvalitet's own relations are this module's structure and
      * do not count.
      *
-     * HIDDEN LINKS. The person deleting may not be allowed to see the module that made the link.
-     * The refusal therefore says one general thing — «in use elsewhere in Procynia» — the same for
-     * every module, every link and every count, and never which risk, case, requirement or user. A
-     * reason the person can see for themselves (an approved version, evidence) is given first. The
-     * caller asks this only for someone who may delete (quality.delete); see QualityController.
-     *
-     * A retired item is still there, with everything attached, and is no longer offered for new
-     * links anywhere.
+     * ONE REASON FOR ALL (simplified 2026-10-22). The person is told the item is in use and can be
+     * set to «Utgått»; never why. That keeps the rules out of the user's way, and it is also what
+     * keeps a link from a module the person may not see from being given away: the answer is the
+     * same for every cause. The caller asks this only for someone who may delete (quality.delete);
+     * see QualityController.
      *
      * @param  iterable<QualityItem>  $items
      * @return array<int, string>
@@ -351,55 +346,29 @@ class QualityItemService
         $byType = collect($items)->groupBy('quality_type')->map(
             static fn ($group) => $group->map(static fn (QualityItem $item): int => (int) $item->id)->values()->all(),
         );
-
-        $blockers = [];
-
-        foreach (QualityProcessRevision::query()
-            ->where('customer_id', $customerId)
-            ->whereIn('quality_item_id', $byType->get(QualityItem::TYPE_PROCESS, []))
-            ->distinct()
-            ->pluck('quality_item_id') as $id) {
-            $blockers[(int) $id] = 'procynia.quality.errors.approved_process_not_deletable';
-        }
-
         $processIds = $byType->get(QualityItem::TYPE_PROCESS, []);
-        $controlIds = $byType->get(QualityItem::TYPE_CONTROL, []);
 
-        // Links from other modules first, so a reason the person can see for themselves (below)
-        // replaces the general one.
-        foreach ($this->linkedFromOtherModules($customerId, self::PROCESS_LINKS, $processIds) as $id) {
-            $blockers[$id] = 'procynia.quality.errors.process_in_use_not_deletable';
-        }
+        $inUse = array_merge(
+            $this->linkedFromOtherModules($customerId, self::PROCESS_LINKS, $processIds),
+            $this->linkedFromOtherModules($customerId, self::CONTROL_LINKS, $byType->get(QualityItem::TYPE_CONTROL, [])),
+            QualityProcessRevision::query()
+                ->where('customer_id', $customerId)
+                ->whereIn('quality_item_id', $processIds)
+                ->distinct()
+                ->pluck('quality_item_id')
+                ->all(),
+            // Evidence on any item, removed evidence included: it is still the record (A29), and a
+            // delete would take it along by cascade.
+            QualityItemDocument::query()
+                ->where('customer_id', $customerId)
+                ->whereIn('quality_item_id', $byType->flatten()->all())
+                ->where('relation_type', QualityItemDocument::RELATION_TYPE_EVIDENCE)
+                ->distinct()
+                ->pluck('quality_item_id')
+                ->all(),
+        );
 
-        foreach ($this->linkedFromOtherModules($customerId, self::CONTROL_LINKS, $controlIds) as $id) {
-            $blockers[$id] = 'procynia.quality.errors.control_in_use_not_deletable';
-        }
-
-        foreach (QualityProcessRevision::query()
-            ->where('customer_id', $customerId)
-            ->whereIn('quality_item_id', $processIds)
-            ->distinct()
-            ->pluck('quality_item_id') as $id) {
-            $blockers[(int) $id] = 'procynia.quality.errors.approved_process_not_deletable';
-        }
-
-        // Evidence on any item, withdrawn evidence included: it is still the record (A29), and a
-        // delete would take it along by cascade.
-        $controlIdSet = array_flip($controlIds);
-        $withEvidence = QualityItemDocument::query()
-            ->where('customer_id', $customerId)
-            ->whereIn('quality_item_id', $byType->flatten()->all())
-            ->where('relation_type', QualityItemDocument::RELATION_TYPE_EVIDENCE)
-            ->distinct()
-            ->pluck('quality_item_id');
-
-        foreach ($withEvidence as $id) {
-            $blockers[(int) $id] = isset($controlIdSet[(int) $id])
-                ? 'procynia.quality.errors.control_with_history_not_deletable'
-                : 'procynia.quality.errors.item_with_evidence_not_deletable';
-        }
-
-        return $blockers;
+        return array_fill_keys(array_map('intval', array_unique($inUse)), 'procynia.quality.errors.in_use_not_deletable');
     }
 
     /**

@@ -1701,11 +1701,9 @@ class QualityController extends Controller
                     'code' => $item->code,
                     'status' => $item->status,
                     'publication' => $publications[(int) $item->id] ?? null,
-                    // What is retired, never deleted (an approved process, a control with history):
-                    // the menu says why instead of offering a delete the server would refuse.
-                    'delete_blocked_message' => isset($deletionBlockers[(int) $item->id])
-                        ? __($deletionBlockers[(int) $item->id])
-                        : null,
+                    // In use (history, evidence, links from other modules): the menu offers «Sett til
+                    // Utgått» instead of a delete the server would refuse. Never why (A28).
+                    'in_use' => isset($deletionBlockers[(int) $item->id]),
                     'owner_name' => $item->owner?->name,
                     'next_review_at' => $item->next_review_at?->toDateString(),
                     'wiki_link_count' => (int) $item->wiki_links_count,

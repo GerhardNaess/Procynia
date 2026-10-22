@@ -433,7 +433,7 @@ class KpiQualityContextLinkTest extends TestCase
         foreach ([$incident, $backup] as $process) {
             $this->actingAs($editor)->delete("/app/quality/items/{$process->id}")
                 ->assertRedirect()
-                ->assertSessionHas('error', __('procynia.quality.errors.process_in_use_not_deletable'));
+                ->assertSessionHas('error', __('procynia.quality.errors.in_use_not_deletable'));
             $this->assertDatabaseHas('quality_items', ['id' => $process->id]);
         }
         $this->assertSame(2, KpiProcess::query()->where('kpi_id', $kpi->id)->count() + KpiActivity::query()->where('kpi_id', $kpi->id)->count());

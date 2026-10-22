@@ -73,7 +73,7 @@ class QualityControlHistoryTest extends TestCase
                 app(QualityItemService::class)->deleteItem((int) $customer->id, $control, $owner);
                 $this->fail("{$kind}: the service refuses");
             } catch (ValidationException $e) {
-                $this->assertSame(__('procynia.quality.errors.control_with_history_not_deletable'), $e->errors()['item'][0], $kind);
+                $this->assertSame(__('procynia.quality.errors.in_use_not_deletable'), $e->errors()['item'][0], $kind);
             }
 
             $this->assertRefused(fn () => DB::table('quality_items')->where('id', $control->id)->delete(), "{$kind}: deleting in SQL");
@@ -125,11 +125,11 @@ class QualityControlHistoryTest extends TestCase
         $plain = $this->control($customer, owner: $owner, title: 'Uten historikk');
 
         $rows = collect($this->actingAs($owner)->get('/app/quality?tab=controls')->viewData('page')['props']['items'])->keyBy('id');
-        $this->assertSame(__('procynia.quality.errors.control_with_history_not_deletable'), $rows[$withEvidence->id]['delete_blocked_message']);
-        $this->assertNull($rows[$plain->id]['delete_blocked_message']);
+        $this->assertTrue($rows[$withEvidence->id]['in_use']);
+        $this->assertFalse($rows[$plain->id]['in_use']);
 
         $this->actingAs($owner)->delete("/app/quality/items/{$withEvidence->id}?tab=controls")
-            ->assertSessionHas('error', __('procynia.quality.errors.control_with_history_not_deletable'));
+            ->assertSessionHas('error', __('procynia.quality.errors.in_use_not_deletable'));
         $this->assertNotNull(QualityItem::query()->find($withEvidence->id));
     }
 

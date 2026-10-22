@@ -24,19 +24,20 @@ import {
  * navigation this one action never had. Tab reaches the action; Escape closes and returns focus to
  * the trigger.
  *
- * What is retired rather than deleted — a process that has been approved, a control with
- * registered evidence, a process or control in use elsewhere — gets the reason in the menu,
- * pointing to «Utgått»,
- * instead of a delete the server would refuse. The reason is the backend's own sentence.
+ * An item that is in use — it has history, evidence, or another module relies on it — is not
+ * deleted. Its menu offers «Sett til Utgått» instead: one click, no dialog, the same status change
+ * the item's own form makes. Why it is in use is never said; the person does not need the rules,
+ * and a link from a module they cannot see must not be given away (A19/A28, simplified 2026-10-22).
  *
  * @param {object} item  The row's item. `id`, `title` and `quality_type`, plus
  *                       `produced_wiki_page_count` and `can_delete_produced_wiki_pages`, which
  *                       decide whether the dialog asks what should happen to the knowledge, and
- *                       `delete_blocked_message`, which takes the delete away.
+ *                       `in_use`, which replaces the delete with «Sett til Utgått».
+ * @param {boolean} [canEdit] Whether this reader may change the status (quality.edit).
  * @param {string} [tab] The Kvalitet tab to come back to. Deleting from the Prosesser list should
  *                       leave the user in Prosesser, not bounce them to Oversikt.
  */
-export default function QualityItemActions({ tq, item, tab = null }) {
+export default function QualityItemActions({ tq, item, tab = null, canEdit = false }) {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -56,7 +57,20 @@ export default function QualityItemActions({ tq, item, tab = null }) {
     const isProcess = item.quality_type === 'process';
     // A control is not a document, and the dialog never calls it one.
     const isControl = item.quality_type === 'control';
-    const deleteBlockedMessage = item.delete_blocked_message ?? null;
+    const inUse = Boolean(item.in_use);
+    const canRetire = inUse && canEdit && item.status !== 'retired';
+    const [retiring, setRetiring] = useState(false);
+
+    function retire() {
+        setRetiring(true);
+        router.patch(`/app/quality/items/${item.id}`, { status: 'retired' }, {
+            preserveScroll: true,
+            onFinish: () => {
+                setRetiring(false);
+                setIsMenuOpen(false);
+            },
+        });
+    }
     const producedWikiPageCount = item.produced_wiki_page_count ?? 0;
     const hasProducedWikiPages = producedWikiPageCount > 0;
     // The choice is only offered when the backend says this reader may actually take it. Offering
@@ -139,8 +153,22 @@ export default function QualityItemActions({ tq, item, tab = null }) {
                     style={{ top: `${menuPosition.top}px`, right: `${menuPosition.right}px` }}
                     className="fixed z-40 w-60 rounded-2xl border border-slate-200 bg-white p-1.5 text-left shadow-lg"
                 >
-                    {deleteBlockedMessage ? (
-                        <p className="px-3 py-2 text-base leading-6 text-slate-700">{deleteBlockedMessage}</p>
+                    {inUse ? (
+                        <>
+                            <p className="px-3 py-2 text-base leading-6 text-slate-600">
+                                {tq.in_use_hint ?? 'Er i bruk og kan ikke slettes.'}
+                            </p>
+                            {canRetire && (
+                                <button
+                                    type="button"
+                                    className="block w-full rounded-xl px-3 py-2 text-left text-base font-semibold text-slate-900 transition hover:bg-slate-50"
+                                    disabled={retiring}
+                                    onClick={retire}
+                                >
+                                    {tq.retire ?? 'Sett til Utgått'}
+                                </button>
+                            )}
+                        </>
                     ) : (
                         <button
                             type="button"
