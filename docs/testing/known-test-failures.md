@@ -8,7 +8,7 @@ Tester som feiler på grunnlinjen og ikke skyldes arbeidet som pågår. Hver fei
 |---|---|---|
 | KTF-1 | **Løst 2026-10-22.** Testfiksturen er rettet, applikasjonen er uendret. | `898a4c08` |
 | KTF-2 | **Løst 2026-10-22.** Testene kontrollerer nå dagens komponenter og den faktiske navigasjonsfunksjonen. | `2d133715` |
-| KTF-3 | **Løst 2026-10-22.** Testen følger dagens Kjøringer-fane. Grensesnittet er uendret. | KTF-3-commit |
+| KTF-3 | **Løst 2026-10-22.** Testen følger dagens Kjøringer-fane. Grensesnittet er uendret. | `be3f517c` (testen), denne loggen |
 
 Ingen kjente feil står åpne. Dokumentet beholdes som logg, og nye kjente feil føres inn her.
 
@@ -106,7 +106,7 @@ Ingen kontroll er fjernet. Hver påstand er flyttet til den formen funksjonen ha
 
 ## Før merge til `main`
 
-- ~~Rett KTF-1 og KTF-2.~~ Gjort.
+- ~~Rett KTF-1 og KTF-2.~~ Gjort. ~~KTF-3.~~ Gjort.
 - Kjør hele PHP-suiten (`docker exec procynia-app php artisan test`).
 - Kjør JS-suiten (`node:22`-Docker).
 - Kjør relevante E2E-spesifikasjoner.

@@ -13,11 +13,20 @@
   - steg 5 (`9b5a5673`, `be1aba2b`)
   - steg 6 (`9541ef63`, regresjon rettet i `f10a0f81`)
   - steg 7 (`37c239c5`)
+  - KTF-3 (`be3f517c`)
+  - A4 (`e4e56f50`)
 - Wiki-delen av fase 0 er gjennomført. Neste: de andre modulene (steg 9–17), etter gjennomgang.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
 - Full Wiki-suite etter steg 7 (2026-10-22): 2913 bestått, 18 feilet. Alle 18 er KTF-1 eller KTF-2 og fantes før fase 0.
+- KTF-1, KTF-2 og KTF-3 er løst. A4 er implementert (§2b).
+- Verifisering etter A4 (2026-10-22):
+  - Wiki-suiten for PHP (`--filter=Wiki`, 4406 tester): alle bestått, 0 feilet.
+  - JS-suiten: 2130 av 2130 bestått.
+  - Alle Wiki-spesifikasjoner i E2E (21 filer): 175 av 175 bestått.
+  - Frontendbygg og Pint på berørte filer er rene.
+  - F1a–F1d er beskyttet av testene som rettet dem, og alle består: `WikiEditLockedDuringReviewTest`, `WikiPublishIsExplicitTest`, `EnterpriseWikiClaimContentRepairServiceTest`, `WikiClaimTextDecisionDuringReviewTest`, `WikiBestPracticeSectionDecisionTest`, `EnterpriseWikiSourceBasedBlockVerificationTest` og `WikiClaimTextDecisionOnPublishedVersionTest`.
 **Dato:** 2026-10-22
 **Gren:** `feature/external-api-foundation`
 **Bygger på:** [`external-api-architecture.md`](external-api-architecture.md) §4.3, §7 og §14, [`AGENTS.md`](../AGENTS.md), [`enterprise-wiki-architecture.md`](enterprise-wiki-architecture.md) og [`enterprise-wiki-approval-model.md`](enterprise-wiki-approval-model.md).
@@ -85,7 +94,7 @@ Hvert funn er bekreftet eller avkreftet med en isolert test. Testene beskriver d
 | A1 | Godkjenningstjenestene for Wiki nekter fortsatt med `abort()` (HTTP-unntak), fordi koden ble flyttet uendret og statuskodene skal være like. | Godtatt i fase 0. API-laget i fase 1 må gjøre om `HttpException` til sitt eget feilformat. Domeneunntak kan innføres senere uten endret oppførsel. |
 | A2 | Noen Wiki-handlinger for kildeadministrasjon går ennå ikke gjennom vakten: opplasting (`EnterpriseWikiDocumentUploadService::store(?int, ?int)`), bytte av dokumenteier (skrives i `WikiSourceController::updateOwner`), start av kjøring (`startForDocument` uten aktør) og ny kjøring av mislykkede steg (`attempt()` uten aktør). `HumanDecision` har verdiene `WIKI_SOURCE_UPLOAD`, `WIKI_SOURCE_OWNER_CHANGE` og `WIKI_RUN_START`, men de er ikke koblet til. | Ikke godkjenningsflyt. Kontrollerne sjekker `wiki.source.manage`. Kobles til i steg 20, kontrakttesten, eller før en API-rute åpnes for kildeadministrasjon. Det skal den ikke i v1. |
 | A3 | Regresjonen i steg 6 (`f10a0f81`) ble bare fanget av `WikiControllerTest`. Den var holdt utenfor de målrettede listene på grunn av KTF-1. | KTF-1 bør rettes før steg 9, så hele `WikiControllerTest` igjen kan brukes som sikkerhetsnett. |
-| A4 | Påstandsbeslutninger som ikke endrer tekst («Behold teksten», blokkering), skriver fortsatt `approval_status` og blokkering på påstander i den publiserte versjonen. | Vurdert 2026-10-22 (§2a). Statusendringer skal fortsatt skje på stedet, men sporbarheten har tre hull som bør tettes. Ikke implementert. |
+| A4 | Påstandsbeslutninger som ikke endrer tekst («Behold teksten», blokkering), skriver fortsatt `approval_status` og blokkering på påstander i den publiserte versjonen. | Vurdert (§2a) og **implementert** 2026-10-22 (§2b, `e4e56f50`). Statusendringer skjer fortsatt på stedet. Hver endring, også systemets egne og versjonskopier, står i en beskyttet logg, skrevet i samme transaksjon. |
 | A5 | Endepunktene for dokumenteiers godkjenning og avvisning har ingen kaller i grensesnittet lenger. | Herdet i steg 5. Om de skal fjernes, er et eget spørsmål. Fjerning reduserer angrepsflaten. |
 
 ### 2a. Vurdering av A4 – statusendringer på publiserte påstander (2026-10-22)
@@ -136,7 +145,7 @@ Ny arbeidsversjon for statusendringer anbefales ikke:
 - Det er byråkrati uten noe spørsmål å besvare, og det strider mot `PublicationSettlementService` («purely technical maintenance … sending a published page back for review … would be bureaucracy») og mot QA-flyten.
 - Loggen er allerede den riktige mekanismen for hendelser. Den må bare bli komplett og beskyttet.
 
-**Anbefaling (egen oppgave, ikke implementert)**
+**Anbefaling (implementert 2026-10-22, se §2b)**
 
 1. Statusendringer skjer fortsatt på stedet, på den gjeldende eller publiserte versjonen.
 2. Systemnullstillinger skriver en rad i loggen: aktør `NULL`, ny `decision_type` (for eksempel `system_reset`) og årsak i `comment`.
@@ -145,6 +154,74 @@ Ny arbeidsversjon for statusendringer anbefales ikke:
 5. En test kontrollerer at hver kodesti som skriver `approval_status` eller `blocking_override`, også skriver en rad i loggen (strukturell test, som i `HumanDecisionContractTest`).
 
 **Konsekvens for QA-arbeidsflyten:** ingen synlig endring. QA arbeider som i dag. Det eneste nye er at systemnullstillinger og kildekoblinger blir synlige i historikken.
+
+### 2b. A4 implementert – fullstendig historikk for påstandsstatus (2026-10-22)
+
+**Commit:** `e4e56f50`. **Beslutning (godkjent 2026-10-22):** kvalitetsmetadata på publiserte versjoner kan fortsatt oppdateres uten ny arbeidsversjon. Publisert tekst er fortsatt uforanderlig (F1c/F1d). Publiserings- og godkjenningsreglene er ikke endret.
+
+**Hva som er gjort**
+
+| Krav | Løsning |
+|---|---|
+| 1. Systemnullstillinger i loggen | `EnterpriseWikiClaimDecisionRecorder` er eneste kode som endrer `approval_status`/`approved_*` og `blocking_override*` på en påstand som finnes. De to nullstillingene (`reset_on_first_source`, `reset_on_lost_source`) skriver en hendelse. Det gjør også kopiering av en påstand til en ny versjon (`copied_to_new_version`), som var et fjerde hull: kopien fikk status uten historikk (påstand 547 i utviklingsdata). |
+| 2. Aktør og tidspunkt på kildekoblinger | `enterprise_wiki_source_references` har `linked_by_type` (`user`, `system`, `unrecorded`), `linked_by_user_id`, `linked_by_process` og `linked_at`. «Koble kilde» lagrer personen. De fem stegene i pipelinen lagrer sitt navn. En kopi beholder opplysningene fra koblingen den kopierer. «Koble kilde» skriver i tillegg en hendelse (`source_reference`) i loggen. |
+| 3. Beskyttet logg | Modellvakt og PostgreSQL-trigger nekter UPDATE og DELETE. Unntakene er nulling av en slettet bruker og kaskade når påstanden selv slettes. Samme mønster som dokumenteiers beslutninger (steg 5). `decided_by_user_id` hadde `cascadeOnDelete`: sletting av en bruker slettet beslutningene. Nå `nullOnDelete`. |
+| 4. Atomisk | Opptakeren skriver hendelsen og endringen i én transaksjon med lås på påstandsraden. Forrige tilstand leses fra den låste raden. «Angre», blokkering og «Koble kilde» (kobling, hendelse og eventuell nullstilling) går nå også i én transaksjon. Det gjorde de ikke før. |
+| 5. Tester som avdekker hull | Se under. |
+
+**Systemhendelser uten innlogget person**
+
+- Hver hendelse har `actor_type`: `user` (en person, `decided_by_user_id`) eller `system` (Procynia selv, `system_process` navngir regelen).
+- En systemhendelse har aldri `decided_by_user_id`. Det finnes ingen systembruker eller stedfortreder.
+- `initiated_by_user_id` er personen som utløste regelen, når det finnes en: den som koblet kilden eller slettet dokumentet. Er nullstillingen utløst av verifisering eller avstemming i pipelinen, er feltet tomt.
+- En systemhendelse lagrer alt den nullstilte (hvem som godkjente, når, kommentaren). Ingen persons beslutningsrad sier det.
+- Databasen håndhever regelen med `ewcd_actor_check`. Modellen nekter i tillegg en personhendelse uten person når den skrives. Databasen kan ikke skille den fra en hendelse der personen er slettet senere.
+- Avvik fra anbefalingen i §2a: `decision_type` er fortsatt aksen (`approval_status`, `blocking_override`). Ny `decision_type` brukes ikke for systemnullstillinger. Den som leser historikken for en akse, får da med seg alle endringer uansett aktør. Årsaken står i `system_process`, ikke i `comment`, som er forbeholdt det en person skrev.
+
+**Migrering (`2026_10_22_000004_complete_enterprise_wiki_claim_decision_history`)**
+
+- Kontrollert på utviklingsdata før sperrene ble innført:
+  - 54 hendelser, alle med person.
+  - 119 påstander, hvorav 55 besluttet.
+  - Én besluttet påstand uten historikk: en versjonskopi.
+  - Ingen påstand der siste hendelse og gjeldende tilstand var ulike.
+  - 38 kildekoblinger uten aktør.
+- Eksisterende hendelser får `actor_type = user`.
+- Hver påstand der gjeldende godkjenning eller blokkering avviker fra siste hendelse, får én systemhendelse `history_backfill`. På utviklingsdata gjaldt det 1 påstand. Etterfyllingen kan kjøres igjen uten å legge til noe.
+- Eldre kildekoblinger blir `unrecorded` med `linked_at = created_at`. Migreringen gjetter ikke hvem som laget dem.
+- Migreringen kan rulles tilbake. Systemhendelser og hendelser uten person fjernes da, siden den gamle kolonnen ikke kan holde dem.
+- Utviklingsdatabasen og testdatabasen er migrert.
+
+**Hva som ikke er endret**
+
+- Ingen synlig endring i QA-arbeidsflyten. Loggen har ingen leser i grensesnittet. Beslutninger, statuser, funn, «Mine oppgaver» og publiseringsstatus leser de samme feltene som før.
+- Publiserings- og godkjenningsreglene og F1a–F1d er uendret.
+- En modellvakt på `EnterpriseWikiClaim` som nekter statusendringer utenom opptakeren, er vurdert og ikke innført. Elleve testfiksturer setter status direkte for å bygge opp en tilstand, og de måtte da skrive falsk historikk. Kontrakttesten finner slik kode i `app/`.
+
+**Tester**
+
+- `EnterpriseWikiClaimDecisionHistoryTest` (9 tester):
+  - en persons beslutninger på en publisert side, der teksten og versjonen er uendret
+  - «Koble kilde» og nullstillingen den utløser
+  - nullstilling fra pipelinen uten person
+  - sletting av eneste kilde
+  - versjonskopi
+  - atomisitet i begge retninger
+  - uforanderlig logg (modell og database, sletting av bruker og påstand)
+  - aktørregelen
+  - etterfyllingen i migreringen
+- Hjelperen `assertHistoryEndsAtCurrentState` kontrollerer invarianten: leser man bare historikken, kommer man fram til påstandens gjeldende godkjenning og blokkering.
+- `EnterpriseWikiClaimStatusHistoryContractTest` (3 tester) leser alle PHP-filer i `app/` som arbeider med påstander:
+  - Den feiler på `update()`, `fill()`, `forceFill()` og tilordning av statuskolonnene utenom opptakeren.
+  - Den feiler på `create()` med annen status enn `pending`.
+  - Den feiler på nye steder som holder kolonnene uten gjennomgått begrunnelse.
+  - Den feiler på kildekoblinger som ikke sier hvem som laget dem.
+- Mutasjonssjekket:
+  - nullstilling uten opptaker gir 2 feil
+  - kopi uten hendelse gir 1 feil
+  - opptaker uten transaksjon gir 1 feil
+  - direkte statusskriving i en ny fil fanges av kontrakttesten
+- `EnterpriseWikiClaimContentRepairServiceTest`: påstanden om at kopien «ikke har noen beslutninger», er skrevet om. Personens beslutning kopieres fortsatt ikke. Kopien har én systemhendelse som peker til originalen.
 
 ---
 
