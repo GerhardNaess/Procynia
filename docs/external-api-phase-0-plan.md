@@ -85,8 +85,66 @@ Hvert funn er bekreftet eller avkreftet med en isolert test. Testene beskriver d
 | A1 | Godkjenningstjenestene for Wiki nekter fortsatt med `abort()` (HTTP-unntak), fordi koden ble flyttet uendret og statuskodene skal være like. | Godtatt i fase 0. API-laget i fase 1 må gjøre om `HttpException` til sitt eget feilformat. Domeneunntak kan innføres senere uten endret oppførsel. |
 | A2 | Noen Wiki-handlinger for kildeadministrasjon går ennå ikke gjennom vakten: opplasting (`EnterpriseWikiDocumentUploadService::store(?int, ?int)`), bytte av dokumenteier (skrives i `WikiSourceController::updateOwner`), start av kjøring (`startForDocument` uten aktør) og ny kjøring av mislykkede steg (`attempt()` uten aktør). `HumanDecision` har verdiene `WIKI_SOURCE_UPLOAD`, `WIKI_SOURCE_OWNER_CHANGE` og `WIKI_RUN_START`, men de er ikke koblet til. | Ikke godkjenningsflyt. Kontrollerne sjekker `wiki.source.manage`. Kobles til i steg 20, kontrakttesten, eller før en API-rute åpnes for kildeadministrasjon. Det skal den ikke i v1. |
 | A3 | Regresjonen i steg 6 (`f10a0f81`) ble bare fanget av `WikiControllerTest`. Den var holdt utenfor de målrettede listene på grunn av KTF-1. | KTF-1 bør rettes før steg 9, så hele `WikiControllerTest` igjen kan brukes som sikkerhetsnett. |
-| A4 | Påstandsbeslutninger som ikke endrer tekst («Behold teksten», blokkering), skriver fortsatt `approval_status` og blokkering på påstander i den publiserte versjonen. | Godtatt. Grounding leser bare `claim_text` og `content_origin` fra publisert versjon (`RequirementWikiResearchService`). Status er kvalitetsmetadata, ikke publisert innhold. |
+| A4 | Påstandsbeslutninger som ikke endrer tekst («Behold teksten», blokkering), skriver fortsatt `approval_status` og blokkering på påstander i den publiserte versjonen. | Vurdert 2026-10-22 (§2a). Statusendringer skal fortsatt skje på stedet, men sporbarheten har tre hull som bør tettes. Ikke implementert. |
 | A5 | Endepunktene for dokumenteiers godkjenning og avvisning har ingen kaller i grensesnittet lenger. | Herdet i steg 5. Om de skal fjernes, er et eget spørsmål. Fjerning reduserer angrepsflaten. |
+
+### 2a. Vurdering av A4 – statusendringer på publiserte påstander (2026-10-22)
+
+**Hva som kan endres etter publisering**
+
+Innholdet i en publisert versjon (`content_markdown`, `content_blocks_json`, `claim_text`) kan ikke lenger endres, etter F1c og F1d. Kvalitetsmetadata på påstandene i versjonen kan fortsatt endres:
+
+| Felt | Endres av |
+|---|---|
+| `approval_status`, `approved_by_user_id`, `approved_at`, `approval_comment` | «Behold teksten» og avvis uten tekstfjerning (`EnterpriseWikiClaimDecisionService::approve/reject`), «Angre» (`unapprove`), kaskade over sider for beste praksis, og to systemstier som nullstiller til `pending`: `EnterpriseWikiAppliedRunLintService::resetClaimDecisionAfterFirstSourceReference` og `EnterpriseWikiDocumentDeletionService` når en påstand mister sin eneste kilde |
+| `blocking_override`, `blocking_override_by_user_id`, `blocking_override_at` | Beslutning om blokkering (`setBlockingOverride`) |
+| `review_metadata` | `visible_wiki_link_result` ved godkjenning, `text_removed_by_decision` |
+| Kildereferanser (`enterprise_wiki_source_references`) | «Koble kilde» (`attachSourceReference`) |
+| Lintfunn | Løses og gjenåpnes sammen med beslutningene |
+
+**Hvem som leser feltene**
+
+- **Ikke svarmotoren.** Grounding, Spør Wiki og anbudssvar leser `claim_text` og `content_origin` fra den publiserte versjonen (`RequirementWikiResearchService`, `RequirementWikiCatalogBuilder`), aldri status eller blokkering.
+- **QA og arbeidsflyt:**
+  - kvalitetsstatus og fremdrift for kvalitetssikring på siden
+  - QA-funn i Kjøringer (`EnterpriseWikiRunFindingsService`)
+  - «Mine oppgaver» (`EnterpriseWikiQaTaskService`)
+  - kjøringens QA-utfall (`EnterpriseWikiPostIngestQaService`, blant annet blokkering)
+  - antall påstander i publiseringsstatusen
+  - sperren mot publisering ved uløste kildefunn, som bare gjelder versjonen som ligger til godkjenning
+- Alle disse leser gjeldende versjon (`is_current`). For en publisert side er det den publiserte versjonen.
+
+**Historikk og sporbarhet**
+
+Hver beslutning fra en person skrives til `enterprise_wiki_claim_decisions` med aktør, tidspunkt, forrige og ny tilstand og kommentar. Fra F1c gjelder det også gammel og ny tekst. Tre hull er bekreftet i koden:
+
+1. **To systemstier nullstiller beslutninger uten å skrive i loggen.** `resetClaimDecisionAfterFirstSourceReference` gjør det ved første kildereferanse, og dokumentslettingen ved tap av eneste kilde. Begge bruker `$claim->update()` direkte, så tilstanden kan ikke rekonstrueres fra loggen.
+2. **«Koble kilde» lagrer ingen aktør og skriver ingen rad i loggen.**
+3. **`enterprise_wiki_claim_decisions` er append-only bare etter konvensjon.** Tabellen har verken modellvakt eller trigger, i motsetning til historikktabellene i de andre modulene og dokumenteiers beslutninger (steg 5).
+
+**Er en publisert versjon et uforanderlig øyeblikksbilde?**
+
+- **For innholdet: ja.** Det er det svar og lesere bygger på, og etter F1d kan det ikke endres uten en ny versjon og ny godkjenning.
+- **For kvalitetsstatusen: nei.** Den er levende og skal være det. Kvalitetssikring kan fortsette etter publisering (sidens egen hjelpetekst sier det, og produktreglene sier at QA ikke stopper publisering).
+- **Statusen på publiseringstidspunktet** kan rekonstrueres fra loggen bare når hullene 1–3 er tettet.
+
+**Egne hendelser eller ny arbeidsversjon?**
+
+Ny arbeidsversjon for statusendringer anbefales ikke:
+
+- Hver «Behold teksten» og hver blokkering på en publisert side ville sette siden til utkast og kreve ny godkjenningsrunde, selv om ingenting leserne ser, har endret seg.
+- Det er byråkrati uten noe spørsmål å besvare, og det strider mot `PublicationSettlementService` («purely technical maintenance … sending a published page back for review … would be bureaucracy») og mot QA-flyten.
+- Loggen er allerede den riktige mekanismen for hendelser. Den må bare bli komplett og beskyttet.
+
+**Anbefaling (egen oppgave, ikke implementert)**
+
+1. Statusendringer skjer fortsatt på stedet, på den gjeldende eller publiserte versjonen.
+2. Systemnullstillinger skriver en rad i loggen: aktør `NULL`, ny `decision_type` (for eksempel `system_reset`) og årsak i `comment`.
+3. «Koble kilde» skriver en rad i loggen (`decision_type = source_reference`) med aktør og referansen som ny tilstand.
+4. `enterprise_wiki_claim_decisions` får modellvakt og trigger som nekter UPDATE og DELETE, med unntak for kaskade fra påstanden eller kunden og nulling av slettet bruker. Det er samme mønster som i steg 5.
+5. En test kontrollerer at hver kodesti som skriver `approval_status` eller `blocking_override`, også skriver en rad i loggen (strukturell test, som i `HumanDecisionContractTest`).
+
+**Konsekvens for QA-arbeidsflyten:** ingen synlig endring. QA arbeider som i dag. Det eneste nye er at systemnullstillinger og kildekoblinger blir synlige i historikken.
 
 ---
 
