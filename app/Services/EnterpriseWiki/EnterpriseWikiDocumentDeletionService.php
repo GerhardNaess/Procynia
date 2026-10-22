@@ -13,6 +13,7 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\QualityItemDocument;
 use App\Models\User;
+use App\Support\HumanDecision;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -66,6 +67,7 @@ class EnterpriseWikiDocumentDeletionService
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
         private readonly EnterpriseWikiDocumentWithdrawalService $withdrawalService,
+        private readonly EnterpriseWikiSourceAuthority $sourceAuthority,
     ) {}
 
     /**
@@ -169,6 +171,8 @@ class EnterpriseWikiDocumentDeletionService
      */
     public function delete(EnterpriseWikiDocument $document, User $actor): array
     {
+        $this->sourceAuthority->assertMayManageDocument($actor, $document, HumanDecision::WIKI_SOURCE_DELETE);
+
         $runs = $this->documentRuns($document);
 
         if ($this->hasActiveRun($runs)) {

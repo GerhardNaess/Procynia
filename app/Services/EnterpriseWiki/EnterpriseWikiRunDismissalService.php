@@ -4,6 +4,7 @@ namespace App\Services\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\User;
+use App\Support\HumanDecision;
 use DomainException;
 use Illuminate\Support\Facades\DB;
 
@@ -34,6 +35,7 @@ class EnterpriseWikiRunDismissalService
 
     public function __construct(
         private readonly EnterpriseWikiRunFindingsService $runFindingsService,
+        private readonly EnterpriseWikiSourceAuthority $sourceAuthority,
     ) {}
 
     /**
@@ -70,6 +72,8 @@ class EnterpriseWikiRunDismissalService
      */
     public function dismiss(EnterpriseWikiIngestRun $run, User $actor): bool
     {
+        $this->sourceAuthority->assertMayManageRun($actor, $run, HumanDecision::WIKI_RUN_DISMISS);
+
         return DB::transaction(function () use ($run, $actor): bool {
             $locked = EnterpriseWikiIngestRun::query()->lockForUpdate()->findOrFail($run->id);
 

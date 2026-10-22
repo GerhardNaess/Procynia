@@ -21,6 +21,7 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\User;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Support\EnterpriseWiki\EnterpriseWikiQueueTrace;
+use App\Support\HumanDecision;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -246,6 +247,9 @@ class EnterpriseWikiDocumentFlowService
      */
     public function cancelRun(EnterpriseWikiIngestRun $run, User $actor, ?string $reason = null): EnterpriseWikiIngestRun
     {
+        // A person who may administer the run's document — checked here, not only by the caller.
+        app(EnterpriseWikiSourceAuthority::class)->assertMayManageRun($actor, $run, HumanDecision::WIKI_RUN_CANCEL);
+
         $cancelled = DB::transaction(function () use ($run, $actor, $reason): EnterpriseWikiIngestRun {
             $locked = EnterpriseWikiIngestRun::query()->lockForUpdate()->findOrFail($run->id);
 

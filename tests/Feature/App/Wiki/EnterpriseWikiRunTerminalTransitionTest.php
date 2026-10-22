@@ -216,10 +216,14 @@ class EnterpriseWikiRunTerminalTransitionTest extends TestCase
 
     private function createUser(Customer $customer): User
     {
+        // A person who may administer the run's document — the flow service checks that itself
+        // (EnterpriseWikiSourceAuthority) — so these tests stay about the transition.
         return User::factory()->create([
             'customer_id' => $customer->id,
             'name' => 'Kari Nordmann',
-            'role' => User::ROLE_USER,
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
+            'is_active' => true,
         ]);
     }
 }
