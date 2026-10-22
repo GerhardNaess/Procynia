@@ -115,7 +115,8 @@ class MyTasksE2EFixture
                 User::query()->where('customer_id', $customer->id)->delete();
                 CustomerPackageEntitlement::query()->where('customer_id', $customer->id)->delete();
                 // Before the fagområde they hold with RESTRICT.
-                Risk::query()->where('customer_id', $customer->id)->delete();
+                // Risks with history are closed, never deleted; a test run's own risks are purged (B3).
+                RiskTestDataPurge::delete(Risk::query()->where('customer_id', $customer->id));
                 Kpi::query()->where('customer_id', $customer->id)->delete();
                 Objective::query()->where('customer_id', $customer->id)->delete();
                 $customer->delete();

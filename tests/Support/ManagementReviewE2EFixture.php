@@ -238,7 +238,8 @@ class ManagementReviewE2EFixture
                 User::query()->where('customer_id', $customer->id)->delete();
                 CustomerPackageEntitlement::query()->where('customer_id', $customer->id)->delete();
                 // Before the fagområde they hold with RESTRICT.
-                Risk::query()->where('customer_id', $customer->id)->delete();
+                // Risks with history are closed, never deleted; a test run's own risks are purged (B3).
+                RiskTestDataPurge::delete(Risk::query()->where('customer_id', $customer->id));
                 // Reviews, their locked rows and history, the cases and the fagområde go with the customer.
                 $customer->delete();
             });

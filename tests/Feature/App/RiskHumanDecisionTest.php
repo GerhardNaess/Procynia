@@ -16,6 +16,7 @@ use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Risk\RiskAcceptanceService;
 use App\Services\Risk\RiskAccessService;
 use App\Services\Risk\RiskAssessmentService;
+use App\Services\Risk\RiskLifecycleService;
 use App\Services\Security\ActorChannel;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -208,7 +209,7 @@ class RiskHumanDecisionTest extends TestCase
     }
 
     /**
-     * Every decision this commit puts in a service, called directly with this actor: each is
+     * Every human decision in Risiko, called directly on its service with this actor: each is
      * refused with $refusal, and the risk's assessments and acceptances are exactly as they were.
      *
      * @param  array<string, mixed>  $case
@@ -220,6 +221,7 @@ class RiskHumanDecisionTest extends TestCase
             'assess' => fn () => app(RiskAssessmentService::class)->record($actor, $case['risk'], $this->scores(), 'Uten rett.'),
             'accept' => fn () => app(RiskAcceptanceService::class)->accept($actor, $case['risk'], (int) $case['assessment']->id, 'Uten rett.', null),
             'revoke' => fn () => app(RiskAcceptanceService::class)->revoke($actor, $case['acceptance']),
+            'delete' => fn () => app(RiskLifecycleService::class)->delete($actor, $case['risk']),
         ] as $decision => $attempt) {
             try {
                 $attempt();

@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use LogicException;
 
 /**
  * A risk in the customer's risk register.
@@ -17,6 +18,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  *
  * Never query this model for a user without going through RiskAccessService::visibleRisks() —
  * the area scope is what keeps a risk outside someone's areas from being discoverable at all.
+ *
+ * A risk with history — an assessment, an acceptance (revoked ones included) or a tiltak — is never
+ * deleted (decision B3): it is closed (STATUS_CLOSED). The model refuses, and so does a PostgreSQL
+ * trigger; the only deletion that takes history along is the customer's own. Deleting is for a
+ * risk registered by mistake. See RiskLifecycleService.
  */
 class Risk extends Model
 {
@@ -82,6 +88,33 @@ class Risk extends Model
         return [
             'review_interval_months' => 'integer',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::deleting(static function (Risk $risk): void {
+            if ($risk->hasDecisionHistory()) {
+                throw new LogicException('A risk with assessments, acceptances or tiltak is history and cannot be deleted. Close it instead.');
+            }
+        });
+    }
+
+    /**
+     * Whether the risk may be deleted at all, before any permission is considered: only while
+     * nothing has been decided or planned on it. From the first assessment, acceptance or tiltak
+     * on, it is closed instead.
+     */
+    public function isDeletable(): bool
+    {
+        return ! $this->hasDecisionHistory();
+    }
+
+    /** Any assessment, acceptance (revoked or not) or tiltak. */
+    public function hasDecisionHistory(): bool
+    {
+        return RiskAssessment::query()->where('risk_id', $this->id)->exists()
+            || RiskAcceptance::query()->where('risk_id', $this->id)->exists()
+            || RiskTreatmentAction::query()->where('risk_id', $this->id)->exists();
     }
 
     /**

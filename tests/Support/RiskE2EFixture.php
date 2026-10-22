@@ -5,6 +5,7 @@ namespace Tests\Support;
 use App\Models\BusinessArea;
 use App\Models\CustomerRole;
 use App\Models\Risk;
+use App\Models\RiskAssessment;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -35,7 +36,7 @@ class RiskE2EFixture
     private const ROLE_NAMES = [
         'E2E Egen risikorolle', 'E2E Risikoansvarlig', 'E2E Risikobehandling', 'E2E Risikobeskrivelse',
         'E2E Risikobeslutning', 'E2E Risikogjennomgang', 'E2E Risikoleser alle', 'E2E Risikoreise', 'E2E Risiko og kontekst',
-        'E2E Risiko og kontroll', 'E2E Risiko og tiltak', 'E2E Risikostatus', 'E2E Risikovurderer', 'E2E Oppmerksomhet',
+        'E2E Risiko og kontroll', 'E2E Risiko og tiltak', 'E2E Risikostatus', 'E2E Risikovurderer', 'E2E Oppmerksomhet', 'E2E Risikosletting',
     ];
 
     private const RISK_TITLES = [
@@ -43,10 +44,36 @@ class RiskE2EFixture
         'E2E Strømbrudd i datasenter', 'E2E Strømbrudd', 'E2E Svikt i backup',
         'E2E Høy restrisiko', 'E2E Uten restrisiko', 'E2E Forfalt vurdering', 'E2E Forfalt tiltak',
         'E2E Rolig', 'E2E Skjult risiko', 'E2E Skjult uten vurdering', 'E2E Reise',
+        'E2E Feilregistrert', 'E2E Vurdert og lukket',
     ];
 
     /** Users are only created by the attention spec's seed; the others reuse the seeded E2E users. */
     private const USER_EMAIL_PREFIX = 'e2e\.attention\.';
+
+    /**
+     * An assessment registered on the given date, as if it had been made then. Assessments are
+     * history and are never rewritten (the database refuses an UPDATE), so a spec that needs an
+     * old one registers it with its date instead of moving a new one back in time. Same scores
+     * and author as an assessment made through the page.
+     */
+    public static function recordAssessmentMadeOn(int $riskId, string $assessedAt, string $rationale): void
+    {
+        $risk = Risk::query()->findOrFail($riskId);
+
+        RiskAssessment::query()->create([
+            'customer_id' => $risk->customer_id,
+            'risk_id' => $risk->id,
+            'assessed_by' => $risk->created_by,
+            'assessed_at' => $assessedAt,
+            'rationale' => $rationale,
+            'risk_cause' => $risk->cause,
+            'risk_event' => $risk->event,
+            'risk_consequence' => $risk->consequence,
+            'criteria_key' => 'standard_5x5_v1',
+            'inherent_likelihood' => 3,
+            'inherent_consequence' => 4,
+        ]);
+    }
 
     /**
      * Removes what one run created (by its suffix), or — with no suffix — whatever interrupted
@@ -66,10 +93,10 @@ class RiskE2EFixture
             // A risk is only removed when both its title and its fagområde carry the run's markers.
             // Deleting the risk row cascades in the database to its assessments, acceptances,
             // treatment actions, control links and process/activity context — the immutable
-            // history models are never deleted one by one.
-            $sweepOnly(self::named(Risk::query(), $customerId, 'title', self::RISK_TITLES, $suffixRegex))
-                ->whereIn('business_area_id', $areaIds)
-                ->delete();
+            // history models are never deleted one by one. A risk with history is never deleted in
+            // Procynia (B3); a test run's own risks are purged through RiskTestDataPurge.
+            RiskTestDataPurge::delete($sweepOnly(self::named(Risk::query(), $customerId, 'title', self::RISK_TITLES, $suffixRegex))
+                ->whereIn('business_area_id', $areaIds));
 
             // Role permissions, area grants and user-role links (also on the seeded E2E users)
             // cascade from the role.

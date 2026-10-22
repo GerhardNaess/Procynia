@@ -13,6 +13,7 @@ use App\Services\Risk\RiskAccessService;
 use App\Services\Risk\RiskAttentionService;
 use App\Services\Risk\RiskControlService;
 use App\Services\Risk\RiskCreator;
+use App\Services\Risk\RiskLifecycleService;
 use App\Services\Risk\RiskQualityContextService;
 use App\Services\Risk\RiskReviewSchedule;
 use App\Services\Risk\RiskScoringPolicy;
@@ -54,6 +55,7 @@ class RiskController extends Controller
         private readonly WikiKnowledgeHandoffService $knowledgeHandoff,
         private readonly RiskCreator $creator,
         private readonly SupplierRiskService $supplierRisks,
+        private readonly RiskLifecycleService $lifecycle,
     ) {}
 
     public function index(Request $request): Response
@@ -141,6 +143,8 @@ class RiskController extends Controller
         $risk->loadMissing(['businessArea:id,name', 'owner:id,name']);
 
         $canEdit = $this->access->can($user, CustomerPermissionCatalog::RISK_EDIT, $risk);
+        $canDelete = $this->access->canDelete($user, $risk);
+        $isDeletable = $risk->isDeletable();
         // Control information is Kvalitet's, so it is shown only to someone who can read it there.
         // Without that, the page says nothing about controls — not even how many are linked.
         $canReadControls = $this->controls->canReadQuality($user);
@@ -188,7 +192,10 @@ class RiskController extends Controller
                 'can_manage_actions' => $canEdit,
                 'can_assess' => $this->access->can($user, CustomerPermissionCatalog::RISK_ASSESS, $risk),
                 'can_accept' => $this->access->can($user, CustomerPermissionCatalog::RISK_ACCEPT, $risk),
-                'can_delete' => $this->access->can($user, CustomerPermissionCatalog::RISK_DELETE, $risk),
+                // A risk with history is closed, never deleted (B3): «Slett» is offered only while
+                // there is none, and someone who could otherwise delete is told why it is not.
+                'can_delete' => $canDelete && $isDeletable,
+                'delete_blocked_by_history' => $canDelete && ! $isDeletable,
             ],
             'area_options' => $this->areaOptions($editableAreas),
             'owner_options' => $canEdit ? $this->ownerOptions($user, $editableAreas) : [],
@@ -253,7 +260,12 @@ class RiskController extends Controller
 
         abort_unless($this->access->can($user, CustomerPermissionCatalog::RISK_DELETE, $risk), 403);
 
-        $risk->delete();
+        // Said plainly here; RiskLifecycleService refuses the same on its own (409) for any other caller.
+        if (! $risk->isDeletable()) {
+            return back()->with('error', __('procynia.risk.flash.delete_blocked'));
+        }
+
+        $this->lifecycle->delete($user, $risk);
 
         return redirect()->route('app.risk.index')->with('success', __('procynia.risk.flash.deleted'));
     }

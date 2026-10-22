@@ -413,7 +413,8 @@ class RiskAcceptanceTest extends TestCase
         $this->assertNotNull($visibleAssessment->id);
     }
 
-    public function test_deleting_the_risk_takes_its_acceptances_along(): void
+    /** Decision B3: a risk with an acceptance is closed, never deleted, and the acceptance stays. */
+    public function test_a_risk_with_an_acceptance_cannot_be_deleted_and_the_acceptance_stays(): void
     {
         ['customer' => $customer] = $this->context();
         $hr = $this->area($customer, 'HR');
@@ -422,9 +423,12 @@ class RiskAcceptanceTest extends TestCase
         $user = $this->member($customer);
         $this->grant($customer, $user, [CustomerPermissionCatalog::RISK_VIEW, CustomerPermissionCatalog::RISK_DELETE], [$hr]);
 
-        $this->actingAs($user)->delete("/app/risk/risks/{$risk->id}")->assertRedirect();
+        $this->actingAs($user)->delete("/app/risk/risks/{$risk->id}")
+            ->assertRedirect()
+            ->assertSessionHas('error', __('procynia.risk.flash.delete_blocked'));
 
-        $this->assertDatabaseMissing('risk_acceptances', ['risk_id' => $risk->id]);
+        $this->assertDatabaseHas('risks', ['id' => $risk->id]);
+        $this->assertDatabaseHas('risk_acceptances', ['risk_id' => $risk->id]);
     }
 
     private function assessment(Risk $risk, bool $residual): RiskAssessment

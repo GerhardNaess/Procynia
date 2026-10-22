@@ -172,6 +172,13 @@ export default function RiskShow() {
                                 {tr.delete ?? 'Slett risiko'}
                             </button>
                         )}
+                        {/* A risk with history is closed, never deleted (B3): said where «Slett» would
+                            have been offered, rather than the action silently missing. */}
+                        {permissions.delete_blocked_by_history && (
+                            <p data-testid="risk-delete-blocked" className="max-w-sm text-base leading-6 text-slate-600">
+                                {tr.delete_blocked_hint ?? 'Risikoen har vurderinger, aksepter eller tiltak. Historikken skal bevares, så risikoen kan ikke slettes. Sett status til «Lukket» under «Rediger» når den ikke lenger skal følges opp.'}
+                            </p>
+                        )}
                     </div>
                 </header>
 

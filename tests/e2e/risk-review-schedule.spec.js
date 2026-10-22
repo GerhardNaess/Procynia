@@ -65,11 +65,10 @@ test('a quarterly interval shows the next review, and a new assessment moves it'
         await expect(page.getByText('Vurderingen er registrert.')).toBeVisible();
     };
 
-    await assess('Backup tas nattlig, men gjenoppretting er ikke testet.');
-
-    // The first assessment as if it had been made at the end of June.
+    // The first assessment, made at the end of June. Assessments are history and never rewritten,
+    // so it is registered with that date rather than moved back in time afterwards.
     await execAsync(
-        `docker compose exec -T app php artisan tinker --execute="DB::table('risk_assessments')->where('risk_id', ${riskId})->update(['assessed_at' => '2026-06-30 10:00:00']);"`,
+        `docker compose exec -T app php artisan tinker --execute="\\Tests\\Support\\RiskE2EFixture::recordAssessmentMadeOn(${riskId}, '2026-06-30 10:00:00', 'Backup tas nattlig, men gjenoppretting er ikke testet.');"`,
     );
     await page.reload();
 

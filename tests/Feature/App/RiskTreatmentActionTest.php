@@ -357,7 +357,8 @@ class RiskTreatmentActionTest extends TestCase
         }
     }
 
-    public function test_deleting_the_risk_takes_its_actions_along(): void
+    /** Decision B3: a risk with tiltak is closed, never deleted, and its tiltak stay. */
+    public function test_a_risk_with_tiltak_cannot_be_deleted_and_its_tiltak_stay(): void
     {
         ['customer' => $customer] = $this->context();
         $hr = $this->area($customer, 'HR');
@@ -369,9 +370,12 @@ class RiskTreatmentActionTest extends TestCase
         $this->action($risk, $user, 'Tiltak 2', '2026-11-01', completed: true);
         $kept = $this->action($other, $user, 'Beholdes', '2026-11-01');
 
-        $this->actingAs($user)->delete("/app/risk/risks/{$risk->id}")->assertRedirect();
+        $this->actingAs($user)->delete("/app/risk/risks/{$risk->id}")
+            ->assertRedirect()
+            ->assertSessionHas('error', __('procynia.risk.flash.delete_blocked'));
 
-        $this->assertDatabaseMissing('risk_treatment_actions', ['risk_id' => $risk->id]);
+        $this->assertDatabaseHas('risks', ['id' => $risk->id]);
+        $this->assertSame(2, DB::table('risk_treatment_actions')->where('risk_id', $risk->id)->count());
         $this->assertDatabaseHas('risk_treatment_actions', ['id' => $kept->id]);
     }
 

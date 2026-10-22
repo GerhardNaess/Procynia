@@ -7385,6 +7385,7 @@ return [
                             ['title' => 'Fagområde', 'text' => 'Hver risiko hører til ett fagområde. Fagområdet bestemmer hvem som kan se og arbeide med risikoen.'],
                             ['title' => 'Risikoeier', 'text' => 'Personen som har ansvaret for å følge opp risikoen. Bare personer som kan se risikoer i fagområdet kan velges.'],
                             ['title' => 'Status', 'text' => 'Hvor risikoen er i livsløpet: Identifisert, Under behandling, Under oppfølging eller Lukket. Status settes manuelt og sier ikke hvor alvorlig risikoen er – det gjør vurderingen.'],
+                            ['title' => 'Lukke eller slette', 'text' => 'Når en risiko ikke lenger skal følges opp, velger du «Rediger» på risikosiden og setter status til «Lukket». «Slett risiko» er bare for en risiko som er registrert ved en feil. Så snart risikoen har en vurdering, en aksept eller et tiltak, kan den ikke slettes, og historikken bevares.'],
                         ],
                     ],
                     [
@@ -7468,6 +7469,7 @@ return [
         'edit' => 'Rediger',
         'delete' => 'Slett risiko',
         'delete_confirm' => 'Slett risikoen? Dette kan ikke angres.',
+        'delete_blocked_hint' => 'Risikoen har vurderinger, aksepter eller tiltak. Historikken skal bevares, så risikoen kan ikke slettes. Sett status til «Lukket» under «Rediger» når den ikke lenger skal følges opp.',
         'back' => 'Til risikoregisteret',
         'details' => 'Detaljer',
         'no_description' => 'Ingen beskrivelse.',
@@ -7720,6 +7722,7 @@ return [
             'created' => 'Risikoen er registrert.',
             'updated' => 'Risikoen er oppdatert.',
             'deleted' => 'Risikoen er slettet.',
+            'delete_blocked' => 'Risikoen har vurderinger, aksepter eller tiltak og kan ikke slettes. Sett status til «Lukket» når den ikke lenger skal følges opp.',
             'assessed' => 'Vurderingen er registrert.',
             'control_linked' => 'Kontrollen er koblet til risikoen.',
             'control_unlinked' => 'Koblingen er fjernet. Kontrollen finnes fortsatt i Kvalitet.',

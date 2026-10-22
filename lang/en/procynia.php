@@ -7381,6 +7381,7 @@ return [
                             ['title' => 'Business area', 'text' => 'Every risk belongs to one business area. The business area decides who can see and work on the risk.'],
                             ['title' => 'Risk owner', 'text' => 'The person responsible for following up the risk. Only people who can see risks in the business area can be chosen.'],
                             ['title' => 'Status', 'text' => 'Where the risk is in its life cycle: Identified, In treatment, Monitored or Closed. Status is set manually and does not say how serious the risk is – the assessment does.'],
+                            ['title' => 'Close or delete', 'text' => 'When a risk no longer needs follow-up, choose «Edit» on the risk page and set its status to «Closed». «Delete risk» is only for a risk registered by mistake. Once the risk has an assessment, an acceptance or an action, it cannot be deleted, and its history is kept.'],
                         ],
                     ],
                     [
@@ -7464,6 +7465,7 @@ return [
         'edit' => 'Edit',
         'delete' => 'Delete risk',
         'delete_confirm' => 'Delete the risk? This cannot be undone.',
+        'delete_blocked_hint' => 'The risk has assessments, acceptances or actions. Its history is kept, so the risk cannot be deleted. Set its status to «Closed» under «Edit» when it no longer needs follow-up.',
         'back' => 'Back to the risk register',
         'details' => 'Details',
         'no_description' => 'No description.',
@@ -7716,6 +7718,7 @@ return [
             'created' => 'The risk has been registered.',
             'updated' => 'The risk has been updated.',
             'deleted' => 'The risk has been deleted.',
+            'delete_blocked' => 'The risk has assessments, acceptances or actions and cannot be deleted. Set its status to «Closed» when it no longer needs follow-up.',
             'assessed' => 'The assessment has been registered.',
             'control_linked' => 'The control has been linked to the risk.',
             'control_unlinked' => 'The link has been removed. The control still exists in Quality.',

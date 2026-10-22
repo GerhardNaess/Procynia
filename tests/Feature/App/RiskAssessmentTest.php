@@ -332,7 +332,8 @@ class RiskAssessmentTest extends TestCase
         $this->assertEmpty(array_filter($columns, fn (string $column): bool => str_contains($column, 'level') || str_contains($column, 'score')));
     }
 
-    public function test_deleting_the_risk_takes_its_history_along(): void
+    /** Decision B3: an assessed risk is closed, never deleted, and its assessments stay. */
+    public function test_an_assessed_risk_cannot_be_deleted_and_its_history_stays(): void
     {
         ['customer' => $customer] = $this->context();
         $hr = $this->area($customer, 'HR');
@@ -345,9 +346,12 @@ class RiskAssessmentTest extends TestCase
         ], [$hr]);
 
         $this->actingAs($user)->post($this->url($risk), $this->assessment())->assertRedirect();
-        $this->actingAs($user)->delete("/app/risk/risks/{$risk->id}")->assertRedirect('/app/risk');
+        $this->actingAs($user)->delete("/app/risk/risks/{$risk->id}")
+            ->assertRedirect()
+            ->assertSessionHas('error', __('procynia.risk.flash.delete_blocked'));
 
-        $this->assertDatabaseMissing('risk_assessments', ['risk_id' => $risk->id]);
+        $this->assertDatabaseHas('risks', ['id' => $risk->id]);
+        $this->assertDatabaseHas('risk_assessments', ['risk_id' => $risk->id]);
     }
 
     public function test_risk_assess_is_offered_in_tilganger(): void

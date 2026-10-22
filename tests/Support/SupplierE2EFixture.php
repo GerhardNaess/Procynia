@@ -734,7 +734,8 @@ class SupplierE2EFixture
                 User::query()->where('customer_id', $customer->id)->delete();
                 CustomerPackageEntitlement::query()->where('customer_id', $customer->id)->delete();
                 // Before the fagområder they hold with RESTRICT; their links to suppliers cascade.
-                Risk::query()->where('customer_id', $customer->id)->delete();
+                // Risks with history are closed, never deleted; a test run's own risks are purged (B3).
+                RiskTestDataPurge::delete(Risk::query()->where('customer_id', $customer->id));
                 // Wiki pages hold the customer without cascade; their links to requirements cascade.
                 EnterpriseWikiPage::query()->where('customer_id', $customer->id)->delete();
                 // Suppliers, their history, assessments, documentation, the fagområde, the cases and the
