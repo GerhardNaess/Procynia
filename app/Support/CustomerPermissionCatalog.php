@@ -271,6 +271,53 @@ final class CustomerPermissionCatalog
     }
 
     /**
+     * The keys only a person may ever exercise: approving, publishing, professional assessments,
+     * formal decisions and deletion. An integration or AI agent never holds them, whatever role it
+     * is given — CustomerPermissionService takes them away — and the services behind them refuse a
+     * non-human actor on their own (HumanDecisionGuard). Reading and drafting are not on the list.
+     *
+     * wiki.edit is here because a manual edit is recorded as human-authored content; a machine
+     * reaches the Wiki only by handing knowledge over as a source. objective.measure is here because
+     * a measurement is a recorded value, not a proposal.
+     *
+     * See docs/external-api-phase-0-plan.md §4.1.
+     *
+     * @return list<string>
+     */
+    public static function humanOnlyPermissions(): array
+    {
+        return [
+            self::WIKI_EDIT,
+            self::WIKI_REVIEW,
+            self::WIKI_APPROVE,
+            self::WIKI_DELETE,
+            self::WIKI_SOURCE_MANAGE,
+            self::QUALITY_APPROVE,
+            self::QUALITY_DELETE,
+            self::RISK_ASSESS,
+            self::RISK_ACCEPT,
+            self::RISK_DELETE,
+            self::OBJECTIVE_MEASURE,
+            self::OBJECTIVE_DELETE,
+            self::IMPROVEMENT_CLOSE,
+            self::IMPROVEMENT_DELETE,
+            self::COMPLIANCE_ASSESS,
+            self::COMPLIANCE_AUDIT,
+            self::COMPLIANCE_DELETE,
+            self::SUPPLIER_ASSESS,
+            self::SUPPLIER_ASSURE,
+            self::SUPPLIER_DELETE,
+            self::MANAGEMENT_REVIEW_FINALIZE,
+            self::MANAGEMENT_REVIEW_DELETE,
+        ];
+    }
+
+    public static function isHumanOnly(string $permissionKey): bool
+    {
+        return in_array($permissionKey, self::humanOnlyPermissions(), true);
+    }
+
+    /**
      * The domains whose rights are scoped by fagområde: a key of one of these reaches content only
      * in the areas the same role reaches (BusinessAreaGrants). Kvalitet and Wiki are not scoped.
      *

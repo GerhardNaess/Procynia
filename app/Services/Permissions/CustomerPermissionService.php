@@ -23,6 +23,10 @@ use Illuminate\Support\Collection;
  * The one exception is the explicit-grant domains (CustomerPermissionCatalog::explicitGrantDomains()):
  * their keys reach System Owner only through a role, exactly as for anyone else. Nothing about the
  * administration surface depends on them, so the lock-out argument above does not apply.
+ *
+ * An integration identity never holds a human-only key (CustomerPermissionCatalog::humanOnlyPermissions()),
+ * whatever roles it is given. That is a subtraction, not a deny rule a customer configures: it holds
+ * for every role, including one that grants the whole catalogue.
  */
 class CustomerPermissionService
 {
@@ -71,6 +75,13 @@ class CustomerPermissionService
      */
     public function effectivePermissions(User $user): array
     {
+        if ($user->isIntegration()) {
+            return array_values(array_filter(
+                $this->permissionsFromRoles($user),
+                fn (string $key): bool => ! CustomerPermissionCatalog::isHumanOnly($key),
+            ));
+        }
+
         if (! $user->isSystemOwner()) {
             return $this->permissionsFromRoles($user);
         }
@@ -88,6 +99,12 @@ class CustomerPermissionService
     public function has(User $user, string $permissionKey): bool
     {
         if (! CustomerPermissionCatalog::exists($permissionKey)) {
+            return false;
+        }
+
+        // Before the System Owner short-circuit: no bid_role an integration carries can buy back a
+        // decision reserved for a person.
+        if ($user->isIntegration() && CustomerPermissionCatalog::isHumanOnly($permissionKey)) {
             return false;
         }
 

@@ -17,6 +17,8 @@ use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeSourceRegistry;
 use App\Services\Notifications\AssignmentNotifier;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Services\Quality\QualityActivityLinkCleanup;
+use App\Services\Security\ActorChannel;
+use App\Services\Security\InteractiveActorChannel;
 use App\Services\Ted\TedSourceAdapter;
 use App\Support\Ai\AiCallContextScope;
 use App\Support\EnterpriseWiki\EnterpriseWikiQueueReservationTrace;
@@ -39,6 +41,10 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(AiCallContextScope::class);
+
+        // How the current request reached Procynia. Scoped, so the external API (phase 1) can bind
+        // its own request context per request; everything else is interactive.
+        $this->app->scoped(ActorChannel::class, InteractiveActorChannel::class);
 
         // Every opportunity source Procynia can speak to, addressed by its own key.
         //

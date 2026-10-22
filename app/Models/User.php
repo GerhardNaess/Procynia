@@ -46,6 +46,14 @@ class User extends Authenticatable implements FilamentUser
 
     public const ROLE_USER = 'user';
 
+    /**
+     * A machine identity acting for one customer through the external API (one per client and
+     * customer). Never a person: it cannot sign in, and it never takes a decision reserved for a
+     * human (CustomerPermissionCatalog::humanOnlyPermissions(), HumanDecisionGuard). No account of
+     * this kind can be created yet — see docs/external-api-architecture.md §4.
+     */
+    public const ROLE_INTEGRATION = 'integration';
+
     public const BID_ROLE_SYSTEM_OWNER = 'system_owner';
 
     public const BID_ROLE_BID_MANAGER = 'bid_manager';
@@ -314,6 +322,11 @@ class User extends Authenticatable implements FilamentUser
     public function isRegularUser(): bool
     {
         return $this->role === self::ROLE_USER;
+    }
+
+    public function isIntegration(): bool
+    {
+        return $this->role === self::ROLE_INTEGRATION;
     }
 
     public function canManageUsers(): bool
