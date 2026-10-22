@@ -232,6 +232,17 @@ Anbud bruker rollebaserte rettigheter (`users.bid_role` og Tilganger-matrisen `c
 
 Konsekvens for dagens arbeidsflyt: Brukere med bare lesetilgang mister godkjenningen. Det er beslutningen. Alle andre beholder den til en System Owner endrer matrisen.
 
+### 4.8 Databasetiltak
+
+| Tiltak | Tabeller | Merknad |
+|---|---|---|
+| Delt funksjon `assert_human_decision_actor(bigint, text)` og `BEFORE INSERT OR UPDATE OF <kolonne>`-triggere | **Wiki:** `enterprise_wiki_pages.reviewed_by_user_id`; `enterprise_wiki_claims.approved_by_user_id`, `blocking_override_by_user_id`; `enterprise_wiki_claim_decisions.decided_by_user_id`; `enterprise_wiki_page_version_document_owner_approvals.decided_by_user_id`, `overridden_by_user_id`; `enterprise_wiki_page_versions.submitted_by_user_id`, `reviewer_user_id`. <br>**Risiko:** `risk_acceptances.accepted_by_user_id`, `revoked_by_user_id`; `risk_assessments.assessed_by`. <br>**Avvik:** `improvement_cases.closed_by_user_id`; `improvement_action_verifications.verified_by_user_id`. <br>**Mål/KPI:** `kpi_measurements.recorded_by_user_id`. <br>**Etterlevelse:** `compliance_assessments.assessed_by_user_id`; `compliance_audit_status_changes.changed_by_user_id`. <br>**Leverandør:** `supplier_assessments.assessed_by_user_id`; `supplier_requirement_evaluations.evaluated_by_user_id`; `supplier_requirement_overrides.created_by_user_id`; `supplier_due_diligence_assessments.assessed_by_user_id`. <br>**Ledelsens gjennomgåelse:** `management_reviews.finalized_by_user_id`; `management_review_amendments.created_by_user_id`. <br>**Kvalitet:** `quality_process_revisions.approved_by_user_id`; `quality_process_blueprints.approved_by_user_id`. <br>**Anbud:** `saved_notice_ai_requirements.approved_by_user_id`, `rejected_by_user_id` | Nekter bare `role = 'integration'`. NULL tillates, fordi `nullOnDelete` må virke. Kopier av menneskelige beslutninger passerer. `CREATE OR REPLACE`, pgsql-vakt, og `down()` fjerner triggere og funksjon. |
+| `BEFORE DELETE` på `risks` | `risks` | B3, §4.6 |
+| **Ny** `saved_notice_status_changes` (append-only, trigger mot UPDATE/DELETE) | `saved_notice_id`, `from_status`, `to_status`, `changed_by_user_id`, `changed_at`, `reason` | Samme mønster som `*_status_changes` i andre moduler. Erstatter manglende aktør i `transitionBidStatus`. |
+| **Ny** `customer_access_changes` (append-only) | `customer_id`, `actor_user_id`, `subject_type` (user/role/permission_settings), `subject_id`, `change_type`, `before` (jsonb), `after` (jsonb), `created_at` | F4. Skrives fra `UserController::update`/`store`/`toggleActive`/`syncCustomerRoles`, `CustomerRoleController` og `CustomerEnvironmentController::updatePermissions`. Bare rettighetsrelevante felt, ingen e-post eller passord. |
+| Valgfritt: `enterprise_wiki_ingest_runs.started_by_user_id`, `cancelled_by_user_id` | | O4. Kan utsettes uten å påvirke sikkerheten. |
+| Datakontroll før triggere | Lesespørring mot dev-databasen: godkjente eller avgjorte rader uten aktør | Ingen NOT NULL- eller CHECK-endringer på eksisterende data i fase 0. |
+
 ### 4.9 Trekke tilbake fra godkjenning (B5)
 
 - **Handling:** «Trekk tilbake» på Wiki-siden, `PATCH /app/wiki/{slug}/withdraw`. Den vises for den som kan sende siden inn (`canSubmitEnterpriseWikiPage`: sideeier eller System Owner, med `wiki.edit`) når siden har status `pending_review`.
@@ -249,17 +260,6 @@ Konsekvens for dagens arbeidsflyt: Brukere med bare lesetilgang mister godkjenni
 - Ny append-only tabell `enterprise_wiki_document_owner_decisions` med approval-rad, beslutning, kommentar, aktør, overstyring og tidspunkt. Triggeren nekter UPDATE og DELETE, med unntak for kundesletting.
 - `decide()` skriver alltid en ny rad. Raden i `…_document_owner_approvals` holder siste tilstand, som i dag, men en endring av en avgjort rad krever begrunnelse og logges som en ny hendelse. Den overskriver aldri uten spor.
 - Del av steg 5.
-
-### 4.8 Databasetiltak
-
-| Tiltak | Tabeller | Merknad |
-|---|---|---|
-| Delt funksjon `assert_human_decision_actor(bigint, text)` og `BEFORE INSERT OR UPDATE OF <kolonne>`-triggere | **Wiki:** `enterprise_wiki_pages.reviewed_by_user_id`; `enterprise_wiki_claims.approved_by_user_id`, `blocking_override_by_user_id`; `enterprise_wiki_claim_decisions.decided_by_user_id`; `enterprise_wiki_page_version_document_owner_approvals.decided_by_user_id`, `overridden_by_user_id`; `enterprise_wiki_page_versions.submitted_by_user_id`, `reviewer_user_id`. <br>**Risiko:** `risk_acceptances.accepted_by_user_id`, `revoked_by_user_id`; `risk_assessments.assessed_by`. <br>**Avvik:** `improvement_cases.closed_by_user_id`; `improvement_action_verifications.verified_by_user_id`. <br>**Mål/KPI:** `kpi_measurements.recorded_by_user_id`. <br>**Etterlevelse:** `compliance_assessments.assessed_by_user_id`; `compliance_audit_status_changes.changed_by_user_id`. <br>**Leverandør:** `supplier_assessments.assessed_by_user_id`; `supplier_requirement_evaluations.evaluated_by_user_id`; `supplier_requirement_overrides.created_by_user_id`; `supplier_due_diligence_assessments.assessed_by_user_id`. <br>**Ledelsens gjennomgåelse:** `management_reviews.finalized_by_user_id`; `management_review_amendments.created_by_user_id`. <br>**Kvalitet:** `quality_process_revisions.approved_by_user_id`; `quality_process_blueprints.approved_by_user_id`. <br>**Anbud:** `saved_notice_ai_requirements.approved_by_user_id`, `rejected_by_user_id` | Nekter bare `role = 'integration'`. NULL tillates, fordi `nullOnDelete` må virke. Kopier av menneskelige beslutninger passerer. `CREATE OR REPLACE`, pgsql-vakt, og `down()` fjerner triggere og funksjon. |
-| `BEFORE DELETE` på `risks` | `risks` | B3, §4.6 |
-| **Ny** `saved_notice_status_changes` (append-only, trigger mot UPDATE/DELETE) | `saved_notice_id`, `from_status`, `to_status`, `changed_by_user_id`, `changed_at`, `reason` | Samme mønster som `*_status_changes` i andre moduler. Erstatter manglende aktør i `transitionBidStatus`. |
-| **Ny** `customer_access_changes` (append-only) | `customer_id`, `actor_user_id`, `subject_type` (user/role/permission_settings), `subject_id`, `change_type`, `before` (jsonb), `after` (jsonb), `created_at` | F4. Skrives fra `UserController::update`/`store`/`toggleActive`/`syncCustomerRoles`, `CustomerRoleController` og `CustomerEnvironmentController::updatePermissions`. Bare rettighetsrelevante felt, ingen e-post eller passord. |
-| Valgfritt: `enterprise_wiki_ingest_runs.started_by_user_id`, `cancelled_by_user_id` | | O4. Kan utsettes uten å påvirke sikkerheten. |
-| Datakontroll før triggere | Lesespørring mot dev-databasen: godkjente eller avgjorte rader uten aktør | Ingen NOT NULL- eller CHECK-endringer på eksisterende data i fase 0. |
 
 ---
 
