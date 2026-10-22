@@ -930,6 +930,72 @@ class QualityItemTest extends TestCase
     }
 
     /**
+     * Characterisation of a known gap — docs/external-api-phase-0-plan.md, finding F3.
+     *
+     * WikiController::destroy() asks for wiki.delete first and page ownership after: "owning a page
+     * is no longer enough on its own". Deleting a process with delete_wiki_pages checks only the
+     * ownership half, so a page owner whose roles grant quality.delete but not wiki.delete removes
+     * through Kvalitet a page the Wiki itself refuses to let them remove. When the check is added
+     * this test fails, and its last assertions should flip to "refused, nothing deleted".
+     */
+    public function test_a_page_owner_without_wiki_delete_removes_produced_pages_through_quality(): void
+    {
+        Queue::fake();
+
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $pageOwner = User::query()->create([
+            'name' => 'Prosesseier',
+            'email' => 'process-owner-'.Str::lower(Str::random(10)).'@procynia.local',
+            'password' => bcrypt('secret-password'),
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $customer->id,
+            'is_active' => true,
+        ]);
+
+        $role = CustomerRole::query()->create([
+            'customer_id' => $customer->id,
+            'name' => 'Prosesseier',
+            'is_active' => true,
+        ]);
+        $role->syncPermissions([
+            CustomerPermissionCatalog::QUALITY_VIEW,
+            CustomerPermissionCatalog::QUALITY_DELETE,
+            CustomerPermissionCatalog::WIKI_VIEW,
+        ]);
+        $pageOwner->customerRoles()->attach($role->id, ['customer_id' => $customer->id]);
+
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Avvikshandtering');
+        $document = $this->document($customer, 'avviksrutine.pdf');
+        $produced = $this->page($customer, 'Avviksrutine');
+        $produced->forceFill(['owner_user_id' => $pageOwner->id])->save();
+
+        $run = $this->ingestRun($customer, $document);
+        $this->runPage($run, $produced, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+
+        QualityActivityWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'quality_item_id' => $process->id,
+            'activity_key' => 'vurder',
+            'enterprise_wiki_document_id' => $document->id,
+            'created_by_user_id' => $owner->id,
+        ]);
+
+        // The Wiki refuses: owning the page is not enough without wiki.delete.
+        $this->actingAs($pageOwner)->delete("/app/wiki/{$produced->slug}")->assertForbidden();
+        $this->assertNotNull(EnterpriseWikiPage::query()->find($produced->id));
+
+        // Kvalitet does not ask for wiki.delete, and the page is gone.
+        $this->actingAs($pageOwner)
+            ->delete("/app/quality/items/{$process->id}?delete_wiki_pages=1")
+            ->assertRedirect('/app/quality')
+            ->assertSessionHas('success');
+
+        $this->assertNull(QualityItem::query()->find($process->id));
+        $this->assertNull(EnterpriseWikiPage::query()->find($produced->id), 'F3: deleted without wiki.delete');
+    }
+
+    /**
      * Deleting is reachable from the Prosesser list as well as from the process's own page, so the
      * redirect keeps the tab the request came from. A user clearing out two processes should not
      * have to find their way back to Prosesser between them.

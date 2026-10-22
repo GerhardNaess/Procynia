@@ -5,6 +5,7 @@ namespace Tests\Feature\App\Wiki;
 use App\Jobs\Ai\Wiki\FinalizeEnterpriseWikiIngest;
 use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiSection;
 use App\Models\Customer;
+use App\Models\CustomerRole;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -14,11 +15,14 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\User;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\Ai\Wiki\EnterpriseWikiSectionParser;
 use App\Services\Ai\Wiki\WikiArticleAiClient;
 use App\Services\Ai\Wiki\WikiSectionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentWikiAnswerStalenessService;
+use App\Support\CustomerPermissionCatalog;
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -147,6 +151,80 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
         // handed the version to a named reviewer through submit().
         $page->refresh();
         $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->status);
+    }
+
+    /**
+     * docs/external-api-phase-0-plan.md, finding F2 — why the unconditional status=draft cannot
+     * reach a page in review.
+     *
+     * Finalize writes status=draft to the run's page without checking its status. That page was
+     * created by the same run (ProcessEnterpriseWikiIngest), and until Finalize its only version
+     * is not current. submit() is the only way into pending_review and needs a current version, so
+     * the page cannot be in review while Finalize can still write to it.
+     */
+    public function test_a_page_still_waiting_for_finalize_cannot_be_sent_for_review(): void
+    {
+        $this->withoutMiddleware(ValidateCsrfToken::class);
+        ['customer' => $customer, 'page' => $page, 'pageVersion' => $pageVersion] = $this->createScaffold(['running']);
+        $owner = $this->wikiUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $reviewer = $this->wikiUser($customer, User::BID_ROLE_CONTRIBUTOR, isWikiApprover: true);
+        $page->forceFill(['owner_user_id' => $owner->id])->save();
+
+        $this->assertFalse((bool) $pageVersion->fresh()->is_current);
+
+        $this->actingAs($owner)
+            ->patch(route('app.wiki.submit', ['slug' => $page->slug]), ['reviewer_user_id' => $reviewer->id])
+            ->assertStatus(422);
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->fresh()->status);
+        $this->assertNull($pageVersion->fresh()->reviewer_user_id);
+    }
+
+    /**
+     * F2, second half: once Finalize has completed the run it never runs its write again, so a page
+     * submitted afterwards keeps its review.
+     */
+    public function test_a_repeated_finalize_leaves_a_page_submitted_after_the_run_in_review(): void
+    {
+        ['run' => $run, 'page' => $page, 'pageVersion' => $pageVersion] = $this->createScaffold(['completed']);
+        $this->createClaim($page, $pageVersion, $run);
+        $this->mockArticleClient();
+
+        $this->runFinalize($run);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->fresh()->status);
+
+        // What submit() would do next.
+        $page->forceFill(['status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW])->save();
+
+        $this->runFinalize($run);
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
+    }
+
+    private function wikiUser(Customer $customer, string $bidRole, bool $isWikiApprover = false): User
+    {
+        $user = User::factory()->create([
+            'customer_id' => $customer->id,
+            'role' => User::customerRoleForBidRole($bidRole),
+            'bid_role' => $bidRole,
+            'is_active' => true,
+            'is_wiki_approver' => $isWikiApprover,
+        ]);
+
+        $role = CustomerRole::query()->create([
+            'customer_id' => $customer->id,
+            'name' => 'Wiki '.Str::upper(Str::random(8)),
+            'is_active' => true,
+        ]);
+        $role->syncPermissions([
+            CustomerPermissionCatalog::WIKI_VIEW,
+            CustomerPermissionCatalog::WIKI_EDIT,
+            CustomerPermissionCatalog::WIKI_REVIEW,
+            CustomerPermissionCatalog::WIKI_APPROVE,
+        ]);
+        $user->customerRoles()->attach($role->id, ['customer_id' => $customer->id]);
+
+        return $user;
     }
 
     // -------------------------------------------------------------------------

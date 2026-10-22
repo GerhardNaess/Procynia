@@ -19,6 +19,7 @@ use App\Services\Ai\Wiki\WikiClaimVerificationAiClient;
 use App\Services\Ai\Wiki\WikiPageClaimExtractionAiClient;
 use App\Services\Ai\Wiki\WikiSemanticReviserAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimContentRepairService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -374,6 +375,73 @@ class EnterpriseWikiClaimContentRepairServiceTest extends TestCase
         // qa_status, and a terminal main status would stop QA re-evaluation entirely.)
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_DECISION_ONLY, $fixture['run']->fresh()->status);
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $fixture['run']->fresh()->qa_status);
+    }
+
+    /**
+     * Characterisation of a known gap — docs/external-api-phase-0-plan.md, finding F1b.
+     *
+     * The ordinary working-version edit settles publication through
+     * EnterpriseWikiPublicationSettlementService::afterManualEdit(): an approved page goes back to
+     * draft, keeps serving its published version, and can be sent for review. Claim repair promotes
+     * its new version without that call, so an approved page keeps status approved with an
+     * unpublished current version — the state EnterpriseWikiPublicationStatusService reports as
+     * blocked ("edited after publish"), because submit() only accepts a draft.
+     *
+     * Readers are safe: grounding reads published_version_id only. What breaks is the route to get
+     * the edit reviewed. When the settlement call is added this test fails, and its status
+     * assertions should flip to draft / draftNextStep.
+     */
+    public function test_manual_mixed_block_edit_leaves_a_published_page_approved_with_unpublished_changes(): void
+    {
+        $fixture = $this->createManualMixedBlockEditFixture();
+        $newMarkdown = 'Kunden bidrar til dokumentert kontroll etter revisjonen.';
+
+        // The state approve() leaves behind: the current version is the published one.
+        $fixture['page']->forceFill([
+            'status' => EnterpriseWikiPage::STATUS_APPROVED,
+            'published_version_id' => $fixture['version']->id,
+        ])->save();
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaimsForManualMixedBlock')
+            ->once()
+            ->andReturn(['claims' => [[
+                'text' => $newMarkdown,
+                'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+                'excerpt' => 'Kunden bidrar til dokumentert kontroll',
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+                'source_element_keys' => [],
+                'best_practice_reason' => null,
+                'conflict_note' => null,
+            ]]]);
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(
+                supportingSourceElementKeys: ['source-edited-1'],
+                reason: 'Påstanden er støttet av kildereferansen.',
+            ));
+
+        $result = $this->service()->applyManualMixedBlockEdit(
+            $fixture['run']->fresh(),
+            $fixture['page']->fresh(),
+            $fixture['version']->fresh(),
+            $fixture['reviewClaim']->fresh(),
+            'block-0002',
+            $newMarkdown,
+            $fixture['actor']->fresh(),
+        );
+
+        $page = $fixture['page']->fresh();
+        $current = EnterpriseWikiPageVersion::query()->findOrFail($result['page_version_id']);
+
+        $this->assertTrue((bool) $current->is_current);
+        $this->assertSame((int) $fixture['version']->id, (int) $page->published_version_id, 'readers keep the approved text');
+        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->status, 'F1b: not returned to draft');
+
+        $status = app(EnterpriseWikiPublicationStatusService::class)->forPage($page, $current);
+        $this->assertSame(EnterpriseWikiPublicationStatusService::STATE_PUBLISHED_WITH_CHANGES, $status['state']);
+        $this->assertSame('blocked', $status['next_step'], 'F1b: the edit has no route into review');
     }
 
     /**
