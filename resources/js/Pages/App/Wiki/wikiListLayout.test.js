@@ -82,7 +82,9 @@ describe('the table is the main surface', () => {
 
     test('the page title is the row, at 16px semibold', () => {
         assert.match(pagesTab, /<td className="px-6 py-5 font-semibold text-slate-950">\{page\.title\}<\/td>/);
-        assert.match(pagesTab, /<tr key=\{page\.id\} className="text-base text-slate-700 transition hover:bg-slate-50\/70">/);
+        assert.match(pagesTab, /<tr key=\{page\.id\} className="group text-base text-slate-700 transition hover:bg-slate-50\/70">/);
+        // «Åpne» is pinned to the box's right edge, so it is in view at 1366 px while wider columns scroll.
+        assert.match(pagesTab, /<td className="sticky right-0 bg-white [^"]*group-hover:bg-slate-50/);
     });
 
     test('rows have room, and hover is a hint rather than a highlight', () => {

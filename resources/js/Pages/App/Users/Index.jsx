@@ -205,7 +205,8 @@ aria-label={user.is_active && user.is_self ? undefined : `${user.is_active ? 'De
                                             <th scope="col" className="px-6 py-4">{tu.col_customer_roles ?? 'Egne roller'}</th>
                                             <th scope="col" className="px-6 py-4">Status</th>
                                             <th scope="col" className="px-6 py-4">Opprettet</th>
-                                            <th scope="col" className="px-6 py-4">Handlinger</th>
+                                            {/* The actions stay in view while the wider columns scroll under them (Rediger was off-screen at 1366 px). */}
+                                            <th scope="col" className="sticky right-0 bg-slate-50 px-6 py-4 shadow-[-8px_0_12px_-10px_rgba(15,23,42,0.25)]">Handlinger</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
@@ -261,7 +262,7 @@ aria-label={user.is_active && user.is_self ? undefined : `${user.is_active ? 'De
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4 text-slate-500">{formatDate(user.created_at, locale)}</td>
-                                                <td className="px-6 py-4">
+                                                <td className="sticky right-0 bg-white px-6 py-4 shadow-[-8px_0_12px_-10px_rgba(15,23,42,0.25)]">
                                                     <div className="flex flex-wrap gap-2">
                                                         <Link
                                                             href={user.edit_url}

@@ -2078,12 +2078,13 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                                         <th scope="col" className="px-6 py-3.5">{tw.document_owner_column ?? 'Dokumenteier'}</th>
                                         <th scope="col" className="px-6 py-3.5">{tw.claims_approved_column ?? 'Påstander kvalitetssikret'}</th>
                                         <th scope="col" className="px-6 py-3.5">{tw.updated ?? 'Oppdatert'}</th>
-                                        <th scope="col" className="px-6 py-3.5"><span className="sr-only">{ta.wiki_actions_column ?? 'Handlinger'}</span></th>
+                                        {/* «Åpne» stays in view while the wider columns scroll under it — at 1366 px it was off-screen. */}
+                                        <th scope="col" className="sticky right-0 bg-slate-50 px-6 py-3.5 shadow-[-8px_0_12px_-10px_rgba(15,23,42,0.25)]"><span className="sr-only">{ta.wiki_actions_column ?? 'Handlinger'}</span></th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
                                     {pages.map((page) => (
-                                        <tr key={page.id} className="text-base text-slate-700 transition hover:bg-slate-50/70">
+                                        <tr key={page.id} className="group text-base text-slate-700 transition hover:bg-slate-50/70">
                                             <td className="px-6 py-5 font-semibold text-slate-950">{page.title}</td>
                                             <td className="px-6 py-5">
                                                 {page.page_type && (
@@ -2109,7 +2110,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                                                     .replace(':total', page.claims_count ?? 0)}
                                             </td>
                                             <td className="px-6 py-5 text-slate-600">{formatDate(page.updated_at, locale)}</td>
-                                            <td className="px-6 py-5">
+                                            <td className="sticky right-0 bg-white px-6 py-5 transition-colors group-hover:bg-slate-50 shadow-[-8px_0_12px_-10px_rgba(15,23,42,0.25)]">
                                                 <Link
                                                     href={`/app/wiki/${page.slug}`}
                                                     className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950"
