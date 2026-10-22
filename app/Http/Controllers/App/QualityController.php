@@ -1675,7 +1675,11 @@ class QualityController extends Controller
 
         $producedPages = $this->producedWikiPagesByItem($customerId, $items);
         $publications = $customerId === null ? [] : $this->blueprints->publicationStates($customerId, $items);
-        $deletionBlockers = $customerId === null ? [] : $this->items->deletionBlockers($customerId, $items);
+        // Only for someone who may delete: a reason can rest on a link from a module the reader is
+        // not allowed to see, and a reader is offered no delete to explain anyway (A28).
+        $deletionBlockers = $customerId === null || ! $this->may($user, CustomerPermissionCatalog::QUALITY_DELETE)
+            ? []
+            : $this->items->deletionBlockers($customerId, $items);
 
         return $items
             ->map(function (QualityItem $item) use ($producedPages, $publications, $deletionBlockers, $user): array {

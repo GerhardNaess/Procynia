@@ -25,7 +25,8 @@ import {
  * the trigger.
  *
  * What is retired rather than deleted — a process that has been approved, a control with
- * registered evidence — gets the reason in the menu, pointing to «Utgått»,
+ * registered evidence, a process or control in use elsewhere — gets the reason in the menu,
+ * pointing to «Utgått»,
  * instead of a delete the server would refuse. The reason is the backend's own sentence.
  *
  * @param {object} item  The row's item. `id`, `title` and `quality_type`, plus

@@ -31,7 +31,8 @@ use Tests\TestCase;
  * cascade it away. Now such a control is set to «Utgått» — the status that already closes a control
  * to new links — and keeps everything. The rule holds in the menu, the controller, the service and
  * the database; only the customer's own deletion takes it along. A control that only sits on
- * activities, uses a tool or is linked from other modules is deleted as before.
+ * activities or uses a tool is deleted as before; links from other modules block too
+ * (QualityCrossModuleLinkTest).
  */
 class QualityControlHistoryTest extends TestCase
 {
@@ -79,25 +80,6 @@ class QualityControlHistoryTest extends TestCase
             $this->assertNotNull(QualityItem::query()->find($control->id), $kind);
             $this->assertNotNull(QualityItemDocument::query()->find($evidence->id), $kind);
         }
-    }
-
-    /**
-     * Links from Risiko and Etterlevelse do not block, as before: Kvalitet is not told about them
-     * (RiskControlLinkTest, ComplianceQualityContextTest, ComplianceAuditFindingTest), and a refusal
-     * would tell. Whether they should is an open product decision (A19 in the plan).
-     */
-    public function test_links_from_other_modules_do_not_block_as_before(): void
-    {
-        ['customer' => $customer, 'owner' => $owner] = $this->complianceContext();
-        $control = $this->control($customer, owner: $owner);
-        $riskId = $this->risk($customer);
-        DB::table('risk_controls')->insert(['customer_id' => $customer->id, 'risk_id' => $riskId, 'quality_item_id' => $control->id, 'created_at' => now(), 'updated_at' => now()]);
-
-        $this->assertNull(app(QualityItemService::class)->deletionBlocker($control));
-
-        app(QualityItemService::class)->deleteItem((int) $customer->id, $control, $owner);
-        $this->assertNull(QualityItem::query()->find($control->id));
-        $this->assertTrue(DB::table('risks')->where('id', $riskId)->exists());
     }
 
     /** Placements and tools are Kvalitet's own structure: such a control is deleted as before. */

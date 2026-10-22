@@ -268,7 +268,7 @@ class RiskQualityContextLinkTest extends TestCase
         $this->assertSame(1, RiskActivity::query()->count());
     }
 
-    public function test_removing_a_step_the_flow_or_the_process_in_kvalitet_removes_only_the_link(): void
+    public function test_removing_a_step_or_the_flow_removes_only_the_activity_link_and_a_linked_process_is_not_deleted(): void
     {
         ['customer' => $customer, 'owner' => $owner] = $this->context();
         $hr = $this->area($customer, 'HR');
@@ -297,15 +297,18 @@ class RiskQualityContextLinkTest extends TestCase
         $this->assertSame(0, RiskActivity::query()->where('risk_id', $risk->id)->count());
         $this->assertSame(1, RiskProcess::query()->where('risk_id', $risk->id)->count());
 
-        // Deleting the process is not refused because of a link it cannot see.
+        // Deleting a process a risk relies on is refused (A19/A28, decided 2026-10-22), even for a
+        // Kvalitet user who cannot see the risk, and the sentence does not say why. The links stay.
         $hiring = $this->process($customer, $owner, 'Ansettelse', ['Sjekk referanser']);
         $this->linkActivity($risk, $hiring, 'sjekk-referanser');
-        $this->actingAs($editor)->delete("/app/quality/items/{$payroll->id}")->assertRedirect()->assertSessionHasNoErrors();
-        $this->actingAs($editor)->delete("/app/quality/items/{$hiring->id}")->assertRedirect()->assertSessionHasNoErrors();
-        $this->assertDatabaseMissing('quality_items', ['id' => $payroll->id]);
-        $this->assertDatabaseMissing('quality_items', ['id' => $hiring->id]);
-        $this->assertSame(0, RiskProcess::query()->where('risk_id', $risk->id)->count());
-        $this->assertSame(0, RiskActivity::query()->where('risk_id', $risk->id)->count());
+        foreach ([$payroll, $hiring] as $process) {
+            $this->actingAs($editor)->delete("/app/quality/items/{$process->id}")
+                ->assertRedirect()
+                ->assertSessionHas('error', __('procynia.quality.errors.process_in_use_not_deletable'));
+            $this->assertDatabaseHas('quality_items', ['id' => $process->id]);
+        }
+        $this->assertSame(1, RiskProcess::query()->where('risk_id', $risk->id)->count());
+        $this->assertSame(1, RiskActivity::query()->where('risk_id', $risk->id)->count());
         $this->assertDatabaseHas('risks', ['id' => $risk->id, 'title' => 'Feil lønnsutbetaling']);
     }
 

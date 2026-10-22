@@ -406,7 +406,7 @@ class ComplianceAuditScopeTest extends TestCase
         $this->actingAs($owner)->delete($this->url($audit, "processes/{$process->id}"))->assertForbidden();
     }
 
-    public function test_kvalitet_never_sees_the_audit_and_a_deleted_process_takes_its_link_along(): void
+    public function test_kvalitet_never_sees_the_audit_and_cannot_delete_a_process_in_its_scope(): void
     {
         ['customer' => $customer] = $this->complianceContext();
         $auditor = $this->complianceAuditor($customer, [CustomerPermissionCatalog::QUALITY_VIEW]);
@@ -418,8 +418,9 @@ class ComplianceAuditScopeTest extends TestCase
         $this->assertStringNotContainsString('Revisjon som Kvalitet ikke ser', json_encode(array_diff_key($page, ['translations' => true]), JSON_UNESCAPED_UNICODE));
         $this->assertStringNotContainsString('/app/compliance/audits', json_encode(array_diff_key($page, ['translations' => true]), JSON_UNESCAPED_UNICODE));
 
-        $process->delete();
-        $this->assertSame(0, ComplianceAuditProcess::query()->where('audit_id', $audit->id)->count());
+        // A process in an audit's scope is not deleted (A19/A28, decided 2026-10-22); the link stays.
+        $this->assertRefused('deleting a process in an audit scope', fn () => $process->delete());
+        $this->assertSame(1, ComplianceAuditProcess::query()->where('audit_id', $audit->id)->count());
         $this->assertNotNull($audit->fresh());
     }
 

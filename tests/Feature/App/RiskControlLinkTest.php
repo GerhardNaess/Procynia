@@ -324,11 +324,14 @@ class RiskControlLinkTest extends TestCase
             $this->assertStringNotContainsString("/app/risk/risks/{$risk->id}", $content, $url);
         }
 
-        // Deleting the control in Kvalitet is not refused because of a link it cannot see; the
-        // link goes, the risk stays.
-        $this->actingAs($user)->delete("/app/quality/items/{$control->id}")->assertRedirect();
-        $this->assertDatabaseMissing('quality_items', ['id' => $control->id]);
-        $this->assertDatabaseMissing('risk_controls', ['risk_id' => $risk->id]);
+        // Deleting the control in Kvalitet is refused while a risk relies on it (A19/A28, decided
+        // 2026-10-22), with a sentence that names neither the risk nor Risiko. Link and risk stay.
+        $this->actingAs($user)->delete("/app/quality/items/{$control->id}")
+            ->assertRedirect()
+            ->assertSessionHas('error', __('procynia.quality.errors.control_in_use_not_deletable'));
+        $this->assertStringNotContainsString('Konfidensiell', (string) session('error'));
+        $this->assertDatabaseHas('quality_items', ['id' => $control->id]);
+        $this->assertDatabaseHas('risk_controls', ['risk_id' => $risk->id]);
         $this->assertDatabaseHas('risks', ['id' => $risk->id]);
     }
 

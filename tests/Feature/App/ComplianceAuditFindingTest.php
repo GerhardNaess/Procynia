@@ -464,7 +464,8 @@ class ComplianceAuditFindingTest extends TestCase
         $this->assertRefused('changing the control to a non-control', fn () => $finding->forceFill(['control_item_id' => $checklist->id])->save());
     }
 
-    public function test_the_finding_survives_kvalitet_deleting_its_process_or_control(): void
+    /** Kvalitet cannot delete what a finding names (A19/A28, decided 2026-10-22): the finding keeps both. */
+    public function test_kvalitet_cannot_delete_the_process_or_control_a_finding_names(): void
     {
         ['customer' => $customer] = $this->complianceContext();
         $auditor = $this->complianceAuditor($customer);
@@ -475,15 +476,14 @@ class ComplianceAuditFindingTest extends TestCase
         $frozen = $this->finding($audit, ['quality_process_id' => $process->id, 'control_item_id' => $control->id]);
         $this->markHandedOff($frozen, $auditor);
 
-        $process->delete();
-        $control->delete();
+        $this->assertRefused('deleting the process a finding names', fn () => $process->delete());
+        $this->assertRefused('deleting the control a finding names', fn () => $control->delete());
 
         foreach ([$open, $frozen] as $finding) {
             $finding->refresh();
             $this->assertSame('Tilganger fjernes ikke', $finding->title);
-            $this->assertNull($finding->quality_process_id);
-            $this->assertNull($finding->control_item_id);
-            // Only the Kvalitet column was nulled — not the tenant.
+            $this->assertSame((int) $process->id, (int) $finding->quality_process_id);
+            $this->assertSame((int) $control->id, (int) $finding->control_item_id);
             $this->assertSame((int) $customer->id, (int) $finding->customer_id);
         }
         $this->assertNotNull($frozen->improvement_case_id);

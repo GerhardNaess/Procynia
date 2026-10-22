@@ -450,7 +450,7 @@ class ComplianceQualityContextTest extends TestCase
         $this->assertRefused('a duplicate control link', fn () => $this->link($requirement, $control));
     }
 
-    public function test_deleting_either_side_leaves_no_dangling_links(): void
+    public function test_kvalitet_cannot_delete_a_linked_item_and_a_deleted_requirement_takes_its_links(): void
     {
         ['customer' => $customer, 'owner' => $owner] = $this->complianceContext();
         $manager = $this->complianceManager($customer);
@@ -460,12 +460,12 @@ class ComplianceQualityContextTest extends TestCase
         $this->link($requirement, $process);
         $this->link($requirement, $control);
 
-        // Kvalitet deletes its item without asking compliance; the link goes with it.
-        $control->delete();
-        $this->assertDatabaseMissing('compliance_requirement_controls', ['requirement_id' => $requirement->id]);
-        QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->delete();
-        $process->delete();
-        $this->assertDatabaseMissing('compliance_requirement_processes', ['requirement_id' => $requirement->id]);
+        // Kvalitet cannot delete an item a requirement relies on (A19/A28, decided 2026-10-22); the
+        // links stay.
+        $this->assertRefused('deleting a linked control', fn () => $control->delete());
+        $this->assertRefused('deleting a linked process', fn () => $process->delete());
+        $this->assertDatabaseHas('compliance_requirement_controls', ['requirement_id' => $requirement->id]);
+        $this->assertDatabaseHas('compliance_requirement_processes', ['requirement_id' => $requirement->id]);
 
         // Deleting a requirement registered by mistake takes its links along, never the Kvalitet items.
         $second = $this->requirementFor($customer);

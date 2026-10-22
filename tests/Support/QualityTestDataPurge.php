@@ -10,9 +10,11 @@ use Illuminate\Support\Facades\DB;
  * Test-only: removes Kvalitet items an E2E run created, history included. Not autoloaded in
  * production (autoload-dev only).
  *
- * A process with an approved version and a control with registered evidence are never deleted in
+ * A process with an approved version, a control with registered evidence and an item another module
+ * links to are never deleted in
  * Procynia; PostgreSQL triggers refuse it unless the customer itself is being deleted
- * (quality_items_keep_approved_versions, quality_items_keep_control_history — phase 0 step 12, A19).
+ * (quality_items_keep_approved_versions, quality_items_keep_control_history,
+ * quality_items_keep_cross_module_links — phase 0 step 12, A19, A28).
  * E2E runs in the shared E2E customer still have to clean up after themselves, so this helper
  * switches those triggers off for its own transaction, deletes, and switches them on again — a table
  * owner's explicit DDL step, the same one ImprovementTestDataPurge and RiskTestDataPurge take.
@@ -21,7 +23,7 @@ use Illuminate\Support\Facades\DB;
  */
 final class QualityTestDataPurge
 {
-    private const TRIGGERS = ['quality_items_keep_approved_versions', 'quality_items_keep_control_history'];
+    private const TRIGGERS = ['quality_items_keep_approved_versions', 'quality_items_keep_control_history', 'quality_items_keep_cross_module_links'];
 
     /** @param Builder<QualityItem> $items */
     public static function delete(Builder $items): void

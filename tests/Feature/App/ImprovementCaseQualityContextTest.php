@@ -200,7 +200,7 @@ class ImprovementCaseQualityContextTest extends TestCase
         $this->assertSame(0, ImprovementCaseProcess::query()->where('improvement_case_id', $case->id)->count());
     }
 
-    public function test_removing_a_step_or_the_process_removes_the_link(): void
+    public function test_removing_a_step_removes_its_link_and_a_linked_process_is_not_deleted(): void
     {
         ['customer' => $customer, 'owner' => $owner] = $this->context();
         $it = $this->area($customer, 'IT');
@@ -219,8 +219,13 @@ class ImprovementCaseQualityContextTest extends TestCase
             ->assertRedirect()->assertSessionHasNoErrors();
         $this->assertSame(['klassifiser-alvorlighet'], ImprovementCaseActivity::query()->where('improvement_case_id', $case->id)->pluck('activity_key')->all());
 
-        $this->actingAs($editor)->delete("/app/quality/items/{$incident->id}")->assertRedirect()->assertSessionHasNoErrors();
-        $this->assertSame(0, ImprovementCaseProcess::query()->where('improvement_case_id', $case->id)->count() + ImprovementCaseActivity::query()->where('improvement_case_id', $case->id)->count());
+        // Deleting the process the case points at is refused (A19/A28, decided 2026-10-22), without
+        // naming the case; the remaining links stay.
+        $this->actingAs($editor)->delete("/app/quality/items/{$incident->id}")
+            ->assertRedirect()
+            ->assertSessionHas('error', __('procynia.quality.errors.process_in_use_not_deletable'));
+        $this->assertDatabaseHas('quality_items', ['id' => $incident->id]);
+        $this->assertSame(2, ImprovementCaseProcess::query()->where('improvement_case_id', $case->id)->count() + ImprovementCaseActivity::query()->where('improvement_case_id', $case->id)->count());
         $this->assertNotNull($case->fresh());
     }
 

@@ -324,11 +324,20 @@ class QualityItemService
      *
      *  - a process with an approved version (phase 0 step 12) — the versions are the record of what
      *    was decided;
-     *  - a control with registered evidence (finding A19) — the evidence is the record that the
-     *    control was carried out. Placements on activities and tools are this module's own
-     *    structure and do not count. Links from Risiko and Etterlevelse do not count either, as
-     *    before: Kvalitet is not told about them, and a refusal would tell (an open decision, see
-     *    A19 in docs/external-api-phase-0-plan.md).
+     *  - a control with registered evidence, withdrawn evidence included (findings A19, A29) — the
+     *    evidence is the record that the control was carried out;
+     *  - a process or control another module points at — Risiko, Mål og KPI, Avvik og forbedringer,
+     *    Etterlevelse og revisjon (findings A19, A28, decided 2026-10-22). Those links are the other
+     *    module's record of relying on it, and they are kept.
+     *
+     * Placements on activities, tools and Kvalitet's own relations are this module's structure and
+     * do not count.
+     *
+     * HIDDEN LINKS. The person deleting may not be allowed to see the module that made the link.
+     * The refusal therefore says one general thing — «in use elsewhere in Procynia» — the same for
+     * every module, every link and every count, and never which risk, case, requirement or user. A
+     * reason the person can see for themselves (an approved version, evidence) is given first. The
+     * caller asks this only for someone who may delete (quality.delete); see QualityController.
      *
      * A retired item is still there, with everything attached, and is no longer offered for new
      * links anywhere.
@@ -352,9 +361,29 @@ class QualityItemService
             $blockers[(int) $id] = 'procynia.quality.errors.approved_process_not_deletable';
         }
 
+        $processIds = $byType->get(QualityItem::TYPE_PROCESS, []);
         $controlIds = $byType->get(QualityItem::TYPE_CONTROL, []);
 
+        // Links from other modules first, so a reason the person can see for themselves (below)
+        // replaces the general one.
+        foreach ($this->linkedFromOtherModules($customerId, self::PROCESS_LINKS, $processIds) as $id) {
+            $blockers[$id] = 'procynia.quality.errors.process_in_use_not_deletable';
+        }
+
+        foreach ($this->linkedFromOtherModules($customerId, self::CONTROL_LINKS, $controlIds) as $id) {
+            $blockers[$id] = 'procynia.quality.errors.control_in_use_not_deletable';
+        }
+
+        foreach (QualityProcessRevision::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('quality_item_id', $processIds)
+            ->distinct()
+            ->pluck('quality_item_id') as $id) {
+            $blockers[(int) $id] = 'procynia.quality.errors.approved_process_not_deletable';
+        }
+
         if ($controlIds !== []) {
+            // Withdrawn evidence counts too: it is still the record (A29).
             $withEvidence = QualityItemDocument::query()
                 ->where('customer_id', $customerId)
                 ->whereIn('quality_item_id', $controlIds)
@@ -368,6 +397,50 @@ class QualityItemService
         }
 
         return $blockers;
+    }
+
+    /**
+     * Where other modules point at a process or a control: table => column. The database trigger
+     * quality_items_keep_cross_module_links holds the same list.
+     */
+    private const PROCESS_LINKS = [
+        'risk_processes' => 'quality_item_id',
+        'risk_activities' => 'quality_item_id',
+        'kpi_processes' => 'quality_process_id',
+        'kpi_activities' => 'quality_process_id',
+        'improvement_case_processes' => 'quality_process_id',
+        'improvement_case_activities' => 'quality_process_id',
+        'compliance_requirement_processes' => 'quality_process_id',
+        'compliance_audit_processes' => 'quality_process_id',
+        'compliance_audit_findings' => 'quality_process_id',
+    ];
+
+    private const CONTROL_LINKS = [
+        'risk_controls' => 'quality_item_id',
+        'compliance_requirement_controls' => 'control_item_id',
+        'compliance_audit_findings' => 'control_item_id',
+    ];
+
+    /**
+     * @param  array<string, string>  $links
+     * @param  list<int>  $itemIds
+     * @return list<int>
+     */
+    private function linkedFromOtherModules(int $customerId, array $links, array $itemIds): array
+    {
+        if ($itemIds === []) {
+            return [];
+        }
+
+        $linked = [];
+
+        foreach ($links as $table => $column) {
+            foreach (DB::table($table)->where('customer_id', $customerId)->whereIn($column, $itemIds)->distinct()->pluck($column) as $id) {
+                $linked[(int) $id] = true;
+            }
+        }
+
+        return array_keys($linked);
     }
 
     private function assertDeletable(QualityItem $item): void

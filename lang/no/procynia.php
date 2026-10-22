@@ -884,6 +884,8 @@ return [
             'blueprint_requires_process' => 'Bare prosesser kan ha en flyt.',
             'control_retired' => 'En utgått kontroll kan ikke knyttes til nye aktiviteter.',
             'control_with_history_not_deletable' => 'Kontrollen har registrert evidens og kan ikke slettes. Sett statusen til «Utgått» for å ta den ut av bruk. Evidensen beholdes.',
+            'process_in_use_not_deletable' => 'Prosessen er i bruk andre steder i Procynia og kan ikke slettes. Sett statusen til «Utgått» for å ta den ut av bruk. Det som er knyttet til den, beholdes.',
+            'control_in_use_not_deletable' => 'Kontrollen er i bruk andre steder i Procynia og kan ikke slettes. Sett statusen til «Utgått» for å ta den ut av bruk. Det som er knyttet til den, beholdes.',
             'approved_process_not_deletable' => 'Prosessen har en godkjent versjon og kan ikke slettes. Sett statusen til «Utgått» for å ta den ut av bruk. De godkjente versjonene beholdes.',
             'activity_not_found' => 'Aktiviteten finnes ikke i prosessens arbeidsversjon.',
             'placement_required' => 'Velg minst én kontroll eller aktivitet.',

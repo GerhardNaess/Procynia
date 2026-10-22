@@ -880,6 +880,8 @@ return [
             'blueprint_requires_process' => 'Only a process can have a flow.',
             'control_retired' => 'A retired control cannot be linked to new activities.',
             'control_with_history_not_deletable' => 'This control has registered evidence and cannot be deleted. Set its status to «Retired» to take it out of use. The evidence is kept.',
+            'process_in_use_not_deletable' => 'This process is in use elsewhere in Procynia and cannot be deleted. Set its status to «Retired» to take it out of use. What is linked to it is kept.',
+            'control_in_use_not_deletable' => 'This control is in use elsewhere in Procynia and cannot be deleted. Set its status to «Retired» to take it out of use. What is linked to it is kept.',
             'approved_process_not_deletable' => 'This process has an approved version and cannot be deleted. Set its status to «Retired» to take it out of use. The approved versions are kept.',
             'activity_not_found' => 'The activity does not exist in the working version of the process.',
             'placement_required' => 'Choose at least one control or activity.',

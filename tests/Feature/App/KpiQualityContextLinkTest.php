@@ -393,7 +393,7 @@ class KpiQualityContextLinkTest extends TestCase
     // Cleanup
     // ---------------------------------------------------------------------
 
-    public function test_removing_a_step_the_flow_or_the_process_removes_kpi_and_risk_links_alike(): void
+    public function test_removing_a_step_or_the_flow_removes_activity_links_and_a_linked_process_is_not_deleted(): void
     {
         ['customer' => $customer, 'owner' => $owner] = $this->context();
         $it = $this->area($customer, 'IT');
@@ -426,12 +426,17 @@ class KpiQualityContextLinkTest extends TestCase
         $this->assertSame(0, KpiActivity::query()->where('kpi_id', $kpi->id)->count());
         $this->assertSame(1, KpiProcess::query()->where('kpi_id', $kpi->id)->count());
 
-        // Deleting the process is not refused because of a link it cannot see.
+        // Deleting a process a KPI is measured against is refused (A19/A28, decided 2026-10-22), even
+        // for a Kvalitet user who cannot see the KPI, and the sentence does not say why.
         $backup = $this->process($customer, $owner, 'Backup', ['Test gjenoppretting']);
         $this->linkActivity($kpi, $backup, 'test-gjenoppretting');
-        $this->actingAs($editor)->delete("/app/quality/items/{$incident->id}")->assertRedirect()->assertSessionHasNoErrors();
-        $this->actingAs($editor)->delete("/app/quality/items/{$backup->id}")->assertRedirect()->assertSessionHasNoErrors();
-        $this->assertSame(0, KpiProcess::query()->where('kpi_id', $kpi->id)->count() + KpiActivity::query()->where('kpi_id', $kpi->id)->count());
+        foreach ([$incident, $backup] as $process) {
+            $this->actingAs($editor)->delete("/app/quality/items/{$process->id}")
+                ->assertRedirect()
+                ->assertSessionHas('error', __('procynia.quality.errors.process_in_use_not_deletable'));
+            $this->assertDatabaseHas('quality_items', ['id' => $process->id]);
+        }
+        $this->assertSame(2, KpiProcess::query()->where('kpi_id', $kpi->id)->count() + KpiActivity::query()->where('kpi_id', $kpi->id)->count());
         $this->assertDatabaseHas('kpis', ['id' => $kpi->id, 'title' => 'Løsningstid']);
     }
 
