@@ -7,6 +7,7 @@ use App\Models\RiskActivity;
 use App\Models\RiskProcess;
 use App\Models\User;
 use App\Services\Quality\QualityProcessContextReader;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -30,6 +31,7 @@ class RiskQualityContextService
 {
     public function __construct(
         private readonly QualityProcessContextReader $quality,
+        private readonly RiskAccessService $access,
     ) {}
 
     /**
@@ -85,6 +87,7 @@ class RiskQualityContextService
      */
     public function link(User $user, Risk $risk, int $processId, ?string $activityKey): void
     {
+        $risk = $this->editableRisk($user, $risk);
         $customerId = (int) $risk->customer_id;
         $process = $this->quality->findProcess($customerId, $processId);
 
@@ -118,8 +121,10 @@ class RiskQualityContextService
     }
 
     /** Remove the whole-process link. The process, and links to its activities, are left as they are. */
-    public function unlinkProcess(Risk $risk, int $processId): bool
+    public function unlinkProcess(User $user, Risk $risk, int $processId): bool
     {
+        $risk = $this->editableRisk($user, $risk);
+
         return RiskProcess::query()
             ->where('risk_id', $risk->id)
             ->where('customer_id', $risk->customer_id)
@@ -128,13 +133,30 @@ class RiskQualityContextService
     }
 
     /** Remove one activity link, by its id on this risk. */
-    public function unlinkActivity(Risk $risk, int $linkId): bool
+    public function unlinkActivity(User $user, Risk $risk, int $linkId): bool
     {
+        $risk = $this->editableRisk($user, $risk);
+
         return RiskActivity::query()
             ->where('risk_id', $risk->id)
             ->where('customer_id', $risk->customer_id)
             ->whereKey($linkId)
             ->delete() > 0;
+    }
+
+    /**
+     * Linking is risk.edit in the risk's area and reading Kvalitet — checked here as well as in the
+     * controller, so the rule holds for every entry point (phase 0 step 9).
+     */
+    private function editableRisk(User $user, Risk $risk): Risk
+    {
+        $risk = $this->access->assertCanEdit($user, $risk);
+
+        if (! $this->quality->canRead($user)) {
+            throw new AuthorizationException('This user may not read Kvalitet.');
+        }
+
+        return $risk;
     }
 
     /**

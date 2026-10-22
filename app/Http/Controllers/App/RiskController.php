@@ -219,30 +219,7 @@ class RiskController extends Controller
 
         abort_unless($this->access->can($user, CustomerPermissionCatalog::RISK_EDIT, $risk), 403);
 
-        $validated = $this->validated($request);
-        $targetAreaId = (int) $validated['business_area_id'];
-
-        // Moving a risk changes who can see it, so it takes edit authority on both sides.
-        if ($targetAreaId !== (int) $risk->business_area_id) {
-            $this->creator->assertAreaAllows($user, CustomerPermissionCatalog::RISK_EDIT, $targetAreaId);
-        }
-
-        $this->creator->assertValidOwner($user, $validated);
-
-        $risk->fill($this->creator->fields($validated) + ['updated_by' => $user->id]);
-
-        // Only when sent, so a client that does not know the field never clears the cycle.
-        if (array_key_exists('review_interval_months', $validated)) {
-            $risk->review_interval_months = $validated['review_interval_months'];
-        }
-
-        // Same rule. Only the direction is stored: «accept» here is not an acceptance — that takes
-        // risk.accept and RiskAcceptanceService — and «reduce» creates no tiltak.
-        if (array_key_exists('treatment_strategy', $validated)) {
-            $risk->treatment_strategy = $validated['treatment_strategy'];
-        }
-
-        $risk->save();
+        $risk = $this->creator->update($user, $risk, $this->validated($request));
 
         // After a move the user may no longer see the risk; the register is the only safe place
         // to land in that case.

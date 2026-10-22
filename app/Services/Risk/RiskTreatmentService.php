@@ -6,6 +6,7 @@ use App\Models\Risk;
 use App\Models\RiskTreatmentAction;
 use App\Models\User;
 use App\Support\CustomerPermissionCatalog;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -13,7 +14,8 @@ use Illuminate\Validation\ValidationException;
  *
  * The caller has already reached the risk through RiskAccessService::visibleRisks() and checked
  * risk.edit in its area. Nothing here looks a risk up on its own, so a tiltak can never be the way
- * to a risk someone cannot see.
+ * to a risk someone cannot see. Every write checks risk.edit in the risk's area again itself
+ * (RiskAccessService::assertCanEdit), so the rule holds for every entry point (phase 0 step 9).
  *
  * The responsible person must be an active user of the risk's own customer who can read risks in
  * the risk's area: someone who cannot open the risk cannot be responsible for acting on it.
@@ -80,6 +82,7 @@ class RiskTreatmentService
     /** @param  array{title: string, owner_user_id: int|string, due_at: string, outcome_note?: ?string}  $data */
     public function create(User $actor, Risk $risk, array $data): RiskTreatmentAction
     {
+        $risk = $this->access->assertCanEdit($actor, $risk);
         $this->guardOwner($risk, (int) $data['owner_user_id']);
 
         return RiskTreatmentAction::query()->create([
@@ -98,6 +101,7 @@ class RiskTreatmentService
     /** @param  array{title: string, owner_user_id: int|string, due_at: string, outcome_note?: ?string}  $data */
     public function update(User $actor, RiskTreatmentAction $action, Risk $risk, array $data): void
     {
+        $risk = $this->editableRiskOf($actor, $action, $risk);
         $this->guardOwner($risk, (int) $data['owner_user_id']);
 
         $action->fill([
@@ -116,6 +120,7 @@ class RiskTreatmentService
     /** Completing sets completed_at. An optional note records what came of it. */
     public function complete(User $actor, RiskTreatmentAction $action, ?string $outcomeNote): void
     {
+        $this->editableRiskOf($actor, $action);
         $note = $this->normalizedText($outcomeNote);
 
         $action->fill([
@@ -129,6 +134,8 @@ class RiskTreatmentService
     /** Reopening clears completed_at; the note stays as a record of what was tried. */
     public function reopen(User $actor, RiskTreatmentAction $action): void
     {
+        $this->editableRiskOf($actor, $action);
+
         $action->fill([
             'status' => RiskTreatmentAction::STATUS_OPEN,
             'completed_at' => null,
@@ -144,6 +151,21 @@ class RiskTreatmentService
             ->where('customer_id', $risk->customer_id)
             ->whereKey($actionId)
             ->first();
+    }
+
+    /**
+     * The risk the tiltak belongs to, if this person may edit it. A tiltak passed together with a
+     * risk it does not belong to is refused like one on a risk they may not edit.
+     */
+    private function editableRiskOf(User $actor, RiskTreatmentAction $action, ?Risk $risk = null): Risk
+    {
+        $owning = Risk::query()->where('customer_id', $action->customer_id)->find($action->risk_id);
+
+        if ($owning === null || ($risk !== null && (int) $risk->id !== (int) $owning->id)) {
+            throw new AuthorizationException('This tiltak does not belong to a risk this user may change.');
+        }
+
+        return $this->access->assertCanEdit($actor, $owning);
     }
 
     /**

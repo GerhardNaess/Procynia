@@ -7,6 +7,7 @@ use App\Models\Risk;
 use App\Models\RiskControl;
 use App\Models\User;
 use App\Services\Quality\QualityProcessContextReader;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\ValidationException;
 
@@ -33,6 +34,7 @@ class RiskControlService
     public function __construct(
         private readonly QualityProcessContextReader $quality,
         private readonly RiskQualityContextService $context,
+        private readonly RiskAccessService $access,
     ) {}
 
     /**
@@ -96,6 +98,8 @@ class RiskControlService
      */
     public function link(User $user, Risk $risk, int $controlId): void
     {
+        $risk = $this->editableRisk($user, $risk);
+
         $control = $this->controlsQuery((int) $risk->customer_id)->whereKey($controlId)->first();
 
         if ($control === null) {
@@ -113,13 +117,30 @@ class RiskControlService
     /**
      * Remove the link. The control is left exactly as it was.
      */
-    public function unlink(Risk $risk, int $controlId): bool
+    public function unlink(User $user, Risk $risk, int $controlId): bool
     {
+        $risk = $this->editableRisk($user, $risk);
+
         return RiskControl::query()
             ->where('risk_id', $risk->id)
             ->where('customer_id', $risk->customer_id)
             ->where('quality_item_id', $controlId)
             ->delete() > 0;
+    }
+
+    /**
+     * Linking is risk.edit in the risk's area and reading Kvalitet — checked here as well as in the
+     * controller, so the rule holds for every entry point (phase 0 step 9).
+     */
+    private function editableRisk(User $user, Risk $risk): Risk
+    {
+        $risk = $this->access->assertCanEdit($user, $risk);
+
+        if (! $this->canReadQuality($user)) {
+            throw new AuthorizationException('This user may not read Kvalitet.');
+        }
+
+        return $risk;
     }
 
     /** @return Builder<QualityItem> */

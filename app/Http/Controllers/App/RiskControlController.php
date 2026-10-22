@@ -44,9 +44,9 @@ class RiskControlController extends Controller
 
     public function destroy(int $riskId, int $controlId): RedirectResponse
     {
-        [, $risk] = $this->editableRisk($riskId);
+        [$user, $risk] = $this->editableRisk($riskId);
 
-        abort_unless($this->controls->unlink($risk, $controlId), 404);
+        abort_unless($this->controls->unlink($user, $risk, $controlId), 404);
 
         return back()->with('success', __('procynia.risk.flash.control_unlinked'));
     }

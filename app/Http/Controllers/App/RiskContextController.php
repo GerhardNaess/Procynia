@@ -50,18 +50,18 @@ class RiskContextController extends Controller
 
     public function destroyProcess(int $riskId, int $processId): RedirectResponse
     {
-        [, $risk] = $this->editableRisk($riskId);
+        [$user, $risk] = $this->editableRisk($riskId);
 
-        abort_unless($this->context->unlinkProcess($risk, $processId), 404);
+        abort_unless($this->context->unlinkProcess($user, $risk, $processId), 404);
 
         return back()->with('success', __('procynia.risk.flash.context_unlinked'));
     }
 
     public function destroyActivity(int $riskId, int $linkId): RedirectResponse
     {
-        [, $risk] = $this->editableRisk($riskId);
+        [$user, $risk] = $this->editableRisk($riskId);
 
-        abort_unless($this->context->unlinkActivity($risk, $linkId), 404);
+        abort_unless($this->context->unlinkActivity($user, $risk, $linkId), 404);
 
         return back()->with('success', __('procynia.risk.flash.context_unlinked'));
     }

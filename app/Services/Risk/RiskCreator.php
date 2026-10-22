@@ -19,6 +19,10 @@ use Illuminate\Validation\ValidationException;
  * all, the answer is the same.
  *
  * Validation of the request itself is the caller's, with rules(); create() takes the result.
+ *
+ * Editing a risk — its fields, its status (closing it included), its area — is update(), with the
+ * same rules: risk.edit in the risk's area, checked here for every entry point (phase 0 step 9),
+ * and on both sides when the risk moves to another area.
  */
 class RiskCreator
 {
@@ -68,6 +72,41 @@ class RiskCreator
             'created_by' => $actor->id,
             'updated_by' => $actor->id,
         ]);
+    }
+
+    /**
+     * Write validated fields onto an existing risk. risk.edit in the risk's area (403 otherwise);
+     * moving it takes edit authority in the target area too, since it changes who can see it.
+     *
+     * @param  array<string, mixed>  $validated  validated with rules()
+     */
+    public function update(User $actor, Risk $risk, array $validated): Risk
+    {
+        $risk = $this->access->assertCanEdit($actor, $risk);
+        $targetAreaId = (int) $validated['business_area_id'];
+
+        if ($targetAreaId !== (int) $risk->business_area_id) {
+            $this->assertAreaAllows($actor, CustomerPermissionCatalog::RISK_EDIT, $targetAreaId);
+        }
+
+        $this->assertValidOwner($actor, $validated);
+
+        $risk->fill($this->fields($validated) + ['updated_by' => $actor->id]);
+
+        // Only when sent, so a client that does not know the field never clears the cycle.
+        if (array_key_exists('review_interval_months', $validated)) {
+            $risk->review_interval_months = $validated['review_interval_months'];
+        }
+
+        // Same rule. Only the direction is stored: «accept» here is not an acceptance — that takes
+        // risk.accept and RiskAcceptanceService — and «reduce» creates no tiltak.
+        if (array_key_exists('treatment_strategy', $validated)) {
+            $risk->treatment_strategy = $validated['treatment_strategy'];
+        }
+
+        $risk->save();
+
+        return $risk;
     }
 
     /**

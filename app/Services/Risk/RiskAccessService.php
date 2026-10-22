@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\Permissions\BusinessAreaGrants;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerPermissionCatalog;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 
@@ -155,6 +156,31 @@ class RiskAccessService
         return $this->canDecide($user, CustomerPermissionCatalog::RISK_DELETE, $risk);
     }
 
+    /**
+     * Changing what the risk is or holds — its fields and status, its tiltak, its links to Kvalitet.
+     * Not a human-only decision: an integration with risk.edit may. The services that write ask
+     * this themselves, so the rule is the same from every entry point.
+     */
+    public function canEdit(User $user, Risk $risk): bool
+    {
+        return $this->canDecide($user, CustomerPermissionCatalog::RISK_EDIT, $risk);
+    }
+
+    /**
+     * The edit rule, as a refusal (403), for the risk as it is stored now — not a copy the caller
+     * loaded earlier. Returns that current risk.
+     */
+    public function assertCanEdit(User $user, Risk $risk): Risk
+    {
+        $current = Risk::query()->whereKey($risk->id)->first();
+
+        if ($current === null || ! $this->canEdit($user, $current)) {
+            throw new AuthorizationException('This user may not change this risk.');
+        }
+
+        return $current;
+    }
+
     public function canInArea(User $user, string $permissionKey, int $customerId, int $areaId): bool
     {
         return $this->canOpenModule($user)
@@ -173,6 +199,7 @@ class RiskAccessService
         return $this->grants->areaIdsByUser($customerId, CustomerPermissionCatalog::RISK_VIEW);
     }
 
+    /** The key in the risk's area and risk.view there; each (key, area) pair from one role, as always. */
     private function canDecide(User $user, string $permissionKey, Risk $risk): bool
     {
         return $this->can($user, CustomerPermissionCatalog::RISK_VIEW, $risk)
