@@ -190,6 +190,11 @@ return [
         'file_none_selected' => 'No file selected',
         'field_next_review' => 'Next review',
         'create_submit' => 'Create',
+        'create_process_button' => 'New process',
+        'create_process_heading' => 'New process',
+        'create_process_help' => 'Give the process a title. You then go straight to the flow, where you describe the activities.',
+        'create_process_submit' => 'Create process',
+        'cancel' => 'Cancel',
         'save' => 'Save',
         'actions_menu' => 'Actions',
         'delete_item' => 'Delete document',
@@ -270,10 +275,18 @@ return [
                 'intro' => 'This tab lists every process in the quality system with its owner, status and next review. Open a process to describe it and see its flow.',
                 'sections' => [
                     [
+                        'title' => 'How to do it',
+                        'items' => [
+                            ['title' => '1. Choose «New process»', 'text' => 'The button is at the top of the Processes tab.'],
+                            ['title' => '2. Fill in and choose «Create process»', 'text' => 'Title is required. Owner, document number, review interval, last reviewed and purpose can be filled in now or later.'],
+                            ['title' => '3. Describe the flow', 'text' => 'You go straight to the process flow. The process comes into force when the flow is approved and published.'],
+                        ],
+                    ],
+                    [
                         'title' => 'Processes',
                         'items' => [
                             ['title' => 'What is a process?', 'text' => 'A description of how the organisation carries out a piece of work from start to finish — who does what, in which order, and where the work branches.'],
-                            ['title' => 'New process', 'text' => 'Created under «Register in the quality system» at the bottom of Overview, with the type Process.'],
+                            ['title' => 'New process', 'text' => 'Choose «New process» at the top of this tab. You can also use «Register in the quality system» at the bottom of Overview, with the type Process.'],
                             ['title' => 'Status', 'text' => 'A new process is «Not published». It comes into force the first time its flow is approved and published. «With unpublished changes» means the working version has changed since the last published revision.'],
                             ['title' => 'Next review', 'text' => 'Calculated from «Last reviewed» and the review interval. Once the date has passed, the process appears under Needs attention on Overview.'],
                         ],

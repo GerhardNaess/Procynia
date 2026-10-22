@@ -136,13 +136,29 @@ export default function QualityIndex() {
                         showPlacements
                     />
                 ) : activeTab === 'processes' ? (
-                    <ProcessTable
-                        items={items}
-                        tq={tq}
-                        canDelete={canDelete}
-                        activeTab={activeTab}
-                        statusLabels={statusLabels}
-                    />
+                    <>
+                        {/* A process used to be creatable only from the form at the very bottom of
+                            Oversikt, which nobody looking at the process list could find. The same form,
+                            fixed to the Prosess type, opens here. */}
+                        {canCreate && (
+                            <NewProcess
+                                tq={tq}
+                                ta={ta}
+                                qualityTypes={qualityTypes}
+                                statuses={statuses}
+                                ownerOptions={ownerOptions}
+                                typeLabels={typeLabels}
+                                statusLabels={statusLabels}
+                            />
+                        )}
+                        <ProcessTable
+                            items={items}
+                            tq={tq}
+                            canDelete={canDelete}
+                            activeTab={activeTab}
+                            statusLabels={statusLabels}
+                        />
+                    </>
                 ) : (
                     <OverviewSections
                         items={items}
@@ -797,9 +813,45 @@ function RegisterToolPanel({ tq, ta, categories, documentOptions }) {
     );
 }
 
-function CreateItemPanel({ tq, ta, qualityTypes, statuses, ownerOptions, typeLabels, statusLabels }) {
+/**
+ * «Ny prosess» on the Prosesser tab: a button that opens the create form fixed to the Prosess type,
+ * with focus on its first field, and «Avbryt» that closes it and returns focus to the button.
+ */
+function NewProcess(props) {
+    const { tq } = props;
+    const [open, setOpen] = useState(false);
+    const buttonRef = useRef(null);
+    const close = () => {
+        setOpen(false);
+        buttonRef.current?.focus();
+    };
+
+    return (
+        <div className="space-y-4">
+            <div className="flex justify-end">
+                <button
+                    ref={buttonRef}
+                    type="button"
+                    aria-expanded={open}
+                    aria-controls="quality-new-process"
+                    onClick={() => (open ? close() : setOpen(true))}
+                    className={open ? SECONDARY_ACTION : PRIMARY_ACTION}
+                >
+                    {tq.create_process_button ?? 'Ny prosess'}
+                </button>
+            </div>
+            {open && (
+                <div id="quality-new-process">
+                    <CreateItemPanel {...props} fixedType="process" onCancel={close} />
+                </div>
+            )}
+        </div>
+    );
+}
+
+function CreateItemPanel({ tq, ta, qualityTypes, statuses, ownerOptions, typeLabels, statusLabels, fixedType = null, onCancel = null }) {
     const { data, setData, post, processing, errors, reset } = useForm({
-        quality_type: '',
+        quality_type: fixedType ?? '',
         title: '',
         code: '',
         purpose: '',
@@ -834,12 +886,17 @@ function CreateItemPanel({ tq, ta, qualityTypes, statuses, ownerOptions, typeLab
 
     return (
         <section className={CARD}>
-            <h2 className="text-xl font-semibold text-slate-950">{tq.create_heading ?? 'Registrer i kvalitetssystemet'}</h2>
-            <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{tq.create_help ?? ''}</p>
+            <h2 className="text-xl font-semibold text-slate-950">
+                {fixedType === 'process' ? (tq.create_process_heading ?? 'Ny prosess') : (tq.create_heading ?? 'Registrer i kvalitetssystemet')}
+            </h2>
+            <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">
+                {fixedType === 'process' ? (tq.create_process_help ?? '') : (tq.create_help ?? '')}
+            </p>
 
             <form ref={formRef} onSubmit={submit} className="mt-4 grid gap-4 md:grid-cols-2">
                 <RequiredFieldsNote text={ta.required_fields} className="text-base text-slate-600 md:col-span-2" />
 
+                {fixedType === null && (
                 <Field label={tq.field_type ?? 'Type'} error={errors.quality_type} required>
                     <select
                         className={INPUT}
@@ -863,9 +920,12 @@ function CreateItemPanel({ tq, ta, qualityTypes, statuses, ownerOptions, typeLab
                         ))}
                     </select>
                 </Field>
+                )}
 
                 <Field label={tq.field_title ?? 'Tittel'} error={errors.title} required>
                     <input
+                        // Opened from «Ny prosess»: the title is the first thing to fill in.
+                        autoFocus={fixedType !== null}
                         className={INPUT}
                         value={data.title}
                         onChange={(event) => setData('title', event.target.value)}
@@ -966,10 +1026,15 @@ function CreateItemPanel({ tq, ta, qualityTypes, statuses, ownerOptions, typeLab
                     </Field>
                 </div>
 
-                <div className="md:col-span-2">
+                <div className="flex flex-wrap gap-3 md:col-span-2">
                     <button type="submit" className={PRIMARY_ACTION} disabled={processing}>
-                        {tq.create_submit ?? 'Opprett'}
+                        {fixedType === 'process' ? (tq.create_process_submit ?? 'Opprett prosess') : (tq.create_submit ?? 'Opprett')}
                     </button>
+                    {onCancel && (
+                        <button type="button" className={SECONDARY_ACTION} onClick={onCancel}>
+                            {tq.cancel ?? 'Avbryt'}
+                        </button>
+                    )}
                 </div>
             </form>
         </section>

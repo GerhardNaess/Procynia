@@ -192,6 +192,11 @@ return [
         'file_none_selected' => 'Ingen fil valgt',
         'field_next_review' => 'Neste revisjon',
         'create_submit' => 'Opprett',
+        'create_process_button' => 'Ny prosess',
+        'create_process_heading' => 'Ny prosess',
+        'create_process_help' => 'Gi prosessen en tittel. Etterpå kommer du rett til flyten, der du beskriver aktivitetene.',
+        'create_process_submit' => 'Opprett prosess',
+        'cancel' => 'Avbryt',
         'save' => 'Lagre',
         'actions_menu' => 'Handlinger',
         'delete_item' => 'Slett dokument',
@@ -272,10 +277,18 @@ return [
                 'intro' => 'Fanen viser alle prosessene i kvalitetssystemet med eier, status og neste revisjon. Åpne en prosess for å beskrive den og se flyten.',
                 'sections' => [
                     [
+                        'title' => 'Slik gjør du det',
+                        'items' => [
+                            ['title' => '1. Velg «Ny prosess»', 'text' => 'Knappen står øverst på fanen Prosesser.'],
+                            ['title' => '2. Fyll ut og velg «Opprett prosess»', 'text' => 'Tittel er påkrevd. Eier, dokumentnummer, revisjonsintervall, sist revidert og formål kan fylles ut nå eller senere.'],
+                            ['title' => '3. Beskriv flyten', 'text' => 'Du kommer rett til prosessens flyt. Prosessen blir gjeldende når flyten godkjennes og publiseres.'],
+                        ],
+                    ],
+                    [
                         'title' => 'Prosesser',
                         'items' => [
                             ['title' => 'Hva er en prosess?', 'text' => 'En beskrivelse av hvordan virksomheten gjennomfører et arbeid, fra start til slutt — hvem som gjør hva, i hvilken rekkefølge, og hvor arbeidet forgrener seg.'],
-                            ['title' => 'Ny prosess', 'text' => 'Opprettes under «Registrer i kvalitetssystemet» nederst på Oversikt, med typen Prosess.'],
+                            ['title' => 'Ny prosess', 'text' => 'Velg «Ny prosess» øverst på denne fanen. Du kan også bruke «Registrer i kvalitetssystemet» nederst på Oversikt, med typen Prosess.'],
                             ['title' => 'Status', 'text' => 'En ny prosess er «Ikke publisert». Den blir gjeldende første gang flyten godkjennes og publiseres. «Med upubliserte endringer» betyr at arbeidsversjonen er endret etter siste publiserte revisjon.'],
                             ['title' => 'Neste revisjon', 'text' => 'Regnes ut fra «Sist revidert» og revisjonsintervallet. Når datoen har passert, vises prosessen under Trenger oppmerksomhet på Oversikt.'],
                         ],
