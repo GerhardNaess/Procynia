@@ -3,6 +3,7 @@
 namespace App\Services\EnterpriseWiki;
 
 use App\Exceptions\EnterpriseWikiReviewConflict;
+use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageReviewEvent;
 use App\Models\EnterpriseWikiPageVersion;
@@ -103,6 +104,64 @@ class EnterpriseWikiPageReviewService
 
             return $event;
         });
+    }
+
+    /**
+     * May this person change the page's text through a claim decision right now? — finding F1c.
+     *
+     * Outside review this rule adds nothing; the claim decision's own authorization applies. While
+     * the page is in review, text is changed only by the reviewer the current version was handed
+     * to: the edit lands in the version they approve, the handover stays intact, and the four-eyes
+     * line is not crossed by anyone else. A quality assurer, the page owner and the submitter keep
+     * every decision that does not change the text (keep it, undo, blocking, source references).
+     * Not a System Owner either — they may send a page back, but not rewrite somebody else's review.
+     */
+    public function mayChangeClaimText(?User $actor, EnterpriseWikiPage $page, EnterpriseWikiClaim $claim): bool
+    {
+        return $this->mayChangeVersionText($actor, $page, (int) $claim->enterprise_wiki_page_version_id);
+    }
+
+    /**
+     * For the page view: is changing text through claim decisions closed to this viewer because
+     * the page is in review and they are not its reviewer? The claim cards then offer only the
+     * decisions that leave the text as it is.
+     */
+    public function isClaimTextLockedFor(?User $actor, EnterpriseWikiPage $page, ?EnterpriseWikiPageVersion $currentVersion): bool
+    {
+        return $page->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW
+            && ($currentVersion === null || ! $this->mayChangeVersionText($actor, $page, (int) $currentVersion->id));
+    }
+
+    private function mayChangeVersionText(?User $actor, EnterpriseWikiPage $page, int $versionId): bool
+    {
+        if (! $this->guard->allows($actor)) {
+            return false;
+        }
+
+        // Re-read: the instance the caller holds may predate a submit or a withdrawal.
+        $status = EnterpriseWikiPage::query()->whereKey($page->id)->value('status');
+
+        if ($status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            return true;
+        }
+
+        $reviewerId = EnterpriseWikiPageVersion::query()
+            ->whereKey($versionId)
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->where('is_current', true)
+            ->value('reviewer_user_id');
+
+        return $reviewerId !== null && (int) $reviewerId === (int) $actor->id;
+    }
+
+    /** Refuses a text-changing claim decision before anything is written (see mayChangeClaimText()). */
+    public function assertMayChangeClaimText(User $actor, EnterpriseWikiPage $page, EnterpriseWikiClaim $claim): void
+    {
+        $actor = $this->guard->assert($actor, HumanDecision::WIKI_CLAIM_DECIDE);
+
+        if (! $this->mayChangeClaimText($actor, $page, $claim)) {
+            throw new AuthorizationException(__('procynia.wiki.claim_text_locked_in_review'));
+        }
     }
 
     private function mayHandOver(?User $actor, EnterpriseWikiPage $page): bool

@@ -313,7 +313,18 @@ class EnterpriseWikiSourceBasedBlockVerificationTest extends TestCase
         $this->assertSame('unresolved_source_findings', $publication['review_assignment']['final_approval_blocker']);
         $this->assertContains(__('procynia.wiki.publication_blocker_unresolved_source_findings'), $publication['publication']['blocking_reasons']);
 
+        // F1c: while the page is in review, the submitter does not rewrite the text the reviewer
+        // is deciding — only the reviewer it was handed to may.
         $this->actingAs($scenario['owner'])
+            ->patch("/app/wiki/{$scenario['page']->slug}/claims/{$scenario['claim']->id}/approve", [
+                'approved_text' => self::SOURCE_SENTENCE,
+            ])
+            ->assertForbidden();
+
+        // The reviewer resolves it in the version under review — when they may also handle claims
+        // (QA). A reviewer who may not, sends the page back instead.
+        $reviewer->forceFill(['is_qa' => true])->save();
+        $this->actingAs($this->freshUser($reviewer))
             ->patch("/app/wiki/{$scenario['page']->slug}/claims/{$scenario['claim']->id}/approve", [
                 'approved_text' => self::SOURCE_SENTENCE,
             ])

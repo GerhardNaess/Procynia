@@ -1060,6 +1060,7 @@ export default function WikiShow({
     lint_summary: lintSummary = null,
     can_edit_wiki_claims: canEditWikiClaims = false,
     manual_block_edit: manualBlockEdit = null,
+    claim_text_locked_in_review: claimTextLockedInReview = false,
     working_version_edit: workingVersionEdit = null,
     outgoing_links: outgoingLinks = [],
     incoming_links: incomingLinks = [],
@@ -1800,6 +1801,11 @@ export default function WikiShow({
         const claimTextEdit = claimTextEdits[claim.id] ?? claimEditBaseline;
         const isSourceFinding = claim.source_based_block_finding === true;
         const canEditClaimText = claim.content_origin === 'best_practice' || isSourceFinding;
+        // «Fjern teksten» takes text out of the page for exactly these claims (WikiClaimController::reject).
+        const removesText = canEditClaimText;
+        // F1c: while the page is in review, only its reviewer changes the text. Everyone else keeps
+        // the decisions that leave it as it is.
+        const textLocked = claimTextLockedInReview && canEditClaimText;
         const claimTextChanged = String(claimTextEdit).trim() !== String(claimEditBaseline).trim();
         const keepTextLabel = isSourceFinding && claimTextChanged
             ? (tw.claim_card_approve_edited_text ?? 'Godkjenn redigert tekst')
@@ -2338,7 +2344,13 @@ export default function WikiShow({
                         here repeated the badge and the why-block above it, so only the editable
                         text remains. Shown whether or not the claim has source references: text
                         presented as source-based usually has one, and is still edited here. */}
-                    {canEditClaimText && canHandleClaim && isPendingDecision && (
+                    {textLocked && canHandleClaim && isPendingDecision && (
+                        <p className="text-base leading-6 text-slate-600">
+                            {tw.claim_text_locked_in_review ?? 'Siden ligger til gjennomgang. Bare den tildelte kontrolløren kan endre eller fjerne teksten.'}
+                        </p>
+                    )}
+
+                    {canEditClaimText && ! textLocked && canHandleClaim && isPendingDecision && (
                         <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
                             <label className="block space-y-1">
                                 <span className="text-base font-semibold text-amber-700">
@@ -2426,36 +2438,49 @@ export default function WikiShow({
                                 >
                                     {keepTextLabel}
                                 </button>
-                                <button
-                                    type="button"
-                                    aria-disabled={isBusy || undefined}
-                                    aria-describedby={claimDescribedBy}
-                                    onClick={() => removeClaimText(claim)}
-                                    className="rounded-full border border-rose-300 bg-white px-4 py-2 text-base font-semibold text-rose-700 transition hover:bg-rose-50 aria-disabled:opacity-50"
-                                >
-                                    {tw.claim_card_remove_text ?? 'Fjern teksten'}
-                                </button>
+                                {! (textLocked && removesText) && (
+                                    <button
+                                        type="button"
+                                        aria-disabled={isBusy || undefined}
+                                        aria-describedby={claimDescribedBy}
+                                        onClick={() => removeClaimText(claim)}
+                                        className="rounded-full border border-rose-300 bg-white px-4 py-2 text-base font-semibold text-rose-700 transition hover:bg-rose-50 aria-disabled:opacity-50"
+                                    >
+                                        {tw.claim_card_remove_text ?? 'Fjern teksten'}
+                                    </button>
+                                )}
                             </div>
                         </div>
                     )}
 
-                    {!isPendingDecision && canHandleClaim && (
+                    {/* Who decided, when, and whether the decision changed the text — shown to everyone
+                        who can see the card, the page owner included (F1c). Undoing stays with
+                        those who may handle the claim. */}
+                    {!isPendingDecision && (
                         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sky-50 px-3 py-3 text-base text-sky-700">
                             <span>
                                 {(tw.claim_decided_by_at ?? 'Besluttet av :name den :date')
                                     .replace(':name', claim.approved_by_name ?? '—')
                                     .replace(':date', claim.approved_at ? new Date(claim.approved_at).toLocaleString(locale) : '')}
+                                {claim.review_metadata?.edited_before_approval === true
+                                    ? ` ${tw.claim_decision_text_edited ?? 'Teksten ble endret ved beslutningen.'}`
+                                    : ''}
+                                {claim.review_metadata?.text_removed_by_decision === true
+                                    ? ` ${tw.claim_decision_text_removed ?? 'Teksten ble fjernet ved beslutningen.'}`
+                                    : ''}
                                 {claim.approval_comment ? ` — “${claim.approval_comment}”` : ''}
                             </span>
-                            <button
-                                type="button"
-                                aria-disabled={isBusy || undefined}
-                                aria-describedby={claimDescribedBy}
-                                onClick={() => unapproveClaim(claim)}
-                                className="rounded-full border border-sky-300 bg-white px-3 py-2 text-base font-semibold text-sky-700 transition hover:bg-sky-100 aria-disabled:opacity-50"
-                            >
-                                {tw.undo_claim_decision_button ?? tw.unapprove_claim_button ?? 'Angre beslutning'}
-                            </button>
+                            {canHandleClaim && (
+                                <button
+                                    type="button"
+                                    aria-disabled={isBusy || undefined}
+                                    aria-describedby={claimDescribedBy}
+                                    onClick={() => unapproveClaim(claim)}
+                                    className="rounded-full border border-sky-300 bg-white px-3 py-2 text-base font-semibold text-sky-700 transition hover:bg-sky-100 aria-disabled:opacity-50"
+                                >
+                                    {tw.undo_claim_decision_button ?? tw.unapprove_claim_button ?? 'Angre beslutning'}
+                                </button>
+                            )}
                         </div>
                     )}
 

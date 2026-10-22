@@ -249,7 +249,10 @@ class WikiBestPracticeSectionDecisionTest extends TestCase
             'slug' => 'seksjonsbeslutning-'.Str::lower(Str::random(6)),
             'title' => 'Seksjonsbeslutning',
             'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
-            'status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW,
+            // A draft: these tests are about how a section is decided, not about review. While a
+            // page is in review only its assigned reviewer may change text through a claim
+            // decision (F1c) — WikiClaimTextDecisionDuringReviewTest covers that.
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('hash', 64, '0'),
         ]);

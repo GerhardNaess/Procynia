@@ -2136,6 +2136,9 @@ class WikiController extends Controller
                 && $user->canDeleteEnterpriseWikiPage($page),
             'can_edit_wiki_claims' => (bool) $canApproveWikiClaims,
             'manual_block_edit' => $manualBlockEdit,
+            // F1c: while the page is in review, only its reviewer changes text through a claim
+            // decision. Everyone else is offered the decisions that leave the text as it is.
+            'claim_text_locked_in_review' => $this->pageReviewService->isClaimTextLockedFor($user, $page, $currentVersion),
             'working_version_edit' => $this->workingVersionEditContext($page, $currentVersion, $customerId, $user),
             'source_documents' => $sourceDocuments,
             // Kept: the best-practice marking reads whether the page version is finally approved.

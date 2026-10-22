@@ -19,6 +19,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiClaimFindingExplainer;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageContentBlockService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageReviewService;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
@@ -58,6 +59,7 @@ class WikiClaimController extends Controller
         private readonly EnterpriseWikiBestPracticeSectionService $bestPracticeSectionService,
         private readonly CustomerPermissionService $customerPermissions,
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
+        private readonly EnterpriseWikiPageReviewService $pageReviews,
     ) {}
 
     public function approve(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
@@ -75,12 +77,19 @@ class WikiClaimController extends Controller
 
         $this->abortIfAlreadyDecided($claim);
 
+        // F1c: changing the text while the page is in review is the assigned reviewer's alone.
+        // Asked before anything is written; keeping the text as it stands is not a change.
+        if ($this->approvalWouldChangeText($claim, $validated['approved_text'] ?? null)) {
+            $this->pageReviews->assertMayChangeClaimText($user, $page, $claim);
+        }
+
         $textBeforeBestPracticeEdit = (string) $claim->claim_text;
         $this->applyBestPracticeTextEdit($claim, $validated['approved_text'] ?? null);
         $bestPracticeEdited = (string) $claim->fresh()->claim_text !== $textBeforeBestPracticeEdit;
 
         $textBeforeEdit = (string) $claim->claim_text;
         $sourceFindingEdited = $this->applySourceBasedFindingTextEdit($claim, $validated['approved_text'] ?? null);
+        $textEdited = $sourceFindingEdited || $bestPracticeEdited;
 
         // The edit happens in place on the version, so the decision row is where the replaced
         // wording survives: who changed it, when, and from what to what.
@@ -89,8 +98,8 @@ class WikiClaimController extends Controller
             $user->id,
             EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
             $validated['comment'] ?? null,
-            $sourceFindingEdited ? ['claim_text' => $textBeforeEdit] : [],
-            $sourceFindingEdited ? ['claim_text' => (string) $claim->fresh()->claim_text] : [],
+            $textEdited ? ['claim_text' => $bestPracticeEdited ? $textBeforeBestPracticeEdit : $textBeforeEdit] : [],
+            $textEdited ? ['claim_text' => (string) $claim->fresh()->claim_text] : [],
         );
 
         if ($sourceFindingEdited) {
@@ -148,12 +157,32 @@ class WikiClaimController extends Controller
             'Avsnittet inneholder også tekst som kilden støtter. Rediger teksten for å fjerne bare den udokumenterte delen.',
         );
 
+        // Rejecting removes the text for exactly these two kinds of claim (below).
+        $removesText = $isSourceBasedFinding || $claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE;
+
+        // F1c: removing text while the page is in review is the assigned reviewer's alone — asked
+        // before the decision is stored, so a refusal leaves nothing half-written.
+        if ($removesText) {
+            $this->pageReviews->assertMayChangeClaimText($user, $page, $claim);
+        }
+
         $this->storeDecision(
             $claim,
             $user->id,
             EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED,
             $validated['comment'] ?? null,
+            $removesText ? ['claim_text' => (string) $claim->claim_text] : [],
+            $removesText ? ['text_removed' => true] : [],
         );
+
+        if ($removesText) {
+            // What the page owner reads on the card: this decision took text out of the page.
+            $claim->fresh()->update([
+                'review_metadata' => array_merge((array) ($claim->fresh()->review_metadata ?? []), [
+                    'text_removed_by_decision' => true,
+                ]),
+            ]);
+        }
 
         // The claim covers the whole block and the source supports none of it, so "fjern teksten"
         // removes exactly what the reviewer was shown — the same blanking a rejected best-practice
@@ -175,7 +204,7 @@ class WikiClaimController extends Controller
         $this->cascadeBestPracticeDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED, $validated['comment'] ?? null);
         $this->cascadeBlockDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED, $validated['comment'] ?? null);
 
-        $textRemoved = $isSourceBasedFinding || $claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE;
+        $textRemoved = $removesText;
 
         return redirect()
             ->route('app.wiki.show', $this->wikiShowRouteParamsForReviewReturn($request, $page->slug, $claim->id))
@@ -678,6 +707,37 @@ class WikiClaimController extends Controller
             'new_state' => $newState,
             'comment' => $comment,
         ]);
+    }
+
+    /**
+     * Whether approving with this text would change the page: the same two conditions under which
+     * applyBestPracticeTextEdit() and applySourceBasedFindingTextEdit() write. Sending the text back
+     * unchanged is «Behold teksten», not an edit.
+     */
+    private function approvalWouldChangeText(EnterpriseWikiClaim $claim, ?string $approvedText): bool
+    {
+        $approvedText = $this->normalizeNullableString($approvedText);
+
+        if ($approvedText === null) {
+            return false;
+        }
+
+        if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
+            return $approvedText !== trim((string) $claim->claim_text);
+        }
+
+        $claim->loadMissing('version');
+        $version = $claim->version;
+
+        if ($version === null || ! $this->claimFindingExplainer->presentsUnsupportedTextAsSourceBased($claim, $version)) {
+            return false;
+        }
+
+        $blockKey = trim((string) $claim->content_block_key);
+        $blockMarkdown = collect((array) ($version->content_blocks_json ?? []))
+            ->first(static fn (mixed $block): bool => is_array($block) && ($block['block_key'] ?? null) === $blockKey)['markdown'] ?? '';
+
+        return $approvedText !== trim((string) $blockMarkdown);
     }
 
     private function applyBestPracticeTextEdit(EnterpriseWikiClaim $claim, ?string $approvedText): void
