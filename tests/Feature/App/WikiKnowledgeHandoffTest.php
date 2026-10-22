@@ -24,6 +24,7 @@ use App\Models\Objective;
 use App\Models\Supplier;
 use App\Models\User;
 use App\Services\Ai\Usage\AiUsageLedger;
+use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeHandoffService;
 use App\Services\ManagementReview\ManagementReviewFinalizationService;
 use App\Services\ManagementReview\ManagementReviewService;
 use App\Services\Modules\ModuleEntitlementService;
@@ -31,6 +32,7 @@ use App\Services\OpenAi\OpenAiClient;
 use App\Support\Ai\AiCallContextScope;
 use App\Support\Ai\RunsInAiCallContext;
 use App\Support\CustomerPermissionCatalog;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -47,7 +49,7 @@ use Tests\TestCase;
  * The shared «Lag kunnskapsartikkel» handoff for Etterlevelse, Leverandøroppfølging, Avvik og
  * forbedringer, Mål and Ledelsens gjennomgang (its own rules: ManagementReviewWikiKnowledgeTest; Risiko has its own, older test: RiskWikiKnowledgeTest).
  *
- * The same matrix for every module: the module's own write permission AND wiki.source.manage, a
+ * The same matrix for every module: the module's own write permission AND wiki.knowledge.handoff, a
  * foreign or hidden record is a 404, the source becomes an ordinary Wiki document with an origin row
  * and an ordinary queued run, nothing is published — and the run's AI usage is attributed to the
  * module record that caused it.
@@ -96,7 +98,7 @@ class WikiKnowledgeHandoffTest extends TestCase
     {
         $customer = $this->customer();
         $scenario = $this->scenario($sourceType, $customer);
-        $user = $this->member($customer, [...$scenario['edit'], CustomerPermissionCatalog::WIKI_VIEW, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE], $scenario['areas']);
+        $user = $this->member($customer, [...$scenario['edit'], CustomerPermissionCatalog::WIKI_VIEW, CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF], $scenario['areas']);
 
         $panel = $this->actingAs($user)->get($scenario['show'])->assertOk()->viewData('page')['props']['knowledge_handoff'];
         $this->assertTrue($panel['can_create']);
@@ -144,13 +146,73 @@ class WikiKnowledgeHandoffTest extends TestCase
         $this->assertFalse($this->actingAs($moduleOnly)->get($scenario['show'])->viewData('page')['props']['knowledge_handoff']['can_create']);
         $this->actingAs($moduleOnly)->post($scenario['url'], $this->payload())->assertForbidden();
 
-        $readerWithWiki = $this->member($customer, [...$scenario['view'], CustomerPermissionCatalog::WIKI_VIEW, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE], $scenario['areas']);
+        $readerWithWiki = $this->member($customer, [...$scenario['view'], CustomerPermissionCatalog::WIKI_VIEW, CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF], $scenario['areas']);
         $panel = $this->actingAs($readerWithWiki)->get($scenario['show'])->viewData('page')['props']['knowledge_handoff'];
         $this->assertFalse($panel['can_create']);
         $this->assertNull($panel['draft']);
         $this->actingAs($readerWithWiki)->post($scenario['url'], $this->payload())->assertForbidden();
 
         $this->assertNothingHandedOver($customer);
+    }
+
+    /**
+     * Handing knowledge over is not administering the Wiki's sources (docs/external-api-phase-0-plan.md
+     * §4.2): wiki.source.manage alone no longer opens «Lag kunnskapsartikkel».
+     */
+    #[DataProvider('sources')]
+    public function test_administering_wiki_sources_is_not_handing_knowledge_over(string $sourceType): void
+    {
+        $customer = $this->customer();
+        $scenario = $this->scenario($sourceType, $customer);
+        $sourceAdmin = $this->member($customer, [...$scenario['edit'], CustomerPermissionCatalog::WIKI_VIEW, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE], $scenario['areas']);
+
+        $this->assertFalse($this->actingAs($sourceAdmin)->get($scenario['show'])->viewData('page')['props']['knowledge_handoff']['can_create']);
+        $this->actingAs($sourceAdmin)->post($scenario['url'], $this->payload())->assertForbidden();
+
+        $this->assertNothingHandedOver($customer);
+    }
+
+    /** The service refuses on its own, so no other entry point hands knowledge over without the rule. */
+    public function test_the_service_refuses_without_the_handoff_permission(): void
+    {
+        $customer = $this->customer();
+        $scenario = $this->scenario('improvement_case', $customer);
+        $moduleOnly = $this->member($customer, [...$scenario['edit'], CustomerPermissionCatalog::WIKI_VIEW], $scenario['areas']);
+        $handoff = app(WikiKnowledgeHandoffService::class);
+
+        try {
+            $handoff->handOff($moduleOnly, 'improvement_case', $scenario['record'], 'Læring', [], 'Dette bør andre vite.');
+            $this->fail('handOff() must refuse a user without wiki.knowledge.handoff');
+        } catch (AuthorizationException) {
+        }
+
+        try {
+            $handoff->deposit((int) $customer->id, $moduleOnly, 'quality', 'quality_item', 1, 'Læring', 'Tekst.');
+            $this->fail('deposit() must refuse a user without wiki.knowledge.handoff');
+        } catch (AuthorizationException) {
+        }
+
+        $this->assertNothingHandedOver($customer);
+    }
+
+    /**
+     * Knowledge handoff is not human-only — it proposes, a person reviews what the Wiki makes of it —
+     * so an integration may hand over. It never becomes the source's document owner: that is a
+     * person's responsibility (docs/external-api-architecture.md §4.3).
+     */
+    public function test_an_integration_hands_over_but_never_owns_the_source(): void
+    {
+        $customer = $this->customer();
+        $integration = $this->member($customer, [CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF]);
+        $integration->forceFill(['role' => User::ROLE_INTEGRATION])->save();
+
+        $result = app(WikiKnowledgeHandoffService::class)->deposit(
+            (int) $customer->id, $integration->fresh(), 'quality', 'quality_item', 1, 'Maskinforslag', 'Et forslag fra en integrasjon.',
+        );
+
+        $this->assertNull($result['document']->owner_user_id, 'an integration is never a document owner');
+        $this->assertSame((int) $integration->id, (int) $result['document']->uploaded_by_user_id);
+        $this->assertSame(0, EnterpriseWikiPage::query()->where('customer_id', $customer->id)->count(), 'nothing is published');
     }
 
     #[DataProvider('sources')]
@@ -160,7 +222,7 @@ class WikiKnowledgeHandoffTest extends TestCase
         $other = $this->customer();
         $foreign = $this->scenario($sourceType, $other);
         $own = $this->scenario($sourceType, $customer);
-        $user = $this->member($customer, [...$own['edit'], CustomerPermissionCatalog::WIKI_SOURCE_MANAGE], $own['areas']);
+        $user = $this->member($customer, [...$own['edit'], CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF], $own['areas']);
 
         $this->actingAs($user)->post($foreign['url'], $this->payload())->assertNotFound();
 
@@ -172,7 +234,7 @@ class WikiKnowledgeHandoffTest extends TestCase
     {
         $customer = $this->customer();
         $scenario = $this->scenario('improvement_case', $customer);
-        $user = $this->member($customer, [...$scenario['edit'], CustomerPermissionCatalog::WIKI_SOURCE_MANAGE], $scenario['areas']);
+        $user = $this->member($customer, [...$scenario['edit'], CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF], $scenario['areas']);
         $this->actingAs($user)->post($scenario['url'], $this->payload())->assertSessionHasNoErrors();
         $document = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->sole();
 
@@ -197,7 +259,7 @@ class WikiKnowledgeHandoffTest extends TestCase
         // A plan that includes AI, so the call reaches the provider and is recorded.
         $customer->forceFill(['subscription_plan' => Customer::PLAN_PRO, 'included_ai_credits' => 10])->save();
         $scenario = $this->scenario($sourceType, $customer);
-        $user = $this->member($customer, [...$scenario['edit'], CustomerPermissionCatalog::WIKI_SOURCE_MANAGE], $scenario['areas']);
+        $user = $this->member($customer, [...$scenario['edit'], CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF], $scenario['areas']);
         $this->actingAs($user)->post($scenario['url'], $this->payload())->assertSessionHasNoErrors();
         $run = EnterpriseWikiIngestRun::query()->where('customer_id', $customer->id)->sole();
         auth()->logout();

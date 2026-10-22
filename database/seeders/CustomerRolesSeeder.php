@@ -70,6 +70,7 @@ class CustomerRolesSeeder extends Seeder
                 'wiki.approve',
                 'wiki.delete',
                 'wiki.source.manage',
+                'wiki.knowledge.handoff',
             ],
         ],
         [
@@ -95,6 +96,7 @@ class CustomerRolesSeeder extends Seeder
             'permissions' => [
                 'wiki.view',
                 'wiki.source.manage',
+                'wiki.knowledge.handoff',
             ],
         ],
         [

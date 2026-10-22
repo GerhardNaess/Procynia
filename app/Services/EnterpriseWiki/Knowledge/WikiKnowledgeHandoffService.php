@@ -17,6 +17,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerPermissionCatalog;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -42,8 +43,11 @@ use InvalidArgumentException;
  * PROVENANCE. One EnterpriseWikiDocumentOrigin row per (document, source record). Read by the
  * source module and by AI usage attribution; never shown by a Wiki screen.
  *
- * PERMISSIONS. The module's own write permission on the record AND wiki.source.manage AND the
- * customer's Wiki module. Neither side implies the other.
+ * PERMISSIONS. The module's own write permission on the record AND wiki.knowledge.handoff AND the
+ * customer's Wiki module. Neither side implies the other. Handing over is not administering the
+ * Wiki's sources (wiki.source.manage), and it decides nothing: what the Wiki makes of the source is
+ * reviewed and published by a person. Checked here as well as in the controllers, so no other entry
+ * point hands knowledge over without the same rule.
  */
 class WikiKnowledgeHandoffService
 {
@@ -79,7 +83,12 @@ class WikiKnowledgeHandoffService
         return $customer instanceof Customer
             && (int) $record->getAttribute('customer_id') === (int) $customer->id
             && $source->canHandOff($user, $record)
-            && $this->permissions->has($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE)
+            && $this->mayDeposit($user, $customer);
+    }
+
+    private function mayDeposit(User $user, Customer $customer): bool
+    {
+        return $this->permissions->has($user, CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF)
             && $this->modules->hasModule($customer, 'wiki');
     }
 
@@ -129,6 +138,10 @@ class WikiKnowledgeHandoffService
     {
         $source = $this->source($sourceType);
 
+        if (! $this->canHandOff($actor, $source, $record)) {
+            throw new AuthorizationException('This record cannot be handed over to the Wiki by this user.');
+        }
+
         return $this->deposit(
             customerId: (int) $record->getAttribute('customer_id'),
             actor: $actor,
@@ -163,6 +176,13 @@ class WikiKnowledgeHandoffService
     ): array {
         if ((int) $actor->customer_id !== $customerId) {
             throw new InvalidArgumentException('A Wiki knowledge handoff must be made by a user of the source record\'s customer.');
+        }
+
+        // The Wiki half of the permission, for every caller — the source module checks its own.
+        $customer = Customer::query()->find($customerId);
+
+        if (! $customer instanceof Customer || ! $this->mayDeposit($actor, $customer)) {
+            throw new AuthorizationException('This user may not hand knowledge over to the Wiki.');
         }
 
         $title = trim($title);

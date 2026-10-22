@@ -22,8 +22,8 @@ use Tests\TestCase;
 /**
  * Enterprise Wiki, gated by the customer's own roles.
  *
- * Six permissions — wiki.view, wiki.edit, wiki.review, wiki.approve, wiki.delete and
- * wiki.source.manage — layered on top of the Wiki's existing authority model rather than replacing
+ * Seven permissions — wiki.view, wiki.edit, wiki.review, wiki.approve, wiki.delete,
+ * wiki.source.manage and wiki.knowledge.handoff — layered on top of the Wiki's existing authority model rather than replacing
  * any of it. What these tests defend:
  *
  *  - Each permission is enforced on its own and grants exactly what it names. wiki.edit is not
@@ -435,7 +435,18 @@ class WikiPermissionTest extends TestCase
             $this->props($user, '/app/quality/items/'.$process->id)['permissions']['can_create_wiki_articles'],
         );
 
+        // Administering the Wiki's sources is not handing knowledge over: the two are separate
+        // rights (docs/external-api-phase-0-plan.md §4.2).
         $this->grant($customer, $user, [CustomerPermissionCatalog::WIKI_SOURCE_MANAGE]);
+
+        $this->assertFalse(
+            $this->props($user, '/app/quality/items/'.$process->id)['permissions']['can_create_wiki_articles'],
+        );
+        $this->actingAs($user)
+            ->post('/app/quality/items/'.$process->id.'/activities/articles', $payload)
+            ->assertForbidden();
+
+        $this->grant($customer, $user, [CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF]);
 
         $this->assertTrue(
             $this->props($user, '/app/quality/items/'.$process->id)['permissions']['can_create_wiki_articles'],

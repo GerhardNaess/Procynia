@@ -130,7 +130,7 @@ class ManagementReviewE2EFixture
         $manager = User::query()->where('email', $people['email'])->sole();
         $customer = $manager->customer;
         $customer->forceFill(['ai_access_status' => Customer::AI_ACCESS_SUSPENDED])->save();
-        self::role($customer, self::PREFIX.' '.strtoupper($suffix).' Wiki', [P::WIKI_VIEW, P::WIKI_SOURCE_MANAGE], $manager);
+        self::role($customer, self::PREFIX.' '.strtoupper($suffix).' Wiki', [P::WIKI_VIEW, P::WIKI_KNOWLEDGE_HANDOFF], $manager);
 
         $conclusion = 'Styringssystemet er egnet, men avvik må lukkes raskere.';
         $participant = 'Deltaker '.strtoupper($suffix);

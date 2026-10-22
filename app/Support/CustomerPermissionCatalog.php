@@ -52,6 +52,15 @@ final class CustomerPermissionCatalog
 
     public const WIKI_SOURCE_MANAGE = 'wiki.source.manage';
 
+    /**
+     * Handing knowledge over to the Wiki from another module («Lag kunnskapsartikkel»): the record
+     * becomes a source document that goes through the ordinary run and a person's review. Kept
+     * apart from wiki.source.manage (deleting sources, changing owners, managing runs) so a role —
+     * or an integration — can propose knowledge without administering the Wiki's sources.
+     * Not human-only: it decides nothing.
+     */
+    public const WIKI_KNOWLEDGE_HANDOFF = 'wiki.knowledge.handoff';
+
     /*
      * Risiko. Unlike the other domains these say what a role may do, never where: a risk is only
      * reached through a fagområde the same role reaches. See RiskAccessService.
@@ -200,6 +209,7 @@ final class CustomerPermissionCatalog
                 self::WIKI_APPROVE,
                 self::WIKI_DELETE,
                 self::WIKI_SOURCE_MANAGE,
+                self::WIKI_KNOWLEDGE_HANDOFF,
             ],
             self::DOMAIN_RISK => [
                 self::RISK_VIEW,

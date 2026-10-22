@@ -86,6 +86,7 @@ class A11yWikiE2EFixture
                 CustomerPermissionCatalog::WIKI_APPROVE,
                 CustomerPermissionCatalog::WIKI_DELETE,
                 CustomerPermissionCatalog::WIKI_SOURCE_MANAGE,
+                CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF,
             ]);
 
             $owner = self::user($customer, 'E2E Wiki-eier', self::OWNER_EMAIL, User::BID_ROLE_SYSTEM_OWNER);

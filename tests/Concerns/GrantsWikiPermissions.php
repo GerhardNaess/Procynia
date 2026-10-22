@@ -40,6 +40,7 @@ trait GrantsWikiPermissions
             CustomerPermissionCatalog::WIKI_APPROVE,
             CustomerPermissionCatalog::WIKI_DELETE,
             CustomerPermissionCatalog::WIKI_SOURCE_MANAGE,
+            CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF,
         ]);
 
         $user->customerRoles()->attach($role->id, ['customer_id' => $customerId]);

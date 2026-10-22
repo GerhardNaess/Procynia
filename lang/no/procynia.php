@@ -2952,6 +2952,7 @@ return [
                 'wiki_approve' => 'Godkjenne Wiki-sider',
                 'wiki_delete' => 'Slette Wiki-sider',
                 'wiki_source_manage' => 'Administrere kildedokumenter',
+                'wiki_knowledge_handoff' => 'Overføre kunnskap til Wiki',
                 'risk_view' => 'Se risikoer',
                 'risk_create' => 'Opprette risikoer',
                 'risk_edit' => 'Endre risikoer',

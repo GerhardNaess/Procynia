@@ -2948,6 +2948,7 @@ return [
                 'wiki_approve' => 'Approve Wiki pages',
                 'wiki_delete' => 'Delete Wiki pages',
                 'wiki_source_manage' => 'Manage source documents',
+                'wiki_knowledge_handoff' => 'Hand knowledge over to the Wiki',
                 'risk_view' => 'View risks',
                 'risk_create' => 'Create risks',
                 'risk_edit' => 'Edit risks',

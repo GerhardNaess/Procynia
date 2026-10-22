@@ -56,7 +56,8 @@ final class KnowledgeHandoffE2EFixture
                 CustomerPermissionCatalog::IMPROVEMENT_VIEW,
                 CustomerPermissionCatalog::IMPROVEMENT_EDIT,
                 CustomerPermissionCatalog::WIKI_VIEW,
-                CustomerPermissionCatalog::WIKI_SOURCE_MANAGE,
+                // Handing over, not administering sources: the two are separate rights.
+                CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF,
             ]);
             $role->syncBusinessAreas(false, [$area->id]);
             $user->customerRoles()->attach($role->id, ['customer_id' => $customer->id]);

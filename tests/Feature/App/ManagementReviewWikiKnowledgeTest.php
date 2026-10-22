@@ -72,7 +72,7 @@ class ManagementReviewWikiKnowledgeTest extends TestCase
     public function test_a_draft_review_cannot_be_handed_over(): void
     {
         ['customer' => $customer] = $this->mrContext();
-        $manager = $this->mrManager($customer, [CustomerPermissionCatalog::WIKI_VIEW, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE]);
+        $manager = $this->mrManager($customer, [CustomerPermissionCatalog::WIKI_VIEW, CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF]);
         $review = $this->mrReview($manager);
 
         $this->assertNull($this->actingAs($manager)->get("/app/management-reviews/{$review->id}")->assertOk()->viewData('page')['props']['knowledge_handoff']);
@@ -85,7 +85,7 @@ class ManagementReviewWikiKnowledgeTest extends TestCase
     public function test_a_module_section_is_offered_only_to_someone_who_may_read_its_basis(): void
     {
         ['customer' => $customer, 'review' => $review] = $this->finalizedReview();
-        $wiki = [CustomerPermissionCatalog::WIKI_VIEW, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE];
+        $wiki = [CustomerPermissionCatalog::WIKI_VIEW, CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF];
 
         $withoutCases = $this->mrManager($customer, $wiki);
         $draft = $this->draftFor($withoutCases, $review);
@@ -106,7 +106,7 @@ class ManagementReviewWikiKnowledgeTest extends TestCase
     public function test_only_the_managements_own_dated_word_goes_over(): void
     {
         ['customer' => $customer, 'review' => $review, 'finalizer' => $finalizer] = $this->finalizedReview();
-        $user = $this->mrManager($customer, [CustomerPermissionCatalog::WIKI_VIEW, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE, CustomerPermissionCatalog::IMPROVEMENT_VIEW], true);
+        $user = $this->mrManager($customer, [CustomerPermissionCatalog::WIKI_VIEW, CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF, CustomerPermissionCatalog::IMPROVEMENT_VIEW], true);
 
         // The basis really did hold the register entry — leaving it out below is a choice, not luck.
         $this->assertStringContainsString(self::CASE_TITLE, json_encode(
@@ -169,7 +169,7 @@ class ManagementReviewWikiKnowledgeTest extends TestCase
     public function test_the_dating_goes_over_even_when_no_section_is_chosen(): void
     {
         ['customer' => $customer, 'review' => $review] = $this->finalizedReview();
-        $user = $this->mrManager($customer, [CustomerPermissionCatalog::WIKI_VIEW, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE]);
+        $user = $this->mrManager($customer, [CustomerPermissionCatalog::WIKI_VIEW, CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF]);
 
         $draft = $this->draftFor($user, $review);
         $this->assertSame('context', $draft['context']['key']);
@@ -188,7 +188,7 @@ class ManagementReviewWikiKnowledgeTest extends TestCase
     public function test_handing_the_same_choice_over_twice_is_one_source_with_one_origin(): void
     {
         ['customer' => $customer, 'review' => $review] = $this->finalizedReview();
-        $user = $this->mrManager($customer, [CustomerPermissionCatalog::WIKI_VIEW, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE]);
+        $user = $this->mrManager($customer, [CustomerPermissionCatalog::WIKI_VIEW, CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF]);
 
         $this->actingAs($user)->post("/app/management-reviews/{$review->id}/knowledge-handoff", $this->payload(['conclusion']))->assertSessionHasNoErrors();
         $this->actingAs($user)->post("/app/management-reviews/{$review->id}/knowledge-handoff", $this->payload(['conclusion']))->assertSessionHasNoErrors();

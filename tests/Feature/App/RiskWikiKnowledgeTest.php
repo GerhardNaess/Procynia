@@ -38,7 +38,7 @@ use Tests\TestCase;
  *    ordinary document run. Nothing is published by it.
  *  - Nothing of the risk reaches the Wiki unless the person opts that section in; the provenance
  *    row (enterprise_wiki_document_origins) keeps ids only.
- *  - risk.edit in the area AND wiki.source.manage; neither alone is enough, and no Wiki permission
+ *  - risk.edit in the area AND wiki.knowledge.handoff; neither alone is enough, and no Wiki permission
  *    ever makes a hidden or foreign risk reachable.
  *  - The Wiki never reveals which risk a page came out of.
  *  - Deleting either side removes only the provenance.
@@ -55,7 +55,7 @@ class RiskWikiKnowledgeTest extends TestCase
 
     private const WIKI_HANDOFF = [
         CustomerPermissionCatalog::WIKI_VIEW,
-        CustomerPermissionCatalog::WIKI_SOURCE_MANAGE,
+        CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF,
     ];
 
     private const SECRET_TITLE = 'Uoppdaget sårbarhet i lønnssystemet';

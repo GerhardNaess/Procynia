@@ -2379,7 +2379,7 @@ class QualityController extends Controller
      *
      * Handing an activity's knowledge to Wiki creates an Enterprise Wiki source document — see
      * QualityActivityArticleService — so it is a Wiki source action performed from Kvalitet, and
-     * it asks for both sides: quality.create for the Kvalitet half, wiki.source.manage for the
+     * it asks for both sides: quality.create for the Kvalitet half, wiki.knowledge.handoff for the
      * Wiki half. Neither on its own is enough, because neither module alone is being changed.
      *
      * Nothing else in Kvalitet is affected. Attaching an existing Wiki page, uploading a document
@@ -2387,7 +2387,7 @@ class QualityController extends Controller
      */
     private function authorizeActivityArticleHandover(?User $user): void
     {
-        abort_unless($this->may($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE), 403);
+        abort_unless($this->may($user, CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF), 403);
     }
 
     /**
@@ -2409,7 +2409,7 @@ class QualityController extends Controller
             // The cross-module one: what the activity article panel may offer. Both halves, so a
             // button it shows is a request authorizeActivityArticleHandover() accepts.
             'can_create_wiki_articles' => $this->may($user, CustomerPermissionCatalog::QUALITY_CREATE)
-                && $this->may($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE),
+                && $this->may($user, CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF),
         ];
     }
 
