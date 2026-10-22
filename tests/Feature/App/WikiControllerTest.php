@@ -2804,6 +2804,13 @@ class WikiControllerTest extends TestCase
         ]);
     }
 
+    /**
+     * A run as the pipeline leaves it: started once it has left the queue, finished once it reached a
+     * terminal status. A "completed" run with neither is one that never ran — the Kjøringer list
+     * leaves exactly that out on purpose (WikiRunDismissalTest::
+     * test_a_run_recorded_as_completed_that_never_ran_is_left_out_of_the_list), so a fixture without
+     * the timestamps would test a state the pipeline never produces.
+     */
     private function createIngestRun(Customer $customer, EnterpriseWikiDocument $document, string $status): EnterpriseWikiIngestRun
     {
         return EnterpriseWikiIngestRun::query()->create([
@@ -2814,6 +2821,8 @@ class WikiControllerTest extends TestCase
             'source_hash' => hash('sha256', "enterprise_wiki_document:{$document->id}"),
             'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
             'status' => $status,
+            'started_at' => $status === EnterpriseWikiIngestRun::STATUS_QUEUED ? null : now()->subMinutes(5),
+            'finished_at' => in_array($status, EnterpriseWikiIngestRun::TERMINAL_STATUSES, true) ? now() : null,
         ]);
     }
 
