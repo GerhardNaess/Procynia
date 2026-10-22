@@ -100,7 +100,7 @@ class EnterpriseWikiPageReviewServiceAuthorityTest extends TestCase
         $service = app(EnterpriseWikiPageReviewService::class);
 
         return [
-            'submit' => fn () => $service->submit($actor, $case['page'], $case['reviewer']),
+            'submit' => fn () => $service->submit($actor, $case['page'], $case['version'], $case['reviewer']),
             'reopen' => fn () => $service->reopenRejected($actor, $case['page']),
             'withdraw' => fn () => $service->withdraw($actor, $case['page']),
             'approve' => fn () => $service->approve($actor, $case['page']),

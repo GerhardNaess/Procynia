@@ -3058,7 +3058,7 @@ class WikiController extends Controller
         }
 
         // The decision itself, re-checked under the page lock: EnterpriseWikiPageReviewService.
-        $this->pageReviewService->submit($user, $page, $reviewer);
+        $this->pageReviewService->submit($user, $page, $version, $reviewer);
 
         return redirect()->route('app.wiki.show', $page->slug)
             ->with('success', "Siden er sendt til gjennomgang hos {$reviewer->name}.");

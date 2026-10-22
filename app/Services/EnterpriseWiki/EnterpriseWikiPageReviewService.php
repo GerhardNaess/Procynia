@@ -55,21 +55,20 @@ class EnterpriseWikiPageReviewService
     /**
      * Hand the working version to a named reviewer (draft → pending_review).
      *
+     * $version is the version the person is handing over — read by the caller BEFORE anything else,
+     * because a version written by an automated writer in between must not be the one that gets
+     * handed over. Under the page lock it has to still be the current one, or the handover is refused
+     * (409) rather than given a version nobody looked at.
+     *
      * Refusing rather than silently reassigning: an assignment already in flight belongs to whoever
      * is acting on it.
      */
-    public function submit(User $actor, EnterpriseWikiPage $page, User $reviewer): EnterpriseWikiPageVersion
+    public function submit(User $actor, EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, User $reviewer): EnterpriseWikiPageVersion
     {
         $actor = $this->guard->assert($actor, HumanDecision::WIKI_PAGE_SUBMIT);
         $this->assertMayHandOver($actor, $page);
 
-        if ($page->status !== EnterpriseWikiPage::STATUS_DRAFT) {
-            abort(422);
-        }
-
-        $version = $page->currentVersion()->first();
-
-        if ($version === null) {
+        if ($page->status !== EnterpriseWikiPage::STATUS_DRAFT || (int) $version->enterprise_wiki_page_id !== (int) $page->id) {
             abort(422);
         }
 
