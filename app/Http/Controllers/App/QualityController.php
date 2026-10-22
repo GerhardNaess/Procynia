@@ -22,6 +22,7 @@ use App\Services\Ai\Quality\ProcessActivityArticleAiClient;
 use App\Services\Ai\Quality\ProcessFlowChangeAiClient;
 use App\Services\Ai\Quality\ProcessFlowInterpretationAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentUploadService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageDeletionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Services\Quality\Exceptions\ProcessFlowInterpretationException;
@@ -113,6 +114,7 @@ class QualityController extends Controller
         private readonly CustomerPermissionService $permissions,
         private readonly QualityToolService $tools,
         private readonly QualityAttentionService $attention,
+        private readonly EnterpriseWikiPageDeletionService $wikiPageDeletion,
     ) {}
 
     public function index(Request $request): Response
@@ -405,14 +407,12 @@ class QualityController extends Controller
             : collect();
 
         // Deleting a Wiki page is Wiki's authority, not Kvalitet's: managing the kvalitetssystem
-        // does not carry the right to remove a page from the Wiki. Checked page by page with the
-        // Wiki's own rule, and all-or-nothing — a partial delete would leave the user believing
-        // the process's knowledge was gone when some of it is still there.
-        $undeletable = $producedPages->first(
-            fn (EnterpriseWikiPage $page): bool => ! $user->canDeleteEnterpriseWikiPage($page),
-        );
-
-        if ($undeletable instanceof EnterpriseWikiPage) {
+        // does not carry the right to remove a page from the Wiki. The Wiki's own rule — wiki.delete
+        // and every page the user's to delete (finding F3a) — and all-or-nothing, since a partial
+        // delete would leave the user believing the process's knowledge was gone when some of it is
+        // still there. EnterpriseWikiPageDeletionService applies it again on its own.
+        if ($producedPages->isNotEmpty()
+            && ! $this->wikiPageDeletion->mayDelete($user, (int) $customerId, $producedPages)) {
             return $backToIndex()->with('error', __('procynia.quality.errors.wiki_pages_not_deletable'));
         }
 
@@ -1662,7 +1662,7 @@ class QualityController extends Controller
                     'produced_wiki_page_count' => $pages->count(),
                     'can_delete_produced_wiki_pages' => $pages->isNotEmpty()
                         && $user instanceof User
-                        && $pages->every(fn (EnterpriseWikiPage $page): bool => $user->canDeleteEnterpriseWikiPage($page)),
+                        && $this->wikiPageDeletion->mayDelete($user, (int) $item->customer_id, $pages),
                     'url' => route('app.quality.items.show', ['item' => $item->id]),
                 ];
             })

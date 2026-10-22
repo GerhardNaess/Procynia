@@ -22,8 +22,10 @@ use App\Models\QualityProcessBlueprint;
 use App\Models\QualityProcessIo;
 use App\Models\QualityProcessStep;
 use App\Models\User;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageDeletionService;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Support\CustomerPermissionCatalog;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Http\UploadedFile;
@@ -930,15 +932,14 @@ class QualityItemTest extends TestCase
     }
 
     /**
-     * Characterisation of a known gap — docs/external-api-phase-0-plan.md, finding F3.
-     *
-     * WikiController::destroy() asks for wiki.delete first and page ownership after: "owning a page
-     * is no longer enough on its own". Deleting a process with delete_wiki_pages checks only the
-     * ownership half, so a page owner whose roles grant quality.delete but not wiki.delete removes
-     * through Kvalitet a page the Wiki itself refuses to let them remove. When the check is added
-     * this test fails, and its last assertions should flip to "refused, nothing deleted".
+     * Finding F3a (docs/external-api-phase-0-plan.md §2). WikiController::destroy() asks for
+     * wiki.delete first and page ownership after: "owning a page is no longer enough on its own".
+     * Deleting a process with delete_wiki_pages used to check only the ownership half, so a page
+     * owner with quality.delete but not wiki.delete removed through Kvalitet a page the Wiki itself
+     * refuses to let them remove. Now the same rule holds on both ways in, and in the deletion
+     * service behind them.
      */
-    public function test_a_page_owner_without_wiki_delete_removes_produced_pages_through_quality(): void
+    public function test_a_page_owner_without_wiki_delete_cannot_remove_produced_pages_through_quality(): void
     {
         Queue::fake();
 
@@ -985,14 +986,41 @@ class QualityItemTest extends TestCase
         $this->actingAs($pageOwner)->delete("/app/wiki/{$produced->slug}")->assertForbidden();
         $this->assertNotNull(EnterpriseWikiPage::query()->find($produced->id));
 
-        // Kvalitet does not ask for wiki.delete, and the page is gone.
+        // Kvalitet does not offer it, and refuses it whole: nothing is deleted.
+        $row = collect($this->actingAs($pageOwner)->get('/app/quality?tab=processes')->viewData('page')['props']['items'])
+            ->firstWhere('id', $process->id);
+        $this->assertFalse($row['can_delete_produced_wiki_pages']);
+
         $this->actingAs($pageOwner)
+            ->delete("/app/quality/items/{$process->id}?delete_wiki_pages=1")
+            ->assertRedirect('/app/quality')
+            ->assertSessionHas('error');
+
+        $this->assertNotNull(QualityItem::query()->find($process->id));
+        $this->assertNotNull(EnterpriseWikiPage::query()->find($produced->id));
+
+        // The deletion service refuses on its own, for any caller.
+        try {
+            app(EnterpriseWikiPageDeletionService::class)->deletePages((int) $customer->id, collect([$produced->id]), $pageOwner->fresh());
+            $this->fail('the deletion service must refuse a user without wiki.delete');
+        } catch (AuthorizationException) {
+        }
+        $this->assertNotNull(EnterpriseWikiPage::query()->find($produced->id));
+
+        // With wiki.delete as well, the same owner takes the pages with the process.
+        $role->syncPermissions([...$role->permissionKeys(), CustomerPermissionCatalog::WIKI_DELETE]);
+
+        $row = collect($this->actingAs($pageOwner->fresh())->get('/app/quality?tab=processes')->viewData('page')['props']['items'])
+            ->firstWhere('id', $process->id);
+        $this->assertTrue($row['can_delete_produced_wiki_pages']);
+
+        $this->actingAs($pageOwner->fresh())
             ->delete("/app/quality/items/{$process->id}?delete_wiki_pages=1")
             ->assertRedirect('/app/quality')
             ->assertSessionHas('success');
 
         $this->assertNull(QualityItem::query()->find($process->id));
-        $this->assertNull(EnterpriseWikiPage::query()->find($produced->id), 'F3: deleted without wiki.delete');
+        $this->assertNull(EnterpriseWikiPage::query()->find($produced->id));
     }
 
     /**

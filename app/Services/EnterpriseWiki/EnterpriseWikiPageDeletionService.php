@@ -7,6 +7,11 @@ use App\Jobs\EnterpriseWiki\ProjectEnterpriseWikiPageToGraph;
 use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\User;
+use App\Services\Permissions\CustomerPermissionService;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -52,11 +57,37 @@ class EnterpriseWikiPageDeletionService
     public function __construct(
         private readonly EnterpriseWikiDocumentWithdrawalService $withdrawalService,
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $stalenessService,
+        private readonly HumanDecisionGuard $guard,
+        private readonly CustomerPermissionService $permissions,
     ) {}
 
     /**
      * @return array{pages_deleted: int, incoming_links_dematerialized: int, pages_rewritten: int, findings_deleted: int, stale_wiki_answers_marked: int}
      */
+    /**
+     * May this person delete every one of these pages? wiki.delete, the same customer, and each page
+     * theirs to delete (User::canDeleteEnterpriseWikiPage(): System Owner, or the page owner).
+     * Holding the permission does not make somebody else's page yours; owning a page is not enough
+     * without the permission.
+     *
+     * @param  iterable<EnterpriseWikiPage>  $pages
+     */
+    public function mayDelete(User $actor, int $customerId, iterable $pages): bool
+    {
+        if ((int) $actor->customer_id !== $customerId
+            || ! $this->permissions->has($actor, CustomerPermissionCatalog::WIKI_DELETE)) {
+            return false;
+        }
+
+        foreach ($pages as $page) {
+            if (! $actor->canDeleteEnterpriseWikiPage($page)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public function deletePage(EnterpriseWikiPage $page, User $actor): array
     {
         return $this->deletePages((int) $page->customer_id, collect([(int) $page->id]), $actor);
@@ -98,6 +129,15 @@ class EnterpriseWikiPageDeletionService
 
         if ($pages->isEmpty()) {
             return $empty;
+        }
+
+        // The Wiki's own rule, whoever asks — the Wiki page itself or a Quality process taking the
+        // pages it produced with it (finding F3a): wiki.delete first, and every page has to be the
+        // actor's to delete. All or nothing, before anything is touched.
+        $actor = $this->guard->assert($actor, HumanDecision::WIKI_PAGE_DELETE);
+
+        if (! $this->mayDelete($actor, $customerId, $pages)) {
+            throw new AuthorizationException('This user may not delete these Wiki pages.');
         }
 
         $ids = $pages->pluck('id')->map(static fn (mixed $value): int => (int) $value)->values();
