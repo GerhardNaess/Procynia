@@ -5,7 +5,8 @@
 **Fremdrift:**
 - Ferdig: steg 1 (`3a0d009d`), 3a (`7962a744`), 3b (`dcb7d823`) og 3c (`5eac50a4`), samt E2E (`a11y-wiki.spec.js`).
 - F1a, F1b og O6 er rettet.
-- Neste: steg 2 og deretter steg 4 (F3a), etter gjennomgang.
+- F1c er rettet (`2af1ba86`). F1d er bekreftet og venter på beslutning (Å7).
+- Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1).
 **Dato:** 2026-10-22
 **Gren:** `feature/external-api-foundation`
 **Bygger på:** [`external-api-architecture.md`](external-api-architecture.md) §4.3, §7 og §14, [`AGENTS.md`](../AGENTS.md), [`enterprise-wiki-architecture.md`](enterprise-wiki-architecture.md) og [`enterprise-wiki-approval-model.md`](enterprise-wiki-approval-model.md).
@@ -63,7 +64,8 @@ Hvert funn er bekreftet eller avkreftet med en isolert test. Testene beskriver d
 | O4 | `WikiSourceController::ingest()` sjekker ikke eierskap og lagrer ikke hvem som startet kjøringen. `cancelRun` lagrer aktøren bare som fritekst i `error_message`. | Sporbarhet. `started_by_user_id`/`cancelled_by_user_id` foreslås i §4.8 (valgfritt). |
 | O5 | `approve()` og `reject()` bruker ulike myndighetsregler. System Owner kan sende tilbake, men ikke publisere en versjon de ikke er tildelt. | Bevisst (`User::canFinalApproveEnterpriseWikiVersion`, docblokk). Skal bevares uendret. |
 | O6 *(rettet i 3c, `5eac50a4`)* | `WikiController::mayActOnCurrentVersion()` returnerer `true` for en versjon uten kontrollør. Dermed kan *enhver* Wiki-godkjenner sende den tilbake. Dette motsier `User::canReviewEnterpriseWikiVersion()` («a missing reviewer is broken state, not a licence»). | Strammes inn i steg 3. Bare tildelt kontrollør eller System Owner kan returnere. Sider som allerede står i denne tilstanden, frigjøres med «Trekk tilbake» (B5). |
-| F1c | Påstandsbeslutninger («Rediger og godkjenn», «Fjern teksten», beste praksis) endrer teksten i den gjeldende versjonen *direkte*, uten ny versjon, også mens siden ligger til godkjenning. Tildelingen beholdes, så kontrolløren vurderer det som står ved godkjenning. Dette er funnbehandling som hører til gjennomgangen, ikke ordinær redigering. | Ikke endret i steg 3. Tas med i steg 7 (`EnterpriseWikiClaimDecisionService`). Spørsmålet om hvem som kan endre tekst under godkjenning, legges fram før steg 7 (§9, Å6). |
+| F1c *(rettet, `2af1ba86`)* | Påstandsbeslutninger («Rediger og godkjenn», «Fjern teksten», beste praksis) endrer teksten i den gjeldende versjonen *direkte*, uten ny versjon, også mens siden ligger til godkjenning. Tildelingen beholdes, så kontrolløren vurderer det som står ved godkjenning. Dette er funnbehandling som hører til gjennomgangen, ikke ordinær redigering. | **Besluttet 2026-10-22:** under godkjenning tar bare tildelt kontrollør tekstendrende påstandsbeslutninger. Kvalitetssikrer, sideeier, innsender og System Owner beholder beslutningene som ikke endrer teksten. Endringen spores (aktør, tidspunkt, gammel og ny tekst), vises for sideeier, og havner i versjonen kontrolløren godkjenner. Kontrolløren må fortsatt ha rettigheten til å behandle påstander (QA). |
+| **F1d** | **Bekreftet 2026-10-22.** Når en side er publisert og gjeldende versjon *er* den publiserte, skriver tekstendrende påstandsbeslutninger direkte i den publiserte versjonen. Siden står fortsatt som «godkjent», og ingen har gjennomgått endringen. Dette rammer publisert innhold som svar og grounding bygger på. | Høy. Ikke rettet: rettingen endrer arbeidsflyten og krever beslutning (§9, Å7). Test: `WikiClaimTextDecisionOnPublishedVersionFindingTest`. |
 
 ---
 
@@ -413,7 +415,8 @@ Fase 0 er ferdig når alle punktene er oppfylt og har test:
 | Å3 | KPI-målinger fra integrasjoner | **Besluttet: B7** (ikke i fase 0) |
 | Å4 | Visning av lukkede risikoer | **Besluttet: B8** (uendret) |
 | Å5 | Dokumenteiers beslutning kan endres | **Besluttet: B9** (ny beslutning er en egen hendelse, aldri en overskriving) |
-| Å6 | F1c: hvem kan endre tekst via påstandsbeslutninger mens siden ligger til godkjenning? | Legges fram før steg 7. Forslag: bare tildelt kontrollør og QA, aldri innsenderen. Endringen registreres på påstanden, som i dag. |
+| Å6 | F1c: hvem kan endre tekst via påstandsbeslutninger under godkjenning | **Besluttet:** bare tildelt kontrollør (`2af1ba86`). |
+| Å7 | F1d: hva skal skje når en tekstendrende påstandsbeslutning gjelder den publiserte versjonen? | Anbefaling: beslutningen skriver en ny arbeidsversjon gjennom `EnterpriseWikiPageVersionWriter`. Den publiserte versjonen fortsetter å gjelde, og siden går til utkast via `afterManualEdit()`, som ved vanlig redigering. Alternativ: nekt tekstendringer på publisert versjon og henvis til «Rediger artikkel». |
 
 ---
 
