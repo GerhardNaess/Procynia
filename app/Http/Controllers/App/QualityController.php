@@ -399,10 +399,10 @@ class QualityController extends Controller
         $backToIndex = fn (): RedirectResponse => redirect()
             ->route('app.quality.index', $tab !== null ? ['tab' => $tab] : []);
 
-        // A process that has been approved is retired, never deleted; the service refuses it too.
+        // What is retired rather than deleted (an approved process); the service refuses it too.
         // Said here as the dialog's own error, rather than as a field error nobody would see.
-        if ($this->items->hasApprovedVersion($item)) {
-            return $backToIndex()->with('error', __('procynia.quality.errors.approved_process_not_deletable'));
+        if (($blocker = $this->items->deletionBlocker($item)) !== null) {
+            return $backToIndex()->with('error', __($blocker));
         }
 
         // The knowledge a process produced outlives the process by default. Removing it too is a

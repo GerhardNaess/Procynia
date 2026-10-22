@@ -198,7 +198,10 @@ class EnterpriseWikiPageDeletionService
             ProjectEnterpriseWikiPageToGraph::dispatch($pageId)->afterCommit();
         }
 
-        Log::info('[PROCYNIA][WIKI_PAGE] Deleted Wiki pages.', [
+        // After commit too: a caller may run this inside its own transaction (Kvalitet deleting a
+        // process with the pages it produced, finding A21), and a rollback there means nothing was
+        // deleted. Outside any transaction this runs at once.
+        DB::afterCommit(static fn () => Log::info('[PROCYNIA][WIKI_PAGE] Deleted Wiki pages.', [
             'customer_id' => $customerId,
             'actor_user_id' => $actor->id,
             'page_ids' => $ids->all(),
@@ -206,7 +209,7 @@ class EnterpriseWikiPageDeletionService
             'pages_rewritten' => $pagesRewritten,
             'findings_deleted' => $findingsDeleted,
             'stale_wiki_answers_marked' => $staleAnswers['stale_wiki_answer_count'],
-        ]);
+        ]));
 
         return [
             'pages_deleted' => $ids->count(),

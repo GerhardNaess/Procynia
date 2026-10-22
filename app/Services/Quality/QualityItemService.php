@@ -214,28 +214,34 @@ class QualityItemService
     /**
      * Deleting a styrende dokument, and — only when asked — the Wiki knowledge it produced.
      *
-     * $deleteProducedWikiPagesAs is the user on whose behalf the Wiki deletion is performed, not a
-     * flag: Wiki will not delete a page without an actor, and a caller that has not decided who is
-     * asking has not decided to delete anything. Null is the default and means the knowledge stays,
-     * which is what it has always done.
+     * The Wiki pages go through EnterpriseWikiPageDeletionService — the one place a Wiki page is
+     * deleted, with Wiki's own permission check, withdrawal, cascades and fail-closed assertion.
+     * Quality implements none of that; it hands Wiki the pages its provenance rows identify, which
+     * is why they are read before the item (and those rows) go.
      *
-     * The Wiki pages go FIRST, through EnterpriseWikiPageDeletionService — the one place a Wiki
-     * page is deleted — because the provenance rows that identify them cascade away with the item.
-     * Quality implements none of that cleanup: it hands Wiki a set of pages and lets Wiki's own
-     * withdrawal, cascades and fail-closed assertion decide what happens. If Wiki refuses, the
-     * exception propagates and the process is still here, which is the right half to keep.
+     * ONE TRANSACTION, both halves (finding A21). The pages and the item are deleted together or not
+     * at all: Wiki refusing, the item's own refusal in the database, or anything else failing in
+     * between rolls back the pages too, so a process can never be left standing without the
+     * knowledge it was asked to take along — nor the knowledge gone while the process stays. The
+     * graph is told only after commit (both services dispatch afterCommit).
+     *
+     * Concurrency: the item row is locked first (FOR UPDATE) and every check that decides the
+     * outcome is read again under the lock. An approval of the same process in flight inserts a
+     * revision, which needs a key-share lock on the item, so it waits for this to finish and then
+     * fails on the missing process; an approval that committed first is seen by the re-check and
+     * refuses the delete. The same holds for a new article from one of the process's activities,
+     * whose provenance row references the item.
      *
      * The source documents are never touched either way. A file the virksomhet uploaded is the
      * virksomhet's, and that was true before this option existed.
      *
      * A process with an approved version is not deleted at all (phase 0 step 12): the approved
      * versions are the record of what the virksomhet decided, and a process that is no longer in
-     * use is retired («Utgått») instead. Refused before anything is touched, the Wiki pages
-     * included; the database refuses it too.
+     * use is retired («Utgått») instead.
      *
      * @return array{wiki_pages_deleted: int}
      *
-     * @throws ValidationException when the process has an approved version
+     * @throws ValidationException when the item may not be deleted (see deletionBlocker())
      */
     public function deleteItem(int $customerId, QualityItem $item, User $actor, bool $deleteProducedWikiPages = false): array
     {
@@ -244,46 +250,83 @@ class QualityItemService
         $actor = $this->guard->assert($actor, HumanDecision::QUALITY_DELETE);
         $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_DELETE, $customerId);
         $this->assertOwned($customerId, $item);
-
-        if ($this->hasApprovedVersion($item)) {
-            throw ValidationException::withMessages([
-                'item' => __('procynia.quality.errors.approved_process_not_deletable'),
-            ]);
-        }
-
-        $deleteProducedWikiPagesAs = $deleteProducedWikiPages ? $actor : null;
+        $this->assertDeletable($item);
 
         $itemId = (int) $item->id;
-        $wikiPagesDeleted = 0;
 
-        if ($deleteProducedWikiPagesAs !== null) {
-            $pageIds = $this->producedWikiPages($customerId, $item)
-                ->map(static fn (EnterpriseWikiPage $page): int => (int) $page->id);
+        [$wikiPagesDeleted, $neighbourIds] = DB::transaction(function () use ($customerId, $itemId, $actor, $deleteProducedWikiPages): array {
+            $locked = QualityItem::query()
+                ->where('customer_id', $customerId)
+                ->whereKey($itemId)
+                ->lockForUpdate()
+                ->first();
 
-            if ($pageIds->isNotEmpty()) {
-                $wikiPagesDeleted = $this->wikiPageDeletion
-                    ->deletePages($customerId, $pageIds, $deleteProducedWikiPagesAs)['pages_deleted'];
+            if ($locked === null) {
+                throw ValidationException::withMessages([
+                    'item' => __('procynia.quality.errors.item_not_found'),
+                ]);
             }
-        }
 
-        // The other end of every edge that touched this item has to be reprojected too: the graph
-        // stores edges as the outgoing set of their start node, so an incoming edge is only removed
-        // by rebuilding the node it comes from.
-        $neighbourIds = QualityItemRelation::query()
-            ->where('customer_id', $customerId)
-            ->where('to_item_id', $itemId)
-            ->pluck('from_item_id')
-            ->map(fn ($id): int => (int) $id)
-            ->all();
+            // Read again under the lock: what was true before it may not be now.
+            $this->assertDeletable($locked);
 
-        // Structure rows, relations, wiki links and document links all cascade in the database.
-        // The documents themselves are untouched — a file is the virksomhet's, not the item's.
-        DB::transaction(static fn () => $item->delete());
+            $wikiPagesDeleted = 0;
+
+            if ($deleteProducedWikiPages) {
+                $pageIds = $this->producedWikiPages($customerId, $locked)
+                    ->map(static fn (EnterpriseWikiPage $page): int => (int) $page->id);
+
+                if ($pageIds->isNotEmpty()) {
+                    $wikiPagesDeleted = $this->wikiPageDeletion
+                        ->deletePages($customerId, $pageIds, $actor)['pages_deleted'];
+                }
+            }
+
+            // The other end of every edge that touched this item has to be reprojected too: the
+            // graph stores edges as the outgoing set of their start node, so an incoming edge is
+            // only removed by rebuilding the node it comes from.
+            $neighbourIds = QualityItemRelation::query()
+                ->where('customer_id', $customerId)
+                ->where('to_item_id', $itemId)
+                ->pluck('from_item_id')
+                ->map(fn ($id): int => (int) $id)
+                ->all();
+
+            // Structure rows, relations, wiki links and document links all cascade in the database.
+            // The documents themselves are untouched — a file is the virksomhet's, not the item's.
+            $locked->delete();
+
+            return [$wikiPagesDeleted, $neighbourIds];
+        });
 
         $this->deprojectItem($customerId, $itemId);
         $this->reproject($neighbourIds);
 
         return ['wiki_pages_deleted' => $wikiPagesDeleted];
+    }
+
+    /**
+     * Why this item may not be deleted, as a translation key — or null when it may.
+     *
+     * The page asks this to decide what the row menu offers; deleteItem() asks it before anything is
+     * touched and again under the lock. The database holds the same rules with triggers.
+     */
+    public function deletionBlocker(QualityItem $item): ?string
+    {
+        if ($this->hasApprovedVersion($item)) {
+            return 'procynia.quality.errors.approved_process_not_deletable';
+        }
+
+        return null;
+    }
+
+    private function assertDeletable(QualityItem $item): void
+    {
+        $blocker = $this->deletionBlocker($item);
+
+        if ($blocker !== null) {
+            throw ValidationException::withMessages(['item' => __($blocker)]);
+        }
     }
 
     /** Whether a process has been approved at least once — and so is retired, never deleted. */
