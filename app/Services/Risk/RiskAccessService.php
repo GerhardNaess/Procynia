@@ -65,7 +65,7 @@ class RiskAccessService
      */
     public function areaIdsFor(User $user, string $permissionKey): array
     {
-        if ($user->customer_id === null || ! $this->isRiskPermission($permissionKey)) {
+        if ($user->customer_id === null || ! $this->isRiskPermission($permissionKey) || $this->withheldFromIntegration($user, $permissionKey)) {
             return [];
         }
 
@@ -79,7 +79,7 @@ class RiskAccessService
      */
     public function reachesAllAreas(User $user, string $permissionKey): bool
     {
-        if (! $this->canOpenModule($user) || ! $this->isRiskPermission($permissionKey)) {
+        if (! $this->canOpenModule($user) || ! $this->isRiskPermission($permissionKey) || $this->withheldFromIntegration($user, $permissionKey)) {
             return false;
         }
 
@@ -150,6 +150,16 @@ class RiskAccessService
     public function viewerAreaIdsByUser(int $customerId): array
     {
         return $this->grants->areaIdsByUser($customerId, CustomerPermissionCatalog::RISK_VIEW);
+    }
+
+    /**
+     * An integration identity never holds a human-only key (risk.assess, risk.accept, risk.delete),
+     * whatever its roles grant — the rule CustomerPermissionService::has() applies, applied here too,
+     * because the (permission, area) pairs are read from the roles directly (BusinessAreaGrants).
+     */
+    private function withheldFromIntegration(User $user, string $permissionKey): bool
+    {
+        return $user->isIntegration() && CustomerPermissionCatalog::isHumanOnly($permissionKey);
     }
 
     private function isRiskPermission(string $permissionKey): bool
