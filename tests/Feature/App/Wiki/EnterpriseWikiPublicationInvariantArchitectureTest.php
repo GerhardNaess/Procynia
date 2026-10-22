@@ -2,7 +2,7 @@
 
 namespace Tests\Feature\App\Wiki;
 
-use App\Http\Controllers\App\WikiController;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageReviewService;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use ReflectionMethod;
@@ -10,7 +10,9 @@ use Tests\TestCase;
 
 /**
  * Publication invariant (docs/enterprise-wiki-knowledge-integration-plan.md §3.3, criterion 1): a
- * Wiki page is published in exactly one place — the reviewer's approval in WikiController::approve().
+ * Wiki page is published in exactly one place — the reviewer's approval in
+ * EnterpriseWikiPageReviewService::approve() (moved there from WikiController::approve() in phase 0
+ * step 6, docs/external-api-phase-0-plan.md §4.4).
  * No generation, repair, relink, recovery or partial-completion path may write
  * published_version_id or move a page to approved by itself.
  */
@@ -27,7 +29,7 @@ class EnterpriseWikiPublicationInvariantArchitectureTest extends TestCase
 
     public function test_only_the_reviewers_approval_publishes_a_wiki_page(): void
     {
-        $approve = new ReflectionMethod(WikiController::class, 'approve');
+        $approve = new ReflectionMethod(EnterpriseWikiPageReviewService::class, 'approve');
         $approveFile = realpath($approve->getFileName());
         $violations = [];
 
@@ -57,7 +59,7 @@ class EnterpriseWikiPublicationInvariantArchitectureTest extends TestCase
             }
         }
 
-        $this->assertSame([], $violations, "Only WikiController::approve() may publish a Wiki page:\n".implode("\n", $violations));
+        $this->assertSame([], $violations, "Only EnterpriseWikiPageReviewService::approve() may publish a Wiki page:\n".implode("\n", $violations));
     }
 
     public function test_the_guard_recognises_a_publishing_write_and_ignores_a_read_back(): void

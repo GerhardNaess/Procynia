@@ -32,7 +32,6 @@ use App\Services\EnterpriseWiki\EnterpriseWikiPageGenerationFailureRecoveryServi
 use App\Services\EnterpriseWiki\EnterpriseWikiPageReviewService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
-use App\Services\EnterpriseWiki\EnterpriseWikiReviewNotificationService;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunDismissalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunFailurePresenter;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunFindingsService;
@@ -111,7 +110,6 @@ class WikiController extends Controller
         private readonly EnterpriseWikiPageTraversalService $traversal,
         private readonly EnterpriseWikiWikilinkRenderer $wikilinkRenderer,
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
-        private readonly EnterpriseWikiReviewNotificationService $reviewNotifications,
         private readonly EnterpriseWikiRunFindingsService $runFindingsService,
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
@@ -2057,7 +2055,7 @@ class WikiController extends Controller
                 'published_version_number' => $page->publishedVersion?->version_number,
                 'working_version_id' => $currentVersion !== null ? (int) $currentVersion->id : null,
                 'can_approve_final' => $currentVersion !== null
-                    && $this->finalApprovalBlocker($page, $currentVersion, $user) === null,
+                    && $this->pageReviewService->finalApprovalBlocker($page, $currentVersion, $user) === null,
                 // Sending a page back is NOT the same decision as publishing it, and it never had
                 // the same conditions. reject() asks only for the capability, a page in review and
                 // the person whose turn it is — no document-owner sign-off, and deliberately no
@@ -2067,11 +2065,11 @@ class WikiController extends Controller
                 // The panel used to gate both actions on can_approve_final, so an open source-owner
                 // gate hid the one action that was still available and was the way out of it.
                 'can_send_back' => $currentVersion !== null
-                    && $this->mayActOnCurrentVersion($user, $page, $currentVersion),
+                    && $this->pageReviewService->mayActOnCurrentVersion($user, $page, $currentVersion),
                 // Sending back is review; publishing is approval. The two permissions are not
                 // interchangeable, so the panel is told about them separately.
                 'final_approval_blocker' => $currentVersion !== null
-                    ? $this->finalApprovalBlocker($page, $currentVersion, $user)
+                    ? $this->pageReviewService->finalApprovalBlocker($page, $currentVersion, $user)
                     : 'no_working_version',
                 'changes_requested' => $this->changesRequestedPayload($page, $currentVersion),
             ],
@@ -2091,7 +2089,7 @@ class WikiController extends Controller
                         && $user->canSubmitEnterpriseWikiPage($page),
                     'eligible_reviewer_count' => count($this->eligibleReviewerOptions($page, $user)),
                     'final_approval_blocker' => $currentVersion !== null
-                        ? $this->finalApprovalBlocker($page, $currentVersion, $user)
+                        ? $this->pageReviewService->finalApprovalBlocker($page, $currentVersion, $user)
                         : 'no_working_version',
                     'is_assigned_reviewer' => $currentVersion !== null
                         && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_REVIEW)
@@ -3026,7 +3024,10 @@ class WikiController extends Controller
         // Reopening a rejected page is not a handover — it returns the page to its owner for
         // editing, so it carries no reviewer and clears any assignment the rejected round left.
         if ($page->status === EnterpriseWikiPage::STATUS_REJECTED) {
-            return $this->reopenRejectedPage($page);
+            $this->pageReviewService->reopenRejected($user, $page);
+
+            return redirect()->route('app.wiki.show', $page->slug)
+                ->with('success', 'Siden er gjenåpnet for redigering.');
         }
 
         if ($page->status !== EnterpriseWikiPage::STATUS_DRAFT) {
@@ -3051,44 +3052,13 @@ class WikiController extends Controller
 
         $reviewer = User::query()->find($reviewerId);
 
-        if (! $reviewer instanceof User
-            || ! $this->mayWiki($reviewer, CustomerPermissionCatalog::WIKI_REVIEW)
-            || ! $reviewer->canBeEnterpriseWikiReviewerFor($page, $user->id)) {
+        if (! $reviewer instanceof User || ! $this->pageReviewService->isEligibleReviewer($reviewer, $page, (int) $user->id)) {
             return redirect()->route('app.wiki.show', $page->slug)
                 ->with('error', 'Velg en gyldig kontrollør: en aktiv bruker hos samme kunde som kan godkjenne Wiki-sider, og som ikke er deg selv.');
         }
 
-        DB::transaction(function () use ($page, $version, $user, $reviewer): void {
-            // The same page row lock EnterpriseWikiPageVersionWriter writes under. Everything above
-            // was read without it, so an automated version written in between would otherwise make
-            // this hand over a version that is no longer the working one — a review stranded from
-            // the start. Re-read under the lock and refuse instead.
-            $locked = EnterpriseWikiPage::query()->whereKey($page->id)->lockForUpdate()->first();
-            $currentVersionId = $locked?->currentVersion()->value('id');
-
-            if ($locked?->status !== EnterpriseWikiPage::STATUS_DRAFT || (int) $currentVersionId !== (int) $version->id) {
-                abort(409, __('procynia.wiki.submit_working_version_changed'));
-            }
-
-            $version->forceFill([
-                'submitted_by_user_id' => $user->id,
-                'submitted_at' => now(),
-                'reviewer_user_id' => $reviewer->id,
-            ])->save();
-
-            // Re-derive who must vouch for the source-based content in THIS version, so the people
-            // asked are today's document owners rather than whoever owned a document earlier.
-            // A version with no source-based content produces no requirements, which is a valid
-            // state — there is simply nobody to ask.
-            $this->documentOwnerApprovalService->syncForPageVersion($version);
-
-            $this->reviewNotifications->pageSubmittedForReview($page, $version->fresh(), $user);
-
-            // published_version_id is untouched: sending new work for review must not withdraw
-            // whatever was already approved.
-            $page->status = EnterpriseWikiPage::STATUS_PENDING_REVIEW;
-            $page->save();
-        });
+        // The decision itself, re-checked under the page lock: EnterpriseWikiPageReviewService.
+        $this->pageReviewService->submit($user, $page, $reviewer);
 
         return redirect()->route('app.wiki.show', $page->slug)
             ->with('success', "Siden er sendt til gjennomgang hos {$reviewer->name}.");
@@ -3127,30 +3097,6 @@ class WikiController extends Controller
     }
 
     /**
-     * Return a rejected page to draft so its owner can work on it again.
-     */
-    private function reopenRejectedPage(EnterpriseWikiPage $page): RedirectResponse
-    {
-        DB::transaction(function () use ($page): void {
-            $version = $page->currentVersion()->first();
-
-            if ($version !== null) {
-                $version->forceFill([
-                    'submitted_by_user_id' => null,
-                    'submitted_at' => null,
-                    'reviewer_user_id' => null,
-                ])->save();
-            }
-
-            $page->status = EnterpriseWikiPage::STATUS_DRAFT;
-            $page->save();
-        });
-
-        return redirect()->route('app.wiki.show', $page->slug)
-            ->with('success', 'Siden er gjenåpnet for redigering.');
-    }
-
-    /**
      * Approve a page in pending_review → approved.
      * Requires the approve_wiki_pages capability; System Owner passes as an override.
      */
@@ -3173,43 +3119,9 @@ class WikiController extends Controller
             ->where('slug', $slug)
             ->first() ?? abort(404);
 
-        $this->assertMayFinalApprove($user, $page);
-
-        // Everything above is a fast pre-check for a good error message. The decision itself is made
-        // again under a row lock, because two reviewers — or a reviewer and a System Owner stepping
-        // in — can press approve at the same moment. The lock serialises them: the first commits,
-        // the second re-reads a page that is no longer pending_review and is told so.
-        DB::transaction(function () use ($page, $user): void {
-            $locked = EnterpriseWikiPage::query()
-                ->whereKey($page->id)
-                ->lockForUpdate()
-                ->first();
-
-            $this->assertMayFinalApprove($user, $locked);
-
-            $workingVersion = $locked->currentVersion()->first();
-
-            // A page cannot become approved without naming what was approved. Aborting here rather
-            // than publishing nothing keeps "approved implies published_version_id" true.
-            if ($workingVersion === null) {
-                abort(422, 'Siden har ingen arbeidsversjon å godkjenne.');
-            }
-
-            // Status and publication move together, in one write. The previously published version
-            // stays in the table untouched — it simply stops being the one the page points at.
-            $locked->forceFill([
-                'status' => EnterpriseWikiPage::STATUS_APPROVED,
-                'published_version_id' => $workingVersion->id,
-                'reviewed_at' => now(),
-                'reviewed_by_user_id' => $user->id,
-            ])->save();
-
-            $this->reviewNotifications->pagePublished($locked, $workingVersion, $user);
-
-            // submitted_by_user_id, submitted_at and reviewer_user_id are deliberately left alone:
-            // they are the record of who handed this version over and to whom, and that history is
-            // worth more after the decision than before it.
-        });
+        // Publishing — the four-eyes rule, the open findings, the row lock that serialises two
+        // reviewers — is EnterpriseWikiPageReviewService::approve(), the one place a page is published.
+        $this->pageReviewService->approve($user, $page);
 
         return redirect()->route('app.wiki.show', $this->wikiShowRouteParamsKeepingRunsReturn($request, $page->slug))->with('success', 'Wiki-siden er godkjent.');
     }
@@ -3238,43 +3150,13 @@ class WikiController extends Controller
             ->where('slug', $slug)
             ->first() ?? abort(404);
 
-        $this->assertPendingReview($page);
-        $this->assertMayActOnCurrentVersion($user, $page);
+        // Out for review and this person's turn, before the reason is read.
+        $this->pageReviewService->assertMayReturn($user, $page);
 
         // No return without a reason: the page owner has to know what to fix.
         $reason = $this->validatedReturnReason($request);
 
-        DB::transaction(function () use ($page, $user, $reason): void {
-            $locked = EnterpriseWikiPage::query()
-                ->whereKey($page->id)
-                ->lockForUpdate()
-                ->first();
-
-            $this->assertPendingReview($locked);
-            $this->assertMayActOnCurrentVersion($user, $locked);
-
-            $version = $locked->currentVersion()->first();
-
-            $event = $this->recordChangesRequested(
-                $locked,
-                $version,
-                $user,
-                EnterpriseWikiPageReviewEvent::ACTOR_ROLE_REVIEWER,
-                $reason,
-            );
-
-            if ($event !== null) {
-                $this->reviewNotifications->changesRequested($locked, $event);
-            }
-
-            // published_version_id is deliberately untouched: sending new work back must never
-            // withdraw content that was already approved.
-            $locked->forceFill([
-                'status' => EnterpriseWikiPage::STATUS_REJECTED,
-                'reviewed_at' => now(),
-                'reviewed_by_user_id' => $user->id,
-            ])->save();
-        });
+        $this->pageReviewService->returnToOwner($user, $page, $reason);
 
         $page->refresh();
 
@@ -3375,9 +3257,7 @@ class WikiController extends Controller
             abort(403);
         }
 
-        $version = $page->currentVersion()->first();
-
-        if (! $version instanceof EnterpriseWikiPageVersion) {
+        if (! $page->currentVersion()->first() instanceof EnterpriseWikiPageVersion) {
             abort(422, 'Siden har ingen arbeidsversjon å kvalitetssikre.');
         }
 
@@ -3387,49 +3267,17 @@ class WikiController extends Controller
 
         $assignee = User::query()->find($assigneeId);
 
-        if (! $assignee instanceof User || ! $this->isEligibleQaUser($assignee, $page)) {
+        if (! $assignee instanceof User || ! $this->pageReviewService->isEligibleQaUser($assignee, $page)) {
             return redirect()->route('app.wiki.show', $page->slug)
                 ->with('error', 'Velg en gyldig kvalitetssikrer: en aktiv bruker hos samme kunde som kan godkjenne Wiki-påstander.');
         }
 
-        // Re-assigning to the same person is a no-op rather than a second request. Rewriting the
-        // timestamp would make the dedupe key change and send them the same message again.
-        if ((int) $version->qa_user_id === $assignee->id) {
-            return redirect()->route('app.wiki.show', $page->slug)
-                ->with('success', sprintf('%s er allerede satt som kvalitetssikrer.', $assignee->name));
-        }
-
-        DB::transaction(function () use ($version, $assignee, $user, $page): void {
-            // Claims already approved or rejected keep their actor and timestamp. A handover changes
-            // who is asked next, never what somebody already decided.
-            $version->forceFill([
-                'qa_user_id' => $assignee->id,
-                'qa_assigned_at' => now(),
-                'qa_assigned_by_user_id' => $user->id,
-            ])->save();
-
-            $this->reviewNotifications->qaAssigned($page, $version->fresh(), $assignee, $user);
-        });
+        $changed = $this->pageReviewService->assignQa($user, $page, $assignee);
 
         return redirect()->route('app.wiki.show', $page->slug)
-            ->with('success', sprintf('%s er satt som kvalitetssikrer.', $assignee->name));
-    }
-
-    /**
-     * Whether this person may be asked to quality assure the page.
-     *
-     * canApproveWikiClaims() is the authority, not is_qa on its own: the permission matrix is what
-     * decides, and it grants the claim permission to System Owner plus the QA capability by
-     * default. A Contributor who is QA therefore qualifies, which is the ordinary case.
-     */
-    private function isEligibleQaUser(User $candidate, EnterpriseWikiPage $page): bool
-    {
-        return $candidate->is_active
-            && (int) $candidate->customer_id === (int) $page->customer_id
-            // Only somebody who may actually review can be asked to. Offering a name the claim
-            // actions would then refuse is a request that cannot be answered.
-            && $this->mayWiki($candidate, CustomerPermissionCatalog::WIKI_REVIEW)
-            && $candidate->canApproveWikiClaims();
+            ->with('success', $changed
+                ? sprintf('%s er satt som kvalitetssikrer.', $assignee->name)
+                : sprintf('%s er allerede satt som kvalitetssikrer.', $assignee->name));
     }
 
     /**
@@ -3454,7 +3302,7 @@ class WikiController extends Controller
             ->with('customer:id,permission_settings')
             ->orderBy('name')
             ->get(User::CAPABILITY_COLUMNS)
-            ->filter(fn (User $candidate): bool => $this->isEligibleQaUser($candidate, $page))
+            ->filter(fn (User $candidate): bool => $this->pageReviewService->isEligibleQaUser($candidate, $page))
             ->map(static fn (User $candidate): array => ['id' => (int) $candidate->id, 'name' => $candidate->name])
             ->values()
             ->all();
@@ -3533,59 +3381,6 @@ class WikiController extends Controller
     }
 
     /**
-     * Why this user cannot give final approval right now, or null when they can.
-     *
-     * Read-only and deliberately ordered the way a person would ask: is it even out for review, may
-     * I act on it, and have the document owners finished? The same conditions approve() enforces,
-     * so the screen and the endpoint cannot disagree.
-     */
-    private function finalApprovalBlocker(EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, User $user): ?string
-    {
-        // Publishing is the end of a review, for everyone. A draft has to be sent to somebody else
-        // first — the four-eyes rule leaves no direct route, System Owner included.
-        return match (true) {
-            $page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW => 'not_in_review',
-            $version->reviewer_user_id === null
-                || $version->submitted_by_user_id === null
-                || $version->submitted_at === null => 'missing_assignment',
-            // Same blocker for both halves of the answer: the customer never gave this person
-            // approval work, or the Wiki's own capability matrix does not. Either way the page
-            // says the capability is missing rather than silently offering nothing.
-            ! $this->mayWiki($user, CustomerPermissionCatalog::WIKI_APPROVE) => 'missing_capability',
-            ! $user->canApproveWikiPages() => 'missing_capability',
-            // Reported separately from not_assigned because the two can need different sentences:
-            // one is "somebody else is holding this", the other is "you cannot sign off your own
-            // work". Once a reviewer is named, both mean the same thing to the reader and the page
-            // says so by naming them.
-            (int) $version->submitted_by_user_id === (int) $user->id => 'own_submission',
-            ! $user->canFinalApproveEnterpriseWikiVersion($version, $page) => 'not_assigned',
-            // The system sent a finding to a person because text presented as document content
-            // goes beyond its source. Publishing it with nobody having decided would publish that
-            // misrepresentation. Best-practice suggestions stay advisory and are not counted.
-            $this->hasUnresolvedSourceBasedFindings($version) => 'unresolved_source_findings',
-            // Source documents are provenance, not a level of approval. Whether a document owner
-            // has vouched for their own material is recorded and visible, and it no longer decides
-            // whether the Wiki page may be published — the page is the thing being approved.
-            default => null,
-        };
-    }
-
-    /**
-     * Whether the version carries a finding EnterpriseWikiClaimFindingExplainer::blocksPublication()
-     * holds up final approval for.
-     */
-    private function hasUnresolvedSourceBasedFindings(EnterpriseWikiPageVersion $version): bool
-    {
-        return EnterpriseWikiClaim::query()
-            ->where('enterprise_wiki_page_version_id', $version->id)
-            ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT)
-            ->where('approval_status', EnterpriseWikiClaim::APPROVAL_STATUS_PENDING)
-            ->with(['canonicalFact', 'sourceReferences'])
-            ->get()
-            ->contains(fn (EnterpriseWikiClaim $claim): bool => $this->claimFindingExplainer->blocksPublication($claim, $version));
-    }
-
-    /**
      * Every time this page has been sent back, newest first, and who asked.
      *
      * Page-wide rather than version-scoped on purpose: after a return the owner edits, which
@@ -3641,142 +3436,6 @@ class WikiController extends Controller
         ], [], ['reason' => 'begrunnelse']);
 
         return trim($validated['reason']);
-    }
-
-    /**
-     * Record that this version was sent back, and by whom. Append-only — never updated, so a page
-     * that went round several times keeps every objection.
-     */
-    private function recordChangesRequested(
-        EnterpriseWikiPage $page,
-        ?EnterpriseWikiPageVersion $version,
-        User $actor,
-        string $actorRole,
-        string $reason,
-    ): ?EnterpriseWikiPageReviewEvent {
-        if ($version === null) {
-            return null;
-        }
-
-        return EnterpriseWikiPageReviewEvent::query()->create([
-            'enterprise_wiki_page_id' => $page->id,
-            'enterprise_wiki_page_version_id' => $version->id,
-            'actor_user_id' => $actor->id,
-            'actor_role' => $actorRole,
-            'event_type' => EnterpriseWikiPageReviewEvent::EVENT_TYPE_CHANGES_REQUESTED,
-            'reason' => $reason,
-        ]);
-    }
-
-    /**
-     * A version can only be decided once, and only while it is actually out for review.
-     */
-    private function assertPendingReview(?EnterpriseWikiPage $page): void
-    {
-        if ($page === null) {
-            abort(404);
-        }
-
-        if ($page->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
-            return;
-        }
-
-        abort(422, match ($page->status) {
-            EnterpriseWikiPage::STATUS_APPROVED, EnterpriseWikiPage::STATUS_REJECTED => 'Denne versjonen er allerede avgjort.',
-            default => 'Versjonen er ikke sendt til gjennomgang.',
-        });
-    }
-
-    /**
-     * The one check standing between a request and publication.
-     *
-     * Deliberately reads finalApprovalBlocker() — the same function the page reads to decide what
-     * to offer — rather than re-expressing the rule. A separate chain here is how a button that
-     * lies gets built: the page would say one thing and the endpoint enforce another.
-     *
-     * The status code carries the distinction the caller needs. 403 is "not you"; 409 is "you, but
-     * not yet", which is the reviewer's cue to send the page back instead.
-     */
-    private function assertMayFinalApprove(User $user, EnterpriseWikiPage $page): void
-    {
-        $version = $page->currentVersion()->first();
-
-        if ($version === null) {
-            abort(422, 'Siden har ingen arbeidsversjon å vurdere.');
-        }
-
-        $blocker = $this->finalApprovalBlocker($page, $version, $user);
-
-        if ($blocker === null) {
-            return;
-        }
-
-        abort(match ($blocker) {
-            'missing_assignment', 'unresolved_source_findings' => 409,
-            'not_in_review' => 422,
-            default => 403,
-        }, match ($blocker) {
-            'missing_assignment' => __('procynia.wiki.approve_refused_missing_assignment'),
-            'unresolved_source_findings' => __('procynia.wiki.publication_blocker_unresolved_source_findings'),
-            'own_submission' => 'Du kan ikke godkjenne en versjon du selv har sendt til gjennomgang.',
-            'missing_capability' => 'Du har ikke tilgang til å godkjenne Wiki-sider.',
-            'not_in_review' => 'Versjonen er ikke sendt til gjennomgang.',
-            default => 'Du er ikke tildelt som kontrollør for denne versjonen.',
-        });
-    }
-
-    /**
-     * Whose turn is it on this version — the question both the endpoint and the page have to answer.
-     *
-     * Shared so that what the panel offers and what reject() accepts cannot drift apart. The panel
-     * calls it to decide whether to show "Send tilbake"; the endpoint calls it to decide whether to
-     * honour one.
-     *
-     * Only the person the version was handed to, or a System Owner sending it back
-     * (User::canReviewEnterpriseWikiVersion). A version nobody was handed — a page stranded by an
-     * edit during review before decision B5 — is decided by nobody: a general Wiki approver does not
-     * take over a review they were never given. Its owner withdraws it («Trekk tilbake») instead.
-     */
-    private function mayActOnCurrentVersion(User $user, EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version): bool
-    {
-        if ($page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
-            return false;
-        }
-
-        // Acting on a version in review — sending it back — is review work.
-        if (! $this->mayWiki($user, CustomerPermissionCatalog::WIKI_REVIEW)) {
-            return false;
-        }
-
-        if (! $user->canApproveWikiPages()) {
-            return false;
-        }
-
-        return $user->canReviewEnterpriseWikiVersion($version, $page);
-    }
-
-    /**
-     * The part of the review check that applies to ANY review decision: there has to be a version,
-     * and this user has to be the one whose turn it is.
-     *
-     * Whether that version is publishable is a separate question with its own authority rule —
-     * see assertMayFinalApprove() and User::canFinalApproveEnterpriseWikiVersion().
-     */
-    private function assertMayActOnCurrentVersion(User $user, EnterpriseWikiPage $page): EnterpriseWikiPageVersion
-    {
-        $version = $page->currentVersion()->first();
-
-        if ($version === null) {
-            abort(422, 'Siden har ingen arbeidsversjon å vurdere.');
-        }
-
-        if ($this->mayActOnCurrentVersion($user, $page, $version)) {
-            return $version;
-        }
-
-        abort(403, $version->submitted_by_user_id !== null && (int) $version->submitted_by_user_id === (int) $user->id
-            ? 'Du kan ikke godkjenne en versjon du selv har sendt til gjennomgang.'
-            : 'Du er ikke tildelt som kontrollør for denne versjonen.');
     }
 
     /**
