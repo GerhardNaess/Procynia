@@ -1,6 +1,6 @@
 # Eksternt API – implementeringsplan for fase 0
 
-**Status:** Godkjent retning, ikke implementert. Ingen kode for fase 0 er skrevet.
+**Status:** Planen er godkjent 2026-10-22 med beslutningene B5–B9 (§1). Implementeringen er startet i rekkefølgen i §5.
 **Dato:** 2026-10-22
 **Gren:** `feature/external-api-foundation`
 **Bygger på:** [`external-api-architecture.md`](external-api-architecture.md) §4.3, §7 og §14, [`AGENTS.md`](../AGENTS.md), [`enterprise-wiki-architecture.md`](enterprise-wiki-architecture.md) og [`enterprise-wiki-approval-model.md`](enterprise-wiki-approval-model.md).
@@ -17,6 +17,19 @@ Fase 0 bygger ikke API-et. Den flytter ansvaret for menneskelige beslutninger fr
 | B2 | **Menneskeforbeholdte beslutninger er ikke tilgjengelige via API-et, heller ikke i delegert modus.** | `HumanDecisionGuard` nekter når forespørselen kommer fra API-et, uansett modus (§4.3). |
 | B3 | **En risiko med vurderinger, aksepter eller annen beslutningshistorikk kan ikke slettes permanent.** Historikken bevares. Arkivering eller deaktivering brukes i stedet. | `Risk::isDeletable()` og en sperre i databasen. «Lukket» (`Risk::STATUS_CLOSED`) er alternativet (§4.6). |
 | B4 | **Godkjenning og avvisning av krav i Anbud krever en eksplisitt rettighet og en identifiserbar menneskelig aktør.** Lesetilgang til saken er ikke nok. | Ny rettighet i Anbuds rettighetsmatrise, krav om `canManage` på saken, og påkrevd aktør (§4.7). |
+| B5 | **Sideeieren kan trekke tilbake en Wiki-side som er sendt til godkjenning.** <br>– Innhold som ligger til godkjenning, kan ikke redigeres direkte. <br>– Tilbaketrekkingen registreres med aktør og tidspunkt. <br>– Det tidligere godkjenningsoppdraget og beslutningsmulighetene ugyldiggjøres. <br>– Siden kan deretter redigeres og sendes til ny godkjenning. <br>– Publisert versjon er uendret. <br>– Fireøyneprinsippet og reglene for tildelt kontrollør bevares. | §4.9. Retter F1a. |
+| B6 | Agenter kan ikke laste opp kildedokumenter i fase 0. Det vurderes som en egen funksjon senere. | Ingen endring (§9, Å2 lukket). |
+| B7 | Integrasjoner kan ikke registrere KPI-målinger i fase 0. En senere løsning kan tillate det med egne rettigheter, identifiserbar kilde og sporbarhet. | `objective.measure` er menneskeforbeholdt (§4.1). |
+| B8 | Lukkede risikoer vises som i dag i fase 0. | Ingen endring i registeret. |
+| B9 | **En registrert godkjenning eller avvisning fra en dokumenteier kan ikke overskrives uten historikk.** En ny beslutning registreres som en egen, sporbar hendelse. | §4.10. Retter O1. |
+
+**Føringer for gjennomføringen (2026-10-22):**
+
+- En generell Wiki-godkjenner skal ikke overta en tildelt kontrollørs beslutning uten eksplisitt hjemmel i eksisterende regler.
+- AI-genererte forslag skal holdes adskilt fra ordinær redigering av innhold.
+- Alle eksisterende publiseringsinvarianter i Enterprise Wiki skal bevares.
+- Den publiserte versjonen skal være uendret gjennom redigering, tilbaketrekking og ny godkjenningsrunde.
+- Rettighetskontroller skal aldri svekkes for å få testene grønne.
 
 ---
 
@@ -44,6 +57,8 @@ Hvert funn er bekreftet eller avkreftet med en isolert test. Testene beskriver d
 | O3 | `AiController::updateRequirementReviewStatus()` sjekker bare synlighet og AI-tilgang. Lesere kan godkjenne krav. | Løses av B4 (§4.7). |
 | O4 | `WikiSourceController::ingest()` sjekker ikke eierskap og lagrer ikke hvem som startet kjøringen. `cancelRun` lagrer aktøren bare som fritekst i `error_message`. | Sporbarhet. `started_by_user_id`/`cancelled_by_user_id` foreslås i §4.8 (valgfritt). |
 | O5 | `approve()` og `reject()` bruker ulike myndighetsregler. System Owner kan sende tilbake, men ikke publisere en versjon de ikke er tildelt. | Bevisst (`User::canFinalApproveEnterpriseWikiVersion`, docblokk). Skal bevares uendret. |
+| O6 | `WikiController::mayActOnCurrentVersion()` returnerer `true` for en versjon uten kontrollør. Dermed kan *enhver* Wiki-godkjenner sende den tilbake. Dette motsier `User::canReviewEnterpriseWikiVersion()` («a missing reviewer is broken state, not a licence»). | Strammes inn i steg 3. Bare tildelt kontrollør eller System Owner kan returnere. Sider som allerede står i denne tilstanden, frigjøres med «Trekk tilbake» (B5). |
+| F1c | Påstandsbeslutninger («Rediger og godkjenn», «Fjern teksten», beste praksis) endrer teksten i den gjeldende versjonen *direkte*, uten ny versjon, også mens siden ligger til godkjenning. Tildelingen beholdes, så kontrolløren vurderer det som står ved godkjenning. Dette er funnbehandling som hører til gjennomgangen, ikke ordinær redigering. | Ikke endret i steg 3. Tas med i steg 7 (`EnterpriseWikiClaimDecisionService`). Spørsmålet om hvem som kan endre tekst under godkjenning, legges fram før steg 7 (§9, Å6). |
 
 ---
 
@@ -217,6 +232,24 @@ Anbud bruker rollebaserte rettigheter (`users.bid_role` og Tilganger-matrisen `c
 
 Konsekvens for dagens arbeidsflyt: Brukere med bare lesetilgang mister godkjenningen. Det er beslutningen. Alle andre beholder den til en System Owner endrer matrisen.
 
+### 4.9 Trekke tilbake fra godkjenning (B5)
+
+- **Handling:** «Trekk tilbake» på Wiki-siden, `PATCH /app/wiki/{slug}/withdraw`. Den vises for den som kan sende siden inn (`canSubmitEnterpriseWikiPage`: sideeier eller System Owner, med `wiki.edit`) når siden har status `pending_review`.
+- **Tjeneste:** `EnterpriseWikiPageReviewService::withdraw(User $actor, EnterpriseWikiPage $page, ?string $reason)` (ny). Den kaller `HumanDecisionGuard` (`WIKI_PAGE_WITHDRAW`) og rettighetsregelen, og gjør alt under sidelåsen:
+  1. siden står fortsatt i `pending_review`, ellers 409;
+  2. en `EnterpriseWikiPageReviewEvent` med `event_type = withdrawn`, `actor_role = page_owner`, aktør, tidspunkt og valgfri begrunnelse, knyttet til den innsendte versjonen. Hvem versjonen var tildelt, går ikke tapt: det ligger i den nye kolonnen `assigned_reviewer_user_id` på hendelsen;
+  3. tildelingen på versjonen fjernes (`submitted_by_user_id`, `submitted_at`, `reviewer_user_id` settes til `NULL`, som i `reopenRejectedPage`). Dermed har verken kontrolløren eller andre noen beslutning å ta;
+  4. siden settes til `draft`. `published_version_id`, `reviewed_*` og QA-tildelingen er uendret.
+- **Tilgang:** ikke kontrolløren og ikke en annen godkjenner. Det er innsenderens handling. Kontrolløren har «Send tilbake».
+- **Visning:** historikken over returer (`changesRequestedPayload`) viser bare `changes_requested`. Tilbaketrekkingen gir ikke et «Sendt tilbake»-banner, men oppgaven i «Mine oppgaver» forsvinner, fordi den aggregeres fra status.
+- **Varsel:** kontrolløren får et varsel i bjella om at siden er trukket tilbake. Ellers står et ulest varsel om en godkjenning som ikke lenger finnes.
+
+### 4.10 Dokumenteiers beslutninger som hendelser (B9)
+
+- Ny append-only tabell `enterprise_wiki_document_owner_decisions` med approval-rad, beslutning, kommentar, aktør, overstyring og tidspunkt. Triggeren nekter UPDATE og DELETE, med unntak for kundesletting.
+- `decide()` skriver alltid en ny rad. Raden i `…_document_owner_approvals` holder siste tilstand, som i dag, men en endring av en avgjort rad krever begrunnelse og logges som en ny hendelse. Den overskriver aldri uten spor.
+- Del av steg 5.
+
 ### 4.8 Databasetiltak
 
 | Tiltak | Tabeller | Merknad |
@@ -239,9 +272,11 @@ Hver linje er én commit. Hver commit kjører sine målrettede tester før den l
 | 0 | – | Grunnlinje: kjør testfilene i §6.3 på HEAD og noter feil som finnes fra før (worktree-metoden). | – |
 | 1 | `feat(security): add human-only permissions and HumanDecisionGuard` | `ROLE_INTEGRATION`, `User::isIntegration()`, `humanOnlyPermissions()`, trekket i `has()`/`effectivePermissions()`, `HumanDecision`, `HumanDecisionGuard`, `ActorChannel` + `InteractiveActorChannel`, `HumanDecisionRefused` og enhetstester | 0 |
 | 2 | `feat(wiki): separate knowledge handoff from source management` | `wiki.knowledge.handoff`, datamigrasjon, oversettelser, `canHandOff` og Kvalitets overføring bytter rettighet, og `handOff`/`deposit` kaller `canHandOff` selv | 1 |
-| 3 | `fix(wiki): settle publication and open reviews after manual edits` | **F1a og F1b.** Se regelvalget under. Gjelder `EnterpriseWikiClaimContentRepairService` (begge stier) og `workingVersionEditContext`/`manualMixedBlockEditContext`. Testene for F1a og F1b skrives om til den nye regelen. | 1 |
+| 3a | `feat(wiki): let the page owner withdraw a page from review` | B5, §4.9: rute, tjeneste, hendelse, varsel, knapp, oversettelser og PageHelp | 1 |
+| 3b | `fix(wiki): no direct edits under review; settle publication after claim repair` | **F1a og F1b.** Gjelder `EnterpriseWikiClaimContentRepairService` (begge stier) og `workingVersionEditContext`/`manualMixedBlockEditContext`. Testene for F1a og F1b skrives om til den nye regelen. | 3a |
+| 3c | `fix(wiki): only the assigned reviewer decides a version in review` | O6 | 3a |
 | 4 | `fix(quality): require wiki.delete before deleting produced Wiki pages` | **F3a**: sjekken legges i `EnterpriseWikiPageDeletionService` (felles for Wiki og Kvalitet) og i `QualityController::destroyItem` for en god feilmelding. Testen skrives om til «nektes, ingenting slettes». | 1 |
-| 5 | `refactor(wiki): move document-owner, deletion and run decisions into services` | O1 (`decide`: `canDecide`, allerede avgjort, radlås), slettetjenester, `cancelRun`, `dismiss` med vakt og tilgang | 1 |
+| 5 | `refactor(wiki): move document-owner, deletion and run decisions into services` | O1 og B9 (§4.10): `decide` med `canDecide`, radlås og hendelsestabell. Slettetjenester, `cancelRun` og `dismiss` får vakt og tilgang. | 1 |
 | 6 | `refactor(wiki): extract page review workflow into EnterpriseWikiPageReviewService` | submit, approve, return, reopen, QA-tildeling. Koden flyttes uendret. `EnterpriseWikiPublicationInvariantArchitectureTest` godkjenner den nye metoden i stedet for `WikiController::approve`. | 3, 5 |
 | 7 | `refactor(wiki): extract claim decisions into EnterpriseWikiClaimDecisionService` | approve, reject, unapprove, blocking, kildereferanse, med kaskader i samme transaksjon | 6 |
 | 8 | `fix(wiki): guard FinalizeEnterpriseWikiIngest against pages in review` | **F2**: oppdater bare `status IN (draft)`. Testene får en ekstra påstand. | – |
@@ -262,14 +297,18 @@ Hver linje er én commit. Hver commit kjører sine målrettede tester før den l
 
 Steg 3, 4 og 8 kan tas først fordi de retter bekreftede feil. Steg 9–17 er uavhengige av hverandre og kan tas i valgfri rekkefølge. Anbefalt rekkefølge følger risiko.
 
-**Regelvalg for F1a og F1b (steg 3)** – anbefaling, ikke ny produktbeslutning:
+**Regel for F1a og F1b (steg 3), besluttet (B5):**
 
-- *En side som ligger til godkjenning, kan ikke redigeres.* «Rediger» og påstandsreparasjon vises deaktivert med begrunnelsen «Siden ligger til godkjenning hos …». Tjenesten nekter med 409.
-- For å endre noe trekker eieren siden tilbake, eller kontrolløren sender den tilbake.
-- Det følger `docs/enterprise-wiki-approval-model.md` §10 og prinsippet om at det man godkjenner, er det som ble sendt inn.
-- Alternativet, å flytte tildelingen til den nye versjonen, ville la kontrolløren publisere tekst de ikke har sett. Det anbefales ikke.
+- *En side som ligger til godkjenning, kan ikke redigeres.* «Rediger» og påstandsreparasjon vises deaktivert med en begrunnelse. Tjenesten nekter med 409.
+- For å endre noe trekker eieren siden tilbake («Trekk tilbake», §4.9), eller kontrolløren sender den tilbake.
 - Påstandsreparasjon på en publisert side kaller `afterManualEdit()`, og siden går tilbake til utkast, som ved vanlig redigering.
-- Hvis regelen krever en ny handling («Trekk tilbake fra godkjenning»), er det en produktbeslutning. Se §9, Å1.
+- En versjon uten kontrollør kan ikke avgjøres av en generell godkjenner (O6).
+
+Steg 3 deles i tre commits:
+
+- 3a: «Trekk tilbake»
+- 3b: ingen direkte redigering under godkjenning, og oppgjør av publisering etter påstandsreparasjon
+- 3c: innstramming av O6
 
 ---
 
@@ -328,7 +367,7 @@ Fase 0 er ferdig når alle punktene er oppfylt og har test:
 3. **K3** Ingen beslutningstjeneste tar `?User` eller en standardverdi `null` for aktøren. Unntakene i §4.5 er dokumentert som systemstier.
 4. **K4** En integrasjonsaktør og enhver forespørsel med API-kanal nektes alle beslutninger, også når aktøren har System Owner-rolle eller en rolle som har alle rettigheter, og også i delegert modus.
 5. **K5** Databasen nekter integrasjonsaktører i alle beslutningskolonnene i §4.8.
-6. **K6** F1a: en side som ligger til godkjenning, kan ikke få en ny gjeldende versjon fra en person, og bare den tildelte kontrolløren (eller System Owner ved retur) kan avgjøre den.
+6. **K6** F1a: en side som ligger til godkjenning, kan ikke få en ny gjeldende versjon fra en person, og bare den tildelte kontrolløren (eller System Owner ved retur) kan avgjøre den. Sideeieren kan trekke den tilbake. Det registreres med aktør og tidspunkt, ugyldiggjør tildelingen, og publisert versjon er uendret (B5).
 7. **K7** F1b: enhver manuell eller reparert versjon av en publisert side setter siden til utkast, og den kan sendes til godkjenning.
 8. **K8** F3a: sletting av en Wiki-side krever `wiki.delete` og eierskap, uansett inngang.
 9. **K9** B3: en risiko med historikk kan ikke slettes, verken via tjeneste, HTTP eller direkte SQL. Kundesletting virker fortsatt.
@@ -364,11 +403,12 @@ Fase 0 er ferdig når alle punktene er oppfylt og har test:
 
 | # | Spørsmål | Anbefaling |
 |---|---|---|
-| Å1 | F1a: skal eieren kunne *trekke tilbake* en side fra godkjenning uten at kontrolløren sender den tilbake? | Ja. Én handling, «Trekk tilbake», som setter siden til utkast og avslutter tildelingen med en hendelse i godkjenningshistorikken. Uten den er eneste vei at kontrolløren sender tilbake. |
-| Å2 | Skal opplasting av kildedokumenter (ikke sletting) senere kunne gis til agenter som en egen rettighet (`wiki.source.upload`)? | Ikke i fase 0. Kunnskapsoverføring dekker behovet for forslag. |
-| Å3 | Skal integrasjoner kunne registrere KPI-målinger med egen kildemarkering? | Ikke i fase 0. `objective.measure` er menneskeforbeholdt til det er besluttet. |
-| Å4 | Skal lukkede risikoer skjules fra registeret som standard (B3)? | Uendret i fase 0. Vurderes sammen med registerets filtre. |
-| Å5 | Skal en dokumenteier kunne endre sin egen beslutning etter at den er avgjort (O1)? | Nei. En ny beslutning krever en ny versjon. Inntil det er besluttet nektes overskriving, og raden må avgjøres på nytt ved neste versjon. |
+| Å1 | Trekke tilbake fra godkjenning | **Besluttet: B5** |
+| Å2 | Agentopplasting av kildedokumenter | **Besluttet: B6** (ikke i fase 0) |
+| Å3 | KPI-målinger fra integrasjoner | **Besluttet: B7** (ikke i fase 0) |
+| Å4 | Visning av lukkede risikoer | **Besluttet: B8** (uendret) |
+| Å5 | Dokumenteiers beslutning kan endres | **Besluttet: B9** (ny beslutning er en egen hendelse, aldri en overskriving) |
+| Å6 | F1c: hvem kan endre tekst via påstandsbeslutninger mens siden ligger til godkjenning? | Legges fram før steg 7. Forslag: bare tildelt kontrollør og QA, aldri innsenderen. Endringen registreres på påstanden, som i dag. |
 
 ---
 
