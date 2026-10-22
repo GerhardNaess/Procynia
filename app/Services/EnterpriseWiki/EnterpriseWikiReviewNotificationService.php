@@ -35,6 +35,8 @@ class EnterpriseWikiReviewNotificationService
 
     public const EVENT_QA_ASSIGNED = 'wiki.qa_assigned';
 
+    public const EVENT_REVIEW_WITHDRAWN = 'wiki.review_withdrawn';
+
     public function __construct(
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovals,
         private readonly UserNotificationWriter $writer,
@@ -148,6 +150,38 @@ class EnterpriseWikiReviewNotificationService
             ],
             $event->actor,
             UserNotification::SEVERITY_WARNING,
+        );
+    }
+
+    /**
+     * The page owner took the page back before it was decided. The reviewer it had been handed to
+     * hears about it — otherwise the «Du er tildelt» notification is the last word they have, about
+     * a review that no longer exists. Keyed on the event: each withdrawal is its own news.
+     */
+    public function pageWithdrawnFromReview(EnterpriseWikiPage $page, EnterpriseWikiPageReviewEvent $event): void
+    {
+        $reviewer = $event->assigned_reviewer_user_id !== null
+            ? User::query()->find($event->assigned_reviewer_user_id)
+            : null;
+
+        if (! $reviewer instanceof User) {
+            return;
+        }
+
+        $actor = $event->actor;
+
+        $this->notify(
+            $page,
+            $reviewer,
+            self::EVENT_REVIEW_WITHDRAWN,
+            sprintf('%s:%d:%d', self::EVENT_REVIEW_WITHDRAWN, $event->id, $reviewer->id),
+            __('procynia.wiki.notification_review_withdrawn_title'),
+            __('procynia.wiki.notification_review_withdrawn_message', [
+                'actor' => $actor?->name ?? __('procynia.wiki.notification_review_withdrawn_unknown_actor'),
+                'page' => $page->title,
+            ]),
+            ['page_version_id' => (int) $event->enterprise_wiki_page_version_id, 'review_event_id' => (int) $event->id],
+            $actor,
         );
     }
 

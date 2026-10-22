@@ -28,6 +28,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionFailureRecoveryService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageDeletionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageGenerationFailureRecoveryService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageReviewService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\EnterpriseWiki\EnterpriseWikiReviewNotificationService;
@@ -121,6 +122,7 @@ class WikiController extends Controller
         private readonly CustomerPermissionService $customerPermissions,
         private readonly EnterpriseWikiRunFailurePresenter $runFailurePresenter,
         private readonly EnterpriseWikiRunDismissalService $runDismissalService,
+        private readonly EnterpriseWikiPageReviewService $pageReviewService,
     ) {}
 
     public function index(Request $request): Response
@@ -2030,6 +2032,9 @@ class WikiController extends Controller
                 // wiki.edit rather than with the review permissions on the other side of it.
                 'can_submit' => $this->mayWiki($user, CustomerPermissionCatalog::WIKI_EDIT)
                     && $user->canSubmitEnterpriseWikiPage($page),
+                // Taking the page back while it is out for review: the submitting side's own way
+                // out, which the reviewer's «Send tilbake» is not.
+                'can_withdraw' => $this->pageReviewService->canWithdraw($user, $page),
                 'can_review' => $currentVersion !== null
                     && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_REVIEW)
                     && $user->canReviewEnterpriseWikiVersion($currentVersion, $page),
@@ -3040,6 +3045,38 @@ class WikiController extends Controller
     }
 
     /**
+     * The page owner takes a page back from review before it is decided — decision B5.
+     *
+     * The checks here give the right answer to the person; EnterpriseWikiPageReviewService::withdraw()
+     * applies the same rule again under the page lock and does the work.
+     */
+    public function withdraw(Request $request, string $slug): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $page = EnterpriseWikiPage::query()
+            ->where('customer_id', $customerId)
+            ->where('slug', $slug)
+            ->first() ?? abort(404);
+
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_EDIT);
+
+        if (! $user?->canSubmitEnterpriseWikiPage($page)) {
+            abort(403);
+        }
+
+        if ($page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            abort(409, __('procynia.wiki.withdraw_not_in_review'));
+        }
+
+        $this->pageReviewService->withdraw($user, $page);
+
+        return redirect()->route('app.wiki.show', $this->wikiShowRouteParamsKeepingRunsReturn($request, $page->slug))
+            ->with('success', __('procynia.wiki.withdraw_success'));
+    }
+
+    /**
      * Return a rejected page to draft so its owner can work on it again.
      */
     private function reopenRejectedPage(EnterpriseWikiPage $page): RedirectResponse
@@ -3511,6 +3548,8 @@ class WikiController extends Controller
     {
         $events = EnterpriseWikiPageReviewEvent::query()
             ->where('enterprise_wiki_page_id', $page->id)
+            // A withdrawal is the owner's own step, not an objection anybody asked them to answer.
+            ->where('event_type', EnterpriseWikiPageReviewEvent::EVENT_TYPE_CHANGES_REQUESTED)
             ->with('actor:id,name')
             ->orderByDesc('created_at')
             ->orderByDesc('id')

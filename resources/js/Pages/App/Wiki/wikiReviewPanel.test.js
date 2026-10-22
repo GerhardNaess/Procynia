@@ -587,8 +587,9 @@ describe('a stale view corrects itself', () => {
 
     test('and closes the dialog whose action no longer applies', () => {
         const start = panel.indexOf('if (! isStale) {');
-        const branch = panel.slice(start, start + 900);
+        const branch = panel.slice(start, panel.indexOf('router.reload(', start));
         assert.match(branch, /setIsSubmitOpen\(false\)/);
+        assert.match(branch, /setIsWithdrawOpen\(false\)/);
         assert.match(branch, /setChangesTarget\(null\)/);
     });
 

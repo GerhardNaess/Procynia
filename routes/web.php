@@ -781,6 +781,8 @@ Route::prefix('app')
             // catch-all above.
             Route::delete('/{slug}', [WikiController::class, 'destroy'])->name('destroy');
             Route::patch('/{slug}/submit', [WikiController::class, 'submit'])->name('submit');
+            // The page owner taking a page back from review before it is decided.
+            Route::patch('/{slug}/withdraw', [WikiController::class, 'withdraw'])->name('withdraw');
             // Asking for quality assurance, which is separate from handing the page to a
             // reviewer: QA contributes, the Wiki approver decides.
             Route::patch('/{slug}/qa-assignment', [WikiController::class, 'updateQaAssignment'])->name('qa-assignment.update');

@@ -348,11 +348,11 @@ describe('review and publishing (A11Y-002, -014, -118)', () => {
     });
 
     test('every dialog has a description, and falls back to the panel when its trigger is gone', () => {
-        for (const id of ['wiki-qa-description', 'wiki-submit-description', 'wiki-changes-description']) {
+        for (const id of ['wiki-qa-description', 'wiki-submit-description', 'wiki-changes-description', 'wiki-withdraw-description']) {
             assert.match(panel, new RegExp(`descriptionId="${id}"`));
             assert.match(panel, new RegExp(`<p id="${id}"`));
         }
-        assert.equal((panel.match(/fallbackFocusRef=\{panelRef\}/g) ?? []).length, 3);
+        assert.equal((panel.match(/fallbackFocusRef=\{panelRef\}/g) ?? []).length, 4);
     });
 
     test('after an action, focus lands where the person can continue', () => {

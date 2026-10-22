@@ -99,6 +99,10 @@ function getWikiShowHelpSections(tw) {
                     text: tw.show_page_help_item_submit_text ?? 'Sideeier velger en konkret kontrollør, som blir varslet og får oppgaven under Oppfølging. Kontrolløren kan ikke være den som sender inn.',
                 },
                 {
+                    title: tw.show_page_help_item_withdraw_title ?? 'Trekk tilbake',
+                    text: tw.show_page_help_item_withdraw_text ?? 'Mens siden ligger til gjennomgang, kan den ikke redigeres. Sideeier kan trekke den tilbake før kontrolløren har tatt stilling. Siden blir et utkast igjen, kontrolløren får beskjed, og den publiserte versjonen berøres ikke.',
+                },
+                {
                     title: tw.show_page_help_item_publish_title ?? 'Godkjenn og publiser',
                     text: tw.show_page_help_item_publish_text ?? 'Arbeidsversjonen blir den publiserte kunnskapen på siden. Ingenting annet må være ferdig først.',
                 },

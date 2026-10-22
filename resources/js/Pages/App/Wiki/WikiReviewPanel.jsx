@@ -97,6 +97,7 @@ const FOCUS_AFTER_ERROR = {
     submit: ['wiki-reviewer', 'wiki-review-panel'],
     qa: ['wiki-qa-user', 'wiki-review-panel'],
     reject: ['wiki-change-reason', 'wiki-review-panel'],
+    withdraw: ['wiki-withdraw-confirm', 'wiki-review-panel'],
 };
 
 // While a request runs the panel's buttons stay focusable (aria-disabled + a guard in each handler),
@@ -300,6 +301,7 @@ export default function WikiReviewPanel({
     const [reviewerId, setReviewerId] = useState('');
     const [qaUserId, setQaUserId] = useState('');
     const [changesTarget, setChangesTarget] = useState(null);
+    const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
     const [reason, setReason] = useState('');
     const [showHistory, setShowHistory] = useState(false);
 
@@ -312,6 +314,8 @@ export default function WikiReviewPanel({
     const qaTriggerRef = useRef(null);
     const qaSelectRef = useRef(null);
     const reasonRef = useRef(null);
+    const withdrawTriggerRef = useRef(null);
+    const withdrawConfirmRef = useRef(null);
 
     // A refusal shows its message (ActionError, an alert) where the action was started; if the
     // button pressed was disabled meanwhile, focus is put back where the person can act on it.
@@ -338,6 +342,9 @@ export default function WikiReviewPanel({
     // Publishing ends a review; there is no direct route from draft. The backend refuses it for the
     // submitter and for a page nobody was asked to look at, and the button never suggests otherwise.
     const canApproveFinal = isInReview && reviewAssignment.can_approve_final === true;
+    // The submitting side's way out of a review, before anyone has decided it. A page in review
+    // cannot be edited, so this is how its owner gets it back to change something.
+    const canWithdraw = isInReview && reviewAssignment.can_withdraw === true;
     // The permission, not a role name: roles are the customer's own, so the label a role happens to
     // carry says nothing about whether it can approve.
     const approvePermissionLabel = reviewAssignment.approve_permission_label ?? 'Godkjenne Wiki-sider';
@@ -379,6 +386,7 @@ export default function WikiReviewPanel({
                 onSuccess: () => {
                     setIsSubmitOpen(false);
                     setIsQaOpen(false);
+                    setIsWithdrawOpen(false);
                     setChangesTarget(null);
                     setReason('');
                     refocusIfLost(['wiki-review-panel']);
@@ -413,6 +421,7 @@ export default function WikiReviewPanel({
                     // went away. Nothing is assumed about what the new state is.
                     setIsSubmitOpen(false);
                     setIsQaOpen(false);
+                    setIsWithdrawOpen(false);
                     setChangesTarget(null);
                     setReason('');
                     router.reload({ preserveScroll: true });
@@ -432,6 +441,7 @@ export default function WikiReviewPanel({
     const assignQa = () => run('qa', `/app/wiki/${page.slug}/qa-assignment`, { qa_user_id: Number(qaUserId) });
     const runsReturn = runsBackUrl ? { back_url: runsBackUrl } : {};
     const approve = () => run('approve', `/app/wiki/${page.slug}/approve`, runsReturn);
+    const withdraw = () => run('withdraw', `/app/wiki/${page.slug}/withdraw`, runsReturn);
     const requestChanges = () => {
         const trimmed = reason.trim();
 
@@ -604,7 +614,7 @@ export default function WikiReviewPanel({
                 </div>
             )}
 
-            {! isSubmitOpen && ! isQaOpen && changesTarget === null && <ActionError message={actionError} />}
+            {! isSubmitOpen && ! isQaOpen && ! isWithdrawOpen && changesTarget === null && <ActionError message={actionError} />}
 
             {/* Actions. */}
             <div className="flex flex-wrap items-center gap-2">
@@ -675,6 +685,25 @@ export default function WikiReviewPanel({
                             ? (tw.review_approve_as_system_owner ?? 'Godkjenn og publiser som System Owner')
                             : (tw.review_approve_and_publish ?? 'Godkjenn og publiser')}
                     </button>
+                )}
+
+                {canWithdraw && (
+                    <>
+                        <button
+                            ref={withdrawTriggerRef}
+                            type="button"
+                            aria-disabled={busy || undefined}
+                            onClick={() => { if (busy) return; setActionError(null); setIsWithdrawOpen(true); }}
+                            className={`${SECONDARY_ACTION} ${BUSY}`}
+                        >
+                            {tw.withdraw_button ?? 'Trekk tilbake'}
+                        </button>
+                        <InfoHint
+                            size="sm"
+                            label={tw.withdraw_hint_label ?? 'Vis forklaring for Trekk tilbake'}
+                            text={tw.withdraw_hint ?? 'Siden ligger til gjennomgang og kan ikke redigeres. Trekk den tilbake hvis du vil endre noe før kontrolløren tar stilling.'}
+                        />
+                    </>
                 )}
 
                 {/* Its own condition, because the backend has its own. A reviewer waiting on a
@@ -788,6 +817,49 @@ export default function WikiReviewPanel({
                             : (tw.submit_button ?? 'Send til gjennomgang')}
                     </button>
                     <button type="button" aria-disabled={busy || undefined} onClick={() => { if (busy) return; setIsSubmitOpen(false); setActionError(null); }} className={`${SECONDARY_ACTION} ${BUSY}`}>
+                        {tw.cancel ?? 'Avbryt'}
+                    </button>
+                </div>
+            </ActionDialog>
+
+            {/* Taking the page back from review. Nothing to fill in: it asks nobody to act. */}
+            <ActionDialog
+                isOpen={isWithdrawOpen}
+                onClose={() => { setIsWithdrawOpen(false); setActionError(null); }}
+                closeDisabled={busy}
+                titleId="wiki-withdraw-title"
+                descriptionId="wiki-withdraw-description"
+                initialFocusRef={withdrawConfirmRef}
+                returnFocusRef={withdrawTriggerRef}
+                fallbackFocusRef={panelRef}
+                size="xs"
+            >
+                <h2 id="wiki-withdraw-title" className="text-xl font-semibold tracking-tight text-slate-950">
+                    {tw.withdraw_title ?? 'Trekk tilbake fra gjennomgang?'}
+                </h2>
+                <p id="wiki-withdraw-description" className="mt-2 text-base leading-6 text-slate-600">
+                    {tw.withdraw_description
+                        ?? 'Siden går tilbake til utkast, slik at du kan redigere den og sende den til gjennomgang på nytt. Kontrolløren får beskjed og har ikke lenger noe å godkjenne. Den publiserte versjonen berøres ikke.'}
+                </p>
+
+                {actionError && (
+                    <div className="mt-4">
+                        <ActionError message={actionError} />
+                    </div>
+                )}
+
+                <div className="mt-6 flex flex-wrap gap-3">
+                    <button
+                        ref={withdrawConfirmRef}
+                        id="wiki-withdraw-confirm"
+                        type="button"
+                        aria-disabled={busy || undefined}
+                        onClick={withdraw}
+                        className={`${PRIMARY_ACTION} ${BUSY}`}
+                    >
+                        {tw.withdraw_confirm ?? 'Trekk tilbake'}
+                    </button>
+                    <button type="button" aria-disabled={busy || undefined} onClick={() => { if (busy) return; setIsWithdrawOpen(false); setActionError(null); }} className={`${SECONDARY_ACTION} ${BUSY}`}>
                         {tw.cancel ?? 'Avbryt'}
                     </button>
                 </div>
