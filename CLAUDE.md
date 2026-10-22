@@ -85,6 +85,11 @@ php artisan queue:work --queue=supplier-harvests,default
 
 # Fresh setup
 composer setup
+
+# E2E (Playwright) in the isolated E2E environment — own DB, storage, port 8091, built assets
+scripts/e2e-env.sh up            # builds, migrates procynia_e2e, starts e2e-app + e2e-web
+npx playwright test tests/e2e/risk-access.spec.js
+scripts/e2e-env.sh down          # see docs/testing/e2e-environment.md
 ```
 
 ## Test regime

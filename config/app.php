@@ -55,6 +55,14 @@ return [
     'url' => env('APP_URL', 'http://localhost'),
 
     /*
+    | Where Laravel looks for a running Vite dev server (public/hot when unset). The isolated E2E
+    | environment points it at a file that never exists, so it serves the built assets even while
+    | the developer's own Vite server is running against the same checkout
+    | (docs/testing/e2e-environment.md). Leave unset everywhere else.
+    */
+    'vite_hot_file' => env('VITE_HOT_FILE'),
+
+    /*
     |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------

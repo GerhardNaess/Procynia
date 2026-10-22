@@ -1,19 +1,18 @@
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { test } from '@playwright/test';
+import { artisanCommand } from './environment.js';
 
 const execAsync = promisify(exec);
 const cwd = new URL('../../..', import.meta.url).pathname;
 
 /**
- * Runs PHP in the app container through tinker, as the E2E fixtures in tests/Support are invoked.
- * E2E_TINKER_WORKDIR (e.g. /var/www/html/.wt-feature) runs it in a git worktree's checkout instead of
- * the main one, for a run against that worktree's app.
+ * Runs PHP in the isolated E2E app container through tinker, as the E2E fixtures in tests/Support
+ * are invoked (helpers/environment.js). E2E_TINKER_WORKDIR (e.g. /var/www/html/.wt-feature) runs it
+ * in a git worktree's checkout instead of the main one.
  */
 export function tinker(php) {
-    const workdir = process.env.E2E_TINKER_WORKDIR ? `-w ${process.env.E2E_TINKER_WORKDIR} ` : '';
-
-    return execAsync(`docker compose exec -T ${workdir}app php artisan tinker --execute="${php}"`, { cwd });
+    return execAsync(artisanCommand(`tinker --execute="${php}"`), { cwd });
 }
 
 /**

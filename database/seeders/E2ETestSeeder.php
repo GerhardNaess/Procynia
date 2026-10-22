@@ -79,6 +79,13 @@ class E2ETestSeeder extends Seeder
      */
     private const KNOWLEDGE_FLOW_CODE = 'E2E-FLOW-K';
 
+    /**
+     * A standing Kvalitet control, for the specs that link one (risk-controls, risk-journey). They
+     * used to find one among whatever controls the development database had collected; the isolated
+     * E2E database starts empty (docs/testing/e2e-environment.md), and without one they skipped.
+     */
+    private const STANDING_CONTROL_CODE = 'E2E-KONTROLL';
+
     /** @var list<string> */
     private const KNOWLEDGE_PAGE_TITLES = [
         'E2E Anskaffelsesrutine',
@@ -157,6 +164,21 @@ class E2ETestSeeder extends Seeder
 
         $this->seedPackages($customer, $systemOwner);
         $this->seedQualityProcessFlows($customer, $systemOwner);
+        $this->seedStandingControl($customer, $systemOwner);
+    }
+
+    private function seedStandingControl(Customer $customer, User $owner): void
+    {
+        QualityItem::query()->updateOrCreate(
+            ['customer_id' => $customer->id, 'code' => self::STANDING_CONTROL_CODE],
+            [
+                'quality_type' => QualityItem::TYPE_CONTROL,
+                'title' => 'E2E fast kontroll',
+                'purpose' => 'Fast testkontroll for E2E.',
+                'status' => QualityItem::STATUS_ACTIVE,
+                'created_by_user_id' => $owner->id,
+            ],
+        );
     }
 
     /**

@@ -3,18 +3,15 @@ import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
 import { loginAs } from './helpers/auth.js';
 import { DESKTOP } from './helpers/readability.js';
+import { REPO_ROOT, artisanCommand } from './helpers/environment.js';
 
 const execAsync = promisify(exec);
 const PASSWORD = 'E2eOppg123!';
 const suffix = Math.random().toString(36).slice(2, 8).padEnd(6, '0').toUpperCase();
 
-/**
- * Runs Tests\Support\MyTasksE2EFixture in the app container. E2E_APP_WORKDIR points tinker at the
- * checkout the server under test runs from (a worktree, say); the default is the container's own.
- */
+/** Runs Tests\Support\MyTasksE2EFixture in the isolated E2E app container (helpers/environment.js). */
 async function fixture(call) {
-    const workdir = process.env.E2E_APP_WORKDIR ?? '/var/www/html';
-    const { stdout } = await execAsync(`docker exec -w ${workdir} procynia-app php artisan tinker --execute="echo json_encode(\\Tests\\Support\\MyTasksE2EFixture::${call});"`);
+    const { stdout } = await execAsync(artisanCommand(`tinker --execute="echo json_encode(\\Tests\\Support\\MyTasksE2EFixture::${call});"`), { cwd: REPO_ROOT });
     const match = stdout.match(/\{.*\}|null/);
 
     return match ? JSON.parse(match[0]) : null;

@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
 import { cleanUpRiskE2eData, fillRiskDescription, riskE2eSuffix } from './helpers/risk.js';
+import { artisanCommand } from './helpers/environment.js';
 
 const execAsync = promisify(exec);
 
@@ -68,7 +69,7 @@ test('a quarterly interval shows the next review, and a new assessment moves it'
     // The first assessment, made at the end of June. Assessments are history and never rewritten,
     // so it is registered with that date rather than moved back in time afterwards.
     await execAsync(
-        `docker compose exec -T app php artisan tinker --execute="\\Tests\\Support\\RiskE2EFixture::recordAssessmentMadeOn(${riskId}, '2026-06-30 10:00:00', 'Backup tas nattlig, men gjenoppretting er ikke testet.');"`,
+        artisanCommand(`tinker --execute="\\Tests\\Support\\RiskE2EFixture::recordAssessmentMadeOn(${riskId}, '2026-06-30 10:00:00', 'Backup tas nattlig, men gjenoppretting er ikke testet.');"`),
     );
     await page.reload();
 

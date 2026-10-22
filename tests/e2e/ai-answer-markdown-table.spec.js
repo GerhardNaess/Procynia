@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
+import { artisanCommand } from './helpers/environment.js';
 
 const execAsync = promisify(exec);
 const FIXTURE = '\\Tests\\Support\\WikiAnswerMarkdownTableE2EFixture';
@@ -37,7 +38,7 @@ async function openSeededRequirement(page) {
 test.describe.serial('Wiki answer Markdown rendering', () => {
     test.beforeAll(async () => {
         const { stdout } = await execAsync(
-            `docker compose exec -T app php artisan tinker --execute="echo ${FIXTURE}::seed(${CUSTOMER_ID});"`,
+            artisanCommand(`tinker --execute="echo ${FIXTURE}::seed(${CUSTOMER_ID});"`),
             { cwd: new URL('../..', import.meta.url).pathname },
         );
 
@@ -48,7 +49,7 @@ test.describe.serial('Wiki answer Markdown rendering', () => {
 
     test.afterAll(async () => {
         await execAsync(
-            `docker compose exec -T app php artisan tinker --execute="${FIXTURE}::cleanup(${CUSTOMER_ID});"`,
+            artisanCommand(`tinker --execute="${FIXTURE}::cleanup(${CUSTOMER_ID});"`),
             { cwd: new URL('../..', import.meta.url).pathname },
         );
     });

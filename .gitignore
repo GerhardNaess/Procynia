@@ -33,3 +33,6 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 backups/
+
+# Isolated E2E environment: its own storage (docs/testing/e2e-environment.md)
+/.e2e/

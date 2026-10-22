@@ -26,7 +26,9 @@ module.exports = defineConfig({
     reporter: [['line'], ['html', { open: 'never' }]],
 
     use: {
-        baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:8080',
+        // The isolated E2E environment (scripts/e2e-env.sh up, docs/testing/e2e-environment.md):
+        // built assets, its own database and storage. global-setup.js refuses any other server.
+        baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:8091',
         // With retries off, «on-first-retry» never recorded anything. A failure now keeps its trace,
         // so an intermittent one (KTF-4) can be read afterwards; passing runs keep nothing.
         trace: 'retain-on-failure',

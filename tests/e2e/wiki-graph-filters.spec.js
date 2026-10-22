@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
+import { artisanCommand } from './helpers/environment.js';
 
 const execAsync = promisify(exec);
 
@@ -17,7 +18,7 @@ const ROOT = { cwd: new URL('../..', import.meta.url).pathname };
 let graphCustomerId = null;
 
 async function tinker(code) {
-    const { stdout } = await execAsync(`docker compose exec -T app php artisan tinker --execute="${code}"`, ROOT);
+    const { stdout } = await execAsync(artisanCommand(`tinker --execute="${code}"`), ROOT);
 
     return stdout.trim();
 }

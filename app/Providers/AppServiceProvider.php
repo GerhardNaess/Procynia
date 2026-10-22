@@ -31,6 +31,7 @@ use Illuminate\Queue\Events\JobPopped;
 use Illuminate\Queue\Events\JobPopping;
 use Illuminate\Queue\Events\JobQueued;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Inertia\Middleware;
@@ -97,6 +98,12 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Cashier::useCustomerModel(Customer::class);
+
+        // The isolated E2E environment serves built assets, never the developer's Vite server
+        // (config app.vite_hot_file; unset everywhere else).
+        if (is_string($hotFile = config('app.vite_hot_file')) && $hotFile !== '') {
+            Vite::useHotFile($hotFile);
+        }
 
         // The person's language before Inertia's shared props. Inertia moves its middleware up the
         // priority list to just after the session, but only when the HTTP kernel is resolved after

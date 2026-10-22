@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { E2E_APP_CONTAINER, E2E_WEB_CONTAINER, REPO_ROOT } from './helpers/environment.js';
 
 /**
  * Keeps the server's side of an E2E failure next to its trace (KTF-4, KTF-5).
@@ -8,10 +9,13 @@ import path from 'node:path';
  * With preserveOutput 'failures-only', the run's output folder holds a folder per failed test and
  * nothing else. For each, this writes server-logs.txt: the nginx and PHP-FPM container logs from a
  * few minutes before the test's first file to just after its last — enough to see a 499, a 503 or a
- * full PHP-FPM pool next to the trace. A global teardown runs whatever --reporter is chosen; a
- * reporter would not (the CLI flag replaces the configured ones). Never fails the run.
+ * full PHP-FPM pool next to the trace — and the E2E server's own Laravel log for the same minutes.
+ * The containers are the isolated E2E environment's (helpers/environment.js). A global teardown
+ * runs whatever --reporter is chosen; a reporter would not (the CLI flag replaces the configured
+ * ones). Never fails the run.
  */
-const CONTAINERS = ['procynia-web', 'procynia-app'];
+const CONTAINERS = [E2E_WEB_CONTAINER, E2E_APP_CONTAINER];
+const LARAVEL_LOG = path.join(REPO_ROOT, '.e2e/storage/logs/laravel.log');
 const BEFORE_MS = 3 * 60_000;
 
 export default async function globalTeardown(config) {
@@ -63,9 +67,39 @@ export default async function globalTeardown(config) {
                 }
             }
 
+            sections.push(`===== ${path.relative(REPO_ROOT, LARAVEL_LOG)} =====\n${laravelLogBetween(since, until)}`);
             fs.writeFileSync(path.join(dir, 'server-logs.txt'), sections.join('\n'));
         } catch {
             // Keeping evidence must never change a run's result.
         }
     }
+}
+
+/**
+ * The Laravel log's entries from the window (its timestamps are UTC, config app.timezone), each with
+ * the lines that follow it — a stack trace belongs to its entry.
+ */
+function laravelLogBetween(since, until) {
+    if (!fs.existsSync(LARAVEL_LOG)) {
+        return 'no log file';
+    }
+
+    const from = since.replace('T', ' ').slice(0, 19);
+    const to = until.replace('T', ' ').slice(0, 19);
+    const kept = [];
+    let inWindow = false;
+
+    for (const line of fs.readFileSync(LARAVEL_LOG, 'utf8').split('\n')) {
+        const stamp = line.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/)?.[1];
+
+        if (stamp) {
+            inWindow = stamp >= from && stamp <= to;
+        }
+
+        if (inWindow) {
+            kept.push(line);
+        }
+    }
+
+    return kept.join('\n');
 }

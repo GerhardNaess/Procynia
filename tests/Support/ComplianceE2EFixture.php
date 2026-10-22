@@ -909,7 +909,13 @@ class ComplianceE2EFixture
 
             // The run's audits first: their history, scope and findings go with them through the
             // cascade, and a requirement in an audit's scope could not be deleted otherwise.
-            $sweepOnly(ComplianceAudit::query()->where('customer_id', $customerId)->where('title', '~', $pattern))->delete();
+            $auditIds = $sweepOnly(ComplianceAudit::query()->where('customer_id', $customerId)->where('title', '~', $pattern))->pluck('id');
+            // A check's link to a requirement in scope refers to the scope row without a cascade
+            // (finding A17). Whether it is gone before the scope row depends on the order PostgreSQL
+            // fires the cascades, which differs between a freshly migrated database and one migrated
+            // over time — so it is removed first, explicitly.
+            DB::table('compliance_audit_check_requirements')->whereIn('audit_id', $auditIds)->delete();
+            ComplianceAudit::query()->whereIn('id', $auditIds)->delete();
 
             // The cases the run's findings were handed off to — named after the finding, or in one of
             // the run's fagområder. No finding points at them any more.

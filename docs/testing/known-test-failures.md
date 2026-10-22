@@ -9,8 +9,8 @@ Tester som feiler på grunnlinjen og ikke skyldes arbeidet som pågår. Hver fei
 | KTF-1 | **Løst 2026-10-22.** Testfiksturen er rettet, applikasjonen er uendret. | `898a4c08` |
 | KTF-2 | **Løst 2026-10-22.** Testene kontrollerer nå dagens komponenter og den faktiske navigasjonsfunksjonen. | `2d133715` |
 | KTF-3 | **Løst 2026-10-22.** Testen følger dagens Kjøringer-fane. Grensesnittet er uendret. | `be3f517c` (testen), denne loggen |
-| KTF-4 | **Åpen – mulig ustabilitet.** Siden lastes uventet helt på nytt under en E2E-test. Det har skjedd i `risk-access.spec.js` og `management-review.spec.js`. | – |
-| KTF-5 | **Åpen – mulig problem i testinfrastrukturen.** Innloggingen i `a11y-grc-compliance.spec.js` hang i 15 sekunder, mens PHP-FPM-poolen var full. | – |
+| KTF-4 | **Åpen, under observasjon.** Siden lastes uventet helt på nytt under en E2E-test (`risk-access.spec.js`, `management-review.spec.js`). Ikke reprodusert etter at E2E ble flyttet til det isolerte miljøet (2026-10-22). | – |
+| KTF-5 | **Åpen, under observasjon.** Innloggingen i `a11y-grc-compliance.spec.js` hang i 15 sekunder mens PHP-FPM-poolen var full. Ikke reprodusert i det isolerte miljøet (2026-10-22). | – |
 
 KTF-4 og KTF-5 står åpne som mulig ustabilitet i E2E. Ingen kjente feil står åpne i PHP eller JS. Dokumentet beholdes som logg, og nye kjente feil føres inn her.
 
@@ -168,6 +168,20 @@ Det som gjenstår:
 - Vites avhengighetsmappe (`node_modules/.vite`) finnes ikke, selv om utviklingsserveren har kjørt siden 14.10. Det kan tyde på at mellomlageret er fjernet under serveren. Det er ikke bekreftet som årsak.
 
 **Anbefaling, ikke gjennomført:** Kjør E2E mot bygde ressurser eller mot en egen server. Det kan gjøres uten `public/hot` eller med en egen server, som i `project_e2e_isolated_test_db` (`APP_ENV=e2e`, port 8091), slik at utviklingsserveren ikke kan laste sidene på nytt. Begge berører utviklingsmiljøet som er i bruk, og krever en beslutning. Testene er ikke endret.
+
+### Etter flyttingen til det isolerte E2E-miljøet (2026-10-22)
+
+E2E kjører nå mot et eget miljø med bygde ressurser og ingen Vite-server (`e2e-environment.md`). En omlasting fra utviklingsserveren kan derfor ikke lenger nå siden under test.
+
+| Kjøring | Resultat |
+|---|---|
+| Alle Risiko-spesifikasjoner, Ledelsens gjennomgang, Etterlevelse og Wiki-godkjenning (`a11y-wiki`, `wiki-delete-awaiting-approval`), første runde | 51 av 56 bestått. De 5 feilene var Etterlevelse og skyldtes A17 i fiksturen, ikke KTF-4. Etter rettingen: 5 av 5. |
+| `risk-access.spec.js` ×5 | 5 av 5 |
+| `management-review.spec.js` ×3 | 12 av 12 |
+| `a11y-grc-compliance.spec.js` ×3, med «Kravbibliotek» fra KTF-5 | 9 av 9 |
+| `a11y-wiki.spec.js` ×2 | 26 av 26 |
+
+Hverken KTF-4 eller KTF-5 har oppstått igjen i disse kjøringene. Det er en indikasjon, ikke et bevis, siden begge var sjeldne fra før. De står derfor åpne under observasjon. Neste forekomst får spor og serverlogger automatisk.
 
 ## KTF-5 – E2E: innlogging hang mens PHP-FPM-poolen var full (mulig problem i testinfrastrukturen)
 

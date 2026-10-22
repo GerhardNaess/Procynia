@@ -597,6 +597,92 @@ services:
             start_period: 60s
         restart: unless-stopped
 
+    # ---------------------------------------------------------------------------------------------
+    # Isolated E2E environment — docs/testing/e2e-environment.md.
+    #
+    # Opt-in via profile: `scripts/e2e-env.sh up` (never started by a plain `docker compose up`).
+    # It runs beside the development stack without touching it:
+    #   - its own database, procynia_e2e, as procynia_test_user — a role with no CONNECT on the
+    #     development database, so nothing here can write there;
+    #   - its own storage (.e2e/storage), so fixture files never meet development files;
+    #   - built assets only (VITE_HOT_FILE points at a file that never exists), so the developer's
+    #     Vite server cannot reload a page under test;
+    #   - its own port (127.0.0.1:8091) and its own network for nginx, where the alias `app` is this
+    #     PHP container — the nginx configuration is the development one, unchanged.
+    # Cache, sessions and queue live in procynia_e2e; no worker runs, and the OpenAI key is empty.
+    # ---------------------------------------------------------------------------------------------
+    e2e-app:
+        build:
+            context: .
+            dockerfile: docker/php/Dockerfile
+        container_name: procynia-e2e-app
+        profiles:
+            - e2e
+        working_dir: /var/www/html
+        # The test role's credentials; everything an HTTP server must do differently is below.
+        env_file:
+            - .env.testing
+        environment:
+            APP_ENV: e2e
+            APP_URL: http://127.0.0.1:8091
+            DB_DATABASE: procynia_e2e
+            CACHE_STORE: database
+            SESSION_DRIVER: database
+            # The development .env names a Redis connection here; empty means the default database.
+            SESSION_CONNECTION: ""
+            SESSION_STORE: ""
+            SESSION_SECURE_COOKIE: "false"
+            QUEUE_CONNECTION: database
+            MAIL_MAILER: log
+            OPENAI_API_KEY: ""
+            VITE_HOT_FILE: /var/www/html/storage/framework/no-vite-dev-server
+            # Separate Redis databases, so nothing here can meet the development keys.
+            REDIS_HOST: redis
+            REDIS_PORT: 6379
+            REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD must be set — Redis holds sessions and queues and is not allowed to run unauthenticated}"
+            REDIS_DB: 7
+            REDIS_CACHE_DB: 8
+            PDFTOTEXT_BINARY: /usr/bin/pdftotext
+            PDFTOHTML_BINARY: /usr/bin/pdftohtml
+            PDFIMAGES_BINARY: /usr/bin/pdfimages
+            PDFINFO_BINARY: /usr/bin/pdfinfo
+            TZ: Europe/Oslo
+        volumes:
+            - ./:/var/www/html
+            - ./.e2e/storage:/var/www/html/storage
+            - ./bootstrap/cache:/var/www/html/bootstrap/cache
+        networks:
+            default: {}
+            e2e:
+                aliases:
+                    - app
+        depends_on:
+            postgres:
+                condition: service_healthy
+        restart: "no"
+
+    e2e-web:
+        image: nginx:1.27-alpine
+        container_name: procynia-e2e-web
+        profiles:
+            - e2e
+        depends_on:
+            e2e-app:
+                condition: service_started
+        ports:
+            - "127.0.0.1:8091:80"
+        volumes:
+            - ./:/var/www/html:ro
+            - ./.e2e/storage:/var/www/html/storage:ro
+            - ./bootstrap/cache:/var/www/html/bootstrap/cache:ro
+            - ./docker/nginx:/etc/nginx/conf.d:ro
+        networks:
+            - e2e
+        restart: "no"
+
+networks:
+    e2e: {}
+
 volumes:
     procynia_postgres_data:
     procynia_redis_data:
