@@ -11,6 +11,7 @@ use App\Models\ComplianceAuditRequirement;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
 use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeSource;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -49,9 +50,11 @@ class ComplianceAuditKnowledgeSource implements WikiKnowledgeSource
         return $this->canOpenModule($user) ? $this->access->findVisibleAudit($user, $sourceId) : null;
     }
 
+    /** compliance.audit in the audit's own customer, with the module (phase 0 step 13). */
     public function canHandOff(User $user, Model $source): bool
     {
-        return $source instanceof ComplianceAudit && $this->access->canAudit($user);
+        return $source instanceof ComplianceAudit
+            && $this->access->may($user, CustomerPermissionCatalog::COMPLIANCE_AUDIT, (int) $source->customer_id);
     }
 
     public function draft(User $user, Model $source): WikiKnowledgeDraft

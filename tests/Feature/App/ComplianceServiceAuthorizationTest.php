@@ -14,6 +14,7 @@ use App\Services\Compliance\ComplianceSourceService;
 use App\Services\Compliance\Library\ComplianceApplicabilityService;
 use App\Services\Compliance\Library\ComplianceFrameworkActivationService;
 use App\Services\Compliance\Library\ComplianceFrameworkLibraryImporter;
+use App\Services\EnterpriseWiki\Knowledge\Sources\ComplianceAuditKnowledgeSource;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
@@ -131,6 +132,26 @@ class ComplianceServiceAuthorizationTest extends TestCase
 
         $this->expectException(ValidationException::class);
         app(ComplianceRequirementService::class)->update($world['editor'], $world['retired'], $this->fields($world, 'Endret mens utgått'));
+    }
+
+    /**
+     * «Overfør til Wiki» from an audit: compliance.audit in the audit's own customer, with the module.
+     * Wiki checks its own half (wiki.knowledge.handoff) in WikiKnowledgeHandoffService.
+     */
+    public function test_handing_audit_knowledge_to_wiki_takes_compliance_audit_in_the_audits_customer(): void
+    {
+        ['customer' => $customer] = $this->complianceContext();
+        $auditor = $this->complianceAuditor($customer);
+        $audit = $this->complianceAudit($customer, $auditor);
+        ['customer' => $other] = $this->complianceContext();
+        $source = app(ComplianceAuditKnowledgeSource::class);
+
+        $this->assertTrue($source->canHandOff($auditor, $audit));
+        $this->assertFalse($source->canHandOff($this->complianceEditor($customer), $audit));
+        $this->assertFalse($source->canHandOff($this->complianceAuditor($other), $audit));
+
+        $customer->packageEntitlements()->delete();
+        $this->assertFalse($source->canHandOff($auditor->fresh(), $audit));
     }
 
     /**
