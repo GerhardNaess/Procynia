@@ -15,7 +15,8 @@
   - steg 7 (`37c239c5`)
   - KTF-3 (`be3f517c`)
   - A4 (`e4e56f50`)
-- Wiki-delen av fase 0 er gjennomført. Neste: de andre modulene (steg 9–17), etter gjennomgang.
+  - steg 9, Risiko (`cc3a4e90`, `595deea4`, `b03fd473`, `4c3cd3bf`, E2E-retting `f5e66bf6`), se §2c
+- Wiki-delen av fase 0 er gjennomført og godkjent 2026-10-22. Risiko (steg 9) er gjennomført 2026-10-22 og venter på vurdering. Avvik, Ledelsens gjennomgang og de andre modulene startes ikke før det.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -79,7 +80,7 @@ Hvert funn er bekreftet eller avkreftet med en isolert test. Testene beskriver d
 | Id | Observasjon | Vurdering |
 |---|---|---|
 | O1 | `EnterpriseWikiDocumentOwnerApprovalService::decide()` kaller ikke `canDecide()`, sjekker ikke om raden allerede er avgjort, og låser ikke raden. En ny beslutning overskriver den forrige. | Tas i fase 0 (§5, steg 5). Dokumenteier-godkjenning sperrer ikke lenger publisering, så dette gjelder sporbarhet. |
-| O2 | `RiskController::destroy()` sletter risikoen. Databasekaskade fjerner vurderinger og aksepter, og modellvaktene kjører ikke ved kaskade. | Løses av B3 (§4.6). |
+| O2 | `RiskController::destroy()` sletter risikoen. Databasekaskade fjerner vurderinger og aksepter, og modellvaktene kjører ikke ved kaskade. | **Løst** av B3 (`b03fd473`, §2c). |
 | O3 | `AiController::updateRequirementReviewStatus()` sjekker bare synlighet og AI-tilgang. Lesere kan godkjenne krav. | Løses av B4 (§4.7). |
 | O4 | `WikiSourceController::ingest()` sjekker ikke eierskap og lagrer ikke hvem som startet kjøringen. `cancelRun` lagrer aktøren bare som fritekst i `error_message`. | Sporbarhet. `started_by_user_id`/`cancelled_by_user_id` foreslås i §4.8 (valgfritt). |
 | O5 | `approve()` og `reject()` bruker ulike myndighetsregler. System Owner kan sende tilbake, men ikke publisere en versjon de ikke er tildelt. | Bevisst (`User::canFinalApproveEnterpriseWikiVersion`, docblokk). Skal bevares uendret. |
@@ -225,6 +226,99 @@ Ny arbeidsversjon for statusendringer anbefales ikke:
 
 ---
 
+### 2c. Risiko (steg 9) – kartlegging og gjennomføring (2026-10-22)
+
+**Kartlegging før steg 9**
+
+| Handling | Rettighet | Kontrollert i | Merknad |
+|---|---|---|---|
+| Se, liste, søke | `risk.view` i fagområdet | Domenet (`RiskAccessService::visibleRisks`) | Uendret. En skjult risiko er 404. |
+| Registrere | `risk.create` i valgt fagområde | Domenet (`RiskCreator::create`) | Uendret. |
+| Endre, lukke, flytte | `risk.edit` | **Bare kontrolleren** (`RiskController::update`) | `RiskCreator` sjekket målområde og eier, ikke selve endringsretten. |
+| Vurdere | `risk.assess` (menneskeforbeholdt) | **Bare kontrolleren**, som også skrev vurderingen | |
+| Akseptere og tilbakekalle | `risk.accept` (menneskeforbeholdt) | **Bare kontrolleren** | `RiskAcceptanceService` stolte på kalleren. |
+| Slette | `risk.delete` (menneskeforbeholdt) | **Bare kontrolleren** | Kaskade fjernet vurderinger, aksepter og tiltak (O2). |
+| Tiltak | `risk.edit` | **Bare kontrolleren** | Tjenesten sjekket bare ansvarlig person. |
+| Koble til kontroll, prosess og aktivitet | `risk.edit` og lesetilgang til Kvalitet | **Bare kontrolleren** | |
+| Kunnskapsartikkel til Wiki | `risk.edit` og `wiki.knowledge.handoff` | Domenet (`WikiKnowledgeHandoffService`, steg 2) | Uendret. |
+
+**Gjennomført**
+
+| Commit | Innhold |
+|---|---|
+| `cc3a4e90` | En integrasjon får ingen menneskeforbeholdt risikonøkkel via fagområder (A6). |
+| `595deea4` | `RiskAssessmentService::record` (ny) og `RiskAcceptanceService::accept`/`revoke` kaller `HumanDecisionGuard` (`RISK_ASSESS`, `RISK_ACCEPT`) og deretter `canAssess`/`canAccept`, vurdert på risikoen slik den står under radlåsen. |
+| `b03fd473` | B3: `Risk::isDeletable()`, `RiskLifecycleService::delete` (vakt `RISK_DELETE`, `canDelete`, historikkregelen under radlåsen, 409), modellvakt, databasetriggere og visning på risikosiden. |
+| `4c3cd3bf` | Endring, lukking og flytting (`RiskCreator::update`), tiltak og koblinger til Kvalitet sjekker `risk.edit` i fagområdet i tjenesten. Dette er ikke menneskeforbeholdte handlinger, så en integrasjon med `risk.edit` kan utføre dem. |
+| `f5e66bf6` | To E2E-feil etter Wiki-stegene (A7). |
+
+**Sikkerhetsregler**
+
+1. Vurdering, aksept, tilbakekalling og sletting går bare gjennom sine tjenester. Hver tjeneste:
+   - kaller vakten først. Den nekter integrasjoner, inaktive personer og alt som kommer via API-kanalen, også i delegert modus;
+   - sjekker deretter tilgangen selv: beslutningsnøkkelen og `risk.view` i risikoens fagområde. Hvert par (nøkkel, fagområde) må komme fra én og samme rolle, men nøkkelen og `risk.view` kan komme fra hver sin rolle. Formuleringen «from the same role» i commitmeldingen til `595deea4` er upresis;
+   - vurderer risikoen slik den står nå, under radlåsen. En risiko som nettopp er flyttet ut av fagområdet, nektes.
+2. Andre kunders risikoer er utilgjengelige. Det gjelder også for en rolle med «Alle». Kontrolleren svarer 404, og tjenesten nekter med 403.
+3. System Owner får fortsatt ingen risikodata uten en rolle (tidligere besluttet). En System Owner uten rolle nektes alle beslutninger.
+4. Kontrollerne beholder sine sjekker først, så statuskoder og meldinger er uendret. Tjenestenes sjekker er forsvar i dybden.
+
+**Historikk (B3)**
+
+- En risiko med vurdering, aksept (også tilbakekalt) eller tiltak kan ikke slettes. Det håndheves på fire nivåer:
+  - tjenesten (409);
+  - HTTP (feilmelding);
+  - modellen (`LogicException`);
+  - databasen (`risks_keep_decision_history`).
+- Kundesletting virker som før: kunden er borte når kaskaden kommer til risikoen, og da slipper triggeren den gjennom.
+- `risk_assessments` kan aldri endres, og `risk_acceptances` kan bare tilbakekalles, én gang. Databasen håndhever begge deler med `*_immutable`-triggere. Begge slettes bare sammen med risikoen eller kunden, og nulling av en slettet bruker er tillatt.
+- På risikosiden erstattes «Slett risiko» av en begrunnelse som peker til «Lukket» under «Rediger». Hjelpeteksten har fått punktet «Lukke eller slette» (norsk og engelsk).
+- En risiko uten historikk slettes som før.
+
+**Migrering og data**
+
+- `2026_10_22_000005_keep_risk_decision_history` oppretter bare triggere og funksjoner. Ingen rader endres.
+- Kontrollert før sperrene ble innført, på utviklingsdatabasen:
+  - 1 risiko, ingen vurderinger, aksepter eller tiltak;
+  - ingen vurderinger eller aksepter uten aktør;
+  - ingen rader på tvers av kunder.
+- Migreringen kan rulles tilbake. Det er prøvd på testdatabasen.
+
+**Arkitekturfunn**
+
+| # | Funn | Vurdering |
+|---|---|---|
+| A6 | `BusinessAreaGrants` leser rettighetsparene direkte fra rollene. Fratrekket av menneskeforbeholdte nøkler for integrasjoner (`CustomerPermissionService::has`) gjaldt derfor ikke der. En integrasjon med `risk.accept` i en rolle fikk nøkkelen i rollens fagområder. | Rettet for Risiko (`cc3a4e90`). Mål og KPI bruker samme klasse (`objective.measure`, `objective.delete`) og kontrolleres i steg 15. |
+| A7 | Wiki-stegene brøt to E2E-tester i andre moduler: `risk-journey.spec.js` (`wiki.knowledge.handoff`, `cd42a7f2`) og oppryddingen i `ManagementReviewE2EFixture` (kildeadministrasjon i tjenesten, `be1aba2b`). Wiki-verifiseringen kjørte bare Wiki-spesifikasjonene. | Rettet i `f5e66bf6`. Når en delt rettighet endres, kjøres E2E for modulene som bruker den. |
+| A8 | E2E-data i den felles E2E-kunden må kunne ryddes, også når den har historikk. | `RiskTestDataPurge` (bare `tests/Support`) slår av triggeren i sin egen transaksjon med en eksplisitt DDL-setning. Triggeren har ingen bakdør, og en test kontrollerer at ingen kode i `app/` gjør det samme. |
+| A9 | En integrasjon slipper ikke inn i kundefrontenden (403). | Fase 1 må gå via tjenestene, ikke via webkontrollerne. |
+| A10 | Tjenestene nekter med `HumanDecisionRefused`/`AuthorizationException` (403), `RiskHistoryProtected` (409) og `ValidationException` (422). | API-laget i fase 1 oversetter dem til sitt eget feilformat, som for Wiki (A1). |
+| A11 | Aktørtriggerne for `risk_acceptances.accepted_by_user_id`/`revoked_by_user_id` og `risk_assessments.assessed_by` (§4.8) er ikke laget. | Planlagt i steg 19, felles for alle moduler. Tjenestevakten dekker det i mellomtiden. |
+| A12 | `RiskReviewSchedule`-spesifikasjonen flyttet en vurdering bakover i tid med UPDATE. | Databasen nekter det nå. Spesifikasjonen registrerer i stedet vurderingen med datoen (`RiskE2EFixture::recordAssessmentMadeOn`). |
+
+**Tester**
+
+- `RiskHumanDecisionTest` (8):
+  - integrasjonen får ingen menneskeforbeholdt nøkkel;
+  - en beslutter kan ta alle fire beslutninger;
+  - disse nektes alle fire, og ingenting skrives: integrasjon, API-kanal (delegert), inaktiv person, manglende nøkkel, annet fagområde, manglende synlighet, nøkler i to roller, System Owner uten rolle og annen kunde (både eksplisitt fagområde og «Alle»);
+  - en risiko som er flyttet, vurderes der den står nå.
+- `RiskHistoryProtectionTest` (6): B3 i tjeneste, HTTP, modell og SQL; lukking i stedet; uforanderlige vurderinger og aksepter; kundesletting; ryddestien.
+- `RiskServiceAccessTest` (5): endring, tiltak og koblinger; integrasjon med `risk.edit`; nekting på alle elleve skrivinger; tiltak under feil risiko; lesetilgang til Kvalitet.
+- Tre kaskadetester er skrevet om til B3: `RiskAssessmentTest`, `RiskAcceptanceTest` og `RiskTreatmentActionTest`.
+- E2E `risk-delete-history.spec.js`.
+- Kjøringer 2026-10-22:
+  - PHP: alle testfiler som berører Risiko (27 filer, 253 tester), alle bestått.
+  - JS: 2130 av 2130 bestått.
+  - E2E første runde: alle Risiko-spesifikasjoner pluss Leverandør, Ledelsens gjennomgang og Mine oppgaver, der fiksturene er endret. 50 av 53 bestått. De tre feilene er A7 (to) og A12, alle rettet og kjørt på nytt med grønt resultat.
+  - E2E etter siste commit: Risiko-spesifikasjonene, 15 av 16 bestått. `risk-access.spec.js` feilet én gang på et navigasjonskappløp i spesifikasjonen («interrupted by another navigation» etter lagring av rolle). Den besto 3 av 3 ved ny kjøring og i første runde, og den er ikke berørt av endringene.
+- Mutasjonssjekket: vakt, tilgang, låst lesing, historikkregel, modellvakt, triggere, tiltakseierskap og Kvalitet-tilgang.
+
+**Klar for videre integrasjon**
+
+- Ja for lesing og for menneskelige beslutninger. De nektes i domenet for enhver ny inngang.
+- Skrivinger som ikke er beslutninger, ligger også i tjenestene. Et API kan dermed gjenbruke dem uten å kopiere regler.
+- Gjenstår før fase 1: A10 (feilformat) og steg 19 (aktørtriggere).
+
 ## 3. Avgrensning
 
 **Med i fase 0:**
@@ -342,7 +436,7 @@ Kontrolleren beholder sine sjekker *før* tjenestekallet, slik at statuskoder og
 | | `EnterpriseWikiPageDeletionService::deletePage(s)` | `wiki.delete` og `canDeleteEnterpriseWikiPage`. Gjelder også kallet fra Kvalitet (F3a). | `WikiController::destroy`, `QualityController::destroyItem` |
 | | `EnterpriseWikiDocumentDeletionService::delete`, `EnterpriseWikiDocumentFlowService::cancelRun`, `EnterpriseWikiRunDismissalService::dismiss` | `wiki.source.manage` og `canDeleteEnterpriseWikiDocument` | `WikiSourceController`, `WikiController` |
 | | `WikiKnowledgeHandoffService::handOff` / `deposit` | `canHandOff` (med `wiki.knowledge.handoff`) og grensen på 20 | `WikiKnowledgeHandoffController` |
-| **Risiko** | `RiskAcceptanceService::accept`/`revoke` | **Ny** `RiskAccessService::canAccept` | `RiskAcceptanceController:73` |
+| **Risiko** *(gjort, §2c)* | `RiskAcceptanceService::accept`/`revoke` | **Ny** `RiskAccessService::canAccept` | `RiskAcceptanceController:73` |
 | | **Ny** `RiskAssessmentService::record` (trukket ut) | **Ny** `canAssess` | `RiskAssessmentController:41–54` |
 | | **Ny** `RiskLifecycleService::delete` | `can(RISK_DELETE)` og `isDeletable()` (B3) | `RiskController:249–256` |
 | **Avvik** | `ImprovementCaseLifecycleService::close`/`cancel`/`reopen`, `ImprovementActionLifecycleService::verify` | `canClose` | `ImprovementCaseController:343–377`, `ImprovementActionController:147` |
@@ -443,7 +537,7 @@ Hver linje er én commit. Hver commit kjører sine målrettede tester før den l
 | 6 | `refactor(wiki): extract page review workflow into EnterpriseWikiPageReviewService` | submit, approve, return, reopen, QA-tildeling. Koden flyttes uendret. `EnterpriseWikiPublicationInvariantArchitectureTest` godkjenner den nye metoden i stedet for `WikiController::approve`. | 3, 5 |
 | 7 | `refactor(wiki): extract claim decisions into EnterpriseWikiClaimDecisionService` | approve, reject, unapprove, blocking, kildereferanse, med kaskader i samme transaksjon | 6 |
 | 8 | `fix(wiki): guard FinalizeEnterpriseWikiIngest against pages in review` | **F2**: oppdater bare `status IN (draft)`. Testene får en ekstra påstand. | – |
-| 9 | `refactor(risk): decisions and deletion in services; keep risk history` | `canAccept`/`canAssess`, `RiskAssessmentService`, `RiskLifecycleService::delete`, **B3** med trigger | 1 |
+| 9 | `refactor(risk): decisions and deletion in services; keep risk history` | `canAccept`/`canAssess`, `RiskAssessmentService`, `RiskLifecycleService::delete`, **B3** med trigger. **Gjort** som fire commits (§2c). | 1 |
 | 10 | `refactor(improvements): guard close, cancel, reopen, verify and delete` | | 1 |
 | 11 | `refactor(management-review): guard finalize, amendment and delete` | | 1 |
 | 12 | `refactor(quality): require an actor and guard flow approval and adoption` | Null-aktører og `QUALITY_FLOW_ADOPT` | 1 |
