@@ -936,8 +936,9 @@ class ComplianceE2EFixture
             DB::statement('ALTER TABLE compliance_audit_status_changes ENABLE TRIGGER compliance_audit_status_changes_immutable');
             DB::statement('ALTER TABLE compliance_audit_findings ENABLE TRIGGER compliance_audit_findings_handed_off_immutable');
 
-            // The run's Kvalitet items; details, evidence and any remaining links cascade.
-            $sweepOnly(QualityItem::query()->where('customer_id', $customerId)->where('title', '~', $pattern))->delete();
+            // The run's Kvalitet items; details, evidence and any remaining links cascade. A control with
+            // evidence is retired rather than deleted in Procynia (A19), so through the test-only purge.
+            QualityTestDataPurge::delete($sweepOnly(QualityItem::query()->where('customer_id', $customerId)->where('title', '~', $pattern)));
 
             // A source still holding a requirement the run did not create stays.
             ComplianceSource::query()->whereIn('id', $sourceIds)->whereDoesntHave('requirements')->delete();

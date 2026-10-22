@@ -60,9 +60,8 @@ class QualityOverviewE2EFixture
     /** Removes this run's items, or every run's when no suffix is given. Details and evidence cascade. */
     public static function cleanup(?string $suffix = null): void
     {
-        QualityItem::query()
-            ->where('title', 'like', 'E2E Oversikt %'.($suffix ?? ''))
-            ->get()
-            ->each->delete();
+        // The control has evidence, which is retired rather than deleted in Procynia (A19).
+        QualityTestDataPurge::delete(QualityItem::query()
+            ->where('title', 'like', 'E2E Oversikt %'.($suffix ?? '')));
     }
 }

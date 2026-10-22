@@ -119,10 +119,9 @@ class A11yGrcQualityE2EFixture
     /** Removes this run's items, or every run's when no suffix is given. Flow, details and evidence cascade. */
     public static function cleanup(?string $suffix = null): void
     {
-        QualityItem::query()
+        // The control has evidence, which is retired rather than deleted in Procynia (A19).
+        QualityTestDataPurge::delete(QualityItem::query()
             ->where('title', 'like', 'E2E A11y %'.($suffix ?? ''))
-            ->whereIn('quality_type', [QualityItem::TYPE_PROCESS, QualityItem::TYPE_CONTROL])
-            ->get()
-            ->each->delete();
+            ->whereIn('quality_type', [QualityItem::TYPE_PROCESS, QualityItem::TYPE_CONTROL]));
     }
 }
