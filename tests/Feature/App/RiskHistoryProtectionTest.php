@@ -219,7 +219,7 @@ class RiskHistoryProtectionTest extends TestCase
 
         foreach (['app', 'database/seeders', 'routes', 'config'] as $dir) {
             foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator("{$root}/{$dir}")) as $file) {
-                if ($file->getExtension() === 'php' && preg_match('/DISABLE\s+TRIGGER|session_replication_role|RiskTestDataPurge/i', (string) file_get_contents($file->getPathname()))) {
+                if ($file->getExtension() === 'php' && preg_match('/DISABLE\s+TRIGGER|session_replication_role|TestDataPurge/i', (string) file_get_contents($file->getPathname()))) {
                     $offenders[] = substr($file->getPathname(), strlen($root) + 1);
                 }
             }

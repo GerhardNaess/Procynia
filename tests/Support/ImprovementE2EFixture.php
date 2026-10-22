@@ -310,9 +310,9 @@ class ImprovementE2EFixture
             // bulk delete, past the model: history rows, tiltak with their history and effektverifisering
             // and Kvalitet links go with the case through the database cascade. Kvalitet's processes are
             // never touched.
-            $sweepOnly(ImprovementCase::query()->where('customer_id', $customerId)
-                ->where(fn (Builder $query) => $query->where('title', '~', $pattern)->orWhereIn('business_area_id', $areaIds)))
-                ->delete();
+            // A case with history is never deleted in Procynia; a run's own cases are purged.
+            ImprovementTestDataPurge::delete($sweepOnly(ImprovementCase::query()->where('customer_id', $customerId)
+                ->where(fn (Builder $query) => $query->where('title', '~', $pattern)->orWhereIn('business_area_id', $areaIds))));
 
             // Role permissions, area grants and user-role links cascade from the role.
             $sweepOnly(CustomerRole::query()->where('customer_id', $customerId)->where('name', '~', $pattern))->delete();

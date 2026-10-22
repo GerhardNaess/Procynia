@@ -129,7 +129,8 @@ final class KnowledgeHandoffE2EFixture
         }
 
         DB::transaction(function () use ($customer, $pattern, $caseIds): void {
-            ImprovementCase::query()->whereIn('id', $caseIds)->get()->each(fn (ImprovementCase $case) => $case->delete());
+            // A case with history is never deleted in Procynia; a run's own cases are purged.
+            ImprovementTestDataPurge::delete(ImprovementCase::query()->whereIn('id', $caseIds));
             CustomerRole::query()->where('customer_id', $customer->id)->where('name', '~', $pattern)->delete();
             BusinessArea::query()->where('customer_id', $customer->id)->where('name', '~', $pattern)->get()
                 ->reject(fn (BusinessArea $area): bool => $area->isInUse())

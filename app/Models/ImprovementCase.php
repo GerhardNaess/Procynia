@@ -101,6 +101,15 @@ class ImprovementCase extends Model
                 throw new DomainException("Unknown improvement case status [{$case->status}].");
             }
         });
+
+        // A case with history is cancelled, never deleted — whoever asks. The database refuses it too
+        // (improvement_cases_keep_history); isDeletable() is the stricter rule the product applies.
+        static::deleting(function (self $case): void {
+            if (ImprovementCaseStatusChange::query()->where('improvement_case_id', $case->id)->exists()
+                || ImprovementAction::query()->where('improvement_case_id', $case->id)->exists()) {
+                throw new DomainException('An improvement case with history or tiltak cannot be deleted. Cancel it instead.');
+            }
+        });
     }
 
     public function isDeviation(): bool

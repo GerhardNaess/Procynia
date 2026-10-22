@@ -88,6 +88,15 @@ class ImprovementAction extends Model
                 }
             }
         });
+
+        // A tiltak with history is cancelled, never deleted. The database refuses it too
+        // (improvement_actions_keep_history).
+        static::deleting(function (self $action): void {
+            if (ImprovementActionStatusChange::query()->where('improvement_action_id', $action->id)->exists()
+                || ImprovementActionVerification::query()->where('improvement_action_id', $action->id)->exists()) {
+                throw new DomainException('A tiltak with history cannot be deleted. Cancel it instead.');
+            }
+        });
     }
 
     /** Planned or under arbeid: still to be done. */

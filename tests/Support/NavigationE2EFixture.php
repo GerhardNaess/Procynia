@@ -145,7 +145,7 @@ class NavigationE2EFixture
         DB::transaction(function () use ($customerId, $pattern): void {
             $areaIds = BusinessArea::query()->where('customer_id', $customerId)->where('name', '~', $pattern)->pluck('id');
 
-            ImprovementCase::query()->where('customer_id', $customerId)->whereIn('business_area_id', $areaIds)->delete();
+            ImprovementTestDataPurge::delete(ImprovementCase::query()->where('customer_id', $customerId)->whereIn('business_area_id', $areaIds));
             // Role permissions, area grants and user-role links cascade from the role.
             CustomerRole::query()->where('customer_id', $customerId)->where('name', '~', $pattern)->delete();
             BusinessArea::query()->whereIn('id', $areaIds)->delete();

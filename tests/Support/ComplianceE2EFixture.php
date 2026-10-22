@@ -914,9 +914,9 @@ class ComplianceE2EFixture
             // The cases the run's findings were handed off to — named after the finding, or in one of
             // the run's fagområder. No finding points at them any more.
             $areaIds = $sweepOnly(BusinessArea::query()->where('customer_id', $customerId)->where('name', '~', $pattern))->pluck('id');
-            $sweepOnly(ImprovementCase::query()->where('customer_id', $customerId)
-                ->where(fn (Builder $query) => $query->where('title', '~', $pattern)->orWhereIn('business_area_id', $areaIds)))
-                ->delete();
+            // A case with history is never deleted in Procynia; a run's own cases are purged.
+            ImprovementTestDataPurge::delete($sweepOnly(ImprovementCase::query()->where('customer_id', $customerId)
+                ->where(fn (Builder $query) => $query->where('title', '~', $pattern)->orWhereIn('business_area_id', $areaIds))));
 
             // A requirement is the run's when its title carries the marker, or when it sits under one
             // of the run's sources — a spec may retitle it, but not move it out of a source no one
