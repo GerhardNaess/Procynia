@@ -6,8 +6,11 @@ use App\Exceptions\HumanDecisionRefused;
 use App\Models\Customer;
 use App\Models\CustomerRole;
 use App\Models\QualityItem;
+use App\Models\QualityProcessBlueprint;
+use App\Models\QualityProcessRevision;
 use App\Models\User;
 use App\Services\Quality\QualityItemService;
+use App\Services\Quality\QualityProcessBlueprintService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\QueryException;
@@ -19,6 +22,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Tests\Concerns\CreatesComplianceScenarios;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -220,6 +224,57 @@ class QualityCrossModuleLinkTest extends TestCase
         $this->assertTrue(DB::table('risk_processes')->where('quality_item_id', $linked->id)->exists());
     }
 
+    /**
+     * A31 (decided 2026-10-22: keep). Removing a step from the flow takes only the other modules'
+     * links to that step (QualityActivityLinkCleanup). The risk, the KPI and the case stay, and so
+     * does what was decided about them, and the approved process version still holds the step.
+     */
+    public function test_removing_a_step_keeps_the_records_their_history_and_the_approved_version(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->complianceContext();
+        $flows = app(QualityProcessBlueprintService::class);
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Lønnskjøring');
+        $flows->store((int) $customer->id, $process, $this->flow(['Registrer timer', 'Godkjenn lønn']), QualityProcessBlueprint::SOURCE_MANUAL, $owner, basedOn: QualityFlowVersion::of($process));
+        $approved = $flows->approve((int) $customer->id, $process->fresh(), $owner);
+        $revision = $flows->latestRevision((int) $customer->id, $process);
+        $this->assertNotNull($revision);
+
+        $at = ['created_at' => now(), 'updated_at' => now()];
+        $riskId = $this->riskLink($customer, 'risk_activities', 'quality_item_id', $process, extra: ['activity_key' => 'registrer-timer']);
+        $assessmentId = DB::table('risk_assessments')->insertGetId(['customer_id' => $customer->id, 'risk_id' => $riskId, 'assessed_at' => now(), 'rationale' => 'Vurdert', 'criteria_key' => 'standard', 'inherent_likelihood' => 2, 'inherent_consequence' => 3, 'assessed_by' => $owner->id]);
+        DB::table('risk_acceptances')->insert(['customer_id' => $customer->id, 'risk_id' => $riskId, 'assessment_id' => $assessmentId, 'rationale' => 'Akseptert', 'accepted_at' => now(), 'accepted_by_user_id' => $owner->id] + $at);
+        $kpiId = DB::table('kpis')->insertGetId(['customer_id' => $customer->id, 'objective_id' => DB::table('objectives')->insertGetId(['customer_id' => $customer->id, 'business_area_id' => $this->area($customer), 'title' => 'Mål'] + $at), 'title' => 'KPI', 'unit' => 'count', 'target_min' => 1] + $at);
+        DB::table('kpi_activities')->insert(['customer_id' => $customer->id, 'kpi_id' => $kpiId, 'quality_process_id' => $process->id, 'activity_key' => 'registrer-timer'] + $at);
+        DB::table('kpi_measurements')->insert(['customer_id' => $customer->id, 'kpi_id' => $kpiId, 'period_start' => '2026-09-01', 'period_end' => '2026-09-30', 'value' => 4, 'target_min' => 1, 'recorded_at' => now(), 'recorded_by_user_id' => $owner->id]);
+        $caseId = DB::table('improvement_cases')->insertGetId(['customer_id' => $customer->id, 'business_area_id' => $this->area($customer), 'type' => 'deviation', 'title' => 'Sak', 'description' => 'Beskrivelse', 'status' => 'in_progress'] + $at);
+        DB::table('improvement_case_activities')->insert(['customer_id' => $customer->id, 'improvement_case_id' => $caseId, 'quality_process_id' => $process->id, 'activity_key' => 'registrer-timer'] + $at);
+        DB::table('improvement_case_status_changes')->insert(['customer_id' => $customer->id, 'improvement_case_id' => $caseId, 'from_status' => 'open', 'to_status' => 'in_progress', 'changed_at' => now(), 'changed_by_user_id' => $owner->id]);
+        $history = fn (): array => [
+            DB::table('risk_assessments')->where('risk_id', $riskId)->count(),
+            DB::table('risk_acceptances')->where('risk_id', $riskId)->count(),
+            DB::table('kpi_measurements')->where('kpi_id', $kpiId)->count(),
+            DB::table('improvement_case_status_changes')->where('improvement_case_id', $caseId)->count(),
+        ];
+        $this->assertSame([1, 1, 1, 1], $history());
+
+        // The step leaves the working version.
+        $flows->store((int) $customer->id, $process->fresh(), $this->flow(['Godkjenn lønn']), QualityProcessBlueprint::SOURCE_MANUAL, $owner, basedOn: QualityProcessBlueprintService::versionHash($approved->fresh()));
+
+        // Only the links went.
+        $this->assertSame(0, DB::table('risk_activities')->where('risk_id', $riskId)->count());
+        $this->assertSame(0, DB::table('kpi_activities')->where('kpi_id', $kpiId)->count());
+        $this->assertSame(0, DB::table('improvement_case_activities')->where('improvement_case_id', $caseId)->count());
+        $this->assertTrue(DB::table('risks')->where('id', $riskId)->exists());
+        $this->assertTrue(DB::table('kpis')->where('id', $kpiId)->exists());
+        $this->assertTrue(DB::table('improvement_cases')->where('id', $caseId)->exists());
+        $this->assertSame([1, 1, 1, 1], $history());
+
+        // The approved version is untouched and still holds the step.
+        $kept = QualityProcessRevision::query()->findOrFail($revision->id);
+        $this->assertSame($revision->payload, $kept->payload);
+        $this->assertContains('registrer-timer', collect($kept->payload['nodes'])->pluck('key')->all());
+    }
+
     public function test_deleting_the_customer_takes_linked_items_along(): void
     {
         ['customer' => $customer, 'owner' => $owner] = $this->complianceContext();
@@ -265,6 +320,25 @@ class QualityCrossModuleLinkTest extends TestCase
         DB::table($table)->insert(['customer_id' => $customer->id, 'risk_id' => $riskId, $column => $item->id, 'created_at' => now(), 'updated_at' => now()] + $extra);
 
         return $riskId;
+    }
+
+    /**
+     * @param  list<string>  $steps
+     * @return array<string, list<array<string, string>>>
+     */
+    private function flow(array $steps): array
+    {
+        $nodes = [['key' => 'start', 'lane' => 'lonn', 'type' => 'start', 'label' => 'Start']];
+        foreach ($steps as $step) {
+            $nodes[] = ['key' => Str::slug($step), 'lane' => 'lonn', 'type' => 'step', 'label' => $step];
+        }
+        $nodes[] = ['key' => 'slutt', 'lane' => 'lonn', 'type' => 'end', 'label' => 'Slutt'];
+        $edges = [];
+        for ($i = 1; $i < count($nodes); $i++) {
+            $edges[] = ['from' => $nodes[$i - 1]['key'], 'to' => $nodes[$i]['key']];
+        }
+
+        return ['lanes' => [['key' => 'lonn', 'label' => 'Lønnsansvarlig']], 'nodes' => $nodes, 'edges' => $edges];
     }
 
     private function area(Customer $customer): int
