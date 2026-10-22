@@ -19,7 +19,7 @@
   - steg 10, Avvik og forbedringer (`45ece813`, `5079e978`, `6a6df31d`, `9059f765`), se §2d
   - steg 11, Ledelsens gjennomgang (`34d4c8ba`, `3d89f627`, `6f5431fb`), se §2e
   - isolert E2E-miljø (`cef890b2`), se `docs/testing/e2e-environment.md`
-  - steg 12, Kvalitet (`f958fe57`, `686dba14` og del 3), se §2f
+  - steg 12, Kvalitet (`f958fe57`, `686dba14`, `60fd0d16`), se §2f
 - Wiki-delen av fase 0 og Risiko (steg 9) er gjennomført og godkjent 2026-10-22.
 - Avvik og forbedringer (steg 10) er gjennomført og godkjent 2026-10-22.
 - Ledelsens gjennomgang (steg 11) er gjennomført og godkjent 2026-10-22.
@@ -564,7 +564,7 @@ Ny arbeidsversjon for statusendringer anbefales ikke:
 |---|---|
 | `f958fe57` | Godkjenning (`QUALITY_FLOW_APPROVE`), godkjenning av AI-forslag (`QUALITY_FLOW_ADOPT`) og sletting (`QUALITY_DELETE`) går gjennom vakten og deretter riktig nøkkel i tjenestene. Aktøren er påkrevd. Ny `QualityAccessService`: egen kunde, Kvalitet-modulen og nøkkelen. Avklaringer sjekker `quality.edit`. |
 | `686dba14` | Alle ordinære skrivinger sjekker nøkkelen i tjenesten, med påkrevd aktør. `linkDocument` godtar `quality.create` eller `quality.edit`, som i grensesnittet. Kontroll fra aktivitet går via `createActivityControl` under `quality.edit`. |
-| *(steg 12, del 3)* | Godkjente prosessversjoner bevares (A18): en godkjent prosess settes til «Utgått» i stedet for å slettes – i menyen, kontrolleren, tjenesten og databasen. Versjonene kan verken endres eller slettes. |
+| `60fd0d16` | Godkjente prosessversjoner bevares (A18): en godkjent prosess settes til «Utgått» i stedet for å slettes – i menyen, kontrolleren, tjenesten og databasen. Versjonene kan verken endres eller slettes. |
 
 **Sikkerhetsregler**
 
