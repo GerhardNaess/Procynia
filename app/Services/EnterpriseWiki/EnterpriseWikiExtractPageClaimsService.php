@@ -898,7 +898,7 @@ class EnterpriseWikiExtractPageClaimsService
                     foreach ($this->sourceReferencePayloadsForKeys($sourceElementsByKey, $claim['source_element_keys'], $claim['excerpt']) as $sourceReferencePayload) {
                         EnterpriseWikiSourceReference::query()->create(array_merge([
                             'enterprise_wiki_claim_id' => $createdClaim->id,
-                        ], $sourceReferencePayload));
+                        ], $sourceReferencePayload, EnterpriseWikiSourceReference::linkedBySystem(EnterpriseWikiSourceReference::PROCESS_CLAIM_EXTRACTION)));
                     }
                 }
 

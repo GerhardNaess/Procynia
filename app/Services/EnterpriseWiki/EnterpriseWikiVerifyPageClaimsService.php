@@ -1755,7 +1755,7 @@ class EnterpriseWikiVerifyPageClaimsService
                 'excerpt' => $supportingExcerpt,
                 'source_hash' => $document->file_hash_sha256 ?? '',
                 'page_reference' => $sourceElement['page_reference'] ?? null,
-            ]);
+            ] + EnterpriseWikiSourceReference::linkedBySystem(EnterpriseWikiSourceReference::PROCESS_CLAIM_VERIFICATION));
 
             if ($allowClaimDecisionReset) {
                 $this->lintService->resetClaimDecisionAfterFirstSourceReference($claim, true);

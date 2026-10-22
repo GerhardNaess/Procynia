@@ -343,7 +343,15 @@ class EnterpriseWikiClaimContentRepairServiceTest extends TestCase
         $this->assertNotNull($copiedClaim->verified_at);
         $this->assertNull($copiedClaim->verification_claimed_at);
         $this->assertNull($copiedClaim->verification_claim_token);
-        $this->assertSame(0, $copiedClaim->decisions()->count());
+        // The person's decision is not copied: it stays on the original. The copy's own history
+        // says where its state came from, as a system event (A4).
+        $carriedOver = $copiedClaim->decisions()->sole();
+        $this->assertSame(EnterpriseWikiClaimDecision::ACTOR_SYSTEM, $carriedOver->actor_type);
+        $this->assertSame(EnterpriseWikiClaimDecision::PROCESS_COPIED_TO_NEW_VERSION, $carriedOver->system_process);
+        $this->assertNull($carriedOver->decided_by_user_id);
+        $this->assertNull($carriedOver->comment);
+        $this->assertSame((int) $fixture['unchangedClaim']->id, $carriedOver->new_state['copied_from_claim_id']);
+        $this->assertSame(1, $fixture['unchangedClaim']->decisions()->count());
 
         $copiedReference = $copiedClaim->sourceReferences()->sole();
         $this->assertNotSame($fixture['unchangedReference']->id, $copiedReference->id);

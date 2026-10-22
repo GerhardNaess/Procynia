@@ -3,6 +3,7 @@
 namespace App\Services\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiClaimDecision;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
@@ -11,6 +12,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
+use App\Models\User;
 use Illuminate\Support\Collection;
 
 /**
@@ -39,6 +41,7 @@ class EnterpriseWikiAppliedRunLintService
         private readonly EnterpriseWikiPlannedSectionCoverageValidator $sectionCoverageValidator,
         private readonly EnterpriseWikiPlannedFigureCoverageValidator $figureCoverageValidator,
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
+        private readonly EnterpriseWikiClaimDecisionRecorder $decisionRecorder,
     ) {}
 
     /**
@@ -223,13 +226,14 @@ class EnterpriseWikiAppliedRunLintService
     /**
      * Purpose: Reset a claim's manual decision back to pending when its first real source
      * reference arrives after an approval or rejection already existed.
-     * Inputs: The claim and whether it had no real source reference immediately before the new
-     * reference was attached.
+     * Inputs: The claim, whether it had no real source reference immediately before the new
+     * reference was attached, and the person whose «Koble kilde» brought the source, if any.
      * Returns: None.
      * Side effects: Clears approval fields when the claim was previously decided without a real
-     * source basis and now has one.
+     * source basis and now has one, and records that as a system event (reset_on_first_source)
+     * in the claim's decision history, in the same transaction.
      */
-    public function resetClaimDecisionAfterFirstSourceReference(EnterpriseWikiClaim $claim, bool $wasMissingSourceBefore): void
+    public function resetClaimDecisionAfterFirstSourceReference(EnterpriseWikiClaim $claim, bool $wasMissingSourceBefore, ?User $initiatedBy = null): void
     {
         if (! $wasMissingSourceBefore) {
             return;
@@ -242,12 +246,17 @@ class EnterpriseWikiAppliedRunLintService
             return;
         }
 
-        $claim->update([
-            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
-            'approved_by_user_id' => null,
-            'approved_at' => null,
-            'approval_comment' => null,
-        ]);
+        $this->decisionRecorder->change(
+            $claim,
+            EnterpriseWikiClaimActor::system(EnterpriseWikiClaimDecision::PROCESS_RESET_ON_FIRST_SOURCE, $initiatedBy),
+            EnterpriseWikiClaimDecision::TYPE_APPROVAL_STATUS,
+            [
+                'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+                'approved_by_user_id' => null,
+                'approved_at' => null,
+                'approval_comment' => null,
+            ],
+        );
     }
 
     // =========================================================================

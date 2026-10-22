@@ -239,7 +239,7 @@ class EnterpriseWikiRepairRunClaimSourceLinksService
                                 'enterprise_wiki_claim_id' => $payload['enterprise_wiki_claim_id'],
                                 'source_element_key' => $payload['source_element_key'],
                             ],
-                            $payload,
+                            $payload + EnterpriseWikiSourceReference::linkedBySystem(EnterpriseWikiSourceReference::PROCESS_SOURCE_LINK_REPAIR),
                         );
                     }
 

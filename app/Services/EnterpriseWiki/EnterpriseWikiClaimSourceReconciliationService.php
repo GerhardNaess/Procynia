@@ -227,7 +227,7 @@ class EnterpriseWikiClaimSourceReconciliationService
                 'source_id' => $document->id,
                 'source_label' => $document->original_filename,
                 'excerpt' => $excerpt,
-            ]);
+            ] + EnterpriseWikiSourceReference::linkedBySystem(EnterpriseWikiSourceReference::PROCESS_SOURCE_RECONCILIATION));
 
             $this->lintService->resetClaimDecisionAfterFirstSourceReference($freshClaim, true);
 

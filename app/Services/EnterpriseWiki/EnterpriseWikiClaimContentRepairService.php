@@ -72,6 +72,7 @@ class EnterpriseWikiClaimContentRepairService
         private readonly EnterpriseWikiPublicationSettlementService $publicationSettlement,
         private readonly HumanDecisionGuard $guard,
         private readonly CustomerPermissionService $permissions,
+        private readonly EnterpriseWikiClaimDecisionRecorder $decisionRecorder,
     ) {}
 
     /**
@@ -604,15 +605,7 @@ class EnterpriseWikiClaimContentRepairService
             ->get();
 
         foreach ($claims as $claim) {
-            $copy = EnterpriseWikiClaim::query()->create($this->claimClonePayload($claim, $to));
-
-            foreach ($claim->sourceReferences as $sourceReference) {
-                EnterpriseWikiSourceReference::query()->create(array_merge([
-                    'enterprise_wiki_claim_id' => $copy->id,
-                ], $this->sourceReferenceClonePayload($sourceReference)));
-            }
-
-            $copies[(int) $claim->id] = (int) $copy->id;
+            $copies[(int) $claim->id] = (int) $this->copyClaim($claim, $to)->id;
         }
 
         return $copies;
@@ -900,15 +893,7 @@ class EnterpriseWikiClaimContentRepairService
         $copiedClaimIds = [];
 
         foreach ($claims as $claim) {
-            $copiedClaim = EnterpriseWikiClaim::query()->create($this->claimClonePayload($claim, $stagedVersion));
-
-            foreach ($claim->sourceReferences as $sourceReference) {
-                EnterpriseWikiSourceReference::query()->create(array_merge([
-                    'enterprise_wiki_claim_id' => $copiedClaim->id,
-                ], $this->sourceReferenceClonePayload($sourceReference)));
-            }
-
-            $copiedClaimIds[] = $copiedClaim->id;
+            $copiedClaimIds[] = $this->copyClaim($claim, $stagedVersion)->id;
         }
 
         return $copiedClaimIds;
@@ -1124,6 +1109,28 @@ class EnterpriseWikiClaimContentRepairService
     }
 
     /**
+     * One claim and its sources onto another version. The copy keeps its original's decision and
+     * blocking and says so in its own history (copied_to_new_version); each source keeps who linked
+     * it and when. All in one transaction with the copy.
+     */
+    private function copyClaim(EnterpriseWikiClaim $claim, EnterpriseWikiPageVersion $to): EnterpriseWikiClaim
+    {
+        return DB::transaction(function () use ($claim, $to): EnterpriseWikiClaim {
+            $copy = EnterpriseWikiClaim::query()->create($this->claimClonePayload($claim, $to));
+
+            foreach ($claim->sourceReferences as $sourceReference) {
+                EnterpriseWikiSourceReference::query()->create(array_merge([
+                    'enterprise_wiki_claim_id' => $copy->id,
+                ], $this->sourceReferenceClonePayload($sourceReference)));
+            }
+
+            $this->decisionRecorder->noteCarriedOverState($copy, $claim);
+
+            return $copy;
+        });
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function claimClonePayload(EnterpriseWikiClaim $claim, EnterpriseWikiPageVersion $stagedVersion): array
@@ -1170,7 +1177,7 @@ class EnterpriseWikiClaimContentRepairService
             'excerpt' => $reference->excerpt,
             'source_hash' => $reference->source_hash,
             'page_reference' => $reference->page_reference,
-        ];
+        ] + $reference->linkAttribution();
     }
 
     /**

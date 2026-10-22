@@ -4,6 +4,7 @@ namespace App\Services\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiCanonicalFact;
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiClaimDecision;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestSection;
@@ -68,6 +69,7 @@ class EnterpriseWikiDocumentDeletionService
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
         private readonly EnterpriseWikiDocumentWithdrawalService $withdrawalService,
         private readonly EnterpriseWikiSourceAuthority $sourceAuthority,
+        private readonly EnterpriseWikiClaimDecisionRecorder $decisionRecorder,
     ) {}
 
     /**
@@ -283,7 +285,7 @@ class EnterpriseWikiDocumentDeletionService
                 ->where('source_id', $document->id)
                 ->delete();
 
-            $this->resetClaimsThatLostTheirOnlySource($impactedClaimIds);
+            $this->resetClaimsThatLostTheirOnlySource($impactedClaimIds, $actor);
 
             // Cascades: page_versions, claims, (any remaining) source_references, page_links,
             // ingest_run_pages, page_version_document_owner_approvals, page_relink_attempts,
@@ -525,9 +527,12 @@ class EnterpriseWikiDocumentDeletionService
     }
 
     /**
+     * A decided claim whose only source went with the document is open again. Procynia does that
+     * by rule, not the person deleting; the history records it as a system event they set off.
+     *
      * @param  Collection<int, int|string>  $claimIds
      */
-    private function resetClaimsThatLostTheirOnlySource(Collection $claimIds): void
+    private function resetClaimsThatLostTheirOnlySource(Collection $claimIds, User $actor): void
     {
         $resolvedClaimIds = $claimIds
             ->map(static fn (mixed $value): int => (int) $value)
@@ -556,12 +561,17 @@ class EnterpriseWikiDocumentDeletionService
                 continue;
             }
 
-            $claim->update([
-                'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
-                'approved_by_user_id' => null,
-                'approved_at' => null,
-                'approval_comment' => null,
-            ]);
+            $this->decisionRecorder->change(
+                $claim,
+                EnterpriseWikiClaimActor::system(EnterpriseWikiClaimDecision::PROCESS_RESET_ON_LOST_SOURCE, $actor),
+                EnterpriseWikiClaimDecision::TYPE_APPROVAL_STATUS,
+                [
+                    'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+                    'approved_by_user_id' => null,
+                    'approved_at' => null,
+                    'approval_comment' => null,
+                ],
+            );
 
             $this->lintService->reopenClaimMissingSourceFindingIfStillMissing($claim);
         }

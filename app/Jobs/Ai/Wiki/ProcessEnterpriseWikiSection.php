@@ -156,7 +156,7 @@ class ProcessEnterpriseWikiSection implements ShouldQueue
                         'source_label' => $sourceLabel,
                         'source_hash' => $run->source_hash ?? '',
                         'excerpt' => $claim['excerpt'],
-                    ]);
+                    ] + EnterpriseWikiSourceReference::linkedBySystem(EnterpriseWikiSourceReference::PROCESS_SECTION_PROCESSING));
                 }
 
                 $section->update(['status' => EnterpriseWikiIngestSection::STATUS_COMPLETED]);

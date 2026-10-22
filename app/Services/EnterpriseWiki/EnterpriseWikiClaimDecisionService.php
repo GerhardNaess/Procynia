@@ -42,6 +42,7 @@ class EnterpriseWikiClaimDecisionService
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
         private readonly EnterpriseWikiPageReviewService $pageReviews,
         private readonly EnterpriseWikiClaimContentRepairService $claimContentRepair,
+        private readonly EnterpriseWikiClaimDecisionRecorder $recorder,
     ) {}
 
     /**
@@ -236,23 +237,16 @@ class EnterpriseWikiClaimDecisionService
             abort(422, 'Claim is not manually decided.');
         }
 
-        $this->recordDecision(
-            $claim,
-            $user->id,
-            EnterpriseWikiClaimDecision::TYPE_APPROVAL_STATUS,
-            ['approval_status' => $claim->approval_status],
-            ['approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING],
-            null,
-        );
+        DB::transaction(function () use ($claim, $user): void {
+            $this->recorder->change($claim, EnterpriseWikiClaimActor::user($user), EnterpriseWikiClaimDecision::TYPE_APPROVAL_STATUS, [
+                'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+                'approved_by_user_id' => null,
+                'approved_at' => null,
+                'approval_comment' => null,
+            ]);
 
-        $claim->update([
-            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
-            'approved_by_user_id' => null,
-            'approved_at' => null,
-            'approval_comment' => null,
-        ]);
-
-        $this->lintService->reopenClaimMissingSourceFindingIfStillMissing($claim);
+            $this->lintService->reopenClaimMissingSourceFindingIfStillMissing($claim);
+        });
 
         return $claim->fresh();
     }
@@ -274,20 +268,11 @@ class EnterpriseWikiClaimDecisionService
             EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
         ], true), 422, 'Blocking can only be set for a claim-integrity finding.');
 
-        $this->recordDecision(
-            $claim,
-            $user->id,
-            EnterpriseWikiClaimDecision::TYPE_BLOCKING_OVERRIDE,
-            ['blocking_override' => $claim->blocking_override],
-            ['blocking_override' => $newBlocking],
-            $comment,
-        );
-
-        $claim->update([
+        $this->recorder->change($claim, EnterpriseWikiClaimActor::user($user), EnterpriseWikiClaimDecision::TYPE_BLOCKING_OVERRIDE, [
             'blocking_override' => $newBlocking,
             'blocking_override_by_user_id' => $user->id,
             'blocking_override_at' => now(),
-        ]);
+        ], $comment);
 
         return $claim->fresh();
     }
@@ -348,32 +333,47 @@ class EnterpriseWikiClaimDecisionService
             $sourceRowKey = null;
         }
 
-        EnterpriseWikiSourceReference::query()->updateOrCreate(
-            [
-                'enterprise_wiki_claim_id' => $claim->id,
-                'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-                'source_id' => $document->id,
-                'source_element_key' => $sourceElementKey,
-                'source_element_type' => $sourceElementType,
-                'source_row_key' => $sourceRowKey,
-            ],
-            [
-                'source_label' => $document->original_filename,
-                'source_hash' => hash('sha256', implode('|', [
-                    'enterprise_wiki_document',
-                    $document->id,
-                    $document->file_hash_sha256,
-                    $sourceElementType ?? 'manual',
-                    $sourceElementKey ?? 'manual',
-                    $sourceRowKey ?? 'manual',
-                ])),
-                'excerpt' => $excerpt,
-                'page_reference' => $pageReference,
-            ],
-        );
+        // One transaction: the link, its event and the reset it may cause are there together or not at all.
+        DB::transaction(function () use ($claim, $user, $document, $sourceElementKey, $sourceElementType, $sourceRowKey, $excerpt, $pageReference, $hadSourceReference): void {
+            $reference = EnterpriseWikiSourceReference::query()->updateOrCreate(
+                [
+                    'enterprise_wiki_claim_id' => $claim->id,
+                    'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+                    'source_id' => $document->id,
+                    'source_element_key' => $sourceElementKey,
+                    'source_element_type' => $sourceElementType,
+                    'source_row_key' => $sourceRowKey,
+                ],
+                [
+                    'source_label' => $document->original_filename,
+                    'source_hash' => hash('sha256', implode('|', [
+                        'enterprise_wiki_document',
+                        $document->id,
+                        $document->file_hash_sha256,
+                        $sourceElementType ?? 'manual',
+                        $sourceElementKey ?? 'manual',
+                        $sourceRowKey ?? 'manual',
+                    ])),
+                    'excerpt' => $excerpt,
+                    'page_reference' => $pageReference,
+                ] + EnterpriseWikiSourceReference::linkedByUser($user),
+            );
 
-        $this->lintService->resetClaimDecisionAfterFirstSourceReference($claim, ! $hadSourceReference);
-        $this->lintService->resolveClaimMissingSourceFinding($claim);
+            $this->recorder->note($claim, EnterpriseWikiClaimActor::user($user), EnterpriseWikiClaimDecision::TYPE_SOURCE_REFERENCE,
+                ['had_source_reference' => $hadSourceReference],
+                [
+                    'source_reference_id' => (int) $reference->id,
+                    'source_id' => (int) $document->id,
+                    'source_element_type' => $sourceElementType,
+                    'source_element_key' => $sourceElementKey,
+                    'source_row_key' => $sourceRowKey,
+                    'relinked' => ! $reference->wasRecentlyCreated,
+                ],
+            );
+
+            $this->lintService->resetClaimDecisionAfterFirstSourceReference($claim, ! $hadSourceReference, $user);
+            $this->lintService->resolveClaimMissingSourceFinding($claim);
+        });
 
     }
 
@@ -614,50 +614,14 @@ class EnterpriseWikiClaimDecisionService
         array $previousExtra = [],
         array $newExtra = [],
     ): void {
-        $this->recordDecision(
-            $claim,
-            $userId,
-            EnterpriseWikiClaimDecision::TYPE_APPROVAL_STATUS,
-            array_merge(['approval_status' => $claim->approval_status], $previousExtra),
-            array_merge(['approval_status' => $status], $newExtra),
-            $comment,
-        );
-
-        $claim->update([
+        $this->recorder->change($claim, EnterpriseWikiClaimActor::user($userId), EnterpriseWikiClaimDecision::TYPE_APPROVAL_STATUS, [
             'approval_status' => $status,
             'approved_by_user_id' => $userId,
             'approved_at' => now(),
             'approval_comment' => $comment,
-        ]);
+        ], $comment, $previousExtra, $newExtra);
 
         $this->lintService->resolveClaimMissingSourceFinding($claim);
-    }
-
-    /**
-     * Append-only audit trail (product rule: every decision stores who, when, any comment, and
-     * the previous/new decision) — never updated or deleted, unlike EnterpriseWikiClaim's own
-     * approval_status/blocking_override columns which only hold the CURRENT state. Written before
-     * the claim itself is updated so "previous_state" always reflects genuinely pre-decision data.
-     *
-     * @param  array<string, mixed>  $previousState
-     * @param  array<string, mixed>  $newState
-     */
-    private function recordDecision(
-        EnterpriseWikiClaim $claim,
-        int $userId,
-        string $decisionType,
-        array $previousState,
-        array $newState,
-        ?string $comment,
-    ): void {
-        EnterpriseWikiClaimDecision::query()->create([
-            'enterprise_wiki_claim_id' => $claim->id,
-            'decided_by_user_id' => $userId,
-            'decision_type' => $decisionType,
-            'previous_state' => $previousState,
-            'new_state' => $newState,
-            'comment' => $comment,
-        ]);
     }
 
     /**
