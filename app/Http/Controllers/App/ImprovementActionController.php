@@ -67,7 +67,7 @@ class ImprovementActionController extends Controller
         $action = $this->actionOrFail($case, $actionId);
 
         try {
-            $this->lifecycle->delete($action);
+            $this->lifecycle->delete($action, $user);
         } catch (ValidationException $exception) {
             return back()->with('error', collect($exception->errors())->flatten()->first());
         }

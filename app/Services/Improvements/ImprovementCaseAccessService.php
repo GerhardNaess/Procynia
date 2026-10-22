@@ -141,10 +141,14 @@ class ImprovementCaseAccessService
         return $this->can($user, CustomerPermissionCatalog::IMPROVEMENT_VIEW, $case);
     }
 
-    /** Editing covers registering, changing and Start behandling. Never closing or deleting. */
+    /**
+     * Editing covers changing the case, its årsaksanalyse, its tiltak and Kvalitet context, and
+     * Start behandling. Never closing or deleting. Like every write, on a case the person can read;
+     * the services ask this themselves (phase 0 step 10).
+     */
     public function canEdit(User $user, ImprovementCase $case): bool
     {
-        return $this->can($user, CustomerPermissionCatalog::IMPROVEMENT_EDIT, $case);
+        return $this->canView($user, $case) && $this->can($user, CustomerPermissionCatalog::IMPROVEMENT_EDIT, $case);
     }
 
     /**

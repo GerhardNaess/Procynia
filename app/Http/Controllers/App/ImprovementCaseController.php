@@ -259,12 +259,7 @@ class ImprovementCaseController extends Controller
             'cause_analysis' => ['nullable', 'string', 'max:10000'],
         ], ImprovementValidationMessages::messages(), ImprovementValidationMessages::attributes());
 
-        $text = trim((string) ($validated['cause_analysis'] ?? ''));
-
-        $case->forceFill([
-            'cause_analysis' => $text !== '' ? $text : null,
-            'updated_by' => $user->id,
-        ])->save();
+        $this->creator->updateCause($user, $case, $validated['cause_analysis'] ?? null);
 
         return back()->with('success', __('procynia.improvements.cause.flash.updated'));
     }
@@ -294,23 +289,7 @@ class ImprovementCaseController extends Controller
             return back()->with('error', __('procynia.improvements.validation.reopen_before_edit'));
         }
 
-        $validated = $this->validated($request);
-        $targetAreaId = (int) $validated['business_area_id'];
-
-        // Moving a case changes who can see it, so it takes edit authority on both sides: the old
-        // area above, the new one here.
-        if ($targetAreaId !== (int) $case->business_area_id) {
-            $this->creator->assertCanEditIn($user, $targetAreaId);
-        }
-
-        // Against the area the case will be in, so a move cannot keep an owner who would no longer
-        // be able to see it.
-        $this->creator->assertValidOwner($user, (int) $validated['owner_user_id'], $targetAreaId);
-
-        $case->fill($this->creator->fields($validated) + [
-            'business_area_id' => $targetAreaId,
-            'updated_by' => $user->id,
-        ])->save();
+        $case = $this->creator->update($user, $case, $this->validated($request));
 
         // After a move the user may no longer see the case; the register is the only safe place to
         // land in that case.

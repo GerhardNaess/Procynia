@@ -42,8 +42,8 @@ use Illuminate\Validation\ValidationException;
  *
  * AUTHORIZATION. verify() is a human decision about the outcome, not the work: it checks
  * HumanDecisionGuard (IMPROVEMENT_CLOSE) and improvement.close in the case's area itself, on the
- * locked case (phase 0 step 10). The other writes take improvement.edit in the case's area; the
- * owner is checked with ImprovementCaseAccessService::isValidOwner().
+ * locked case (phase 0 step 10). The other writes check improvement.edit in the case's area
+ * themselves, the same way, and the owner with ImprovementCaseAccessService::isValidOwner().
  */
 class ImprovementActionLifecycleService
 {
@@ -58,7 +58,8 @@ class ImprovementActionLifecycleService
     public function create(ImprovementCase $case, User $actor, array $fields): ImprovementAction
     {
         return DB::transaction(function () use ($case, $actor, $fields): ImprovementAction {
-            $locked = $this->lockActiveCase($case, 'title');
+            $locked = $this->lockActiveCase($case, 'title', $this->mayEdit($actor));
+            $this->assertValidOwner($locked, (int) $fields['owner_user_id']);
 
             return ImprovementAction::query()->create($fields + [
                 'customer_id' => (int) $locked->customer_id,
@@ -77,13 +78,15 @@ class ImprovementActionLifecycleService
     public function update(ImprovementAction $action, User $actor, array $fields): ImprovementAction
     {
         return DB::transaction(function () use ($action, $actor, $fields): ImprovementAction {
-            $locked = $this->lockAction($action, 'title');
+            $locked = $this->lockAction($action, 'title', $this->mayEdit($actor));
 
             if (! $locked->isActive()) {
                 throw ValidationException::withMessages([
                     'title' => __('procynia.improvements.actions.validation.reopen_before_edit'),
                 ]);
             }
+
+            $this->assertValidOwner(ImprovementCase::query()->findOrFail($locked->improvement_case_id), (int) $fields['owner_user_id']);
 
             $locked->fill($fields + ['updated_by' => (int) $actor->id])->save();
 
@@ -92,10 +95,10 @@ class ImprovementActionLifecycleService
     }
 
     /** Only a tiltak added by mistake that nobody has touched (ImprovementAction::isDeletable()). */
-    public function delete(ImprovementAction $action): void
+    public function delete(ImprovementAction $action, User $actor): void
     {
-        DB::transaction(function () use ($action): void {
-            $locked = $this->lockAction($action, 'action');
+        DB::transaction(function () use ($action, $actor): void {
+            $locked = $this->lockAction($action, 'action', $this->mayEdit($actor));
 
             if (! $locked->isDeletable()) {
                 throw ValidationException::withMessages([
@@ -187,7 +190,7 @@ class ImprovementActionLifecycleService
     private function transition(ImprovementAction $action, User $actor, array $from, string $to, ?string $note, string $errorField): ImprovementAction
     {
         return DB::transaction(function () use ($action, $actor, $from, $to, $note, $errorField): ImprovementAction {
-            $locked = $this->lockAction($action, $errorField);
+            $locked = $this->lockAction($action, $errorField, $this->mayEdit($actor));
 
             if (! in_array($locked->status, $from, true)) {
                 throw ValidationException::withMessages([
@@ -242,6 +245,24 @@ class ImprovementActionLifecycleService
         }
 
         return $locked;
+    }
+
+    /** improvement.edit in the case's area — the work on its tiltak — asked of the locked case. */
+    private function mayEdit(User $actor): \Closure
+    {
+        return fn (ImprovementCase $case): bool => $this->access->canEdit($actor, $case);
+    }
+
+    /** The responsible person: an active user of the case's customer who can read cases in its area. */
+    private function assertValidOwner(ImprovementCase $case, int $ownerId): void
+    {
+        $owner = User::query()->where('customer_id', (int) $case->customer_id)->find($ownerId);
+
+        if (! $this->access->isValidOwner($owner, (int) $case->customer_id, (int) $case->business_area_id)) {
+            throw ValidationException::withMessages([
+                'owner_user_id' => __('procynia.improvements.actions.validation.owner_not_allowed'),
+            ]);
+        }
     }
 
     /**

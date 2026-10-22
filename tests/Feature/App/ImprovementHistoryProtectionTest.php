@@ -104,7 +104,7 @@ class ImprovementHistoryProtectionTest extends TestCase
         $world = $this->world();
 
         try {
-            app(ImprovementActionLifecycleService::class)->delete($world['action']);
+            app(ImprovementActionLifecycleService::class)->delete($world['action'], $world['handler']);
             $this->fail('the service must refuse');
         } catch (ValidationException) {
             $this->addToAssertionCount(1);

@@ -7,6 +7,7 @@ use App\Models\ImprovementCaseActivity;
 use App\Models\ImprovementCaseProcess;
 use App\Models\User;
 use App\Services\Quality\QualityProcessContextReader;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -30,6 +31,7 @@ class ImprovementCaseQualityContextService
 {
     public function __construct(
         private readonly QualityProcessContextReader $quality,
+        private readonly ImprovementCaseAccessService $access,
     ) {}
 
     public function canReadQuality(User $user): bool
@@ -74,6 +76,28 @@ class ImprovementCaseQualityContextService
      * @param  list<string>  $activityKeys
      */
     public function syncProcess(User $user, ImprovementCase $case, int $processId, bool $wholeProcess, array $activityKeys): void
+    {
+        DB::transaction(function () use ($user, $case, $processId, $wholeProcess, $activityKeys): void {
+            // improvement.edit in the case's area and Kvalitet read access, asked of the case under its
+            // lock, and only while it is open or under arbeid (phase 0 step 10).
+            $locked = ImprovementCase::query()->whereKey($case->id)->lockForUpdate()->first();
+
+            if ($locked === null || ! $this->access->canEdit($user, $locked) || ! $this->canReadQuality($user)) {
+                throw new AuthorizationException('This user may not change the context of this case.');
+            }
+
+            if (! $locked->isActive()) {
+                throw ValidationException::withMessages([
+                    'quality_process_id' => __('procynia.improvements.validation.reopen_before_edit'),
+                ]);
+            }
+
+            $this->writeProcessContext($user, $locked, $processId, $wholeProcess, $activityKeys);
+        });
+    }
+
+    /** @param  list<string>  $activityKeys */
+    private function writeProcessContext(User $user, ImprovementCase $case, int $processId, bool $wholeProcess, array $activityKeys): void
     {
         $customerId = (int) $case->customer_id;
         $process = $this->quality->findProcess($customerId, $processId);

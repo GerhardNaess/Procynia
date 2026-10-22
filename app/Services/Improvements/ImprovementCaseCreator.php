@@ -6,6 +6,8 @@ use App\Models\ImprovementCase;
 use App\Models\User;
 use App\Support\CalendarDate;
 use App\Support\CustomerPermissionCatalog;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -69,6 +71,70 @@ class ImprovementCaseCreator
     }
 
     /** improvement.edit in this area of the person's own customer, or a 422 on business_area_id. */
+    /**
+     * Change a case's fields, and move it to another fagområde: improvement.edit in the area it is in
+     * now (403 otherwise), and in the target area too when it moves (422 on business_area_id), with the
+     * owner checked against the area it will be in. Only while the case is open or under arbeid. All
+     * of it asked of the case under its row lock (phase 0 step 10).
+     *
+     * @param  array<string, mixed>  $validated  validated with rules()
+     */
+    public function update(User $actor, ImprovementCase $case, array $validated): ImprovementCase
+    {
+        return DB::transaction(function () use ($actor, $case, $validated): ImprovementCase {
+            $locked = $this->lockEditable($actor, $case);
+            $targetAreaId = (int) $validated['business_area_id'];
+
+            // Moving a case changes who can see it, so it takes edit authority on both sides.
+            if ($targetAreaId !== (int) $locked->business_area_id) {
+                $this->assertCanEditIn($actor, $targetAreaId);
+            }
+
+            $this->assertValidOwner($actor, (int) $validated['owner_user_id'], $targetAreaId);
+
+            $locked->fill($this->fields($validated) + [
+                'business_area_id' => $targetAreaId,
+                'updated_by' => $actor->id,
+            ])->save();
+
+            return $locked;
+        });
+    }
+
+    /** Årsaksanalyse: written, changed or emptied while the case is open or under arbeid. */
+    public function updateCause(User $actor, ImprovementCase $case, ?string $causeAnalysis): ImprovementCase
+    {
+        return DB::transaction(function () use ($actor, $case, $causeAnalysis): ImprovementCase {
+            $locked = $this->lockEditable($actor, $case);
+            $text = trim((string) $causeAnalysis);
+
+            $locked->forceFill([
+                'cause_analysis' => $text !== '' ? $text : null,
+                'updated_by' => $actor->id,
+            ])->save();
+
+            return $locked;
+        });
+    }
+
+    /** The case, locked, if this person may edit it and it is still open or under arbeid. */
+    private function lockEditable(User $actor, ImprovementCase $case): ImprovementCase
+    {
+        $locked = ImprovementCase::query()->whereKey($case->id)->lockForUpdate()->first();
+
+        if ($locked === null || ! $this->access->canEdit($actor, $locked)) {
+            throw new AuthorizationException('This user may not change this case.');
+        }
+
+        if (! $locked->isActive()) {
+            throw ValidationException::withMessages([
+                'case' => __('procynia.improvements.validation.reopen_before_edit'),
+            ]);
+        }
+
+        return $locked;
+    }
+
     public function assertCanEditIn(User $actor, int $areaId): void
     {
         if (! $this->access->canInArea($actor, CustomerPermissionCatalog::IMPROVEMENT_EDIT, (int) $actor->customer_id, $areaId)) {
