@@ -16,6 +16,7 @@ use App\Services\Quality\QualityGraphProjector;
 use App\Services\Quality\QualityProcessBlueprintService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\Support\RecordingGraphProjectionService;
 use Tests\TestCase;
@@ -30,6 +31,7 @@ use Tests\TestCase;
  */
 class QualityGraphProjectionTest extends TestCase
 {
+    use AuthorsQualityFlows;
     use CreatesEnterpriseWikiFixtures;
     use RefreshDatabase;
 
@@ -450,7 +452,7 @@ class QualityGraphProjectionTest extends TestCase
                     ['from' => 'vurder', 'to' => 'ferdig'],
                 ],
             ],
-            QualityProcessBlueprint::SOURCE_MANUAL,
+            QualityProcessBlueprint::SOURCE_MANUAL, $this->qualitySystemOwner($customerId),
         );
     }
 

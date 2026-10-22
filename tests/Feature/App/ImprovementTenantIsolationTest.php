@@ -20,6 +20,7 @@ use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\CreatesImprovementCaseScenarios;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
@@ -35,6 +36,7 @@ use Tests\TestCase;
  */
 class ImprovementTenantIsolationTest extends TestCase
 {
+    use AuthorsQualityFlows;
     use CreatesImprovementCaseScenarios;
     use UsesProjectPostgresConnection;
 
@@ -185,7 +187,7 @@ class ImprovementTenantIsolationTest extends TestCase
         $user = $this->member($customer);
         $this->grant($customer, $user, self::ALL, [$area]);
         $case = $this->improvementCase($customer, $area, 'Hemmelig avvik', $user);
-        $process = $this->process($customer, $user);
+        $process = $this->process($customer);
         $base = "/app/improvements/{$case->id}";
 
         $this->actingAs($user)->post("{$base}/start")->assertSessionHasNoErrors();
@@ -227,7 +229,7 @@ class ImprovementTenantIsolationTest extends TestCase
         ];
     }
 
-    private function process(Customer $customer, User $actor): QualityItem
+    private function process(Customer $customer): QualityItem
     {
         $process = QualityItem::query()->create([
             'customer_id' => $customer->id,
@@ -244,7 +246,7 @@ class ImprovementTenantIsolationTest extends TestCase
                 ['key' => 'slutt', 'lane' => 'drift', 'type' => 'end', 'label' => 'Slutt'],
             ],
             'edges' => [['from' => 'start', 'to' => 'kontroll'], ['from' => 'kontroll', 'to' => 'slutt']],
-        ], QualityProcessBlueprint::SOURCE_MANUAL, $actor);
+        ], QualityProcessBlueprint::SOURCE_MANUAL, $this->qualitySystemOwner((int) $customer->id));
 
         return $process;
     }

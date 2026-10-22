@@ -21,6 +21,7 @@ use App\Support\CustomerPermissionCatalog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
@@ -33,6 +34,7 @@ use Tests\TestCase;
  */
 class QualityAttentionTest extends TestCase
 {
+    use AuthorsQualityFlows;
     use UsesProjectPostgresConnection;
 
     protected function setUp(): void
@@ -176,6 +178,7 @@ class QualityAttentionTest extends TestCase
     {
         $customer = $this->customer();
         $items = app(QualityItemService::class);
+        $editor = $this->qualitySystemOwner((int) $customer->id);
         $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Avvikshåndtering');
         $this->item($customer, QualityItem::TYPE_POLICY, 'Forfalt policy')
             ->forceFill(['next_review_at' => today()->subYear()])->save();
@@ -187,16 +190,16 @@ class QualityAttentionTest extends TestCase
         $items->updateItem((int) $customer->id, $process, [
             'review_interval_months' => 12,
             'last_reviewed_at' => today()->subMonths(13)->toDateString(),
-        ]);
+        ], $editor);
         $this->assertSame([(int) $process->id], $this->ids($customer, QualityAttentionService::PROCESSES_OVERDUE_FOR_REVIEW));
 
         // Due today is not yet overdue.
-        $items->updateItem((int) $customer->id, $process, ['last_reviewed_at' => today()->subMonths(12)->toDateString()]);
+        $items->updateItem((int) $customer->id, $process, ['last_reviewed_at' => today()->subMonths(12)->toDateString()], $editor);
         $this->assertSame([], $this->ids($customer, QualityAttentionService::PROCESSES_OVERDUE_FOR_REVIEW));
 
         // Recording a fresh review clears it.
-        $items->updateItem((int) $customer->id, $process, ['last_reviewed_at' => today()->subMonths(13)->toDateString()]);
-        $items->updateItem((int) $customer->id, $process, ['last_reviewed_at' => today()->toDateString()]);
+        $items->updateItem((int) $customer->id, $process, ['last_reviewed_at' => today()->subMonths(13)->toDateString()], $editor);
+        $items->updateItem((int) $customer->id, $process, ['last_reviewed_at' => today()->toDateString()], $editor);
         $this->assertSame([], $this->ids($customer, QualityAttentionService::PROCESSES_OVERDUE_FOR_REVIEW));
     }
 
@@ -274,7 +277,7 @@ class QualityAttentionTest extends TestCase
             (int) $customer->id,
             $process,
             ['lanes' => [['key' => 'rolle-1', 'label' => 'Kvalitetsleder']], 'nodes' => $nodes, 'edges' => $edges],
-            QualityProcessBlueprint::SOURCE_MANUAL,
+            QualityProcessBlueprint::SOURCE_MANUAL, $this->qualitySystemOwner((int) $customer->id),
         );
     }
 

@@ -18,11 +18,13 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Mockery;
 use RuntimeException;
+use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\TestCase;
 
 class EnterpriseWikiGraphProjectionDispatchTest extends TestCase
 {
+    use AuthorsQualityFlows;
     use CreatesEnterpriseWikiFixtures;
     use RefreshDatabase;
 
@@ -114,7 +116,7 @@ class EnterpriseWikiGraphProjectionDispatchTest extends TestCase
                     ['from' => 'kontroller', 'to' => 'ferdig'],
                 ],
             ],
-            QualityProcessBlueprint::SOURCE_MANUAL,
+            QualityProcessBlueprint::SOURCE_MANUAL, $this->qualitySystemOwner((int) $customer->id),
         );
 
         $created = app(QualityActivityArticleService::class)->create(

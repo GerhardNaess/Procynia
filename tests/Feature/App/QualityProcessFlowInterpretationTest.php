@@ -23,6 +23,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
@@ -49,6 +50,7 @@ use Tests\TestCase;
  */
 class QualityProcessFlowInterpretationTest extends TestCase
 {
+    use AuthorsQualityFlows;
     use CreatesEnterpriseWikiFixtures;
     use UsesProjectPostgresConnection;
 
@@ -1702,6 +1704,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
                 'edges' => [],
             ],
             QualityProcessBlueprint::SOURCE_MANUAL,
+            $owner,
             description: 'Gjennomgangen følger vårt eget kontrollskjema.',
         );
 
@@ -2257,6 +2260,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
                 ],
             ],
             QualityProcessBlueprint::SOURCE_MANUAL,
+            $this->qualitySystemOwner((int) $customer->id),
             description: 'Slik gjennomføres leverandørkontrollen hos oss.',
         );
     }

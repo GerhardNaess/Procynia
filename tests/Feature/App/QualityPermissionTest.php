@@ -18,6 +18,7 @@ use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
@@ -43,6 +44,7 @@ use Tests\TestCase;
  */
 class QualityPermissionTest extends TestCase
 {
+    use AuthorsQualityFlows;
     use UsesProjectPostgresConnection;
 
     protected function setUp(): void
@@ -457,7 +459,7 @@ class QualityPermissionTest extends TestCase
             (int) $customer->id,
             $item,
             $this->simpleFlow(),
-            QualityProcessBlueprint::SOURCE_MANUAL,
+            QualityProcessBlueprint::SOURCE_MANUAL, $this->qualitySystemOwner((int) $customer->id),
         );
     }
 

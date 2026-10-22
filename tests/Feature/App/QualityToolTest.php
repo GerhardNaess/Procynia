@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
@@ -34,6 +35,7 @@ use Tests\TestCase;
  */
 class QualityToolTest extends TestCase
 {
+    use AuthorsQualityFlows;
     use UsesProjectPostgresConnection;
 
     protected function setUp(): void
@@ -245,7 +247,9 @@ class QualityToolTest extends TestCase
         $control = $this->control($customer, 'Kontroll');
         $this->actingAs($editor)->post("/app/quality/items/{$control->id}/tools", ['quality_tool_id' => $tool->id]);
 
-        $result = app(EnterpriseWikiDocumentDeletionService::class)->delete($tool->document, $editor);
+        // Deleting the file is Wiki source administration (wiki.source.manage, and the System Owner
+        // or the document's owner), not a Kvalitet right.
+        $result = app(EnterpriseWikiDocumentDeletionService::class)->delete($tool->document, $this->qualitySystemOwner((int) $customer->id));
         $this->assertFalse($result['blocked']);
 
         $this->assertNull(QualityTool::query()->find($tool->id));

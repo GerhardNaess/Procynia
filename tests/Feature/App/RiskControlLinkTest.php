@@ -22,6 +22,7 @@ use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
@@ -39,6 +40,7 @@ use Tests\TestCase;
  */
 class RiskControlLinkTest extends TestCase
 {
+    use AuthorsQualityFlows;
     use UsesProjectPostgresConnection;
 
     private const RISK_EDITOR = [
@@ -130,14 +132,14 @@ class RiskControlLinkTest extends TestCase
 
         $placed = $this->control($customer, 'Fire-øyne-kontroll');
         $unplaced = $this->control($customer, 'Tilgangsgjennomgang');
-        $payroll = $this->process($customer, $user, 'Lønnskjøring', ['Beregn lønn', 'Godkjenn utbetaling']);
+        $payroll = $this->process($customer, 'Lønnskjøring', ['Beregn lønn', 'Godkjenn utbetaling']);
         $this->place($customer, $payroll, 'godkjenn-utbetaling', $placed);
         // A key no longer in the flow says nothing.
         $this->place($customer, $payroll, 'fjernet-steg', $placed);
 
         // Another tenant's placement of the same control id never shows.
         ['customer' => $other] = $this->context(false);
-        $foreignProcess = $this->process($other, $this->member($other), 'Fremmed prosess', ['Hemmelig steg']);
+        $foreignProcess = $this->process($other, 'Fremmed prosess', ['Hemmelig steg']);
         $this->place($other, $foreignProcess, 'hemmelig-steg', $placed);
 
         $options = collect($this->showProps($user, $risk)['control_options'])->keyBy('id');
@@ -383,7 +385,7 @@ class RiskControlLinkTest extends TestCase
     }
 
     /** @param  list<string>  $steps */
-    private function process(Customer $customer, User $actor, string $title, array $steps): QualityItem
+    private function process(Customer $customer, string $title, array $steps): QualityItem
     {
         $process = QualityItem::query()->create([
             'customer_id' => $customer->id,
@@ -407,7 +409,7 @@ class RiskControlLinkTest extends TestCase
             $process,
             ['lanes' => [['key' => 'lonn', 'label' => 'Lønnsansvarlig']], 'nodes' => $nodes, 'edges' => $edges],
             QualityProcessBlueprint::SOURCE_MANUAL,
-            $actor,
+            $this->qualitySystemOwner((int) $customer->id),
         );
 
         return $process;

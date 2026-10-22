@@ -417,7 +417,7 @@ class QualityController extends Controller
         }
 
         try {
-            $result = $this->items->deleteItem((int) $customerId, $item, $deleteWikiPages ? $user : null);
+            $result = $this->items->deleteItem((int) $customerId, $item, $user, $deleteWikiPages);
         } catch (EnterpriseWikiWithdrawalNotRepresentableException $e) {
             // Wiki fails closed, and so does this: the pages are untouched and the process is still
             // here, which is the half worth keeping.
@@ -1034,7 +1034,7 @@ class QualityController extends Controller
 
         $published = $this->blueprints->latestRevision((int) $customerId, $item) !== null;
 
-        $this->blueprints->delete((int) $customerId, $item);
+        $this->blueprints->delete((int) $customerId, $item, $user);
 
         return back()->with('success', __($published
             ? 'procynia.quality.flash.blueprint_discarded'

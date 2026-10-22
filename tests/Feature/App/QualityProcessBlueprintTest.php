@@ -28,6 +28,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
@@ -47,6 +48,7 @@ use Tests\TestCase;
  */
 class QualityProcessBlueprintTest extends TestCase
 {
+    use AuthorsQualityFlows;
     use UsesProjectPostgresConnection;
 
     protected function setUp(): void
@@ -1940,7 +1942,7 @@ class QualityProcessBlueprintTest extends TestCase
             (int) $customer->id,
             $item,
             $payload,
-            QualityProcessBlueprint::SOURCE_MANUAL,
+            QualityProcessBlueprint::SOURCE_MANUAL, $this->qualitySystemOwner((int) $customer->id),
         );
     }
 

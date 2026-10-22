@@ -24,6 +24,7 @@ use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
@@ -36,6 +37,7 @@ use Tests\TestCase;
  */
 class QualityActivityControlTest extends TestCase
 {
+    use AuthorsQualityFlows;
     use UsesProjectPostgresConnection;
 
     protected function setUp(): void
@@ -360,7 +362,7 @@ class QualityActivityControlTest extends TestCase
         $editor = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW, CustomerPermissionCatalog::QUALITY_EDIT]);
         $process = $this->process($customer);
         $blueprint = $this->blueprintFor($customer, $process);
-        app(QualityProcessBlueprintService::class)->approve((int) $customer->id, $process, $editor);
+        app(QualityProcessBlueprintService::class)->approve((int) $customer->id, $process, $this->qualitySystemOwner((int) $customer->id));
         $revision = QualityProcessRevision::query()->where('quality_item_id', $process->id)->sole();
         $revisionPayload = $revision->payload;
         $payloadBefore = $blueprint->fresh()->payload;
@@ -599,7 +601,9 @@ class QualityActivityControlTest extends TestCase
             'source' => QualityItemDocument::SOURCE_MANUAL,
         ]);
 
-        $result = app(EnterpriseWikiDocumentDeletionService::class)->delete($document, $editor);
+        // Deleting the file is Wiki source administration (wiki.source.manage, and the System Owner
+        // or the document's owner), not a Kvalitet right.
+        $result = app(EnterpriseWikiDocumentDeletionService::class)->delete($document, $this->qualitySystemOwner((int) $customer->id));
         $this->assertFalse($result['blocked']);
         $this->assertNull(EnterpriseWikiDocument::query()->find($document->id));
 
@@ -789,7 +793,7 @@ class QualityActivityControlTest extends TestCase
                     ['from' => 'vurder', 'to' => 'slutt'],
                 ],
             ],
-            QualityProcessBlueprint::SOURCE_MANUAL,
+            QualityProcessBlueprint::SOURCE_MANUAL, $this->qualitySystemOwner((int) $customer->id),
         );
     }
 

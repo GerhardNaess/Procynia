@@ -7,6 +7,9 @@ use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\QualityProcessRevision;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -43,6 +46,8 @@ class QualityProcessBlueprintService
     public function __construct(
         private readonly QualityProcessSubprocessService $subprocesses,
         private readonly QualityProcessFlowValidator $validator,
+        private readonly HumanDecisionGuard $guard,
+        private readonly QualityAccessService $access,
     ) {}
 
     /**
@@ -66,9 +71,16 @@ class QualityProcessBlueprintService
         QualityItem $item,
         array $payload,
         string $source,
-        ?User $actor = null,
+        User $actor,
         ?string $description = null,
     ): QualityProcessBlueprint {
+        // Adopting a flow a machine proposed is a decision a person takes (QUALITY_FLOW_ADOPT, phase
+        // 0 step 12) — whatever key it rides on. A manual edit is ordinary editing.
+        if ($source === QualityProcessBlueprint::SOURCE_AI) {
+            $actor = $this->guard->assert($actor, HumanDecision::QUALITY_FLOW_ADOPT);
+        }
+
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
         $this->assertProcess($customerId, $item);
 
         // A seeded flow may not be stored at all, over an existing blueprint or onto an empty
@@ -93,7 +105,7 @@ class QualityProcessBlueprintService
             'source' => $source,
             'status' => QualityProcessBlueprint::STATUS_DRAFT,
             'generated_at' => now(),
-            'generated_by_user_id' => $actor?->id,
+            'generated_by_user_id' => $actor->id,
             'approved_at' => null,
             'approved_by_user_id' => null,
         ];
@@ -131,8 +143,11 @@ class QualityProcessBlueprintService
      * Approving a flow that is already approved, and already recorded, is a no-op rather than a
      * second identical revision — a double click is not a second approval.
      */
-    public function approve(int $customerId, QualityItem $item, ?User $actor = null): QualityProcessBlueprint
+    public function approve(int $customerId, QualityItem $item, User $actor): QualityProcessBlueprint
     {
+        // A human decision (phase 0 step 12): the guard, then quality.approve in this customer.
+        $actor = $this->guard->assert($actor, HumanDecision::QUALITY_FLOW_APPROVE);
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_APPROVE, $customerId);
         $this->assertProcess($customerId, $item);
 
         return DB::transaction(function () use ($customerId, $item, $actor): QualityProcessBlueprint {
@@ -185,15 +200,15 @@ class QualityProcessBlueprintService
                 'payload' => $blueprint->payload,
                 'description' => $blueprint->description,
                 'source' => $blueprint->source,
-                'approved_by_user_id' => $actor?->id,
-                'approved_by_name' => $actor?->name,
+                'approved_by_user_id' => $actor->id,
+                'approved_by_name' => $actor->name,
                 'approved_at' => $approvedAt,
             ]);
 
             $blueprint->forceFill([
                 'status' => QualityProcessBlueprint::STATUS_APPROVED,
                 'approved_at' => $approvedAt,
-                'approved_by_user_id' => $actor?->id,
+                'approved_by_user_id' => $actor->id,
             ])->save();
 
             // The first approval publishes the process. Later approvals leave the lifecycle alone:
@@ -343,8 +358,12 @@ class QualityProcessBlueprintService
      * the rows and the pages are left standing. So do the approved revisions: they point at the
      * process, and they are the record of what was approved, not part of the working version.
      */
-    public function delete(int $customerId, QualityItem $item): void
+    public function delete(int $customerId, QualityItem $item, User $actor): void
     {
+        // Deleting a flow — or, once one is approved, discarding the working version — is a human
+        // decision under quality.delete (phase 0 step 12).
+        $actor = $this->guard->assert($actor, HumanDecision::QUALITY_DELETE);
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_DELETE, $customerId);
         $this->assertProcess($customerId, $item);
 
         // Once a revision has been approved this is "Forkast arbeidsversjon", and nothing is

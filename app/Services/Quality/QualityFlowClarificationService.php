@@ -5,6 +5,7 @@ namespace App\Services\Quality;
 use App\Models\QualityFlowClarificationResolution;
 use App\Models\QualityItem;
 use App\Models\User;
+use App\Support\CustomerPermissionCatalog;
 
 /**
  * What the user has already settled about a process, and how long that holds.
@@ -59,6 +60,10 @@ class QualityFlowClarificationService
      */
     private const SURVIVES_ABOVE = 0.5;
 
+    public function __construct(
+        private readonly QualityAccessService $access,
+    ) {}
+
     /**
      * Record that the user does not want to be asked this again.
      *
@@ -66,8 +71,10 @@ class QualityFlowClarificationService
      * it was dismissed against rather than stacking rows, because the second no is about the text
      * as it stands now.
      */
-    public function dismiss(QualityItem $item, string $question, ?string $description, ?User $user): void
+    public function dismiss(QualityItem $item, string $question, ?string $description, User $user): void
     {
+        $this->access->authorize($user, CustomerPermissionCatalog::QUALITY_EDIT, (int) $item->customer_id);
+
         $this->record(
             $item,
             $question,
@@ -88,8 +95,10 @@ class QualityFlowClarificationService
      * A later dismissal of the same question overwrites this, and a later answer overwrites a
      * dismissal. One row per question per process, holding the user's most recent word on it.
      */
-    public function resolve(QualityItem $item, string $question, ?string $description, ?User $user): void
+    public function resolve(QualityItem $item, string $question, ?string $description, User $user): void
     {
+        $this->access->authorize($user, CustomerPermissionCatalog::QUALITY_EDIT, (int) $item->customer_id);
+
         $this->record(
             $item,
             $question,

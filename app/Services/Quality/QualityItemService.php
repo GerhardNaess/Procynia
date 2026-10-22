@@ -16,6 +16,9 @@ use App\Models\QualityProcessRevision;
 use App\Models\QualityProcessStep;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageDeletionService;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -43,6 +46,8 @@ class QualityItemService
     public function __construct(
         private readonly QualityActivityKnowledgeResolver $activityKnowledge,
         private readonly EnterpriseWikiPageDeletionService $wikiPageDeletion,
+        private readonly HumanDecisionGuard $guard,
+        private readonly QualityAccessService $access,
     ) {}
 
     /**
@@ -91,8 +96,9 @@ class QualityItemService
     /**
      * @param  array<string, mixed>  $attributes
      */
-    public function updateItem(int $customerId, QualityItem $item, array $attributes, ?User $actor = null): QualityItem
+    public function updateItem(int $customerId, QualityItem $item, array $attributes, User $actor): QualityItem
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
         $this->assertOwned($customerId, $item);
 
         // Retyping is refused rather than handled. A process's steps are not a checklist's items,
@@ -192,9 +198,14 @@ class QualityItemService
      *
      * @return array{wiki_pages_deleted: int}
      */
-    public function deleteItem(int $customerId, QualityItem $item, ?User $deleteProducedWikiPagesAs = null): array
+    public function deleteItem(int $customerId, QualityItem $item, User $actor, bool $deleteProducedWikiPages = false): array
     {
+        // A human decision (phase 0 step 12): the guard, then quality.delete in this customer —
+        // before anything is touched, the Wiki pages included.
+        $actor = $this->guard->assert($actor, HumanDecision::QUALITY_DELETE);
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_DELETE, $customerId);
         $this->assertOwned($customerId, $item);
+        $deleteProducedWikiPagesAs = $deleteProducedWikiPages ? $actor : null;
 
         $itemId = (int) $item->id;
         $wikiPagesDeleted = 0;
