@@ -1430,6 +1430,7 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
                     <button
                         type="button"
                         onClick={onReload}
+                        aria-describedby={describedById}
                         className={SOURCE_INLINE_LINK}
                     >
                         {tw.ingest_activity_reload ?? 'Oppdater'}

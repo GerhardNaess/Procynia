@@ -377,8 +377,8 @@ describe('the Wiki list, sources and runs', () => {
 
     test('no hand-made modal is left: every dialog is ActionDialog (A11Y-002)', () => {
         assert.equal(/fixed inset-0/.test(index), false);
-        assert.equal((index.match(/<ActionDialog\b/g) ?? []).length, 5, 'uploaded, delete, decision, cancel run, retry');
-        for (const id of ['wiki-source-delete-description', 'wiki-run-cancel-description', 'wiki-run-retry-description']) {
+        assert.equal((index.match(/<ActionDialog\b/g) ?? []).length, 7, 'uploaded, owner edit, delete, decision, cancel run, retry, dismiss run');
+        for (const id of ['wiki-source-owner-edit-file', 'wiki-source-delete-description', 'wiki-run-cancel-description', 'wiki-run-retry-description', 'wiki-run-dismiss-description']) {
             assert.match(index, new RegExp(`descriptionId="${id}"`));
         }
     });
@@ -420,7 +420,22 @@ describe('the Wiki list, sources and runs', () => {
     });
 
     test('row actions are described by their document, and tables have captions and scoped headers', () => {
-        assert.ok((index.match(/aria-describedby=\{sourceNameId\}/g) ?? []).length >= 4);
+        // Both layouts (table from 1280px, cards below) name the row by its file and hand that id
+        // to the shared row cells; every control in those cells is described by it.
+        assert.equal((index.match(/<(?:span|h3) id=\{nameId\}/g) ?? []).length, 2, 'table row and card');
+        for (const helper of ['renderWikiStatus', 'renderOwner', 'renderActions']) {
+            assert.match(index, new RegExp(`\\{${helper}\\(source, nameId\\b`), helper);
+        }
+        assert.ok((index.match(/describedById=\{nameId\}/g) ?? []).length >= 4);
+        for (const cell of ['IngestStatusBadge', 'SourceGeneratedPages', 'SourceOwner', 'SourceRowActions']) {
+            const start = index.indexOf(`function ${cell}(`);
+            const body = index.slice(start, index.indexOf('\nfunction ', start + 1));
+            // Generated-page links are named by their own page title and are not counted.
+            const controls = (body.match(/<button\b|<a\b|<Link href=\{detailsHref\}/g) ?? []).length;
+            const described = (body.match(/aria-describedby=\{describedById\}/g) ?? []).length;
+            assert.ok(start >= 0 && controls > 0, cell);
+            assert.equal(described, controls, `${cell}: every button and download link is described by the file name`);
+        }
         assert.ok((index.match(/<caption className="sr-only">/g) ?? []).length >= 4);
         assert.match(index, /<th scope="row"/);
     });
