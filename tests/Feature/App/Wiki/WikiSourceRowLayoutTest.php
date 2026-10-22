@@ -14,14 +14,17 @@ use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
- * The Kildedokumenter row was three lines tall for two lines of content: the owner cell stacked a
- * "Lagre eier" button under the select, and the action cell stacked a "Kjøringer" link under the
- * buttons. This pins the compact shape — owner as [name ▼][save icon], actions as one line — and,
- * just as importantly, pins what did NOT change: the same owner endpoint, the same explicit save,
- * the same status codes.
+ * The Kildedokumenter row is compact: the document owner is a name, changed in a dialog rather than
+ * with a select and a save button stacked in the row, and «Lag Wiki» is the one visible action, with
+ * «Last ned» and «Slett» in a ⋯ panel (086ad35e). What these tests defend is what that shape is for,
+ * and what must not change with it: an explicit save to the same owner endpoint, accessible names
+ * on the icon-only controls, the destructive delete behind its confirmation, and no per-row link
+ * into Kjøringer except when a run actually needs attention.
  *
- * The row markup is asserted at source level; the project has no JSX renderer, and this is the same
- * guard style the rest of this suite uses for layout contracts.
+ * The markup is asserted at the level of the components that render it (SourceOwner,
+ * SourceRowActions, IngestStatusBadge and the owner dialog in SourcesTab) — the project has no JSX
+ * renderer. The same behaviour is exercised in a real browser by
+ * tests/e2e/wiki-source-upload-readability.spec.js (14–16).
  */
 class WikiSourceRowLayoutTest extends TestCase
 {
@@ -59,38 +62,55 @@ class WikiSourceRowLayoutTest extends TestCase
         $this->assertStringContainsString('{owner.label}', $tab, 'the owner filter still shows name · e-mail');
     }
 
-    public function test_the_separate_save_owner_text_button_is_gone(): void
+    /** The row shows the owner as a name, not a select with a save button stacked under it. */
+    public function test_the_row_shows_the_owner_as_a_name_with_an_edit_button_not_a_select(): void
     {
-        $tab = $this->sourcesTabSource();
+        $owner = $this->componentSource('SourceOwner');
 
-        $this->assertStringNotContainsString(
-            "className={ACTION_BUTTON_SECONDARY}\n                                                        >\n                                                            {savingOwnerIds",
-            $tab,
-            'the owner cell must not render a full-width text button any more',
-        );
-        $this->assertStringNotContainsString('space-y-2', $this->ownerCellSource(), 'the owner cell is one line, not a stack');
+        $this->assertStringContainsString('{source.owner_name ??', $owner, 'the owner is shown by name');
+        $this->assertStringNotContainsString('<select', $owner, 'no select in the row');
+        $this->assertStringNotContainsString('space-y-2', $owner, 'the owner cell is one line, not a stack');
+        $this->assertStringNotContainsString('handleOwnerChange', $this->sourcesTabSource(), 'the row no longer changes the owner itself');
+
+        // The icon-only button carries its own name, says which document it is about, and the
+        // glyph is decorative.
+        $this->assertStringContainsString('aria-label={editLabel}', $owner);
+        $this->assertStringContainsString('title={editLabel}', $owner);
+        $this->assertStringContainsString('aria-describedby={describedById}', $owner);
+        $this->assertStringContainsString('aria-hidden="true"', $owner);
+        $this->assertStringContainsString('onClick={(event) => onEdit(source, event.currentTarget)}', $owner, 'focus returns to the pencil');
     }
 
-    public function test_the_save_owner_action_survives_as_an_icon_button_with_an_accessible_name(): void
+    /** Changing the owner is a labelled dialog with an explicit save, its busy state and its error. */
+    public function test_the_owner_is_saved_explicitly_from_a_labelled_dialog(): void
     {
-        $cell = $this->ownerCellSource();
+        $dialog = $this->ownerDialogSource();
 
-        $this->assertStringContainsString('ICON_BUTTON_SECONDARY', $cell);
-        $this->assertStringContainsString('handleOwnerSave(source)', $cell, 'the same save handler is kept');
-        $this->assertStringContainsString('aria-label=', $cell);
-        $this->assertStringContainsString('title=', $cell);
-        $this->assertStringContainsString('document_owner_save', $cell);
-        $this->assertStringContainsString('document_owner_saving', $cell, 'the loading state is kept');
-        $this->assertStringContainsString('disabled={savingOwnerIds.has(source.id)}', $cell);
-        $this->assertStringContainsString('aria-hidden="true"', $cell, 'the glyph itself is decorative; the button carries the name');
+        $this->assertStringContainsString('titleId="wiki-source-owner-edit-title"', $dialog);
+        $this->assertStringContainsString('<form onSubmit={handleOwnerSave} noValidate>', $dialog);
+        $this->assertStringContainsString('<label htmlFor="wiki-source-owner-edit"', $dialog);
+        $this->assertStringContainsString('{option.name ?? option.label}', $dialog, 'the select shows the bare name');
+        $this->assertStringContainsString('type="submit"', $dialog);
+        $this->assertStringContainsString('document_owner_save', $dialog);
+        $this->assertStringContainsString('document_owner_saving', $dialog, 'the loading state is kept');
+        $this->assertStringContainsString('aria-disabled={ownerEdit.saving || undefined}', $dialog, 'busy, not disabled: focus stays put');
+        $this->assertStringContainsString('<p id="wiki-source-owner-edit-error" role="alert"', $dialog);
     }
 
+    /** Choosing a name saves nothing; only the save does, to the same endpoint as before. */
     public function test_the_owner_select_still_does_not_autosave(): void
     {
-        $cell = $this->ownerCellSource();
+        $dialog = $this->ownerDialogSource();
+        $select = mb_substr($dialog, mb_strpos($dialog, '<select'), mb_strpos($dialog, '</select>') - mb_strpos($dialog, '<select'));
 
-        $this->assertStringContainsString('onChange={(event) => handleOwnerChange(source.id, event.target.value)}', $cell);
-        $this->assertStringNotContainsString('onChange={(event) => handleOwnerSave', $cell, 'saving stays explicit');
+        $this->assertStringContainsString('setOwnerEdit(', $select);
+        $this->assertStringNotContainsString('router.', $select, 'the select never submits on change');
+        $this->assertStringNotContainsString('handleOwnerSave', $select);
+
+        $tab = $this->sourcesTabSource();
+        $save = mb_substr($tab, mb_strpos($tab, 'const handleOwnerSave = (event) => {'));
+        $this->assertStringContainsString('router.patch(', $save);
+        $this->assertStringContainsString('`/app/wiki/sources/${source.id}/owner`', $save);
     }
 
     public function test_the_save_owner_request_is_unchanged(): void
@@ -114,37 +134,63 @@ class WikiSourceRowLayoutTest extends TestCase
     // Actions: one line, no Kjøringer link
     // =========================================================================
 
-    public function test_download_create_wiki_and_delete_share_one_action_container(): void
+    /** «Lag Wiki» is the one visible action; «Last ned» then «Slett» are in the ⋯ panel. */
+    public function test_lag_wiki_is_the_visible_action_and_download_and_delete_are_in_the_panel(): void
     {
-        $actions = $this->actionCellSource();
-        $container = mb_substr($actions, mb_strpos($actions, 'flex flex-wrap items-center gap-2'));
+        $actions = $this->componentSource('SourceRowActions');
 
-        $download = mb_strpos($container, 'source_download_button');
-        $ingest = mb_strpos($container, 'source_ingest_button');
-        $delete = mb_strpos($container, 'source_delete_button');
+        $ingest = mb_strpos($actions, 'source_ingest_button');
+        $menu = mb_strpos($actions, 'aria-expanded={isOpen}');
+        $panel = mb_strpos($actions, '{isOpen && position && (');
+        $download = mb_strpos($actions, 'source_download_button');
+        $delete = mb_strpos($actions, 'source_delete_button');
 
-        foreach (['download' => $download, 'ingest' => $ingest, 'delete' => $delete] as $name => $position) {
-            $this->assertNotFalse($position, "{$name} must sit inside the single action row");
+        foreach (['ingest' => $ingest, 'menu' => $menu, 'panel' => $panel, 'download' => $download, 'delete' => $delete] as $name => $position) {
+            $this->assertNotFalse($position, "{$name} is missing from the row actions");
         }
 
-        $this->assertLessThan($ingest, $download);
-        $this->assertLessThan($delete, $ingest);
+        // «Lag Wiki» before the ⋯ button, outside the panel; Last ned and Slett inside it, in order.
+        $this->assertLessThan($menu, $ingest);
+        $this->assertLessThan($download, $panel);
+        $this->assertLessThan($delete, $download);
+
+        // The ⋯ button is a disclosure with a name, pointing at the panel it opens.
+        $this->assertStringContainsString('aria-controls={isOpen ? panelId : undefined}', $actions);
+        $this->assertStringContainsString('aria-label={menuLabel}', $actions);
     }
 
+    /** Slett keeps its destructive styling and goes through the delete preview and its confirmation. */
     public function test_the_delete_button_keeps_its_destructive_styling_and_confirm_flow(): void
     {
-        $actions = $this->actionCellSource();
+        $actions = $this->componentSource('SourceRowActions');
+        $deleteButton = mb_substr($actions, mb_strpos($actions, '{canDelete && ('));
 
-        $this->assertStringContainsString('ACTION_BUTTON_DESTRUCTIVE', $actions);
-        $this->assertStringContainsString('handleDeleteClick(source)', $actions);
+        $this->assertStringContainsString('text-rose-700', $deleteButton, 'destructive styling');
+        $this->assertStringContainsString('onDelete(source', $deleteButton);
+
+        $tab = $this->sourcesTabSource();
+        $this->assertStringContainsString('onDelete={handleDeleteClick}', $tab);
+
+        $confirm = mb_substr($tab, mb_strpos($tab, 'const handleDeleteClick = (source, trigger = null) => {'));
+        $this->assertStringContainsString('/delete-preview`', $confirm, 'nothing is deleted before the preview');
+
+        $this->assertStringContainsString('descriptionId="wiki-source-delete-description"', $this->indexSource(), 'the confirmation is a described dialog');
     }
 
-    public function test_the_runs_link_is_gone_from_the_document_row(): void
+    /**
+     * The row no longer carries a link into Kjøringer for every document. It links there only when
+     * the latest run needs attention (failed, escalated or apparently stalled), as «Se detaljer».
+     */
+    public function test_the_row_links_to_kjoringer_only_when_a_run_needs_attention(): void
     {
-        $tab = $this->sourcesTabSource();
+        $this->assertStringNotContainsString('runs_view_runs', $this->sourcesTabSource(), 'the per-row Kjøringer link is gone');
 
-        $this->assertStringNotContainsString('tab=runs&run_src=', $tab, 'the per-row Kjøringer link is removed');
-        $this->assertStringNotContainsString('runs_view_runs', $tab);
+        $badge = $this->componentSource('IngestStatusBadge');
+        $link = mb_strpos($badge, '<Link href={detailsHref}');
+
+        $this->assertNotFalse($link);
+        $this->assertMatchesRegularExpression('/\{needsAttention && detailsHref && \(\s*<Link href=\{detailsHref\}/', $badge);
+        $this->assertStringContainsString("const needsAttention = run.status === 'failed' || run.status === 'escalated' || seemsStalled;", $badge);
     }
 
     public function test_the_dead_runs_link_translation_key_was_removed_from_both_languages(): void
@@ -238,38 +284,43 @@ class WikiSourceRowLayoutTest extends TestCase
     // Fixtures
     // =========================================================================
 
-    private function sourcesTabSource(): string
+    private function indexSource(): string
     {
-        $source = (string) file_get_contents(base_path('resources/js/Pages/App/Wiki/Index.jsx'));
-        $start = mb_strpos($source, 'function SourcesTab(');
-        $end = mb_strpos($source, "\nconst RUNS_SELECT_CLS", $start);
-
-        $this->assertNotFalse($start);
-        $this->assertNotFalse($end);
-
-        return mb_substr($source, $start, $end - $start);
+        return (string) file_get_contents(base_path('resources/js/Pages/App/Wiki/Index.jsx'));
     }
 
-    private function ownerCellSource(): string
+    /** One top-level component of Index.jsx, from its declaration to the next top-level declaration. */
+    private function componentSource(string $name): string
+    {
+        $source = $this->indexSource();
+        $start = mb_strpos($source, "\nfunction {$name}(");
+
+        $this->assertNotFalse($start, "component {$name} not found");
+
+        $ends = array_filter([
+            mb_strpos($source, "\nfunction ", $start + 1),
+            mb_strpos($source, "\nconst ", $start + 1),
+            mb_strpos($source, "\nexport ", $start + 1),
+        ], static fn (mixed $position): bool => $position !== false);
+
+        return mb_substr($source, $start, ($ends === [] ? mb_strlen($source) : min($ends)) - $start);
+    }
+
+    private function sourcesTabSource(): string
+    {
+        return $this->componentSource('SourcesTab');
+    }
+
+    private function ownerDialogSource(): string
     {
         $tab = $this->sourcesTabSource();
-        $start = mb_strpos($tab, '{canAssignDocumentOwner ? (');
-        $end = mb_strpos($tab, 'sourceOwnerLabel}', $start);
+        $start = mb_strpos($tab, 'isOpen={ownerEdit !== null}');
+        $end = mb_strpos($tab, '</ActionDialog>', (int) $start);
 
-        $this->assertNotFalse($start);
+        $this->assertNotFalse($start, 'the owner dialog must exist');
         $this->assertNotFalse($end);
 
         return mb_substr($tab, $start, $end - $start);
-    }
-
-    private function actionCellSource(): string
-    {
-        $tab = $this->sourcesTabSource();
-        $start = mb_strpos($tab, 'One action container');
-
-        $this->assertNotFalse($start, 'the single action container must exist');
-
-        return mb_substr($tab, $start);
     }
 
     /** @return array<string, mixed> */

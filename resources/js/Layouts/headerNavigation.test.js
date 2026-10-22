@@ -201,6 +201,32 @@ describe('the navigation hierarchy is the same shape in every module', () => {
         assert.equal(navigationAt('/app/wiki/graph').activeModuleNavigationKey, 'wiki-graph');
     });
 
+    /**
+     * Ordered by the workflow — the sources go in, the runs show what was made of them, the pages are
+     * the result, the graph shows the connections — and each item keeps its label and destination.
+     * Moved here from a source-level PHP test when the menu moved to appNavigation.js (6b0f13cb):
+     * this drives the real navigation function instead of reading its text.
+     */
+    test('the Wiki items keep their order, labels and destinations, translated or not', () => {
+        const items = navigationAt('/app/wiki').moduleNavigation;
+
+        assert.deepEqual(items.map(({ key, label, href }) => ({ key, label, href })), [
+            { key: 'wiki-sources', label: 'Kildedokumenter', href: '/app/wiki?tab=sources' },
+            { key: 'wiki-runs', label: 'Kjøringer', href: '/app/wiki?tab=runs' },
+            { key: 'wiki-pages', label: 'Wiki-sider', href: '/app/wiki?tab=pages' },
+            { key: 'wiki-graph', label: 'Grafvisning', href: '/app/wiki/graph' },
+        ]);
+
+        const translated = navigationAt('/app/wiki', {
+            translations: { wiki: { tab_sources: 'Sources', tab_runs: 'Runs', tab_pages: 'Wiki pages', tab_graph: 'Graph' } },
+        }).moduleNavigation;
+        assert.deepEqual(translated.map((item) => item.label), ['Sources', 'Runs', 'Wiki pages', 'Graph']);
+
+        // The active item follows the tab value, never the position in the list.
+        assert.equal(navigationAt('/app/wiki?tab=sources').activeModuleNavigationKey, 'wiki-sources');
+        assert.equal(navigationAt('/app/wiki?tab=pages').activeModuleNavigationKey, 'wiki-pages');
+    });
+
     test('both levels are the same control, so they cannot drift apart', () => {
         assert.match(layout, /function NavigationRow\(\{ items, activeKey, ariaLabel, disabledHint = '' \}\)/);
         assert.match(layout, /<NavigationRow\s*\n\s*items=\{moduleNavigation\}/);
