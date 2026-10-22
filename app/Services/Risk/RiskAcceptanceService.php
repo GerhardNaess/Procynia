@@ -6,7 +6,10 @@ use App\Models\Risk;
 use App\Models\RiskAcceptance;
 use App\Models\RiskAssessment;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\HumanDecision;
 use Carbon\CarbonInterface;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -17,6 +20,11 @@ use Illuminate\Validation\ValidationException;
  * The caller has already reached the risk through RiskAccessService::visibleRisks() and checked
  * risk.accept in its area. Nothing here looks a risk up on its own, and an assessment or an
  * acceptance is only ever found under that risk, so neither can be the way to a hidden risk.
+ *
+ * Accepting and revoking are human decisions (phase 0 step 9, docs/external-api-phase-0-plan.md
+ * §4.4), so both check again here, whatever the caller did: HumanDecisionGuard refuses an
+ * integration and any request through the API, and RiskAccessService::canAccept() a person without
+ * risk.accept in the risk's fagområde — judged on the risk as it stands under the row lock.
  *
  * WHICH ACCEPTANCE APPLIES.
  *
@@ -29,6 +37,11 @@ use Illuminate\Validation\ValidationException;
  */
 class RiskAcceptanceService
 {
+    public function __construct(
+        private readonly HumanDecisionGuard $guard,
+        private readonly RiskAccessService $access,
+    ) {}
+
     /**
      * @return array{
      *     latest_assessment_id: int|null,
@@ -73,9 +86,11 @@ class RiskAcceptanceService
 
     public function accept(User $actor, Risk $risk, int $assessmentId, string $rationale, ?string $validUntil): RiskAcceptance
     {
+        $actor = $this->guard->assert($actor, HumanDecision::RISK_ACCEPT);
+
         return DB::transaction(function () use ($actor, $risk, $assessmentId, $rationale, $validUntil): RiskAcceptance {
             // Serialises accepting against a new assessment or a second acceptance of the same risk.
-            Risk::query()->whereKey($risk->id)->lockForUpdate()->first();
+            $risk = $this->lockedRiskFor($actor, (int) $risk->id);
 
             $assessment = RiskAssessment::query()
                 ->where('risk_id', $risk->id)
@@ -118,14 +133,29 @@ class RiskAcceptanceService
 
     public function revoke(User $actor, RiskAcceptance $acceptance): void
     {
-        if ($acceptance->isRevoked()) {
-            $this->fail('already_revoked', 'acceptance');
-        }
+        $actor = $this->guard->assert($actor, HumanDecision::RISK_ACCEPT);
 
-        $acceptance->fill([
-            'revoked_at' => now(),
-            'revoked_by_user_id' => $actor->id,
-        ])->save();
+        DB::transaction(function () use ($actor, $acceptance): void {
+            $risk = $this->lockedRiskFor($actor, (int) $acceptance->risk_id);
+
+            // Read under the lock: two revocations at once leave one, and the second is told so.
+            $locked = $this->findForRisk($risk, (int) $acceptance->id);
+
+            if ($locked === null) {
+                throw new AuthorizationException('This acceptance does not belong to a risk this user may decide on.');
+            }
+
+            if ($locked->isRevoked()) {
+                $this->fail('already_revoked', 'acceptance');
+            }
+
+            $locked->fill([
+                'revoked_at' => now(),
+                'revoked_by_user_id' => $actor->id,
+            ])->save();
+
+            $acceptance->setRawAttributes($locked->getAttributes(), true);
+        });
     }
 
     /** The acceptance, if it belongs to this risk. Anything else is the caller's 404. */
@@ -136,6 +166,21 @@ class RiskAcceptanceService
             ->where('customer_id', $risk->customer_id)
             ->whereKey($acceptanceId)
             ->first();
+    }
+
+    /**
+     * The risk, locked, if this person may accept on it as it stands now. Anything else — another
+     * customer's risk, one outside their fagområder, one they may only read — is refused.
+     */
+    private function lockedRiskFor(User $actor, int $riskId): Risk
+    {
+        $risk = Risk::query()->whereKey($riskId)->lockForUpdate()->first();
+
+        if ($risk === null || ! $this->access->canAccept($actor, $risk)) {
+            throw new AuthorizationException('This user may not accept residual risk on this risk.');
+        }
+
+        return $risk;
     }
 
     private function latestAssessment(Risk $risk): ?RiskAssessment

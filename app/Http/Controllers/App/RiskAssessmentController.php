@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
-use App\Models\RiskAssessment;
 use App\Services\Risk\RiskAccessService;
+use App\Services\Risk\RiskAssessmentService;
 use App\Services\Risk\RiskScoringPolicy;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
@@ -21,6 +21,9 @@ use Illuminate\Validation\Rule;
  * outside the user's fagområder is a 404 here exactly as on its page. Seeing it is not enough
  * to assess it: that takes risk.assess from a role that reaches the risk's area — the same pair
  * rule as every other risk permission. risk.edit is neither needed nor sufficient.
+ *
+ * These checks come first so the answers people get are unchanged; RiskAssessmentService makes
+ * the decision and checks again itself, for every entry point (phase 0 step 9).
  */
 class RiskAssessmentController extends Controller
 {
@@ -28,6 +31,7 @@ class RiskAssessmentController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly RiskAccessService $access,
         private readonly RiskScoringPolicy $scoring,
+        private readonly RiskAssessmentService $assessments,
     ) {}
 
     public function store(Request $request, int $riskId): RedirectResponse
@@ -51,22 +55,12 @@ class RiskAssessmentController extends Controller
             'rationale' => ['required', 'string', 'max:2000'],
         ], RiskValidationMessages::messages(), RiskValidationMessages::attributes());
 
-        RiskAssessment::query()->create([
-            'customer_id' => (int) $risk->customer_id,
-            'risk_id' => (int) $risk->id,
-            'assessed_by' => $user->id,
-            'assessed_at' => now(),
-            'rationale' => trim($validated['rationale']),
-            // What was assessed, as the risk read at this moment. A later edit of the risk leaves it.
-            'risk_cause' => $risk->cause,
-            'risk_event' => $risk->event,
-            'risk_consequence' => $risk->consequence,
-            'criteria_key' => $this->scoring->currentCriteriaKey(),
+        $this->assessments->record($user, $risk, [
             'inherent_likelihood' => (int) $validated['inherent_likelihood'],
             'inherent_consequence' => (int) $validated['inherent_consequence'],
             'residual_likelihood' => isset($validated['residual_likelihood']) ? (int) $validated['residual_likelihood'] : null,
             'residual_consequence' => isset($validated['residual_consequence']) ? (int) $validated['residual_consequence'] : null,
-        ]);
+        ], $validated['rationale']);
 
         return back()->with('success', __('procynia.risk.flash.assessed'));
     }

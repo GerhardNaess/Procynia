@@ -134,6 +134,27 @@ class RiskAccessService
         return $this->canInArea($user, $permissionKey, (int) $risk->customer_id, (int) $risk->business_area_id);
     }
 
+    /**
+     * The human decisions on a risk. Each needs its own key in the risk's area — and the risk must
+     * be one the user can see, as on every route to it: a decision is never taken on a risk the
+     * decider cannot read. The decision services ask these themselves (phase 0 step 9), so the
+     * rule holds for every entry point, not only a web request.
+     */
+    public function canAssess(User $user, Risk $risk): bool
+    {
+        return $this->canDecide($user, CustomerPermissionCatalog::RISK_ASSESS, $risk);
+    }
+
+    public function canAccept(User $user, Risk $risk): bool
+    {
+        return $this->canDecide($user, CustomerPermissionCatalog::RISK_ACCEPT, $risk);
+    }
+
+    public function canDelete(User $user, Risk $risk): bool
+    {
+        return $this->canDecide($user, CustomerPermissionCatalog::RISK_DELETE, $risk);
+    }
+
     public function canInArea(User $user, string $permissionKey, int $customerId, int $areaId): bool
     {
         return $this->canOpenModule($user)
@@ -150,6 +171,12 @@ class RiskAccessService
     public function viewerAreaIdsByUser(int $customerId): array
     {
         return $this->grants->areaIdsByUser($customerId, CustomerPermissionCatalog::RISK_VIEW);
+    }
+
+    private function canDecide(User $user, string $permissionKey, Risk $risk): bool
+    {
+        return $this->can($user, CustomerPermissionCatalog::RISK_VIEW, $risk)
+            && $this->can($user, $permissionKey, $risk);
     }
 
     /**
