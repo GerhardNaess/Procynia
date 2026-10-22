@@ -315,6 +315,8 @@ En `BEFORE INSERT/UPDATE`-trigger avviser at beslutningskolonner peker til en `u
 | B2 | Menneskeforbeholdte beslutninger er ikke tilgjengelige via API-et, heller ikke når en agent handler på vegne av en autentisert person. |
 | B3 | En risiko med vurderinger, aksepter eller annen beslutningshistorikk kan ikke slettes permanent. Historikken bevares, og «Lukket» brukes i stedet. |
 | B4 | Godkjenning og avvisning av krav i Anbud krever en eksplisitt rettighet (`decide_bid_requirements` i Tilganger-matrisen) og en identifiserbar menneskelig aktør. Lesetilgang til saken er ikke nok. |
+| B10 | **Kvalitet (2026-10-22):** En prosess eller kontroll som andre moduler peker på (Risiko, Mål og KPI, Avvik og forbedringer, Etterlevelse og revisjon), kan ikke slettes. Det gjelder også når den som sletter, ikke har tilgang til modulen som har koblingen. Avvisningen er én generell setning som aldri røper modul, post eller person. Elementet settes til «Utgått», og koblingene bevares. **Dette erstatter den tidligere regelen om at Kvalitet ikke skal påvirkes av koblinger den ikke ser.** |
+| B11 | **Kvalitet (2026-10-22):** Godkjente prosessversjoner og registrert evidens er historikk. Et element med slik historikk slettes ikke. Det settes til «Utgått». Evidens fjernes ikke, men trekkes tilbake med aktør og tidspunkt, og hendelsen registreres i `quality_item_events`. Reglene håndheves også av databasetriggere, slik at ingen inngang (SQL, jobb eller API) eller kaskade kan omgå dem. Bare sletting av kunden tar historikken med. |
 
 Funn fra kartleggingen er verifisert med isolerte tester:
 
@@ -495,6 +497,8 @@ Agenter skal kunne *foreslå*, ikke *beslutte*. I prioritert rekkefølge:
 
 - **Forespørselslogg** `api_request_log`: klient, kunde, aktør, modus, rute, status, påvirkede id-er, `request_id`, varighet. Ingen token, ingen innhold og ingen fritekst, i tråd med loggreglene i `security.md` §9. **[MÅ UTVIKLES]**
 - **Opphav i domenedata:** `created_by`/`changed_by_user_id` peker til integrasjonsbrukeren, og navnet viser hvilken integrasjon det er. Agenthandlinger kan dermed spores i eksisterende historikk.
+- **Hendelseslogg i Kvalitet:** `quality_item_events` er en uforanderlig logg per element: hendelse, aktør, navn, tidspunkt og metadata. Den er startet med registrering og tilbaketrekking av evidens (B11). Statusendringer, eierskifte, gjennomganger og sletting skal inn i samme modell før API-et kan skrive i Kvalitet (`external-api-phase-0-plan.md` §2h).
+- **Samtidighet:** En skriving fra API-et til prosessflyt i Kvalitet skal sende versjonen den bygger på (`base_hash`). AI-forslag krever det allerede. For manuell lagring er den valgfri på dagens endepunkt og skal bli påkrevd for integrasjoner (§2h, A27).
 - **AI-kall utløst via API** skal kjøre med `AiCallContext` og streng kontekstkontroll. I dag er standardmodus `warn` (`config/ai_operations.php`), og den bør være `strict` for alle kall utløst via API.
 
 ### 10.4 MCP (Model Context Protocol)

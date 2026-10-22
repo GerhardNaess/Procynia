@@ -21,11 +21,13 @@
   - isolert E2E-miljø (`cef890b2`), se `docs/testing/e2e-environment.md`
   - steg 12, Kvalitet (`f958fe57`, `686dba14`, `60fd0d16`), se §2f
   - oppfølging av A19–A23 og JS-grunnlaget (`ef1e0ee6`, `67e3cf2b`, `37f84480`, `7ca3b7a5`, `03428309`), se §2g
+  - sletting, koblinger og evidens i Kvalitet: A19/A28, A29, A20 (del) og A27 (`41a7fb78`, `b34dec1a`, `770eb2f0`), se §2h
 - Wiki-delen av fase 0 og Risiko (steg 9) er gjennomført og godkjent 2026-10-22.
 - Avvik og forbedringer (steg 10) er gjennomført og godkjent 2026-10-22.
 - Ledelsens gjennomgang (steg 11) er gjennomført og godkjent 2026-10-22.
 - Kvalitet (steg 12) er gjennomført og godkjent 2026-10-22.
-- Oppfølgingen av A19–A23 (§2g) er gjennomført 2026-10-22 og venter på vurdering. Etterlevelse og revisjon startes ikke før det.
+- Oppfølgingen av A19–A23 (§2g) er gjennomført og godkjent 2026-10-22.
+- Reglene for sletting, koblinger og evidens i Kvalitet (§2h) er gjennomført 2026-10-22 og venter på vurdering. Etterlevelse og revisjon startes ikke før det.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -58,6 +60,8 @@ Fase 0 bygger ikke API-et. Den flytter ansvaret for menneskelige beslutninger fr
 | B7 | Integrasjoner kan ikke registrere KPI-målinger i fase 0. En senere løsning kan tillate det med egne rettigheter, identifiserbar kilde og sporbarhet. | `objective.measure` er menneskeforbeholdt (§4.1). |
 | B8 | Lukkede risikoer vises som i dag i fase 0. | Ingen endring i registeret. |
 | B9 | **En registrert godkjenning eller avvisning fra en dokumenteier kan ikke overskrives uten historikk.** En ny beslutning registreres som en egen, sporbar hendelse. | §4.10. Retter O1. |
+| B10 | **Kvalitet: koblinger fra andre moduler (A19/A28).** En prosess eller kontroll som Risiko, Mål og KPI, Avvik eller Etterlevelse peker på, slettes ikke, heller ikke av en som ikke ser modulen. Meldingen er generell, elementet settes til «Utgått», og koblingene bevares. Erstatter den tidligere regelen om at Kvalitet ikke skal påvirkes av skjulte koblinger. | §2h. |
+| B11 | **Kvalitet: evidens (A29).** Evidens trekkes tilbake og slettes aldri. Hvem og når registreres, og hendelsen logges (`quality_item_events`). Et element med evidens slettes ikke. | §2h. |
 
 **Føringer for gjennomføringen (2026-10-22):**
 
@@ -851,6 +855,157 @@ Ingen nettrute starter AI-arbeid helt uten kontroll.
 | A28 | En prosess som ikke er godkjent, og som Risiko, Mål/KPI, Avvik eller Etterlevelse peker på, kan slettes. Koblingene følger med i kaskaden. | Samme åpne spørsmål som koblingene i A19, og bør besluttes sammen med dem. |
 | A29 | Den eksisterende funksjonen «Fjern» på evidens gjør at en kontroll kan tømmes for evidens og deretter slettes. | Se A19 «Gjenstår» og A20. |
 | A30 | Tre E2E-fiksturer ryddet opp ved å slette kontroller med evidens. Det nekter databasen nå. De mislykkede oppryddingene ga også følgefeil (tidsavbrudd i Etterlevelse-spesifikasjoner). | Rettet (`03428309`). |
+
+### 2h. Sletting, koblinger og evidens i Kvalitet: beslutninger og gjennomføring (2026-10-22)
+
+**Produktbeslutninger (2026-10-22, se også §1, B10 og B11):**
+- **A19/A28, alternativ 2:** En prosess eller kontroll som andre moduler peker på, kan ikke slettes. Det gjelder også når den som sletter, ikke har tilgang til modulen med koblingen. Meldingen er generell. Dette er en bevisst endring av regelen om at Kvalitet ikke skal påvirkes av skjulte koblinger (`0798aa5`, §2g).
+- **A29:** Evidens trekkes tilbake og slettes aldri. Det registreres hvem som gjorde det og når.
+- **A20:** Bare den delen av hendelsesloggen som A29 trenger, bygges nå.
+- **A27:** Versjonskontroll ved manuell redigering gjennomføres hvis den er avgrenset. Den var det.
+- **A23:** Beholdes som dokumentert punkt (§2g). Ingen nye API-er eller agentfunksjoner.
+- **Forenkling (besluttet samme dag, etter gjennomføringen nedenfor):**
+  - Det som ikke har vært brukt, kan slettes som før.
+  - Det som har vært brukt, beholder historikken og settes til «Utgått».
+  - Brukeren arbeider som normalt, mens historikk, tilgang og dataintegritet ivaretas automatisk.
+  - Ingen nye statuser, godkjenningssteg, begrunnelsesfelt eller skjermbilder.
+  - Sikkerhetsreglene, triggerne og tilgangskontrollen er uendret. Bare det brukeren ser, er forenklet (`bf4bde95`).
+
+| Commit | Innhold |
+|---|---|
+| `41a7fb78` | A19/A28: et element som andre moduler peker på, settes til «Utgått» og slettes ikke. Meldingen er generell. |
+| `b34dec1a` | A29 og A20: evidens trekkes tilbake, og hendelsesloggen `quality_item_events` er innført. |
+| `770eb2f0` | A27: manuell lagring av flyten overskriver ikke en flyt som er lagret i mellomtiden. |
+| `bf4bde95` | Forenkling: «Er i bruk» med «Sett til Utgått» i menyen, «Fjern» og «Historikk» for evidens, og kortere meldinger. |
+
+#### A19/A28 – koblinger fra andre moduler
+
+**Hva som blokkerer sletting, i tjenesten (`QualityItemService::deletionBlockers()`) og i databasen (`quality_items_keep_cross_module_links`, samme liste):**
+
+| Element | Koblinger |
+|---|---|
+| Prosess (også aktivitetene i den) | `risk_processes`, `risk_activities`, `kpi_processes`, `kpi_activities`, `improvement_case_processes`, `improvement_case_activities`, `compliance_requirement_processes`, `compliance_audit_processes`, `compliance_audit_findings.quality_process_id` |
+| Kontroll | `risk_controls`, `compliance_requirement_controls`, `compliance_audit_findings.control_item_id` |
+
+- **Status:** Elementet settes til «Utgått» (`QualityItem::STATUS_RETIRED`), som allerede finnes for prosesser og kontroller. Ingen ny status trengs.
+  - En utgått prosess eller kontroll tilbys ikke for nye koblinger i Kvalitet, Etterlevelse og revisjon, oppmerksomhetslisten eller Mine oppgaver.
+  - Koblingene som finnes, blir stående.
+- **Hva som fortsatt fjerner en kobling:**
+  - Den andre modulen sletter sin egen post (en risiko, et krav eller en sak). Det er den modulens beslutning, og den tar koblingen med.
+  - Kunden slettes.
+- **Rettighetskontroll og kundeseparasjon er uendret:**
+  - Vakten og `quality.delete` sjekkes før noen regel leses.
+  - En integrasjon kan ikke slette i det hele tatt (`QUALITY_DELETE` er menneskeforbeholdt).
+  - En annen kunde avvises før koblingene leses.
+- **Det brukeren ser (forenklet, `bf4bde95`):**
+  - Menyen sier «Er i bruk og kan ikke slettes.» og tilbyr **«Sett til Utgått»**. Det er ett klikk, uten dialog, og den vanlige statusendringen (`PATCH`, `quality.edit`). Uten `quality.edit` vises bare setningen.
+  - Et forsøk på å slette likevel får «Er i bruk og kan ikke slettes. Sett til «Utgått» i stedet.» (`in_use_not_deletable`).
+  - Det er **én** grunn for alle årsaker: godkjent versjon, evidens og koblinger fra andre moduler. Grunnen sier aldri hvorfor, og nevner aldri modul, risiko, sak, krav eller person.
+  - Radene har `in_use` (sann/usann) i stedet for en setning.
+
+**Kan sletteregelen lekke informasjon? Vurdering og tiltak:**
+
+| Kanal | Vurdering | Tiltak |
+|---|---|---|
+| Teksten i avvisningen | Kan røpe modul, post eller antall | Én setning for alle årsaker, også de brukeren selv kan se (forenkling). Testet mot en liste med avslørende ord. |
+| Flagget i radmenyen (`in_use`) | En leser kunne utledet skjulte koblinger fra sidedataene | Beregnes bare for den som har `quality.delete`. En leser får `false` (testet), og menyen vises ikke for en leser. |
+| Forskjellig svar avhengig av hva brukeren ser | Kunne røpe hvilken modul koblingen kommer fra | Samme status, omdirigering og melding uansett om brukeren ser modulen eller ikke (testet). |
+| Rekkefølgen på kontrollene | En annen kunde eller en leser kunne prøve seg fram | Tilgang sjekkes først. Leseren får 403, en annen kunde 404 eller 403, og en integrasjon nektes av vakten før koblingene leses. |
+| Egne grunner (godkjent versjon, evidens) | Kan brukeren se selv | Etter forenklingen samme setning som alle andre. Svaret skiller ikke mellom årsaker. |
+| Selve avslaget | Den som sletter, får vite at *noe* peker på elementet | **Gjenstår, og er godtatt i beslutningen.** Det røper ikke hva. Den som sletter, har allerede `quality.delete` i samme kunde. |
+| Tid | Svartiden kan variere litt med antall koblinger | Ikke tiltak. Forskjellen er liten og røper ikke modul. Konstant tid står ikke i forhold. |
+| Databasefeil | Triggermeldingen nevner bare elementets id | Vises ikke for brukeren. Appen avviser før databasen. |
+
+**Data:** Utviklingsdatabasen har én prosess (`risk_processes`) og én kontroll (`risk_controls`) med koblinger. De kan nå bare settes til «Utgått». Ingen rader er endret.
+
+**Tester:**
+- `QualityCrossModuleLinkTest` (7):
+  - hver av de tolv koblingene blokkerer, i tjenesten og i databasen, med samme setning;
+  - en skjult kobling nevnes aldri og vises aldri for en leser;
+  - svaret er det samme uansett hva den som sletter, ser;
+  - en integrasjon kommer ikke rundt regelen;
+  - en annen kunde avvises først;
+  - «Utgått» beholder koblingen, og den andre modulen bestemmer fortsatt over sin egen post;
+  - sletting av kunden tar alt med.
+- Åtte eksisterende tester beskrev den gamle regelen og beskriver nå den nye (Risiko, KPI, Avvik og Etterlevelse).
+- Mutasjonssjekket: en tabell fjernet fra listen, grunnen beregnet for en leser, og triggeren.
+
+#### A29 – evidens trekkes tilbake
+
+- **Modell:** Evidens er fortsatt en rad i `quality_item_documents` (`relation_type = evidence`). Raden får `withdrawn_at`, `withdrawn_by_user_id` og `withdrawn_by_name`. Ingen ny tabell for evidens.
+- **Handlingen:** Knappen heter **«Fjern»**, som før (forenklet, `bf4bde95`). For brukeren er det en vanlig fjerning, mens systemet trekker evidensen tilbake i stedet for å slette den.
+  - Raden blir stående.
+  - Tilbaketrekkingen er endelig. En ny tilbaketrekking avvises, og to samtidige registrerer bare én (radlås).
+  - Det samme registrert på nytt blir en ny rad. Unik-indeksen gjelder nå bare aktive rader.
+  - Andre dokumentkoblinger enn evidens fjernes som før.
+- **Visning (forenklet):**
+  - Aktiv evidens vises som før. Fjernet evidens forsvinner fra listen.
+  - Historikken ligger under en lukket **«Historikk (n fjernet)»**, med «Fjernet :dato av :navn». Den tegnes først når den åpnes.
+  - Det samme gjelder i dokumentlisten. Det er ingen egne seksjoner, merker eller nye begreper.
+- **Hva som teller:** Tilbaketrukket evidens teller ikke lenger, verken i antallet i registeret, i «Kontroller uten evidens» eller i det Risiko og Etterlevelse viser. Ledelsens gjennomgang teller *registrert* evidens i perioden, og det er uendret.
+- **Beskyttelse:**
+  - Et element med evidens, tilbaketrukket evidens inkludert og uansett type (ikke bare kontroller), slettes ikke («Utgått»).
+  - En evidensrad kan aldri slettes mens elementet og kunden finnes. Den kan bare endres ved tilbaketrekking, ved frigjøring fra en slettet fil (eksisterende regel) og når en slettet bruker blir `NULL`.
+  - En tilbaketrekking kan ikke angres eller skrives om.
+- **Eksisterende data:** De 2 evidensradene i utviklingsdatabasen står uendret som aktive. Ingen hendelser er fylt inn bakover. En rads `created_at` og `created_by_user_id` er registreringen.
+
+#### A20 – hendelseslogg (den delen A29 trenger)
+
+- **Tabellen `quality_item_events`:**
+  - Kolonner: `customer_id`, `quality_item_id` (uten fremmednøkkel, så historikken overlever elementet), `quality_item_document_id`, `event`, `actor_user_id`, `actor_name`, `occurred_at` og `metadata`.
+  - Den skrives i samme transaksjon som endringen.
+  - Trigger: ingen endring og ingen sletting, unntatt at en slettet bruker blir `NULL` og at kunden slettes.
+- **Hendelser nå:** `evidence_registered` (med tittel og fil) og `evidence_withdrawn`.
+- **Slik kommer resten inn i samme modell** (anbefalt rekkefølge fra §2g, ikke bygget):
+
+| Hendelse | `event` | Metadata | Skrives i |
+|---|---|---|---|
+| Statusendring | `status_changed` | `from`, `to` | `QualityItemService::updateItem` |
+| Eierskifte | `owner_changed` | `from_user_id`/`from_name`, `to_user_id`/`to_name` | `updateItem` |
+| Gjennomgang registrert | `review_recorded` | `reviewed_at`, `interval_months`, `next_review_at` | `updateItem` (`reviewAttributes`) |
+| Element slettet | `item_deleted` | type, tittel, kode og antall Wiki-sider tatt med | `deleteItem`, før slettingen, i samme transaksjon. Raden overlever fordi det ikke er noen fremmednøkkel. |
+| AI-forslag tatt i bruk / arbeidsversjon forkastet / flyt slettet | `flow_adopted`, `flow_discarded`, `flow_deleted` | kilde og versjonsavtrykk | `QualityProcessBlueprintService` |
+| Kontroll plassert eller fjernet; styrende dokument koblet eller fjernet | `control_placed`, `control_unplaced`, `governs_linked`, `governs_unlinked` | aktivitet og element | de respektive tjenestene |
+
+- **Felles for alle:** én metode i tjenestene, i samme transaksjon som endringen, med aktøren fra tjenestekallet. Det betyr at en integrasjon også står med navn.
+- **Visning:** en historikkfane på elementet kan lese tabellen direkte. Den bør bygges sammen med statushendelsene.
+
+#### A27 – samtidig manuell redigering (rettet)
+
+- **Avgrenset, derfor gjennomført:**
+  - Arbeidsversjonen sender `version_hash` til siden.
+  - Alle fire manuelle lagringer sender det tilbake: «Lagre struktur», dialogen for et steg, «+» på en pil og «Flytt steg».
+  - `store()` sjekker det under samme lås som AI-forslag (A22).
+- **Ved konflikt (forenklet tekst):** «Noen andre har lagret flyten i mellomtiden. Last inn siden på nytt.»
+  - Meldingen vises under «Lagre struktur» eller i stegdialogen.
+  - For et AI-forslag: «Flyten er endret siden forslaget ble laget. Lag et nytt forslag.»
+  - Editoren beholder endringene, fordi tilstanden bevares bare når lagringen avvises.
+- **Gjenstår:** `base_hash` er valgfri på endepunktet. Siden sender den alltid, men en klient uten den får fortsatt «siste lagring vinner». Den må bli påkrevd før integrasjoner kan skrive flyt (fase 1).
+- **Tester:** to nye tester i `QualityFlowProposalVersionTest` (lagring imellom; første flyt). Mutasjonssjekket.
+
+#### A23 – AI-operasjoner
+
+Uendret: dokumentert i §2g for senere arbeid.
+
+#### Tester og kjøringer (2026-10-22)
+
+- **PHP:** alle testfiler som berører Kvalitet, Risiko, KPI, Avvik og Etterlevelses koblinger til Kvalitet, og sletting av Wiki-dokumenter (43 filer): 589 av 589 bestått før forenklingen og etter den. Etter forenklingen er det i tillegg én ny test for «Sett til Utgått» (`QualityCrossModuleLinkTest`, 8 av 8).
+- **JS:** 2130 av 2130 bestått i 103 filer. Frontendbygg, ESLint og Pint på berørte filer er rene.
+- **Migreringer:** `2026_10_22_000010` og `000011` er kjørt på utviklings-, test- og E2E-databasen. `000011` er rullet tilbake og migrert på nytt i testdatabasen.
+- **E2E i det isolerte miljøet:** alle spesifikasjoner for Kvalitet og Etterlevelse, `risk-controls`, `risk-context`, `risk-journey`, `objective-kpi-context`, Avvik og `my-tasks-governance` (43 filer, 82 tester). Telt fra Playwrights JSON-rapport.
+  - **Før forenklingen:** 76 bestått, 1 feilet og 5 hoppet over.
+    - Feilen var «removing evidence keeps focus in the list» i `a11y-grc-quality`. Den lette etter «Fjern», mens knappen het «Trekk tilbake».
+    - 2 av de 5 hoppet over som følge av feilen (filen kjører i serie).
+  - **Etter forenklingen (`bf4bde95`):** **79 bestått, 0 feilet og 3 hoppet over.**
+  - **De 3 som hoppes over, er ikke bestått og ikke verifisert.** Alle trenger AI-tolkning, som E2E-miljøet med vilje ikke har: A11Y-013 i `a11y-grc-quality`, `quality-flow-clarify-sticks` og `quality-flow-describe-without-flow`.
+
+#### Nye funn
+
+| # | Funn | Vurdering |
+|---|---|---|
+| A31 | Når et steg fjernes fra flyten, eller flyten slettes eller forkastes, fjernes aktivitetskoblingene fra Risiko, KPI og Avvik til det steget (`QualityActivityLinkCleanup`). Det er en eksisterende, bevisst regel (en kobling til en aktivitet som ikke finnes, peker ikke på noe), men den går ikke via sletteregelen i B10. | **Ikke endret.** Kvalitet-redigering ville blitt sperret av skjulte koblinger hvis regelen ble utvidet til steg. Bør besluttes: behold, eller behold koblingen med «aktiviteten finnes ikke lenger» (slik plasseringer av kontroller allerede gjør). |
+| A32 | `base_hash` er valgfri ved manuell lagring (A27). | Påkrevd før integrasjoner kan skrive flyt. |
+| A33 | Evidens kan ikke redigeres (tittel eller beskrivelse). En feilregistrering rettes med «Fjern» og ny registrering. | Godtatt. Ingen begrunnelsesfelt (forenkling). |
 
 ## 3. Avgrensning
 
