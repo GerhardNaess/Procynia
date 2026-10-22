@@ -56,7 +56,7 @@ class ImprovementCaseAccessService
      */
     public function areaIdsFor(User $user, string $permissionKey): array
     {
-        if ($user->customer_id === null || ! $this->isImprovementPermission($permissionKey)) {
+        if ($user->customer_id === null || ! $this->isImprovementPermission($permissionKey) || $this->withheldFromIntegration($user, $permissionKey)) {
             return [];
         }
 
@@ -69,7 +69,7 @@ class ImprovementCaseAccessService
      */
     public function reachesAllAreas(User $user, string $permissionKey): bool
     {
-        if (! $this->canOpenModule($user) || ! $this->isImprovementPermission($permissionKey)) {
+        if (! $this->canOpenModule($user) || ! $this->isImprovementPermission($permissionKey) || $this->withheldFromIntegration($user, $permissionKey)) {
             return false;
         }
 
@@ -218,6 +218,16 @@ class ImprovementCaseAccessService
             ->filter(fn (array $option): bool => $option['area_ids'] !== [])
             ->values()
             ->all();
+    }
+
+    /**
+     * An integration identity never holds a human-only key (improvement.close, improvement.delete),
+     * whatever its roles grant — the rule CustomerPermissionService::has() applies, applied here too,
+     * because the (permission, area) pairs are read from the roles directly (BusinessAreaGrants).
+     */
+    private function withheldFromIntegration(User $user, string $permissionKey): bool
+    {
+        return $user->isIntegration() && CustomerPermissionCatalog::isHumanOnly($permissionKey);
     }
 
     private function isImprovementPermission(string $permissionKey): bool
