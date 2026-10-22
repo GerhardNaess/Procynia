@@ -17,7 +17,9 @@ module.exports = defineConfig({
 
     use: {
         baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:8080',
-        trace: 'on-first-retry',
+        // With retries off, «on-first-retry» never recorded anything. A failure now keeps its trace,
+        // so an intermittent one (KTF-4) can be read afterwards; passing runs keep nothing.
+        trace: 'retain-on-failure',
     },
 
     projects: [

@@ -9,8 +9,9 @@ Tester som feiler på grunnlinjen og ikke skyldes arbeidet som pågår. Hver fei
 | KTF-1 | **Løst 2026-10-22.** Testfiksturen er rettet, applikasjonen er uendret. | `898a4c08` |
 | KTF-2 | **Løst 2026-10-22.** Testene kontrollerer nå dagens komponenter og den faktiske navigasjonsfunksjonen. | `2d133715` |
 | KTF-3 | **Løst 2026-10-22.** Testen følger dagens Kjøringer-fane. Grensesnittet er uendret. | `be3f517c` (testen), denne loggen |
+| KTF-4 | **Åpen – mulig ustabilitet.** `risk-access.spec.js` feilet én gang, ikke reprodusert. | – |
 
-Ingen kjente feil står åpne. Dokumentet beholdes som logg, og nye kjente feil føres inn her.
+KTF-4 står åpen som mulig ustabilitet i E2E. Ingen kjente feil står åpne i PHP eller JS. Dokumentet beholdes som logg, og nye kjente feil føres inn her.
 
 ## KTF-1 – Kjøringer-fanen i `WikiControllerTest` (9 tester) — løst
 
@@ -103,6 +104,38 @@ Ingen kontroll er fjernet. Hver påstand er flyttet til den formen funksjonen ha
 5. «Skjul tekniske detaljer» skjuler den igjen.
 
 `wiki-source-upload-readability.spec.js`: 13 av 13 bestått.
+
+## KTF-4 – E2E: `risk-access.spec.js` avbrutt av en navigering (mulig ustabilitet)
+
+**Registrert:** 2026-10-22, i kjøringen av alle Risiko-spesifikasjonene etter `4c3cd3bf` (15 av 16 bestått).
+
+### Hva som skjedde
+
+Testen «a role with a fagområde lets its holder register and read risks there» feilet på linje 62:
+
+```text
+page.goto: Navigation to "…/app/customer-environment?tab=users" is interrupted by another navigation to "…/app/customer-environment?tab=permissions"
+```
+
+- Steget går fra Tilganger til Brukere, rett etter at rolle nummer to er lagret og et skjermbilde av hele siden er tatt.
+- Ingen Risiko-handling er utført på dette tidspunktet. Feilen har derfor ikke noe med endringene i steg 9 å gjøre.
+
+### Undersøkt
+
+| Hypotese | Resultat |
+|---|---|
+| Spesifikasjonen er ustabil alene | 3 av 3 og deretter 15 av 15 bestått med den opprinnelige spesifikasjonen, også med spor ved feil. Den besto også i den første store E2E-kjøringen. |
+| Serveren sender `?tab=users` videre til `permissions` | Nei. `CustomerEnvironmentController::index` sender ingen videre, og rolle-lagringen setter ingen sesjonsverdi. |
+| Inertia lagrer rulleposisjonen med en forsinket `history.replaceState` (100 ms), for eksempel etter skjermbildet, og avbryter `goto` | **Avkreftet.** Ingen avbrudd i 30 forsøk: skjermbilde av hele siden, rulling og en direkte `replaceState` 30 ms inn i `goto`. Playwright regner ikke `replaceState` som en navigering. |
+| Bakgrunnsforespørsler (polling, utsatte props, forhåndshenting) på siden | Ingen finnes i Kundemiljø eller i oppsettet. |
+
+Den gjenstående muligheten er en sen Inertia-navigering til `?tab=permissions`, det vil si svaret på en rolle-lagring som kom etter at kontrollene hadde passert, for eksempel en dobbel innsending under høy last. Det er ikke bevist.
+
+### Tiltak
+
+- Spesifikasjonen er **ikke** endret. Årsaken er ukjent, og en endring kunne skjule den uten å rette noe.
+- `playwright.config.cjs` hadde `trace: 'on-first-retry'` med `retries: 0`, og tok dermed aldri spor. Den har nå `trace: 'retain-on-failure'`, slik at neste feil etterlater et spor (`test-results/…/trace.zip`) som viser hvilken forespørsel som navigerte.
+- Feiler testen igjen, leses sporet. Er årsaken en dobbel lagring, er det en feil i grensesnittet og ikke i testen.
 
 ## Før merge til `main`
 

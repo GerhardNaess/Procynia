@@ -313,6 +313,18 @@ Ny arbeidsversjon for statusendringer anbefales ikke:
   - E2E etter siste commit: Risiko-spesifikasjonene, 15 av 16 bestått. `risk-access.spec.js` feilet én gang på et navigasjonskappløp i spesifikasjonen («interrupted by another navigation» etter lagring av rolle). Den besto 3 av 3 ved ny kjøring og i første runde, og den er ikke berørt av endringene.
 - Mutasjonssjekket: vakt, tilgang, låst lesing, historikkregel, modellvakt, triggere, tiltakseierskap og Kvalitet-tilgang.
 
+**Føring for API-fasen: AI-agenter i Risiko (besluttet 2026-10-22)**
+
+- **Utgangspunkt:** en AI-agent (integrasjonsidentitet) skal kunne lese risikoer i fagområdene den er gitt, og opprette *forslag*.
+- Den skal ikke automatisk få generell `risk.edit`.
+- Et forslag blir en del av registeret først når en person med rett til det har tatt det i bruk.
+- **Dagens modell er uendret i fase 0.** `risk.edit` er ikke menneskeforbeholdt. En integrasjon med en rolle som har `risk.edit`, kan derfor i dag endre, lukke og flytte risikoer og arbeide med tiltak og koblinger (`RiskServiceAccessTest::test_an_integration_with_risk_edit_may_edit`). Det er ikke det samme som at den skal få det.
+- **Konsekvens for fase 1:**
+  - Integrasjonsroller får ikke `risk.edit` som standard.
+  - «Forslag» utformes som et eget begrep, for eksempel en egen status eller tabell for foreslåtte risikoer, vurderinger og tiltak, og tas i bruk av en person.
+  - Om `risk.create` skal gi et forslag eller en registrert risiko når aktøren er en integrasjon, besluttes da.
+  - Vurdering, aksept og sletting forblir menneskeforbeholdt, uansett rolle (§2c).
+
 **Klar for videre integrasjon**
 
 - Ja for lesing og for menneskelige beslutninger. De nektes i domenet for enhver ny inngang.
