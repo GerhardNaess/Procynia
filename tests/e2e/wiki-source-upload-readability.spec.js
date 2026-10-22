@@ -9,6 +9,8 @@ const MIN_READABLE_PX = 16;
 const UPLOADED = 'e2e-source-upload-readability.pdf';
 const FAILED = 'e2e-source-list-failed-run.docx';
 const FAILED_RUN_ERROR_START = 'RuntimeException: Page generation failed';
+/** WikiSourceUploadReadabilityE2EFixture::FAILED_RUN_ERROR, as the pipeline stored it. */
+const FAILED_RUN_ERROR = 'RuntimeException: Page generation failed for 1 of 2 planned pages (concept:supplier-follow-up) after 3 attempts; upstream returned HTTP 502 Bad Gateway';
 const READER = { email: 'e2e.wikisources.reader@procynia.test', password: 'e2e-wiki-sources-reader' };
 
 /** The table row (from 1280px) of one document. */
@@ -281,7 +283,7 @@ test.describe.serial('Wiki source upload readability', () => {
         await expect(sourceRow(page, UPLOADED)).not.toContainText('Mangler Dokumenteier');
     });
 
-    test('17. a failed run is one short Norwegian sentence, and «Se detaljer» opens the run with the full error', async ({ page }) => {
+    test('17. a failed run is one short Norwegian sentence; «Se detaljer» opens its run, and the full error is behind «Vis tekniske detaljer»', async ({ page }) => {
         await tinker(`${FIXTURE}::seedListStates(${CUSTOMER_ID});`);
         await page.setViewportSize({ width: 1366, height: 768 });
         await loginAsWikiReader(page);
@@ -296,7 +298,47 @@ test.describe.serial('Wiki source upload readability', () => {
         await expect(details).toHaveAccessibleDescription(FAILED);
         await details.click();
         await page.waitForURL((url) => url.searchParams.get('tab') === 'runs' && url.searchParams.has('run_src'));
-        await expect(page.getByText(FAILED_RUN_ERROR_START, { exact: false }).first()).toBeVisible();
+
+        // Kjøringer opens filtered to this document. The raw error is never on screen until asked
+        // for: the run's detail view, «Vis flere detaljer», then «Vis tekniske detaljer».
+        await expect(page.getByRole('button', { name: 'Fjern kildefilter' })).toBeVisible();
+        await expect(page.getByText(FAILED_RUN_ERROR_START, { exact: false })).toHaveCount(0);
+
+        // Every step is reached from the keyboard, and each toggle says whether it is open.
+        const openDetails = page.locator('[data-run-details-toggle]:visible');
+        await expect(openDetails).toHaveCount(1);
+        await expect(openDetails).toHaveAccessibleName('Vis detaljer');
+        await expect(openDetails).toHaveAccessibleDescription(FAILED);
+        await expect(openDetails).toHaveAttribute('aria-expanded', 'false');
+        await openDetails.focus();
+        await page.keyboard.press('Enter');
+        const panel = page.locator(`#${await openDetails.getAttribute('aria-controls')}`);
+        await expect(panel).toBeVisible();
+        await expect(openDetails).toHaveAccessibleName('Skjul detaljer');
+        await expect(openDetails).toHaveAttribute('aria-expanded', 'true');
+        await expect(panel).not.toContainText('RuntimeException');
+
+        const moreDetails = panel.getByRole('button', { name: 'Vis flere detaljer' });
+        await moreDetails.focus();
+        await page.keyboard.press('Enter');
+        await expect(panel.getByRole('button', { name: 'Skjul flere detaljer' })).toHaveAttribute('aria-expanded', 'true');
+        await expect(panel).not.toContainText('RuntimeException');
+
+        const technical = panel.getByRole('button', { name: 'Vis tekniske detaljer' });
+        await expect(technical).toHaveAttribute('aria-expanded', 'false');
+        await technical.focus();
+        await page.keyboard.press('Space');
+        const hideTechnical = panel.getByRole('button', { name: 'Skjul tekniske detaljer' });
+        await expect(hideTechnical).toHaveAttribute('aria-expanded', 'true');
+        await expect(hideTechnical).toBeFocused();
+
+        // The error exactly as the pipeline stored it — not shortened, not translated.
+        const rawError = panel.getByText(FAILED_RUN_ERROR, { exact: true });
+        await expect(rawError).toBeVisible();
+
+        await page.keyboard.press('Enter');
+        await expect(panel.getByRole('button', { name: 'Vis tekniske detaljer' })).toHaveAttribute('aria-expanded', 'false');
+        await expect(panel).not.toContainText('RuntimeException');
     });
 
     test('18. someone who may only read the Wiki gets Last ned, and nothing that changes a document', async ({ page }) => {

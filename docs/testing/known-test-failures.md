@@ -8,9 +8,9 @@ Tester som feiler på grunnlinjen og ikke skyldes arbeidet som pågår. Hver fei
 |---|---|---|
 | KTF-1 | **Løst 2026-10-22.** Testfiksturen er rettet, applikasjonen er uendret. | `898a4c08` |
 | KTF-2 | **Løst 2026-10-22.** Testene kontrollerer nå dagens komponenter og den faktiske navigasjonsfunksjonen. | `2d133715` |
-| KTF-3 | **Åpen.** E2E-test 17 i `wiki-source-upload-readability.spec.js`. | – |
+| KTF-3 | **Løst 2026-10-22.** Testen følger dagens Kjøringer-fane. Grensesnittet er uendret. | KTF-3-commit |
 
-Ingen kjente feil står åpne i Wiki-suiten for PHP. KTF-3 gjelder E2E. Dokumentet beholdes som logg, og nye kjente feil føres inn her.
+Ingen kjente feil står åpne. Dokumentet beholdes som logg, og nye kjente feil føres inn her.
 
 ## KTF-1 – Kjøringer-fanen i `WikiControllerTest` (9 tester) — løst
 
@@ -78,7 +78,7 @@ Ingen kontroll er fjernet. Hver påstand er flyttet til den formen funksjonen ha
   - Mutasjonssjekket.
 - **`WikiSecondaryNavigationOrderTest`** beholder serverens landingsfane. Rekkefølge, etiketter, oversatte etiketter, mål og aktivt punkt er flyttet til `headerNavigation.test.js`, som kaller den faktiske navigasjonsfunksjonen i `appNavigation.js`.
 
-## KTF-3 – E2E: «Se detaljer» viser ikke den rå feilmeldingen direkte (1 test)
+## KTF-3 – E2E: «Se detaljer» viser ikke den rå feilmeldingen direkte (1 test) — løst
 
 **Registrert:** 2026-10-22 under verifiseringen etter KTF-1 og KTF-2 (73 av 74 bestått i Wiki-E2E).
 
@@ -92,10 +92,17 @@ Ingen kontroll er fjernet. Hver påstand er flyttet til den formen funksjonen ha
 - Den andre halvdelen venter at `RuntimeException: Page generation failed` er synlig rett etter navigeringen til Kjøringer. Kjøringer-fanen ble forenklet etter at testen ble skrevet (`b91e0bb9`, `d3a6432b`, 20.–21.10.). Den utvidede raden forsvant, og den rå feilen ligger bak «Vis tekniske detaljer» (`47fbc663`), slik prinsippet i AGENTS.md om tekniske detaljer krever.
 - Ingen commit i fase 0 har endret hvordan Kjøringer-fanen vises.
 
-### Foreslått retting (egen commit)
+### Retting
 
-1. Bekreft hva Kjøringer skal vise når fanen åpnes med `run_src`. Forventet er en kort forklaring, med full feil tilgjengelig.
-2. La testen åpne «Vis tekniske detaljer» før den ser etter feilmeldingen, og kontroller at den korte forklaringen vises uten at detaljene er åpnet.
+Årsaken er bekreftet: testen var utdatert, ikke grensesnittet. Kjøringer-fanen åpnes filtrert på dokumentet («Filtrert på dokument», «Fjern kildefilter»), og den rå feilen ligger tre nivåer inne. Testen går nå denne veien:
+
+1. Raden i Kildedokumenter viser én kort norsk setning og ingen `RuntimeException`. «Se detaljer» er beskrevet av filnavnet.
+2. Kjøringer viser én kjøring for dokumentet, og den rå feilen er ikke på skjermen.
+3. «Vis detaljer» (beskrevet av filnavnet), «Vis flere detaljer» og «Vis tekniske detaljer» åpnes med tastaturet (Enter og mellomrom). Hver knapp skifter navn og `aria-expanded`. Fokus blir på knappen.
+4. Den rå feilen vises nøyaktig slik pipelinen lagret den (`WikiSourceUploadReadabilityE2EFixture::FAILED_RUN_ERROR`), ikke forkortet.
+5. «Skjul tekniske detaljer» skjuler den igjen.
+
+`wiki-source-upload-readability.spec.js`: 13 av 13 bestått.
 
 ## Før merge til `main`
 
