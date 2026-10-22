@@ -10,8 +10,9 @@ Tester som feiler på grunnlinjen og ikke skyldes arbeidet som pågår. Hver fei
 | KTF-2 | **Løst 2026-10-22.** Testene kontrollerer nå dagens komponenter og den faktiske navigasjonsfunksjonen. | `2d133715` |
 | KTF-3 | **Løst 2026-10-22.** Testen følger dagens Kjøringer-fane. Grensesnittet er uendret. | `be3f517c` (testen), denne loggen |
 | KTF-4 | **Åpen – mulig ustabilitet.** `risk-access.spec.js` feilet én gang, ikke reprodusert. | – |
+| KTF-5 | **Åpen – mulig problem i testinfrastrukturen.** Innloggingen i `a11y-grc-compliance.spec.js` hang i 15 sekunder, mens PHP-FPM-poolen var full. | – |
 
-KTF-4 står åpen som mulig ustabilitet i E2E. Ingen kjente feil står åpne i PHP eller JS. Dokumentet beholdes som logg, og nye kjente feil føres inn her.
+KTF-4 og KTF-5 står åpne som mulig ustabilitet i E2E. Ingen kjente feil står åpne i PHP eller JS. Dokumentet beholdes som logg, og nye kjente feil føres inn her.
 
 ## KTF-1 – Kjøringer-fanen i `WikiControllerTest` (9 tester) — løst
 
@@ -134,9 +135,55 @@ Den gjenstående muligheten er en sen Inertia-navigering til `?tab=permissions`,
 ### Tiltak
 
 - Spesifikasjonen er **ikke** endret. Årsaken er ukjent, og en endring kunne skjule den uten å rette noe.
-- `playwright.config.cjs` hadde `trace: 'on-first-retry'` med `retries: 0`, og tok dermed aldri spor. Den har nå `trace: 'retain-on-failure'`, slik at neste feil etterlater et spor (`test-results/…/trace.zip`) som viser hvilken forespørsel som navigerte.
+- `playwright.config.cjs` hadde `trace: 'on-first-retry'` med `retries: 0`, og tok dermed aldri spor. Den har nå `trace: 'retain-on-failure'`, slik at neste feil etterlater et spor som viser hvilken forespørsel som navigerte. Se «Bevaring av spor» nedenfor.
 - Feiler testen igjen, leses sporet. Er årsaken en dobbel lagring, er det en feil i grensesnittet og ikke i testen.
-- Kopier `test-results/` før en ny kjøring for å bekrefte ustabilitet. En ny kjøring tømmer mappen. Det skjedde 2026-10-22 med en engangsfeil i innloggingen i `a11y-grc-compliance.spec.js` («Kravbibliotek», `loginAs` ble stående på `/login`), som besto 3 av 3 ved ny kjøring.
+- En ny kjøring tømte tidligere `test-results/`, og sporet etter KTF-5 gikk tapt på den måten. Det er rettet. Se «Bevaring av spor».
+
+## KTF-5 – E2E: innlogging hang mens PHP-FPM-poolen var full (mulig problem i testinfrastrukturen)
+
+**Registrert:** 2026-10-22, i kjøringen av E2E-spesifikasjonene for Avvik og Etterlevelse etter `9059f765` (60 av 61 bestått).
+
+### Hva som skjedde
+
+- `a11y-grc-compliance.spec.js`, «Kravbibliotek: headings follow the tree, and the tree speaks its hits», feilet i `loginAs`. Siden ble stående på `/login` i 15 sekunder.
+- Ingen avviks- eller etterlevelsesfunksjon var tatt i bruk da feilen kom. Spesifikasjonen besto 3 av 3 ved ny kjøring.
+- Sporet gikk tapt fordi den nye kjøringen tømte `test-results`.
+
+### Funn i serverloggene (container-loggene til nginx og PHP-FPM)
+
+| Tid (UTC) | Hendelse |
+|---|---|
+| 14:25:25 | PHP-FPM: `WARNING: [pool www] server reached pm.max_children setting (5), consider raising it` |
+| 14:26:20–22 | De forrige innloggingene i samme kjøring fikk 302 på under ett sekund. |
+| 14:26:23 | Uptime Kuma traff fem helsesjekker for køer (`/ops/health/queues/*`) samtidig. Alle fikk 503, mens E2E-trafikken pågikk. |
+| 14:26:36 | `POST /login` fikk **499** (nettleseren lukket forbindelsen før svaret kom). Dette er den eneste av 411 innlogginger i perioden som ikke fikk 302. |
+
+- **Mulig årsak, ikke bevist:** PHP-FPM har bare fem arbeidere (`pm.max_children = 5`). Store Inertia-sider på omtrent 625 kB fra Etterlevelse, sammen med helsesjekkene, fylte poolen, og innloggingen ble stående i kø til Playwright ga opp etter 15 sekunder.
+- Poolen ble også full sju andre ganger de siste tre døgnene. Hver gang er det logget som én advarsel, uten varighet. Det finnes ingen langsom-logg som viser hvilke forespørsler som opptok arbeiderne.
+
+### Sammenheng med KTF-4
+
+Trolig ingen.
+
+- KTF-4 (`risk-access.spec.js`) har ingen 499 og ingen full pool i sitt tidsvindu. Det er ingen 499 mellom 12:15 og 14:26 UTC.
+- Feiltypen er også en annen: en avbrutt navigering, ikke et svar som uteble.
+- Begge oppstod i lange kjøringer på delt utviklingsmiljø, men det er ikke funnet noen felles årsak.
+
+### Tiltak
+
+- **Ingen endring i PHP-FPM-oppsettet eller i testene.** Årsaken er ikke dokumentert. Å heve `pm.max_children` eller slå av helsesjekkene under E2E vil være naturlige forsøk dersom feilen kommer igjen med samme signatur.
+- Spor og serverlogger tas nå vare på automatisk (se nedenfor). Neste forekomst kan dermed avgjøre saken.
+
+## Bevaring av spor (fra 2026-10-22)
+
+- Hver kjøring skriver til sin egen mappe, `test-results/run-<tidspunkt>/` (`outputDir` i `playwright.config.cjs`). En senere kjøring tømmer derfor aldri spor fra en tidligere.
+- `preserveOutput: 'failures-only'` beholder bare utdata fra tester som feilet: `trace.zip`, `error-context.md` og skjermbilder.
+- `tests/e2e/global-teardown.js` skriver `server-logs.txt` i mappen til hver test som feilet. Filen inneholder container-loggene fra nginx og PHP-FPM, med standard ut og feil, fra tre minutter før testen til rett etter den.
+  - Den kjører uansett hvilken `--reporter` som er valgt. En egen reporter ville ikke gjort det, fordi `--reporter` på kommandolinjen erstatter de konfigurerte.
+  - Den feiler aldri selve kjøringen.
+- Mappene ligger i `test-results/`, som ikke spores av git. De slettes for hånd når feilen er undersøkt.
+- Testet med en spesifikasjon som feilet med vilje: spor, feilkontekst og serverlogg ble beholdt, og den beståtte testen etterlot ingenting.
+- `storage/logs/laravel.log` på verten ble tømt i løpet av 2026-10-22, utenfor dette arbeidet. Container-loggene er derfor den kilden som er brukt.
 
 ## Før merge til `main`
 

@@ -424,7 +424,16 @@ Ny arbeidsversjon for statusendringer anbefales ikke:
 
 - Ja. Lesing, beslutninger og arbeid med saker og tiltak ligger i domenet med samme regler for enhver inngang.
 - Gjenstår før fase 1: A10 (feilformat) og steg 19 (aktørtriggere for `improvement_cases.closed_by_user_id` og `improvement_action_verifications.verified_by_user_id`).
-- **Anbefaling, ikke besluttet:** samme føring som for Risiko (§2c). En AI-agent leser saker og foreslår avvik eller tiltak, men får ikke generell `improvement.edit` som standard. Dette skal avklares før fase 1.
+**Føring for API-fasen: AI-agenter i Avvik og forbedringer (besluttet 2026-10-22)**
+
+- **Utgangspunkt:** en AI-agent (integrasjonsidentitet) skal kunne lese avvik og forbedringssaker i fagområdene den er gitt, og opprette *forslag* til forbedringer eller tiltak.
+- Den skal ikke automatisk få generell `improvement.edit`.
+- Et forslag blir en sak eller et tiltak først når en person med rett til det har tatt det i bruk.
+- **Dagens modell er uendret i fase 0.** `improvement.edit` er ikke menneskeforbeholdt. En integrasjon med en rolle som har `improvement.edit`, kan derfor i dag endre saker og tiltak og registrere nye (`ImprovementServiceAccessTest::test_an_integration_with_improvement_edit_may_work_a_case`).
+- **Konsekvens for fase 1:**
+  - Integrasjonsroller får ikke `improvement.edit` som standard.
+  - «Forslag» utformes som i Risiko (§2c). Det bør være samme begrep i begge moduler.
+  - Lukk, Avbryt, Gjenåpne, Effektverifisering og Slett forblir menneskeforbeholdt, uansett rolle.
 
 ## 3. Avgrensning
 
