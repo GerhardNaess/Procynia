@@ -136,6 +136,7 @@ Den gjenstående muligheten er en sen Inertia-navigering til `?tab=permissions`,
 - Spesifikasjonen er **ikke** endret. Årsaken er ukjent, og en endring kunne skjule den uten å rette noe.
 - `playwright.config.cjs` hadde `trace: 'on-first-retry'` med `retries: 0`, og tok dermed aldri spor. Den har nå `trace: 'retain-on-failure'`, slik at neste feil etterlater et spor (`test-results/…/trace.zip`) som viser hvilken forespørsel som navigerte.
 - Feiler testen igjen, leses sporet. Er årsaken en dobbel lagring, er det en feil i grensesnittet og ikke i testen.
+- Kopier `test-results/` før en ny kjøring for å bekrefte ustabilitet. En ny kjøring tømmer mappen. Det skjedde 2026-10-22 med en engangsfeil i innloggingen i `a11y-grc-compliance.spec.js` («Kravbibliotek», `loginAs` ble stående på `/login`), som besto 3 av 3 ved ny kjøring.
 
 ## Før merge til `main`
 

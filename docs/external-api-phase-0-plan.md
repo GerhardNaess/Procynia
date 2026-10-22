@@ -16,7 +16,9 @@
   - KTF-3 (`be3f517c`)
   - A4 (`e4e56f50`)
   - steg 9, Risiko (`cc3a4e90`, `595deea4`, `b03fd473`, `4c3cd3bf`, E2E-retting `f5e66bf6`), se §2c
-- Wiki-delen av fase 0 er gjennomført og godkjent 2026-10-22. Risiko (steg 9) er gjennomført 2026-10-22 og venter på vurdering. Avvik, Ledelsens gjennomgang og de andre modulene startes ikke før det.
+  - steg 10, Avvik og forbedringer (`45ece813`, `5079e978`, `6a6df31d`, `9059f765`), se §2d
+- Wiki-delen av fase 0 og Risiko (steg 9) er gjennomført og godkjent 2026-10-22.
+- Avvik og forbedringer (steg 10) er gjennomført 2026-10-22 og venter på vurdering. Ledelsens gjennomgang og de andre modulene startes ikke før det.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -331,6 +333,99 @@ Ny arbeidsversjon for statusendringer anbefales ikke:
 - Skrivinger som ikke er beslutninger, ligger også i tjenestene. Et API kan dermed gjenbruke dem uten å kopiere regler.
 - Gjenstår før fase 1: A10 (feilformat) og steg 19 (aktørtriggere).
 
+### 2d. Avvik og forbedringer (steg 10) – kartlegging og gjennomføring (2026-10-22)
+
+**Kartlegging før steg 10**
+
+| Handling | Rettighet | Kontrollert i | Merknad |
+|---|---|---|---|
+| Se, liste, søke | `improvement.view` i fagområdet | Domenet (`ImprovementCaseAccessService::visibleCases`) | Uendret. En skjult sak er 404. |
+| Registrere | `improvement.edit` i valgt fagområde | Domenet (`ImprovementCaseCreator::create`) | Uendret. Gjelder også overføring fra Etterlevelse, Ledelsens gjennomgang og Leverandør. |
+| Endre sak og årsaksanalyse | `improvement.edit` | **Bare kontrolleren**, som også skrev endringen | Regelen om at en avsluttet sak må gjenåpnes først, lå også bare i kontrolleren og uten lås. |
+| Start behandling | `improvement.edit` | **Bare kontrolleren** | Tjenesten låste saken og kontrollerte overgangen. |
+| Lukk, Avbryt og Gjenåpne | `improvement.close` (menneskeforbeholdt) | **Bare kontrolleren** | Tjenesten skrev historikk med aktør i samme transaksjon. |
+| Effektverifisering | `improvement.close` | **Bare kontrolleren** | Tjenesten skrev en uforanderlig rad med aktør. |
+| Slette sak | `improvement.delete` (menneskeforbeholdt) | **Bare kontrolleren**, som også slettet | `isDeletable()` i kontrolleren. |
+| Tiltak: opprette, endre, slette, livsløp | `improvement.edit` | **Bare kontrolleren** | Ansvarlig person ble kontrollert i kontrolleren. |
+| Kvalitet-kontekst | `improvement.edit` og lesetilgang til Kvalitet | **Bare kontrolleren** | |
+
+**Gjennomført**
+
+| Commit | Innhold |
+|---|---|
+| `45ece813` | En integrasjon får ingen menneskeforbeholdt avviksnøkkel via fagområder. Dette er A6 for Avvik. |
+| `5079e978` | Beslutningene sjekkes i tjenestene: `close`, `cancel`, `reopen` og `verify` med vakten `IMPROVEMENT_CLOSE`, og `delete` (ny, flyttet fra kontrolleren) med `IMPROVEMENT_DELETE`. Deretter `canClose`/`canDelete` på saken under radlåsen. `start` sjekker `improvement.edit` på samme måte. |
+| `6a6df31d` | Historikken kan ikke slettes, verken i SQL, via Eloquent eller via kaskade (A13). |
+| `9059f765` | Endring av sak og årsaksanalyse, tiltak og Kvalitet-kontekst sjekker `improvement.edit` og regelen for avsluttet sak i tjenestene, under radlåsen. Dette er ikke menneskeforbeholdt, så en integrasjon med `improvement.edit` kan gjøre det. |
+
+**Sikkerhetsregler**
+
+1. Lukk, Avbryt, Gjenåpne, Effektverifisering og Slett går bare gjennom sine tjenester. Hver tjeneste:
+   - kaller vakten først. Den nekter integrasjoner, inaktive personer og API-kanalen, også i delegert modus;
+   - sjekker deretter beslutningsnøkkelen og `improvement.view` i sakens fagområde, på saken slik den står under radlåsen.
+2. Andre kunders saker er utilgjengelige, også med «Alle». Kontrolleren svarer 404 og tjenesten 403.
+3. System Owner uten rolle har ingen saksdata og ingen beslutninger. Det er uendret og nå testet i tjenesten.
+4. Livsløpsreglene er uendret og ligger i tjenestene, under lås:
+   - lukking krever at alle tiltak er avsluttet og alle fullførte tiltak er verifisert med effekt;
+   - avbrytelse krever avsluttede tiltak;
+   - en avsluttet sak og dens tiltak endres ikke før saken er gjenåpnet.
+5. Hver statusendring for sak og tiltak og hver effektverifisering skrives med aktør, i samme transaksjon som endringen. Det gjorde den også før. Aktøren nulles når personen slettes, og raden blir stående.
+
+**Historikk og sletting (A13)**
+
+- Historikktabellene var bare beskyttet mot UPDATE.
+- En DELETE i SQL fjernet statusendringer og effektverifiseringer. Sletting av en sak eller et tiltak, i SQL eller via Eloquent forbi `isDeletable()`, tok med seg hele historikken gjennom kaskaden.
+- **Nå:**
+  - En sak med statusendring eller tiltak kan ikke slettes, og et tiltak med statusendring eller verifisering kan ikke slettes. Det håndheves i modellen og i databasen.
+  - De tre historikktabellene slettes bare sammen med saken eller tiltaket.
+  - Kundesletting virker som før.
+- **Ingen ny forretningsregel:** `isDeletable()` krevde allerede åpen eller planlagt status og ingen historikk. Saker og tiltak som er registrert ved en feil, slettes som før. Endringen hindrer bare omgåelse.
+- **Konsekvens:** E2E-fiksturene for Avvik, Etterlevelse, navigasjon og kunnskapsoverføring rydder nå sine egne saker med `ImprovementTestDataPurge`. Det er samme mønster som `ComplianceE2EFixture` og `RiskTestDataPurge`.
+
+**Migrering og data**
+
+- `2026_10_22_000006_keep_improvement_history` oppretter bare triggere og funksjoner.
+- Kontrollert på utviklingsdatabasen: ingen avviksdata (0 saker, tiltak, statusendringer og verifiseringer). Tallene er de samme før og etter.
+- Migreringen kan rulles tilbake. Det er prøvd på testdatabasen.
+
+**Arkitekturfunn**
+
+| # | Funn | Vurdering |
+|---|---|---|
+| A13 | Historikktriggerne i Avvik dekket bare UPDATE. Sletting fjernet historikk, direkte eller gjennom kaskade. | Rettet (`6a6df31d`). Andre moduler med `*_status_changes` bør kontrolleres på samme måte når de tas: Kvalitet, Ledelsens gjennomgang, Leverandør og Mål/KPI. |
+| A14 | Regelen om at en avsluttet sak må gjenåpnes før den endres, lå i kontrolleren og uten lås for endring av sak og årsaksanalyse. | Ligger nå i tjenesten under lås (`9059f765`). |
+| A6 | Samme hull som i Risiko, i `ImprovementCaseAccessService`. | Rettet (`45ece813`). Gjenstår for Mål og KPI (steg 15). |
+
+**Tester**
+
+- `ImprovementHumanDecisionTest` (8):
+  - integrasjonen får ingen menneskeforbeholdt nøkkel;
+  - en beslutter kan ta alle fem beslutningene, med historikk under eget navn;
+  - disse nektes, og ingenting skrives: integrasjon, API-kanal (delegert), inaktiv person, bare `improvement.edit`, annet fagområde, manglende synlighet, synlighet og nøkler i ulike fagområder, System Owner uten rolle og annen kunde (både eksplisitt fagområde og «Alle»);
+  - en sak som er flyttet, vurderes der den står nå.
+- `ImprovementHistoryProtectionTest` (7): sletting uten historikk som før; sak og tiltak med historikk nektes i tjeneste, modell og SQL; historikkrader kan ikke slettes eller endres; aktør på hver rad; kundesletting; ryddestien.
+- `ImprovementServiceAccessTest` (6):
+  - redigerer og integrasjon med `improvement.edit` kan;
+  - nekting på alle ti skrivinger for personer uten rett og for andre kunder;
+  - en avsluttet sak kan ikke bearbeides gjennom noen tjeneste;
+  - ansvarlig person og lesetilgang til Kvalitet sjekkes i tjenesten.
+- Mutasjonssjekket: vakt, tilgangsregler, låst lesing, triggere, modellvakter, regelen for avsluttet sak og kontrollen av ansvarlig person.
+- Kjøringer 2026-10-22:
+  - PHP: alle testfiler som berører Avvik (48 filer), 462 av 462 bestått. I tillegg Risiko-testene.
+  - JS: 2130 av 2130 bestått.
+  - Frontendbygg og Pint er rene.
+  - E2E for Avvik, Etterlevelse, navigasjon og kunnskapsoverføring, der fiksturene er endret: 60 av 61 bestått.
+    - Testen som feilet, er «Kravbibliotek» i `a11y-grc-compliance.spec.js`. Den feilet i innloggingen (`loginAs` ble stående på `/login`), før noen avviksfunksjon var tatt i bruk.
+    - Ved ny kjøring besto spesifikasjonen 3 av 3.
+    - Sporet gikk tapt fordi den nye kjøringen tømte `test-results`. Det er notert under KTF-4: kopier sporet før en ny kjøring.
+  - En første E2E-kjøring ble startet fra feil mappe (uten konfigurasjon og med 8 parallelle arbeidere) og ble avbrutt. Resultatet er ikke brukt.
+
+**Klar for senere API-integrasjon**
+
+- Ja. Lesing, beslutninger og arbeid med saker og tiltak ligger i domenet med samme regler for enhver inngang.
+- Gjenstår før fase 1: A10 (feilformat) og steg 19 (aktørtriggere for `improvement_cases.closed_by_user_id` og `improvement_action_verifications.verified_by_user_id`).
+- **Anbefaling, ikke besluttet:** samme føring som for Risiko (§2c). En AI-agent leser saker og foreslår avvik eller tiltak, men får ikke generell `improvement.edit` som standard. Dette skal avklares før fase 1.
+
 ## 3. Avgrensning
 
 **Med i fase 0:**
@@ -451,7 +546,7 @@ Kontrolleren beholder sine sjekker *før* tjenestekallet, slik at statuskoder og
 | **Risiko** *(gjort, §2c)* | `RiskAcceptanceService::accept`/`revoke` | **Ny** `RiskAccessService::canAccept` | `RiskAcceptanceController:73` |
 | | **Ny** `RiskAssessmentService::record` (trukket ut) | **Ny** `canAssess` | `RiskAssessmentController:41–54` |
 | | **Ny** `RiskLifecycleService::delete` | `can(RISK_DELETE)` og `isDeletable()` (B3) | `RiskController:249–256` |
-| **Avvik** | `ImprovementCaseLifecycleService::close`/`cancel`/`reopen`, `ImprovementActionLifecycleService::verify` | `canClose` | `ImprovementCaseController:343–377`, `ImprovementActionController:147` |
+| **Avvik** *(gjort, §2d)* | `ImprovementCaseLifecycleService::close`/`cancel`/`reopen`, `ImprovementActionLifecycleService::verify` | `canClose` | `ImprovementCaseController:343–377`, `ImprovementActionController:147` |
 | | `ImprovementCaseLifecycleService::delete` (ny) | `canDelete` og `isDeletable` | `ImprovementCaseController:388–399` |
 | **Mål/KPI** | `KpiMeasurementService::record`/`withdraw` | `canMeasure` | `KpiMeasurementController:119–123` |
 | | `ObjectiveLifecycleService::delete`, `KpiLifecycleService::delete` (nye) | `canDelete` og `isDeletable` | `ObjectiveController:310`, `KpiController:197` |
@@ -550,7 +645,7 @@ Hver linje er én commit. Hver commit kjører sine målrettede tester før den l
 | 7 | `refactor(wiki): extract claim decisions into EnterpriseWikiClaimDecisionService` | approve, reject, unapprove, blocking, kildereferanse, med kaskader i samme transaksjon | 6 |
 | 8 | `fix(wiki): guard FinalizeEnterpriseWikiIngest against pages in review` | **F2**: oppdater bare `status IN (draft)`. Testene får en ekstra påstand. | – |
 | 9 | `refactor(risk): decisions and deletion in services; keep risk history` | `canAccept`/`canAssess`, `RiskAssessmentService`, `RiskLifecycleService::delete`, **B3** med trigger. **Gjort** som fire commits (§2c). | 1 |
-| 10 | `refactor(improvements): guard close, cancel, reopen, verify and delete` | | 1 |
+| 10 | `refactor(improvements): guard close, cancel, reopen, verify and delete` | **Gjort** som fire commits (§2d) | 1 |
 | 11 | `refactor(management-review): guard finalize, amendment and delete` | | 1 |
 | 12 | `refactor(quality): require an actor and guard flow approval and adoption` | Null-aktører og `QUALITY_FLOW_ADOPT` | 1 |
 | 13 | `refactor(compliance): guard assessment, audit lifecycle and delete` | | 1 |
