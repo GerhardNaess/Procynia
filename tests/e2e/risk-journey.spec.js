@@ -35,7 +35,7 @@ test('a risk goes from registered to assessed, treated, accepted and reassessed'
 
     await page.getByRole('button', { name: 'Ny rolle' }).click();
     await page.locator('#customer-role-name').fill(roleName);
-    for (const permission of ['Se kvalitetssystemet', 'Administrere kildedokumenter', 'Se risikoer', 'Opprette risikoer', 'Endre risikoer', 'Vurdere risikoer', 'Akseptere restrisiko']) {
+    for (const permission of ['Se kvalitetssystemet', 'Overføre kunnskap til Wiki', 'Se risikoer', 'Opprette risikoer', 'Endre risikoer', 'Vurdere risikoer', 'Akseptere restrisiko']) {
         await page.getByRole('checkbox', { name: permission, exact: true }).check();
     }
     await page.getByRole('checkbox', { name: areaName, exact: true }).check();

@@ -29,6 +29,7 @@ use App\Services\Modules\ModuleEntitlementService;
 use App\Support\CustomerPermissionCatalog as P;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 /**
  * Test-only setup and cleanup for the Ledelsens gjennomgang E2E spec
@@ -252,13 +253,27 @@ class ManagementReviewE2EFixture
      */
     private static function removeWikiSources(Customer $customer): void
     {
-        $actor = User::query()->where('customer_id', $customer->id)->orderBy('id')->first();
+        $documents = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->get();
 
-        if ($actor === null) {
+        if ($documents->isEmpty()) {
             return;
         }
 
-        foreach (EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->get() as $document) {
+        // Source administration checks its actor itself (wiki.source.manage, phase 0 step 5), and the
+        // run's people only hand knowledge over (wiki.knowledge.handoff, step 2). The customer's
+        // System Owner does the cleanup — one made for it if the run has none; it goes with the customer.
+        $actor = User::query()->where('customer_id', $customer->id)->where('bid_role', User::BID_ROLE_SYSTEM_OWNER)->where('is_active', true)->first()
+            ?? User::query()->create([
+                'name' => 'E2E opprydding',
+                'email' => 'e2e.lg.cleanup.'.$customer->id.'@procynia.test',
+                'password' => bcrypt(Str::random(32)),
+                'role' => User::ROLE_CUSTOMER_ADMIN,
+                'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
+                'customer_id' => $customer->id,
+                'is_active' => true,
+            ]);
+
+        foreach ($documents as $document) {
             EnterpriseWikiIngestRun::query()
                 ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
                 ->where('source_id', $document->id)
