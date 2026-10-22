@@ -920,6 +920,7 @@ return [
             'flow_change_instruction_too_short' => 'The instruction is too short. Write what should change, and where in the process.',
             'flow_change_instruction_too_long' => 'The instruction is too long. Describe one change at a time.',
             'flow_change_without_flow' => 'The process has no flow to change yet. Describe the process first.',
+            'flow_changed_since_opened' => 'Someone else changed the process flow after you opened it, so your change was not saved. Your edits are still in the editor. Reload the page to see the latest flow, and make the change there.',
             'flow_proposal_stale' => 'The process flow has changed since this proposal was made, so it was not adopted. The saved flow has been kept. Review it and ask for a new proposal based on the flow as it is now.',
             'flow_change_stale' => 'The process has changed since this proposal was made, so it cannot be used. Ask for a new proposal based on the flow as it is now.',
             'flow_change_empty' => 'The proposal contains no changes to accept.',

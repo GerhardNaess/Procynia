@@ -526,7 +526,11 @@ class QualityController extends Controller
         $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
-        $validated = $request->validate($this->blueprintRules());
+        $validated = $request->validate($this->blueprintRules() + [
+            // The version the editor was opened on (A27). Optional for now: the page always sends
+            // it; a caller that does not gets the old last-write-wins (see the plan, §2h).
+            'base_hash' => ['nullable', 'string', 'size:40'],
+        ]);
 
         $this->blueprints->store(
             (int) $customerId,
@@ -534,6 +538,7 @@ class QualityController extends Controller
             $validated,
             QualityProcessBlueprint::SOURCE_MANUAL,
             $user,
+            basedOn: $validated['base_hash'] ?? null,
         );
 
         return back()->with('success', __('procynia.quality.flash.blueprint_saved'));
@@ -1876,6 +1881,9 @@ class QualityController extends Controller
             'lanes' => $blueprint->lanes(),
             'nodes' => $this->nodeRows($customerId, $blueprint),
             'edges' => $blueprint->edges(),
+            // What the editor was opened on; a save sends it back, and a flow someone else saved
+            // in between is not overwritten (A27).
+            'version_hash' => QualityProcessBlueprintService::versionHash($blueprint),
             'description' => $blueprint->description,
             'generated_at' => $blueprint->generated_at?->toDateTimeString(),
             'generated_by_name' => $blueprint->generatedBy?->name,

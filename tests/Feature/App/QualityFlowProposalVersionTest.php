@@ -146,6 +146,46 @@ class QualityFlowProposalVersionTest extends TestCase
         app(QualityProcessBlueprintService::class)->store((int) $customer->id, $process, $this->flow('Forslaget'), QualityProcessBlueprint::SOURCE_AI, $owner);
     }
 
+    /**
+     * Manual editing (finding A27): the editor is opened on a version, a save sends it back, and a
+     * flow someone else saved in between is not overwritten. The person is told and keeps the edits.
+     */
+    public function test_a_manual_save_never_overwrites_a_flow_saved_in_between(): void
+    {
+        ['owner' => $owner, 'process' => $process] = $this->world();
+
+        $openedOn = $this->actingAs($owner)->get("/app/quality/items/{$process->id}?tab=flow")->viewData('page')['props']['blueprint']['version_hash'];
+        $this->assertSame($this->versionOf($process), $openedOn);
+
+        // Someone else saves first.
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->flow('Den andres endring') + ['base_hash' => $openedOn])
+            ->assertSessionHasNoErrors();
+
+        // This save was made on the version before it: refused, and the other change stays.
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->flow('Min endring') + ['base_hash' => $openedOn])
+            ->assertSessionHasErrors(['base_hash' => __('procynia.quality.errors.flow_changed_since_opened')]);
+        $this->assertSame('Den andres endring', collect($this->blueprintOf($process)->nodes())->firstWhere('key', 'steg')['label']);
+
+        // On the version as it is now, it goes in.
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->flow('Min endring') + ['base_hash' => $this->versionOf($process)])
+            ->assertSessionHasNoErrors();
+        $this->assertSame('Min endring', collect($this->blueprintOf($process)->nodes())->firstWhere('key', 'steg')['label']);
+    }
+
+    /** A first flow is saved against «no flow yet», and refused once someone has saved one. */
+    public function test_a_first_manual_flow_is_refused_once_someone_has_saved_one(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->world();
+        $empty = $this->process($customer, 'Uten flyt');
+        $noFlow = QualityProcessBlueprintService::versionHash(null);
+
+        $this->actingAs($owner)->put("/app/quality/items/{$empty->id}/blueprint", $this->flow('Første') + ['base_hash' => $noFlow])
+            ->assertSessionHasNoErrors();
+        $this->actingAs($owner)->put("/app/quality/items/{$empty->id}/blueprint", $this->flow('Også første') + ['base_hash' => $noFlow])
+            ->assertSessionHasErrors('base_hash');
+        $this->assertSame('Første', collect($this->blueprintOf($empty)->nodes())->firstWhere('key', 'steg')['label']);
+    }
+
     private function versionOf(QualityItem $process): string
     {
         return QualityProcessBlueprintService::versionHash(QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->first());

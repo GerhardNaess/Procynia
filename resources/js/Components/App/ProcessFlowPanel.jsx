@@ -164,6 +164,7 @@ export default function ProcessFlowPanel({
     const [edges, setEdges] = useState(() => (proposal ?? blueprint)?.edges ?? []);
     const [isDirty, setIsDirty] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [saveError, setSaveError] = useState(null);
     const [confirmingDelete, setConfirmingDelete] = useState(false);
     // Why the last "Godkjenn og publiser" was refused: a heading and one line per problem the flow
     // validator found in the stored flow.
@@ -304,10 +305,17 @@ export default function ProcessFlowPanel({
         };
     }
 
+    // Every save sends the version the editor was opened on, so a flow someone else saved in between
+    // is refused rather than overwritten (A27); the reason is shown under «Lagre struktur», and the
+    // edits stay in the editor.
     function save() {
         setSaving(true);
-        router.put(`/app/quality/items/${item.id}/blueprint`, draft, {
+        setSaveError(null);
+        router.put(`/app/quality/items/${item.id}/blueprint`, { ...draft, base_hash: blueprint?.version_hash ?? null }, {
             preserveScroll: true,
+            // Only when refused, so the edits stay; a saved flow reloads the editor as before.
+            preserveState: 'errors',
+            onError: (errors) => setSaveError(errors.base_hash ?? Object.values(errors)[0] ?? null),
             onFinish: () => setSaving(false),
         });
     }
@@ -324,6 +332,7 @@ export default function ProcessFlowPanel({
     function saveStep(key, { branches = null, ...change }, { onError }) {
         setSaving(true);
         router.put(`/app/quality/items/${item.id}/blueprint`, {
+            base_hash: blueprint?.version_hash ?? null,
             lanes,
             nodes: withStepEdited(nodes, key, change),
             edges: branches === null ? edges : withDecisionBranches(edges, key, branches),
@@ -343,6 +352,7 @@ export default function ProcessFlowPanel({
     function saveInsertion(edge, step, { onError }) {
         setSaving(true);
         router.put(`/app/quality/items/${item.id}/blueprint`, {
+            base_hash: blueprint?.version_hash ?? null,
             lanes,
             ...withStepInserted({ nodes, edges }, edge, step),
         }, {
@@ -366,7 +376,7 @@ export default function ProcessFlowPanel({
         }
 
         setSaving(true);
-        router.put(`/app/quality/items/${item.id}/blueprint`, { lanes, ...moved }, {
+        router.put(`/app/quality/items/${item.id}/blueprint`, { base_hash: blueprint?.version_hash ?? null, lanes, ...moved }, {
             preserveScroll: true,
             onError,
             onFinish: () => setSaving(false),
@@ -829,9 +839,20 @@ export default function ProcessFlowPanel({
                         {(canEdit || canApprove || canDelete) && ! reviewing && (
                             <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
                                 {canEdit && (
-                                    <button type="button" className={PRIMARY_ACTION} onClick={save} disabled={saving}>
+                                    <button
+                                        type="button"
+                                        className={PRIMARY_ACTION}
+                                        onClick={save}
+                                        disabled={saving}
+                                        aria-describedby={saveError ? 'process-flow-save-error' : undefined}
+                                    >
                                         {tb.save ?? 'Lagre struktur'}
                                     </button>
+                                )}
+                                {saveError && (
+                                    <p id="process-flow-save-error" role="alert" className="basis-full text-base text-rose-700">
+                                        {saveError}
+                                    </p>
                                 )}
                                 {canApprove && (
                                     <button

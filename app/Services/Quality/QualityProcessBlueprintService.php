@@ -130,8 +130,17 @@ class QualityProcessBlueprintService
         $blueprint = DB::transaction(function () use ($item, $attributes, $source, $basedOn): QualityProcessBlueprint {
             $current = $this->lockedWorkingVersion($item);
 
-            if ($source === QualityProcessBlueprint::SOURCE_AI && ! hash_equals(self::versionHash($current), (string) $basedOn)) {
-                throw ProcessFlowInterpretationException::proposalStale();
+            // A proposal always carries the version it was made for (A22); a manual save carries the
+            // version the editor was opened on when the page sends it (A27). Either way a newer flow
+            // is never overwritten: the person is told and reads it first.
+            if ($basedOn !== null && ! hash_equals(self::versionHash($current), $basedOn)) {
+                if ($source === QualityProcessBlueprint::SOURCE_AI) {
+                    throw ProcessFlowInterpretationException::proposalStale();
+                }
+
+                throw ValidationException::withMessages([
+                    'base_hash' => __('procynia.quality.errors.flow_changed_since_opened'),
+                ]);
             }
 
             return QualityProcessBlueprint::query()->updateOrCreate(
