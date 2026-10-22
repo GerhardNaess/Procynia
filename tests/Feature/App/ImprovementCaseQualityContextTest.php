@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Tests\Concerns\CreatesImprovementCaseScenarios;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -215,7 +216,7 @@ class ImprovementCaseQualityContextTest extends TestCase
         $editor = $this->member($customer);
         $this->grant($customer, $editor, [CustomerPermissionCatalog::QUALITY_VIEW, CustomerPermissionCatalog::QUALITY_EDIT, CustomerPermissionCatalog::QUALITY_DELETE]);
 
-        $this->actingAs($editor)->put("/app/quality/items/{$incident->id}/blueprint", $this->flow(['Klassifiser alvorlighet']))
+        $this->actingAs($editor)->put("/app/quality/items/{$incident->id}/blueprint", $this->flow(['Klassifiser alvorlighet']) + ['base_hash' => QualityFlowVersion::of($incident)])
             ->assertRedirect()->assertSessionHasNoErrors();
         $this->assertSame(['klassifiser-alvorlighet'], ImprovementCaseActivity::query()->where('improvement_case_id', $case->id)->pluck('activity_key')->all());
 
@@ -279,6 +280,7 @@ class ImprovementCaseQualityContextTest extends TestCase
             $this->flow($steps),
             QualityProcessBlueprint::SOURCE_MANUAL,
             $actor,
+            basedOn: QualityFlowVersion::of($process),
         );
 
         return $process;

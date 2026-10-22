@@ -30,6 +30,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -254,7 +255,7 @@ class QualityProcessBlueprintTest extends TestCase
 
         foreach (QualityProcessBlueprint::RETIRED_SOURCES as $seeded) {
             try {
-                $service->store((int) $customer->id, $process, $this->incidentManagementFlow(), $seeded, $owner);
+                $service->store((int) $customer->id, $process, $this->incidentManagementFlow(), $seeded, $owner, basedOn: QualityFlowVersion::of($process));
                 $this->fail("a blueprint with source [{$seeded}] must be refused");
             } catch (ValidationException $exception) {
                 $this->assertArrayHasKey('source', $exception->errors());
@@ -287,6 +288,7 @@ class QualityProcessBlueprintTest extends TestCase
                 $this->incidentManagementFlow(),
                 QualityProcessBlueprint::SOURCE_EXAMPLE,
                 $owner,
+                basedOn: QualityFlowVersion::of($process),
             );
         } finally {
             $this->assertSame(0, QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->count());
@@ -299,8 +301,8 @@ class QualityProcessBlueprintTest extends TestCase
 
         $process = $this->process($customer, 'Avvikshåndtering');
 
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)]);
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)]);
 
         $this->assertSame(
             1,
@@ -319,7 +321,7 @@ class QualityProcessBlueprintTest extends TestCase
         $process = $this->process($customer, 'Avvikshåndtering');
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow())
+            ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)])
             ->assertRedirect();
 
         $blueprint = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole();
@@ -345,7 +347,7 @@ class QualityProcessBlueprintTest extends TestCase
         $payload['edges'][] = ['from' => 'start', 'to' => 'slettet', 'label' => 'Nei'];
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$process->id}/blueprint", $payload)
+            ->put("/app/quality/items/{$process->id}/blueprint", $payload + ['base_hash' => QualityFlowVersion::of($process)])
             ->assertRedirect()
             ->assertSessionHasNoErrors();
 
@@ -364,7 +366,7 @@ class QualityProcessBlueprintTest extends TestCase
         $payload = $this->simpleFlow();
         $payload['nodes'][] = ['key' => 'hjemløs', 'lane' => 'borte', 'type' => 'step', 'label' => 'Uten rolle'];
 
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $payload);
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $payload + ['base_hash' => QualityFlowVersion::of($process)]);
 
         $blueprint = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole();
         $laneKeys = array_column($blueprint->lanes(), 'key');
@@ -383,7 +385,7 @@ class QualityProcessBlueprintTest extends TestCase
         $payload = $this->simpleFlow();
         $payload['lanes'][] = ['key' => 'tom', 'label' => 'Ingen gjør noe her'];
 
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $payload);
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $payload + ['base_hash' => QualityFlowVersion::of($process)]);
 
         $blueprint = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole();
 
@@ -399,7 +401,7 @@ class QualityProcessBlueprintTest extends TestCase
         $payload = $this->simpleFlow();
         $payload['nodes'][] = ['key' => 'tom', 'lane' => 'saksbehandler', 'type' => 'step', 'label' => '   '];
 
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $payload);
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $payload + ['base_hash' => QualityFlowVersion::of($process)]);
 
         $blueprint = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole();
 
@@ -413,7 +415,7 @@ class QualityProcessBlueprintTest extends TestCase
         $process = $this->process($customer, 'Avvikshåndtering');
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$process->id}/blueprint", ['lanes' => [], 'nodes' => [], 'edges' => []])
+            ->put("/app/quality/items/{$process->id}/blueprint", ['lanes' => [], 'nodes' => [], 'edges' => []] + ['base_hash' => QualityFlowVersion::of($process)])
             ->assertSessionHasErrors('nodes');
 
         $this->assertSame(0, QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->count());
@@ -428,7 +430,7 @@ class QualityProcessBlueprintTest extends TestCase
         $payload = $this->simpleFlow();
         $payload['edges'][] = ['from' => 'start', 'to' => 'vurder', 'label' => null];
 
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $payload);
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $payload + ['base_hash' => QualityFlowVersion::of($process)]);
 
         $this->assertCount(
             2,
@@ -450,7 +452,7 @@ class QualityProcessBlueprintTest extends TestCase
         $payload['edges'][] = ['from' => 'start', 'to' => 'vurder', 'label' => 'Ja'];
         $payload['edges'][] = ['from' => 'start', 'to' => 'vurder', 'label' => 'Nei'];
 
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $payload);
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $payload + ['base_hash' => QualityFlowVersion::of($process)]);
 
         $edges = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole()->edges();
 
@@ -470,7 +472,7 @@ class QualityProcessBlueprintTest extends TestCase
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Avvikshåndtering');
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)]);
 
         $this->actingAs($owner)
             ->post("/app/quality/items/{$process->id}/blueprint/approve")
@@ -491,13 +493,13 @@ class QualityProcessBlueprintTest extends TestCase
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Avvikshåndtering');
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)]);
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
 
         $changed = $this->simpleFlow();
         $changed['nodes'][1]['label'] = 'Vurder saken grundig';
 
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed);
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed + ['base_hash' => QualityFlowVersion::of($process)]);
 
         $blueprint = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole();
 
@@ -522,7 +524,7 @@ class QualityProcessBlueprintTest extends TestCase
         array_pop($flow['nodes']);
         array_pop($flow['edges']);
 
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $flow)->assertSessionHasNoErrors();
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $flow + ['base_hash' => QualityFlowVersion::of($process)])->assertSessionHasNoErrors();
 
         $this->actingAs($owner)
             ->post("/app/quality/items/{$process->id}/blueprint/approve")
@@ -549,7 +551,7 @@ class QualityProcessBlueprintTest extends TestCase
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Avvikshåndtering');
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)]);
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve")->assertSessionHasNoErrors();
 
         $blueprint = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole();
@@ -575,7 +577,7 @@ class QualityProcessBlueprintTest extends TestCase
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Avvikshåndtering');
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)]);
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
 
         $first = QualityProcessRevision::query()->where('quality_item_id', $process->id)->sole();
@@ -583,7 +585,7 @@ class QualityProcessBlueprintTest extends TestCase
 
         $changed = $this->simpleFlow();
         $changed['nodes'][1]['label'] = 'Vurder saken grundig';
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed);
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed + ['base_hash' => QualityFlowVersion::of($process)]);
 
         $this->assertSame(
             QualityProcessBlueprint::STATUS_DRAFT,
@@ -609,7 +611,7 @@ class QualityProcessBlueprintTest extends TestCase
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Avvikshåndtering');
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)]);
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve")->assertSessionHasNoErrors();
 
@@ -621,7 +623,7 @@ class QualityProcessBlueprintTest extends TestCase
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Avvikshåndtering');
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)]);
         QualityProcessBlueprint::query()->where('quality_item_id', $process->id)
             ->update(['description' => 'Saksbehandler vurderer saken.']);
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
@@ -629,7 +631,7 @@ class QualityProcessBlueprintTest extends TestCase
         // Unapproved edits to both the flow and the description it was read out of.
         $changed = $this->simpleFlow();
         $changed['nodes'][1]['label'] = 'Vurder saken grundig';
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed);
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed + ['base_hash' => QualityFlowVersion::of($process)]);
         QualityProcessBlueprint::query()->where('quality_item_id', $process->id)
             ->update(['description' => 'Saksbehandler vurderer saken grundig.']);
 
@@ -669,7 +671,7 @@ class QualityProcessBlueprintTest extends TestCase
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Avvikshåndtering');
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)]);
 
         $this->actingAs($owner)->delete("/app/quality/items/{$process->id}/blueprint")
             ->assertSessionHasNoErrors()
@@ -687,12 +689,12 @@ class QualityProcessBlueprintTest extends TestCase
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Avvikshåndtering');
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)]);
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
 
         $changed = $this->simpleFlow();
         $changed['nodes'][1]['label'] = 'Vurder saken grundig';
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed);
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed + ['base_hash' => QualityFlowVersion::of($process)]);
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
 
         $history = $this->actingAs($owner)
@@ -727,7 +729,7 @@ class QualityProcessBlueprintTest extends TestCase
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->draftProcess($customer, 'Avvikshåndtering');
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)]);
 
         $this->assertSame(
             ['state' => 'unpublished', 'revision_number' => null, 'has_unpublished_changes' => false],
@@ -748,12 +750,12 @@ class QualityProcessBlueprintTest extends TestCase
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->draftProcess($customer, 'Avvikshåndtering');
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)]);
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
 
         $changed = $this->simpleFlow();
         $changed['nodes'][1]['label'] = 'Vurder saken grundig';
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed);
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed + ['base_hash' => QualityFlowVersion::of($process)]);
 
         $this->assertSame(QualityItem::STATUS_ACTIVE, $process->fresh()->status);
         $this->assertSame(
@@ -763,7 +765,7 @@ class QualityProcessBlueprintTest extends TestCase
 
         // Editing back to exactly what is in force leaves nothing unpublished, and approving it
         // publishes nothing new.
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)]);
         $this->assertSame('current', $this->publication($owner, $process)['state']);
 
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve")->assertSessionHasNoErrors();
@@ -775,7 +777,7 @@ class QualityProcessBlueprintTest extends TestCase
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->draftProcess($customer, 'Avvikshåndtering');
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)]);
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
 
         $this->actingAs($owner)
@@ -788,7 +790,7 @@ class QualityProcessBlueprintTest extends TestCase
         // A later approval is not a way to un-retire: retiring is an explicit decision.
         $changed = $this->simpleFlow();
         $changed['nodes'][1]['label'] = 'Vurder saken grundig';
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed);
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed + ['base_hash' => QualityFlowVersion::of($process)]);
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve")->assertSessionHasNoErrors();
 
         $this->assertSame(QualityItem::STATUS_RETIRED, $process->fresh()->status);
@@ -829,7 +831,7 @@ class QualityProcessBlueprintTest extends TestCase
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->draftProcess($customer, 'Avvikshåndtering');
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)]);
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
 
         $this->actingAs($owner)
@@ -845,7 +847,7 @@ class QualityProcessBlueprintTest extends TestCase
 
         $unpublished = $this->draftProcess($customer, 'A uten publisering');
         $published = $this->draftProcess($customer, 'B publisert');
-        $this->actingAs($owner)->put("/app/quality/items/{$published->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$published->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($published)]);
         $this->actingAs($owner)->post("/app/quality/items/{$published->id}/blueprint/approve");
         $policy = $this->item($customer, QualityItem::TYPE_POLICY, 'C policy');
 
@@ -883,7 +885,7 @@ class QualityProcessBlueprintTest extends TestCase
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Avvikshåndtering');
-        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)]);
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
 
         $blueprint = $this->actingAs($owner)
@@ -912,7 +914,7 @@ class QualityProcessBlueprintTest extends TestCase
         $checklist = $this->item($customer, QualityItem::TYPE_CHECKLIST, 'Sjekkliste tilbud');
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$checklist->id}/blueprint", $this->simpleFlow())
+            ->put("/app/quality/items/{$checklist->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($checklist)])
             ->assertSessionHasErrors('quality_type');
     }
 
@@ -924,7 +926,7 @@ class QualityProcessBlueprintTest extends TestCase
         $process = $this->process($customer, 'Avvikshåndtering');
 
         $this->actingAs($contributor)
-            ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow())
+            ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)])
             ->assertForbidden();
 
         $this->actingAs($contributor)
@@ -940,7 +942,7 @@ class QualityProcessBlueprintTest extends TestCase
         $theirs = $this->process($other, 'Deres prosess');
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$theirs->id}/blueprint", $this->simpleFlow())
+            ->put("/app/quality/items/{$theirs->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($theirs)])
             ->assertNotFound();
 
         $this->actingAs($owner)
@@ -960,7 +962,7 @@ class QualityProcessBlueprintTest extends TestCase
         $process = $this->process($customer, 'Avvikshåndtering');
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow())
+            ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)])
             ->assertRedirect(route('app.dashboard'));
 
         $this->assertSame(0, QualityProcessBlueprint::query()->count());
@@ -986,7 +988,7 @@ class QualityProcessBlueprintTest extends TestCase
         $child = $this->process($customer, 'Leverandørkontroll');
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$parent->id}/blueprint", $this->flowWithSubprocess($child->id))
+            ->put("/app/quality/items/{$parent->id}/blueprint", $this->flowWithSubprocess($child->id) + ['base_hash' => QualityFlowVersion::of($parent)])
             ->assertSessionHasNoErrors();
 
         $stored = QualityProcessBlueprint::query()->where('quality_item_id', $parent->id)->sole();
@@ -1074,7 +1076,7 @@ class QualityProcessBlueprintTest extends TestCase
             ->where('quality_item_id', $parent->id)->sole()->updated_at;
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$child->id}/blueprint", $this->incidentManagementFlow())
+            ->put("/app/quality/items/{$child->id}/blueprint", $this->incidentManagementFlow() + ['base_hash' => QualityFlowVersion::of($child)])
             ->assertSessionHasNoErrors();
 
         $view = $this->actingAs($owner)
@@ -1175,7 +1177,7 @@ class QualityProcessBlueprintTest extends TestCase
 
         // The whole reference goes.
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$top->id}/blueprint", $this->simpleFlow())
+            ->put("/app/quality/items/{$top->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($top)])
             ->assertSessionHasNoErrors();
 
         $this->assertNull(
@@ -1192,7 +1194,7 @@ class QualityProcessBlueprintTest extends TestCase
         $process = $this->process($customer, 'Innkjøp');
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$process->id}/blueprint", $this->flowWithSubprocess($process->id))
+            ->put("/app/quality/items/{$process->id}/blueprint", $this->flowWithSubprocess($process->id) + ['base_hash' => QualityFlowVersion::of($process)])
             ->assertSessionHasErrors('nodes');
 
         $this->assertSame(0, QualityProcessBlueprint::query()->count());
@@ -1211,11 +1213,11 @@ class QualityProcessBlueprintTest extends TestCase
         $b = $this->process($customer, 'Leverandørkontroll');
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$a->id}/blueprint", $this->flowWithSubprocess($b->id))
+            ->put("/app/quality/items/{$a->id}/blueprint", $this->flowWithSubprocess($b->id) + ['base_hash' => QualityFlowVersion::of($a)])
             ->assertSessionHasNoErrors();
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$b->id}/blueprint", $this->flowWithSubprocess($a->id))
+            ->put("/app/quality/items/{$b->id}/blueprint", $this->flowWithSubprocess($a->id) + ['base_hash' => QualityFlowVersion::of($b)])
             ->assertSessionHasErrors('nodes');
 
         $this->assertSame(0, QualityProcessBlueprint::query()->where('quality_item_id', $b->id)->count());
@@ -1224,11 +1226,11 @@ class QualityProcessBlueprintTest extends TestCase
         $c = $this->process($customer, 'Sikkerhetsvurdering');
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$b->id}/blueprint", $this->flowWithSubprocess($c->id))
+            ->put("/app/quality/items/{$b->id}/blueprint", $this->flowWithSubprocess($c->id) + ['base_hash' => QualityFlowVersion::of($b)])
             ->assertSessionHasNoErrors();
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$c->id}/blueprint", $this->flowWithSubprocess($a->id))
+            ->put("/app/quality/items/{$c->id}/blueprint", $this->flowWithSubprocess($a->id) + ['base_hash' => QualityFlowVersion::of($c)])
             ->assertSessionHasErrors('nodes');
     }
 
@@ -1269,7 +1271,7 @@ class QualityProcessBlueprintTest extends TestCase
         $theirs = $this->process($other, 'Deres prosess');
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$ours->id}/blueprint", $this->flowWithSubprocess($theirs->id))
+            ->put("/app/quality/items/{$ours->id}/blueprint", $this->flowWithSubprocess($theirs->id) + ['base_hash' => QualityFlowVersion::of($ours)])
             ->assertSessionHasNoErrors();
 
         $stored = QualityProcessBlueprint::query()->where('quality_item_id', $ours->id)->sole();
@@ -1310,7 +1312,7 @@ class QualityProcessBlueprintTest extends TestCase
         $checklist = $this->item($customer, QualityItem::TYPE_CHECKLIST, 'Sjekkliste for leveranse');
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$process->id}/blueprint", $this->flowWithSubprocess($checklist->id))
+            ->put("/app/quality/items/{$process->id}/blueprint", $this->flowWithSubprocess($checklist->id) + ['base_hash' => QualityFlowVersion::of($process)])
             ->assertSessionHasNoErrors();
 
         $this->assertNull($this->subprocessNode($owner, $process)['subprocess']);
@@ -1327,7 +1329,7 @@ class QualityProcessBlueprintTest extends TestCase
         $process = $this->process($customer, 'Avvikshåndtering');
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow())
+            ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)])
             ->assertSessionHasNoErrors();
 
         $props = $this->actingAs($owner)
@@ -1594,7 +1596,7 @@ class QualityProcessBlueprintTest extends TestCase
         $edited['nodes'][1]['label'] = 'Vurder anskaffelsen grundig';
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$process->id}/blueprint", $edited)
+            ->put("/app/quality/items/{$process->id}/blueprint", $edited + ['base_hash' => QualityFlowVersion::of($process)])
             ->assertSessionHasNoErrors();
 
         $node = $this->activityNode($owner, $process);
@@ -1944,6 +1946,7 @@ class QualityProcessBlueprintTest extends TestCase
             $item,
             $payload,
             QualityProcessBlueprint::SOURCE_MANUAL, $this->qualitySystemOwner((int) $customer->id),
+            basedOn: QualityFlowVersion::of($item),
         );
     }
 

@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -215,7 +216,7 @@ class QualityServiceAuthorizationTest extends TestCase
             'remove_activity_control' => fn () => $controls->remove($world['placement'], $actor),
             'register_tool' => fn () => $tools->register($customerId, $world['tool_document'], ['title' => 'Mal'], $actor),
             'link_tool' => fn () => $tools->linkToControl($customerId, $world['control'], $world['tool'], $actor),
-            'store_flow' => fn () => app(QualityProcessBlueprintService::class)->store($customerId, $world['process'], $this->flow('Endret steg'), QualityProcessBlueprint::SOURCE_MANUAL, $actor),
+            'store_flow' => fn () => app(QualityProcessBlueprintService::class)->store($customerId, $world['process'], $this->flow('Endret steg'), QualityProcessBlueprint::SOURCE_MANUAL, $actor, basedOn: QualityFlowVersion::of($world['process'])),
             'dismiss_clarification' => fn () => $clarifications->dismiss($world['process'], 'Hvem godkjenner?', 'Beskrivelse', $actor),
             'resolve_clarification' => fn () => $clarifications->resolve($world['process'], 'Hvem attesterer?', 'Beskrivelse', $actor),
             'draft_article' => fn () => $articles->draft($world['process'], $world['blueprint'], 'steg', 'no', $actor),
@@ -254,7 +255,7 @@ class QualityServiceAuthorizationTest extends TestCase
         $items = app(QualityItemService::class);
 
         $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Innkjøp');
-        $blueprint = app(QualityProcessBlueprintService::class)->store((int) $customer->id, $process, $this->flow('Registrer leverandøren'), QualityProcessBlueprint::SOURCE_MANUAL, $owner);
+        $blueprint = app(QualityProcessBlueprintService::class)->store((int) $customer->id, $process, $this->flow('Registrer leverandøren'), QualityProcessBlueprint::SOURCE_MANUAL, $owner, basedOn: QualityFlowVersion::of($process));
         $policy = $this->item($customer, QualityItem::TYPE_POLICY, 'Innkjøpspolicy');
         $checklist = $this->item($customer, QualityItem::TYPE_CHECKLIST, 'Sjekkliste');
         $control = $items->createItem((int) $customer->id, ['quality_type' => QualityItem::TYPE_CONTROL, 'title' => 'Fire øyne'], $owner);

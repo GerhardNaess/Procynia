@@ -20,6 +20,7 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -92,7 +93,7 @@ class QualityHumanDecisionTest extends TestCase
         $integration->forceFill(['role' => User::ROLE_INTEGRATION])->save();
         $integration->customerRoles()->attach($world['role']->id, ['customer_id' => $world['customer']->id]);
 
-        $draft = app(QualityProcessBlueprintService::class)->store((int) $world['customer']->id, $world['process'], $this->flow('Maskinens utkast'), QualityProcessBlueprint::SOURCE_MANUAL, $integration->fresh());
+        $draft = app(QualityProcessBlueprintService::class)->store((int) $world['customer']->id, $world['process'], $this->flow('Maskinens utkast'), QualityProcessBlueprint::SOURCE_MANUAL, $integration->fresh(), basedOn: QualityFlowVersion::of($world['process']));
         $this->assertSame(QualityProcessBlueprint::STATUS_DRAFT, $draft->status);
 
         $this->assertEveryDecisionRefused($world, $integration->fresh(), HumanDecisionRefused::class);
@@ -225,7 +226,7 @@ class QualityHumanDecisionTest extends TestCase
         $decider = $this->member($customer);
         $role = $this->grant($customer, $decider, self::EVERYTHING);
         $process = $this->process($customer, 'Innkjøp');
-        app(QualityProcessBlueprintService::class)->store((int) $customer->id, $process, $this->flow('Registrer leverandøren'), QualityProcessBlueprint::SOURCE_MANUAL, $owner);
+        app(QualityProcessBlueprintService::class)->store((int) $customer->id, $process, $this->flow('Registrer leverandøren'), QualityProcessBlueprint::SOURCE_MANUAL, $owner, basedOn: QualityFlowVersion::of($process));
 
         return compact('customer', 'owner', 'decider', 'role') + ['process' => $process->fresh()];
     }

@@ -21,6 +21,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Tests\Concerns\CreatesComplianceScenarios;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -176,7 +177,7 @@ class QualityControlHistoryTest extends TestCase
                 ['key' => 'slutt', 'lane' => 'innkjop', 'type' => 'end', 'label' => 'Slutt'],
             ],
             'edges' => [['from' => 'start', 'to' => 'steg'], ['from' => 'steg', 'to' => 'annet'], ['from' => 'annet', 'to' => 'slutt']],
-        ], QualityProcessBlueprint::SOURCE_MANUAL, $owner);
+        ], QualityProcessBlueprint::SOURCE_MANUAL, $owner, basedOn: QualityFlowVersion::of($process));
 
         return app(QualityActivityControlService::class)->place((int) $customer->id, [['process_id' => $process->id, 'activity_key' => 'steg', 'control_item_id' => $control->id]], $owner)[0];
     }

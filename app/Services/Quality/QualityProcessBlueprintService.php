@@ -14,7 +14,6 @@ use App\Support\HumanDecision;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
-use InvalidArgumentException;
 
 /**
  * Every write to a process blueprint goes through here.
@@ -62,6 +61,10 @@ class QualityProcessBlueprintService
      * touches.
      *
      * @param  array<string, mixed>  $payload
+     * @param  string  $basedOn  versionHash() of the working version the change was made against —
+     *                           the editor's flow, or the flow a proposal was made for. Required for
+     *                           every write (A22, A27, A32): a newer flow is never overwritten, by a
+     *                           person, a proposal or any future entry point.
      * @param  ?string  $description  The plain-language text a flow was interpreted from. Null
      *                                means "leave whatever is stored alone", not "clear it": every
      *                                ordinary edit passes null, and an editor save would otherwise
@@ -74,18 +77,13 @@ class QualityProcessBlueprintService
         array $payload,
         string $source,
         User $actor,
+        string $basedOn,
         ?string $description = null,
-        ?string $basedOn = null,
     ): QualityProcessBlueprint {
         // Adopting a flow a machine proposed is a decision a person takes (QUALITY_FLOW_ADOPT, phase
         // 0 step 12) — whatever key it rides on. A manual edit is ordinary editing.
         if ($source === QualityProcessBlueprint::SOURCE_AI) {
             $actor = $this->guard->assert($actor, HumanDecision::QUALITY_FLOW_ADOPT);
-
-            // A proposal is adopted only onto the working version it was made for (finding A22).
-            if ($basedOn === null) {
-                throw new InvalidArgumentException('An AI proposal is adopted only with the version hash it was made for.');
-            }
         }
 
         $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
@@ -130,10 +128,10 @@ class QualityProcessBlueprintService
         $blueprint = DB::transaction(function () use ($item, $attributes, $source, $basedOn): QualityProcessBlueprint {
             $current = $this->lockedWorkingVersion($item);
 
-            // A proposal always carries the version it was made for (A22); a manual save carries the
-            // version the editor was opened on when the page sends it (A27). Either way a newer flow
-            // is never overwritten: the person is told and reads it first.
-            if ($basedOn !== null && ! hash_equals(self::versionHash($current), $basedOn)) {
+            // A proposal carries the version it was made for (A22); a manual save the version the
+            // editor was opened on (A27). Both are required (A32): a newer flow is never
+            // overwritten, and the person is told and reads it first.
+            if (! hash_equals(self::versionHash($current), $basedOn)) {
                 if ($source === QualityProcessBlueprint::SOURCE_AI) {
                     throw ProcessFlowInterpretationException::proposalStale();
                 }

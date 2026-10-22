@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -404,7 +405,7 @@ class QualityProcessFlowChangeTest extends TestCase
         }, $payload['nodes']);
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$process->id}/blueprint", $payload)
+            ->put("/app/quality/items/{$process->id}/blueprint", $payload + ['base_hash' => QualityFlowVersion::of($process)])
             ->assertSessionHasNoErrors();
 
         $this->assertSame(QualityProcessBlueprint::SOURCE_MANUAL, $blueprint->fresh()->source);
@@ -430,7 +431,7 @@ class QualityProcessFlowChangeTest extends TestCase
         $payload = $blueprint->fresh()->payload;
         $payload['nodes'][1]['label'] = 'Registrer leverandøren i ERP';
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$process->id}/blueprint", $payload)
+            ->put("/app/quality/items/{$process->id}/blueprint", $payload + ['base_hash' => QualityFlowVersion::of($process)])
             ->assertSessionHasNoErrors();
         $edited = $blueprint->fresh();
 
@@ -619,7 +620,8 @@ class QualityProcessFlowChangeTest extends TestCase
             ],
             QualityProcessBlueprint::SOURCE_MANUAL,
             $owner,
-            'Innkjøper registrerer leverandøren, godkjenner den og arkiverer den.',
+            basedOn: QualityFlowVersion::of($process),
+            description: 'Innkjøper registrerer leverandøren, godkjenner den og arkiverer den.',
         );
     }
 

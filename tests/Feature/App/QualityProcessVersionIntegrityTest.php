@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -134,7 +135,7 @@ class QualityProcessVersionIntegrityTest extends TestCase
     {
         ['customer' => $customer, 'approved' => $approved] = $this->world();
         $approver = $this->owner($customer, 'Godkjenner Som Slutter');
-        app(QualityProcessBlueprintService::class)->store((int) $customer->id, $approved, $this->flow('Tredje utgave'), QualityProcessBlueprint::SOURCE_MANUAL, $approver);
+        app(QualityProcessBlueprintService::class)->store((int) $customer->id, $approved, $this->flow('Tredje utgave'), QualityProcessBlueprint::SOURCE_MANUAL, $approver, basedOn: QualityFlowVersion::of($approved));
         app(QualityProcessBlueprintService::class)->approve((int) $customer->id, $approved, $approver);
 
         DB::table('users')->where('id', $approver->id)->delete();
@@ -177,13 +178,13 @@ class QualityProcessVersionIntegrityTest extends TestCase
         $blueprints = app(QualityProcessBlueprintService::class);
 
         $approved = $this->process($customer, 'Innkjøp');
-        $blueprints->store((int) $customer->id, $approved, $this->flow('Første utgave'), QualityProcessBlueprint::SOURCE_MANUAL, $owner);
+        $blueprints->store((int) $customer->id, $approved, $this->flow('Første utgave'), QualityProcessBlueprint::SOURCE_MANUAL, $owner, basedOn: QualityFlowVersion::of($approved));
         $blueprints->approve((int) $customer->id, $approved, $owner);
-        $blueprints->store((int) $customer->id, $approved, $this->flow('Andre utgave'), QualityProcessBlueprint::SOURCE_MANUAL, $owner);
+        $blueprints->store((int) $customer->id, $approved, $this->flow('Andre utgave'), QualityProcessBlueprint::SOURCE_MANUAL, $owner, basedOn: QualityFlowVersion::of($approved));
         $blueprints->approve((int) $customer->id, $approved, $owner);
 
         $draft = $this->process($customer, 'Kladd');
-        $blueprints->store((int) $customer->id, $draft, $this->flow('Bare en kladd'), QualityProcessBlueprint::SOURCE_MANUAL, $owner);
+        $blueprints->store((int) $customer->id, $draft, $this->flow('Bare en kladd'), QualityProcessBlueprint::SOURCE_MANUAL, $owner, basedOn: QualityFlowVersion::of($draft));
 
         return ['customer' => $customer, 'owner' => $owner, 'approved' => $approved->fresh(), 'draft' => $draft->fresh()];
     }

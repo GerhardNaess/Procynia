@@ -26,6 +26,7 @@ use Illuminate\Support\Str;
 use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -177,7 +178,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
                 ['from' => 'start', 'to' => 'vurder', 'label' => null],
                 ['from' => 'vurder', 'to' => 'ferdig', 'label' => null],
             ],
-        ])->assertRedirect();
+        ] + ['base_hash' => QualityFlowVersion::of($process)])->assertRedirect();
 
         $existing = QualityProcessBlueprint::query()->firstOrFail();
 
@@ -1713,6 +1714,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
             QualityProcessBlueprint::SOURCE_MANUAL,
             $owner,
             description: 'Gjennomgangen følger vårt eget kontrollskjema.',
+            basedOn: QualityFlowVersion::of($subprocess),
         );
 
         $process = $this->process($customer, 'Leverandørkontroll');
@@ -2269,6 +2271,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
             QualityProcessBlueprint::SOURCE_MANUAL,
             $this->qualitySystemOwner((int) $customer->id),
             description: 'Slik gjennomføres leverandørkontrollen hos oss.',
+            basedOn: QualityFlowVersion::of($process),
         );
     }
 

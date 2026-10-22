@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -283,12 +284,12 @@ class RiskQualityContextLinkTest extends TestCase
         $this->grant($customer, $editor, [CustomerPermissionCatalog::QUALITY_VIEW, CustomerPermissionCatalog::QUALITY_EDIT, CustomerPermissionCatalog::QUALITY_DELETE]);
 
         // Remove one step through Kvalitet's own editor: that link goes, the other stays.
-        $this->actingAs($editor)->put("/app/quality/items/{$payroll->id}/blueprint", $this->payload(['Godkjenn lønn']))
+        $this->actingAs($editor)->put("/app/quality/items/{$payroll->id}/blueprint", $this->payload(['Godkjenn lønn']) + ['base_hash' => QualityFlowVersion::of($payroll)])
             ->assertRedirect()->assertSessionHasNoErrors();
         $this->assertSame(['godkjenn-lonn'], RiskActivity::query()->where('risk_id', $risk->id)->pluck('activity_key')->all());
 
         // A later step that happens to get the removed key back does not inherit the risk.
-        $this->actingAs($editor)->put("/app/quality/items/{$payroll->id}/blueprint", $this->payload(['Registrer timer', 'Godkjenn lønn']))
+        $this->actingAs($editor)->put("/app/quality/items/{$payroll->id}/blueprint", $this->payload(['Registrer timer', 'Godkjenn lønn']) + ['base_hash' => QualityFlowVersion::of($payroll)])
             ->assertRedirect();
         $this->assertSame(['godkjenn-lonn'], RiskActivity::query()->where('risk_id', $risk->id)->pluck('activity_key')->all());
 
@@ -361,6 +362,7 @@ class RiskQualityContextLinkTest extends TestCase
             $this->payload($steps),
             QualityProcessBlueprint::SOURCE_MANUAL,
             $actor,
+            basedOn: QualityFlowVersion::of($process),
         );
 
         return $process;

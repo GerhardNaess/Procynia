@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -118,7 +119,7 @@ class QualityPermissionTest extends TestCase
             ->patch("/app/quality/items/{$process->id}", ['title' => 'Endret'])
             ->assertForbidden();
         $this->actingAs($user)
-            ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow())
+            ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)])
             ->assertForbidden();
         $this->actingAs($user)
             ->post("/app/quality/items/{$process->id}/blueprint/approve")
@@ -212,7 +213,7 @@ class QualityPermissionTest extends TestCase
         $this->assertSame('Avvikshåndtering 2.0', $process->fresh()->title);
 
         $this->actingAs($user)
-            ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow())
+            ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)])
             ->assertSessionHasNoErrors();
 
         $blueprint = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->first();
@@ -257,7 +258,7 @@ class QualityPermissionTest extends TestCase
 
         // Vouching for a flow is not the right to rewrite one.
         $this->actingAs($user)
-            ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow())
+            ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow() + ['base_hash' => QualityFlowVersion::of($process)])
             ->assertForbidden();
     }
 
@@ -460,6 +461,7 @@ class QualityPermissionTest extends TestCase
             $item,
             $this->simpleFlow(),
             QualityProcessBlueprint::SOURCE_MANUAL, $this->qualitySystemOwner((int) $customer->id),
+            basedOn: QualityFlowVersion::of($item),
         );
     }
 

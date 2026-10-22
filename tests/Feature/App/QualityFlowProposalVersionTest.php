@@ -11,13 +11,15 @@ use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Quality\Exceptions\ProcessFlowInterpretationException;
 use App\Services\Quality\QualityProcessBlueprintService;
+use ArgumentCountError;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
-use InvalidArgumentException;
+use ReflectionMethod;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -77,7 +79,7 @@ class QualityFlowProposalVersionTest extends TestCase
         $madeFor = $this->versionOf($process);
 
         // Meanwhile, by hand.
-        app(QualityProcessBlueprintService::class)->store((int) $customer->id, $process, $this->flow('Rettet for hånd'), QualityProcessBlueprint::SOURCE_MANUAL, $owner);
+        app(QualityProcessBlueprintService::class)->store((int) $customer->id, $process, $this->flow('Rettet for hånd'), QualityProcessBlueprint::SOURCE_MANUAL, $owner, basedOn: QualityFlowVersion::of($process));
 
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/adopt", $this->flow('Forslaget') + [
             'description' => 'Slik gjør vi det.',
@@ -108,7 +110,7 @@ class QualityFlowProposalVersionTest extends TestCase
         $madeFor = QualityProcessBlueprintService::versionHash(null);
         $this->assertSame($madeFor, $this->versionOf($empty));
 
-        app(QualityProcessBlueprintService::class)->store((int) $customer->id, $empty, $this->flow('Første flyt'), QualityProcessBlueprint::SOURCE_MANUAL, $owner);
+        app(QualityProcessBlueprintService::class)->store((int) $customer->id, $empty, $this->flow('Første flyt'), QualityProcessBlueprint::SOURCE_MANUAL, $owner, basedOn: QualityFlowVersion::of($empty));
 
         $this->expectException(ProcessFlowInterpretationException::class);
         app(QualityProcessBlueprintService::class)->store((int) $customer->id, $empty, $this->flow('Forslaget'), QualityProcessBlueprint::SOURCE_AI, $owner, basedOn: $madeFor);
@@ -122,7 +124,7 @@ class QualityFlowProposalVersionTest extends TestCase
     {
         ['customer' => $customer, 'owner' => $owner, 'process' => $process] = $this->world();
         $madeFor = $this->versionOf($process);
-        app(QualityProcessBlueprintService::class)->store((int) $customer->id, $process, $this->flow('Endret i mellomtiden'), QualityProcessBlueprint::SOURCE_MANUAL, $owner);
+        app(QualityProcessBlueprintService::class)->store((int) $customer->id, $process, $this->flow('Endret i mellomtiden'), QualityProcessBlueprint::SOURCE_MANUAL, $owner, basedOn: QualityFlowVersion::of($process));
 
         try {
             app(QualityProcessBlueprintService::class)->store((int) $customer->id, $process, $this->flow('Endringen'), QualityProcessBlueprint::SOURCE_AI, $owner, basedOn: $madeFor);
@@ -134,16 +136,28 @@ class QualityFlowProposalVersionTest extends TestCase
         $this->assertSame('Endret i mellomtiden', collect($this->blueprintOf($process)->nodes())->firstWhere('key', 'steg')['label']);
     }
 
-    /** An AI proposal without the version it was made for is not adopted at all. */
-    public function test_an_ai_flow_without_a_version_is_refused(): void
+    /**
+     * No flow write goes without the version it was made against (A32): not a proposal, not a
+     * manual save, and not a future entry point — the service has no way to be called without one.
+     */
+    public function test_every_flow_write_without_a_version_is_refused(): void
     {
         ['customer' => $customer, 'owner' => $owner, 'process' => $process] = $this->world();
+        $before = $this->versionOf($process);
 
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/adopt", $this->flow('Forslaget'))
             ->assertSessionHasErrors('base_hash');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->flow('Uten versjon'))
+            ->assertSessionHasErrors('base_hash');
+        $this->assertSame($before, $this->versionOf($process));
 
-        $this->expectException(InvalidArgumentException::class);
-        app(QualityProcessBlueprintService::class)->store((int) $customer->id, $process, $this->flow('Forslaget'), QualityProcessBlueprint::SOURCE_AI, $owner);
+        $basedOn = (new ReflectionMethod(QualityProcessBlueprintService::class, 'store'))->getParameters()[5];
+        $this->assertSame('basedOn', $basedOn->getName());
+        $this->assertFalse($basedOn->isOptional());
+        $this->assertFalse($basedOn->allowsNull());
+
+        $this->expectException(ArgumentCountError::class);
+        app(QualityProcessBlueprintService::class)->store((int) $customer->id, $process, $this->flow('Forslaget'), QualityProcessBlueprint::SOURCE_MANUAL, $owner);
     }
 
     /**
@@ -221,7 +235,7 @@ class QualityFlowProposalVersionTest extends TestCase
         ]);
 
         $process = $this->process($customer, 'Innkjøp');
-        app(QualityProcessBlueprintService::class)->store((int) $customer->id, $process, $this->flow('Opprinnelig'), QualityProcessBlueprint::SOURCE_MANUAL, $owner);
+        app(QualityProcessBlueprintService::class)->store((int) $customer->id, $process, $this->flow('Opprinnelig'), QualityProcessBlueprint::SOURCE_MANUAL, $owner, basedOn: QualityFlowVersion::of($process));
 
         return compact('customer', 'owner', 'process');
     }

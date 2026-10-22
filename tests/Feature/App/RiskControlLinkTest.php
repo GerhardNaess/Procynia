@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -413,6 +414,7 @@ class RiskControlLinkTest extends TestCase
             ['lanes' => [['key' => 'lonn', 'label' => 'Lønnsansvarlig']], 'nodes' => $nodes, 'edges' => $edges],
             QualityProcessBlueprint::SOURCE_MANUAL,
             $this->qualitySystemOwner((int) $customer->id),
+            basedOn: QualityFlowVersion::of($process),
         );
 
         return $process;

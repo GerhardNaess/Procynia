@@ -18,6 +18,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\CreatesEnterpriseWikiFixtures;
+use Tests\Support\QualityFlowVersion;
 use Tests\Support\RecordingGraphProjectionService;
 use Tests\TestCase;
 
@@ -453,6 +454,7 @@ class QualityGraphProjectionTest extends TestCase
                 ],
             ],
             QualityProcessBlueprint::SOURCE_MANUAL, $this->qualitySystemOwner($customerId),
+            basedOn: QualityFlowVersion::of(QualityItem::query()->findOrFail($itemId)),
         );
     }
 

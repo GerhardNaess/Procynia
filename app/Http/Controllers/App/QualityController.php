@@ -527,9 +527,9 @@ class QualityController extends Controller
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
         $validated = $request->validate($this->blueprintRules() + [
-            // The version the editor was opened on (A27). Optional for now: the page always sends
-            // it; a caller that does not gets the old last-write-wins (see the plan, §2h).
-            'base_hash' => ['nullable', 'string', 'size:40'],
+            // The version the editor was opened on (A27). Required (A32): no caller gets
+            // last-write-wins.
+            'base_hash' => ['required', 'string', 'size:40'],
         ]);
 
         $this->blueprints->store(
@@ -538,7 +538,7 @@ class QualityController extends Controller
             $validated,
             QualityProcessBlueprint::SOURCE_MANUAL,
             $user,
-            basedOn: $validated['base_hash'] ?? null,
+            basedOn: $validated['base_hash'],
         );
 
         return back()->with('success', __('procynia.quality.flash.blueprint_saved'));
@@ -986,8 +986,8 @@ class QualityController extends Controller
                 $validated,
                 QualityProcessBlueprint::SOURCE_AI,
                 $user,
-                $validated['description'] ?? null,
-                $validated['base_hash'],
+                basedOn: $validated['base_hash'],
+                description: $validated['description'] ?? null,
             );
         } catch (ProcessFlowInterpretationException $exception) {
             // The flow changed after the proposal was made (finding A22). The newer flow stays and

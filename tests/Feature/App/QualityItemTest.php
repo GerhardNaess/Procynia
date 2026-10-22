@@ -34,6 +34,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -764,7 +765,7 @@ class QualityItemTest extends TestCase
                 ['from' => 'start', 'to' => 'vurder', 'label' => null],
                 ['from' => 'vurder', 'to' => 'ferdig', 'label' => null],
             ],
-        ])->assertRedirect();
+        ] + ['base_hash' => QualityFlowVersion::of($process)])->assertRedirect();
 
         $this->assertNotNull(QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->first());
 

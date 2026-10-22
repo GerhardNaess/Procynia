@@ -28,6 +28,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -411,13 +412,13 @@ class KpiQualityContextLinkTest extends TestCase
         $this->grant($customer, $editor, [CustomerPermissionCatalog::QUALITY_VIEW, CustomerPermissionCatalog::QUALITY_EDIT, CustomerPermissionCatalog::QUALITY_DELETE]);
 
         // Remove one step through Kvalitet's own editor: that link goes, the other stays.
-        $this->actingAs($editor)->put("/app/quality/items/{$incident->id}/blueprint", $this->payload(['Klassifiser alvorlighet']))
+        $this->actingAs($editor)->put("/app/quality/items/{$incident->id}/blueprint", $this->payload(['Klassifiser alvorlighet']) + ['base_hash' => QualityFlowVersion::of($incident)])
             ->assertRedirect()->assertSessionHasNoErrors();
         $this->assertSame(['klassifiser-alvorlighet'], KpiActivity::query()->where('kpi_id', $kpi->id)->pluck('activity_key')->all());
         $this->assertSame(0, RiskActivity::query()->where('risk_id', $risk->id)->count());
 
         // A later step that gets the removed key back does not inherit the KPI.
-        $this->actingAs($editor)->put("/app/quality/items/{$incident->id}/blueprint", $this->payload(['Registrer hendelse', 'Klassifiser alvorlighet']))
+        $this->actingAs($editor)->put("/app/quality/items/{$incident->id}/blueprint", $this->payload(['Registrer hendelse', 'Klassifiser alvorlighet']) + ['base_hash' => QualityFlowVersion::of($incident)])
             ->assertRedirect();
         $this->assertSame(['klassifiser-alvorlighet'], KpiActivity::query()->where('kpi_id', $kpi->id)->pluck('activity_key')->all());
 
@@ -509,6 +510,7 @@ class KpiQualityContextLinkTest extends TestCase
             $this->payload($steps),
             QualityProcessBlueprint::SOURCE_MANUAL,
             $actor,
+            basedOn: QualityFlowVersion::of($process),
         );
 
         return $process;

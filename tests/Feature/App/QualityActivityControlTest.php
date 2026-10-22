@@ -26,6 +26,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -796,6 +797,7 @@ class QualityActivityControlTest extends TestCase
                 ],
             ],
             QualityProcessBlueprint::SOURCE_MANUAL, $this->qualitySystemOwner((int) $customer->id),
+            basedOn: QualityFlowVersion::of($item),
         );
     }
 

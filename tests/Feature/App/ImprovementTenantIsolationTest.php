@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\DB;
 use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\CreatesImprovementCaseScenarios;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -246,7 +247,7 @@ class ImprovementTenantIsolationTest extends TestCase
                 ['key' => 'slutt', 'lane' => 'drift', 'type' => 'end', 'label' => 'Slutt'],
             ],
             'edges' => [['from' => 'start', 'to' => 'kontroll'], ['from' => 'kontroll', 'to' => 'slutt']],
-        ], QualityProcessBlueprint::SOURCE_MANUAL, $this->qualitySystemOwner((int) $customer->id));
+        ], QualityProcessBlueprint::SOURCE_MANUAL, $this->qualitySystemOwner((int) $customer->id), basedOn: QualityFlowVersion::of($process));
 
         return $process;
     }

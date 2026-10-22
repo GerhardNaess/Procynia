@@ -24,6 +24,7 @@ use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\Concerns\CreatesComplianceScenarios;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -591,6 +592,7 @@ class ComplianceQualityContextTest extends TestCase
             ['lanes' => [['key' => 'eier', 'label' => 'Prosesseier']], 'nodes' => $nodes, 'edges' => $edges],
             QualityProcessBlueprint::SOURCE_MANUAL,
             $actor,
+            basedOn: QualityFlowVersion::of($process),
         );
 
         return $process;

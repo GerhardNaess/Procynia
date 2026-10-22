@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 /**
@@ -278,6 +279,7 @@ class QualityAttentionTest extends TestCase
             $process,
             ['lanes' => [['key' => 'rolle-1', 'label' => 'Kvalitetsleder']], 'nodes' => $nodes, 'edges' => $edges],
             QualityProcessBlueprint::SOURCE_MANUAL, $this->qualitySystemOwner((int) $customer->id),
+            basedOn: QualityFlowVersion::of($process),
         );
     }
 

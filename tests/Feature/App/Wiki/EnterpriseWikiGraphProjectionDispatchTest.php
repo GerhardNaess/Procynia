@@ -20,6 +20,7 @@ use Mockery;
 use RuntimeException;
 use Tests\Concerns\AuthorsQualityFlows;
 use Tests\Concerns\CreatesEnterpriseWikiFixtures;
+use Tests\Support\QualityFlowVersion;
 use Tests\TestCase;
 
 class EnterpriseWikiGraphProjectionDispatchTest extends TestCase
@@ -117,6 +118,7 @@ class EnterpriseWikiGraphProjectionDispatchTest extends TestCase
                 ],
             ],
             QualityProcessBlueprint::SOURCE_MANUAL, $this->qualitySystemOwner((int) $customer->id),
+            basedOn: QualityFlowVersion::of($process),
         );
 
         $created = app(QualityActivityArticleService::class)->create(
