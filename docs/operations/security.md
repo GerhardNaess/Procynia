@@ -696,10 +696,14 @@ Skill mellom to ting:
   utvikleren; det ble bevisst ikke gjort automatisk. Fram til da vil `npm` gi
   `EBADENGINE`-advarsel — det er beviset på at kravet er uttrykt, ikke en feil.
 
-Frontend-testene kjøres med `npm run test:unit`. Kommandoen sender filmønsteret i anførselstegn slik
-at Node — ikke skallet — utfører globbingen; Node 22 tolker et rent katalogargument som en fil som
-skal lastes, så den eldre formen `node --test resources/js` fant ingenting. Verifisert grønn på
-Node 22: 232 tester i 43 suiter.
+Frontend-testene kjøres med `npm run test:unit`, som kjører `scripts/run-js-unit-tests.mjs`.
+Skriptet finner selv alle `*.test.js` under `resources/js` og skriver ut antall filer per katalog
+før testene kjøres. En katalog som ikke kan leses, stopper kjøringen.
+
+Tidligere sendte kommandoen et filmønster til `node --test`. Nodes egen globbing hoppet da stille
+over en katalog den ikke fikk lest. To kjøringer (2026-10-22) rapporterte 970 tester og 0 feil,
+mens hele `resources/js/Pages` (1160 tester) manglet. Den komplette suiten er 2130 tester i 103 filer
+(2026-10-22).
 
 Node 22 fjerner samtidig den eksisterende advarselen om at `@tailwindcss/oxide@4.2.2` krever
 Node ≥ 20, og er en forutsetning for en eventuell framtidig Vite 8.
