@@ -37,6 +37,10 @@ final class ManagementReviewService
     /** @param  array<string, mixed>  $data  validated */
     public function create(User $actor, array $data): ManagementReview
     {
+        if (! $this->access->canEdit($actor)) {
+            throw new AuthorizationException('This user may not create management reviews.');
+        }
+
         return DB::transaction(function () use ($actor, $data): ManagementReview {
             $review = ManagementReview::query()->create($this->fields($actor, $data) + [
                 'customer_id' => (int) $actor->customer_id,
@@ -47,7 +51,7 @@ final class ManagementReviewService
             $this->syncAreas($review, $data);
 
             foreach ($this->participantUserIds($review, $data) as $index => $userId) {
-                $this->addParticipant($review, ['user_id' => $userId], $index);
+                $this->insertParticipant($review, ['user_id' => $userId], $index);
             }
 
             $this->event($review, $actor, ManagementReviewEvent::CREATED);
@@ -60,7 +64,7 @@ final class ManagementReviewService
     public function update(User $actor, ManagementReview $review, array $data): void
     {
         DB::transaction(function () use ($actor, $review, $data): void {
-            $locked = $this->lockedDraft($review);
+            $locked = $this->lockedDraft($review, $actor);
             $locked->fill($this->fields($actor, $data) + ['updated_by' => $actor->id])->save();
             $this->syncAreas($locked, $data);
 
@@ -74,13 +78,32 @@ final class ManagementReviewService
     public function updateConclusion(User $actor, ManagementReview $review, ?string $conclusion): void
     {
         DB::transaction(function () use ($actor, $review, $conclusion): void {
-            $locked = $this->lockedDraft($review);
+            $locked = $this->lockedDraft($review, $actor);
             $locked->forceFill(['conclusion' => $this->text($conclusion), 'updated_by' => $actor->id])->save();
         });
     }
 
     /** @param  array{user_id?: ?int, name?: ?string, role_label?: ?string}  $data */
-    public function addParticipant(ManagementReview $review, array $data, ?int $position = null): ManagementReviewParticipant
+    public function addParticipant(User $actor, ManagementReview $review, array $data): ManagementReviewParticipant
+    {
+        return DB::transaction(fn (): ManagementReviewParticipant => $this->insertParticipant($this->lockedDraft($review, $actor), $data));
+    }
+
+    public function removeParticipant(User $actor, ManagementReview $review, ManagementReviewParticipant $participant): void
+    {
+        DB::transaction(function () use ($actor, $review, $participant): void {
+            $locked = $this->lockedDraft($review, $actor);
+
+            ManagementReviewParticipant::query()
+                ->where('management_review_id', $locked->id)
+                ->whereKey($participant->id)
+                ->firstOrFail()
+                ->delete();
+        });
+    }
+
+    /** @param  array{user_id?: ?int, name?: ?string, role_label?: ?string}  $data */
+    private function insertParticipant(ManagementReview $review, array $data, ?int $position = null): ManagementReviewParticipant
     {
         $this->assertDraft($review);
         $user = null;
@@ -113,12 +136,6 @@ final class ManagementReviewService
         ]);
     }
 
-    public function removeParticipant(ManagementReview $review, ManagementReviewParticipant $participant): void
-    {
-        $this->assertDraft($review);
-        $participant->delete();
-    }
-
     /**
      * The management's assessment of one section: judgement, optional comment, and for a manual
      * section the text that is its basis. The person must be able to see the section — nobody judges
@@ -127,7 +144,7 @@ final class ManagementReviewService
     public function saveSection(User $actor, ManagementReview $review, string $key, ?string $judgement, ?string $comment, ?string $notes): ManagementReviewSection
     {
         return DB::transaction(function () use ($actor, $review, $key, $judgement, $comment, $notes): ManagementReviewSection {
-            $locked = $this->lockedDraft($review);
+            $locked = $this->lockedDraft($review, $actor);
 
             if (! in_array($key, $this->catalog->keysFor($locked), true)) {
                 abort(404);
@@ -185,7 +202,7 @@ final class ManagementReviewService
     public function updateNextReview(User $actor, ManagementReview $review, ?string $date): void
     {
         DB::transaction(function () use ($actor, $review, $date): void {
-            $locked = ManagementReview::query()->whereKey($review->id)->lockForUpdate()->firstOrFail();
+            $locked = $this->lockedEditable($review, $actor);
             $before = $locked->next_review_due_on?->toDateString();
 
             if ($before === $date) {
@@ -203,10 +220,9 @@ final class ManagementReviewService
     /** Who is responsible for the review. Open after finalization: they plan the next one. */
     public function updateOwner(User $actor, ManagementReview $review, int $ownerId): void
     {
-        $this->assertValidOwner($actor, $ownerId);
-
         DB::transaction(function () use ($actor, $review, $ownerId): void {
-            $locked = ManagementReview::query()->whereKey($review->id)->lockForUpdate()->firstOrFail();
+            $locked = $this->lockedEditable($review, $actor);
+            $this->assertValidOwner($actor, $ownerId);
             $locked->forceFill(['owner_user_id' => $ownerId, 'updated_by' => $actor->id])->save();
         });
     }
@@ -278,9 +294,25 @@ final class ManagementReviewService
         }
     }
 
-    private function lockedDraft(ManagementReview $review): ManagementReview
+    /**
+     * The review, locked, if this person may edit it: management_review.edit, the module and view, in
+     * their own customer (phase 0 step 11). Ordinary editing — not a human-only decision.
+     */
+    public function lockedEditable(ManagementReview $review, User $actor): ManagementReview
     {
         $locked = ManagementReview::query()->whereKey($review->id)->lockForUpdate()->firstOrFail();
+
+        if (! $this->access->canEditReview($actor, $locked)) {
+            throw new AuthorizationException('This user may not change this management review.');
+        }
+
+        return $locked;
+    }
+
+    /** As lockedEditable(), and still a draft. */
+    private function lockedDraft(ManagementReview $review, User $actor): ManagementReview
+    {
+        $locked = $this->lockedEditable($review, $actor);
         $this->assertDraft($locked);
 
         return $locked;
@@ -320,7 +352,7 @@ final class ManagementReviewService
         $existing = $review->participants()->whereNotNull('user_id')->pluck('user_id')->map(fn ($id): int => (int) $id)->all();
 
         foreach (array_diff($userIds, $existing) as $userId) {
-            $this->addParticipant($review, ['user_id' => $userId]);
+            $this->insertParticipant($review, ['user_id' => $userId]);
         }
     }
 

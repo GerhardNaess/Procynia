@@ -176,7 +176,7 @@ class ManagementReviewController extends Controller
             'role_label' => ['nullable', 'string', 'max:255'],
         ], ManagementReviewValidationMessages::messages(), ManagementReviewValidationMessages::attributes());
 
-        $this->reviews->addParticipant($review, $validated);
+        $this->reviews->addParticipant($user, $review, $validated);
 
         return back()->with('success', __('procynia.management_review.flash.participant_added'));
     }
@@ -188,7 +188,7 @@ class ManagementReviewController extends Controller
         abort_unless($this->access->canEdit($user), 403);
 
         $participant = $review->participants()->whereKey($participantId)->first() ?? abort(404);
-        $this->reviews->removeParticipant($review, $participant);
+        $this->reviews->removeParticipant($user, $review, $participant);
 
         return back()->with('success', __('procynia.management_review.flash.participant_removed'));
     }

@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\Improvements\ImprovementCaseAccessService;
 use App\Services\Improvements\ImprovementCaseCreator;
 use App\Services\Modules\ModuleEntitlementService;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -47,7 +48,7 @@ final class ManagementReviewDecisionService
     public function create(User $actor, ManagementReview $review, array $data): ManagementReviewDecision
     {
         return DB::transaction(function () use ($actor, $review, $data): ManagementReviewDecision {
-            $locked = ManagementReview::query()->whereKey($review->id)->lockForUpdate()->firstOrFail();
+            $locked = $this->reviews->lockedEditable($review, $actor);
             $this->reviews->assertDraft($locked);
 
             return ManagementReviewDecision::query()->create($this->fields($actor, $data) + [
@@ -64,7 +65,7 @@ final class ManagementReviewDecisionService
     public function update(User $actor, ManagementReviewDecision $decision, array $data): void
     {
         DB::transaction(function () use ($actor, $decision, $data): void {
-            $locked = $this->lockedEditable($decision);
+            $locked = $this->lockedEditable($decision, $actor);
             $fields = $this->fields($actor, $data);
 
             // A tiltak keeps its follow-up state when its text or owner is corrected.
@@ -78,8 +79,8 @@ final class ManagementReviewDecisionService
 
     public function delete(User $actor, ManagementReviewDecision $decision): void
     {
-        DB::transaction(function () use ($decision): void {
-            $this->lockedEditable($decision)->delete();
+        DB::transaction(function () use ($actor, $decision): void {
+            $this->lockedEditable($decision, $actor)->delete();
         });
     }
 
@@ -87,7 +88,13 @@ final class ManagementReviewDecisionService
     public function changeStatus(User $actor, ManagementReviewDecision $decision, string $status, ?string $note): void
     {
         DB::transaction(function () use ($actor, $decision, $status, $note): void {
+            $review = ManagementReview::query()->whereKey($decision->management_review_id)->lockForUpdate()->firstOrFail();
             $locked = ManagementReviewDecision::query()->whereKey($decision->id)->lockForUpdate()->firstOrFail();
+
+            // The tiltak's owner, or anyone with management_review.edit — of the review's own customer.
+            if (! $this->access->reaches($actor, $review) || ! $this->canFollowUp($actor, $locked)) {
+                throw new AuthorizationException('This user may not follow up this tiltak.');
+            }
 
             if (! $locked->isFollowedUpHere() || $locked->status === $status) {
                 throw ValidationException::withMessages(['status' => __('procynia.management_review.validation.status_not_allowed')]);
@@ -120,9 +127,9 @@ final class ManagementReviewDecisionService
     /** Owner and due date of a tiltak followed up here, after the review is finalized. */
     public function reassign(User $actor, ManagementReviewDecision $decision, int $ownerId, string $dueDate): void
     {
-        $this->reviews->assertValidOwner($actor, $ownerId);
-
         DB::transaction(function () use ($actor, $decision, $ownerId, $dueDate): void {
+            $this->reviews->lockedEditable(ManagementReview::query()->findOrFail($decision->management_review_id), $actor);
+            $this->reviews->assertValidOwner($actor, $ownerId);
             $locked = ManagementReviewDecision::query()->whereKey($decision->id)->lockForUpdate()->firstOrFail();
 
             if (! $locked->isFollowedUpHere()) {
@@ -198,7 +205,7 @@ final class ManagementReviewDecisionService
         abort_unless($this->canHandOff($actor), 403);
 
         return DB::transaction(function () use ($actor, $decision, $validated): ImprovementCase {
-            $locked = $this->lockedForHandOff($decision);
+            $locked = $this->lockedForHandOff($decision, $actor);
 
             $case = $this->creator->create($actor, [
                 'type' => ImprovementCase::TYPE_IMPROVEMENT,
@@ -222,7 +229,7 @@ final class ManagementReviewDecisionService
         abort_unless($this->canHandOff($actor), 403);
 
         return DB::transaction(function () use ($actor, $decision, $caseId): ImprovementCase {
-            $locked = $this->lockedForHandOff($decision);
+            $locked = $this->lockedForHandOff($decision, $actor);
             $case = $this->improvements->findVisible($actor, $caseId);
 
             if ($case === null || ! $case->isActive() || ! $this->improvements->canEdit($actor, $case)
@@ -291,9 +298,9 @@ final class ManagementReviewDecisionService
             ['improvement_case_id' => (int) $case->id], (int) $decision->id);
     }
 
-    private function lockedForHandOff(ManagementReviewDecision $decision): ManagementReviewDecision
+    private function lockedForHandOff(ManagementReviewDecision $decision, User $actor): ManagementReviewDecision
     {
-        $review = ManagementReview::query()->whereKey($decision->management_review_id)->lockForUpdate()->firstOrFail();
+        $review = $this->reviews->lockedEditable(ManagementReview::query()->findOrFail($decision->management_review_id), $actor);
         $this->reviews->assertDraft($review);
         $locked = ManagementReviewDecision::query()->whereKey($decision->id)->lockForUpdate()->firstOrFail();
 
@@ -304,9 +311,10 @@ final class ManagementReviewDecisionService
         return $locked;
     }
 
-    private function lockedEditable(ManagementReviewDecision $decision): ManagementReviewDecision
+    /** The review and then the decision, locked, if this person may edit the review (phase 0 step 11). */
+    private function lockedEditable(ManagementReviewDecision $decision, User $actor): ManagementReviewDecision
     {
-        $review = ManagementReview::query()->whereKey($decision->management_review_id)->lockForUpdate()->firstOrFail();
+        $review = $this->reviews->lockedEditable(ManagementReview::query()->findOrFail($decision->management_review_id), $actor);
         $this->reviews->assertDraft($review);
         $locked = ManagementReviewDecision::query()->whereKey($decision->id)->lockForUpdate()->firstOrFail();
 
