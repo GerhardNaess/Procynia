@@ -14,6 +14,7 @@ use App\Services\Compliance\ComplianceAttentionService;
 use App\Services\Compliance\ComplianceQualityContextService;
 use App\Services\Compliance\ComplianceRegisterGroups;
 use App\Services\Compliance\ComplianceRequirementLifecycleService;
+use App\Services\Compliance\ComplianceRequirementService;
 use App\Services\Compliance\ComplianceStatusResolver;
 use App\Services\Compliance\Library\ComplianceApplicabilityService;
 use App\Services\Compliance\Library\ComplianceFrameworkPresenter;
@@ -68,6 +69,7 @@ class ComplianceRequirementController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly ComplianceAccessService $access,
         private readonly ComplianceRequirementLifecycleService $lifecycle,
+        private readonly ComplianceRequirementService $requirements,
         private readonly ComplianceStatusResolver $status,
         private readonly ComplianceAssessmentService $assessments,
         private readonly ComplianceQualityContextService $qualityContext,
@@ -299,11 +301,7 @@ class ComplianceRequirementController extends Controller
 
         $fields = $this->validatedFields($request, $user, null);
 
-        $requirement = $this->guardReferenceRace(fn (): ComplianceRequirement => ComplianceRequirement::query()->create($fields + [
-            'customer_id' => (int) $user->customer_id,
-            'created_by' => $user->id,
-            'updated_by' => $user->id,
-        ]));
+        $requirement = $this->guardReferenceRace(fn (): ComplianceRequirement => $this->requirements->create($user, $fields));
 
         return redirect()
             ->route('app.compliance.requirements.show', ['requirementId' => $requirement->id])
@@ -322,7 +320,7 @@ class ComplianceRequirementController extends Controller
 
         $fields = $this->validatedFields($request, $user, $requirement);
 
-        $this->guardReferenceRace(fn () => $requirement->fill($fields + ['updated_by' => $user->id])->save());
+        $this->guardReferenceRace(fn () => $this->requirements->update($user, $requirement, $fields));
 
         return back()->with('success', __('procynia.compliance.flash.updated'));
     }

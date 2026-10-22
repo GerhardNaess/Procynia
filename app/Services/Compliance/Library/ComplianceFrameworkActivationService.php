@@ -8,6 +8,8 @@ use App\Models\ComplianceRequirement;
 use App\Models\ComplianceSource;
 use App\Models\Customer;
 use App\Models\User;
+use App\Services\Compliance\ComplianceAccessService;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -28,12 +30,20 @@ use Illuminate\Support\Facades\DB;
  * Relevance starts where the standard puts it: a mandatory requirement applies within the scope; a
  * conditional one is Ikke vurdert until the customer decides.
  *
- * Authorization is the caller's (compliance.edit through ComplianceAccessService).
+ * «Aktiver for virksomheten» takes compliance.edit in the actor's own customer with the module,
+ * checked here (phase 0 step 13). sync() without an actor is the system path (library imports and
+ * the seeder) and checks nothing.
  */
 class ComplianceFrameworkActivationService
 {
+    public function __construct(
+        private readonly ComplianceAccessService $access,
+    ) {}
+
     public function activate(ComplianceFramework $framework, User $actor): ComplianceSource
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::COMPLIANCE_EDIT, (int) $actor->customer_id);
+
         return DB::transaction(function () use ($framework, $actor): ComplianceSource {
             $customerId = (int) $actor->customer_id;
             Customer::query()->whereKey($customerId)->lockForUpdate()->firstOrFail();

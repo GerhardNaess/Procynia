@@ -4,6 +4,8 @@ namespace App\Services\Compliance\Library;
 
 use App\Models\ComplianceRequirement;
 use App\Models\User;
+use App\Services\Compliance\ComplianceAccessService;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -22,12 +24,19 @@ use Illuminate\Validation\ValidationException;
  * all; assessments say whether it is met. Only a requirement that applies is assessed.
  *
  * Only library requirements, and only active ones. Who decided and when is recorded on the row.
- * Authorization is the caller's (compliance.edit through ComplianceAccessService).
+ * compliance.edit, in the requirement's own customer with the module, is checked here (phase 0
+ * step 13).
  */
 class ComplianceApplicabilityService
 {
+    public function __construct(
+        private readonly ComplianceAccessService $access,
+    ) {}
+
     public function set(ComplianceRequirement $requirement, User $actor, string $applicability, ?string $rationale): ComplianceRequirement
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::COMPLIANCE_EDIT, (int) $requirement->customer_id);
+
         $rationale = trim((string) $rationale);
 
         if (! in_array($applicability, ComplianceRequirement::APPLICABILITIES, true)) {

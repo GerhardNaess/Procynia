@@ -33,11 +33,7 @@ class ComplianceSourceController extends Controller
         $user = $this->authorizedUser();
         abort_unless($this->access->canEdit($user), 403);
 
-        ComplianceSource::query()->create($this->validated($request) + [
-            'customer_id' => (int) $user->customer_id,
-            'created_by' => $user->id,
-            'updated_by' => $user->id,
-        ]);
+        $this->sources->create($user, $this->validated($request));
 
         return back()->with('success', __('procynia.compliance.sources.flash.created'));
     }
@@ -53,7 +49,7 @@ class ComplianceSourceController extends Controller
             return back()->with('error', __('procynia.compliance.library.validation.source_is_library_edit'));
         }
 
-        $source->fill($this->validated($request) + ['updated_by' => $user->id])->save();
+        $this->sources->update($source, $user, $this->validated($request));
 
         return back()->with('success', __('procynia.compliance.sources.flash.updated'));
     }

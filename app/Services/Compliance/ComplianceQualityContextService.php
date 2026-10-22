@@ -8,6 +8,7 @@ use App\Models\ComplianceRequirementProcess;
 use App\Models\QualityItem;
 use App\Models\User;
 use App\Services\Quality\QualityProcessContextReader;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Validation\ValidationException;
@@ -236,7 +237,10 @@ class ComplianceQualityContextService
      */
     private function authorizeManage(User $user, ComplianceRequirement $requirement): void
     {
-        abort_unless($this->hasManagePermissions($user), 403);
+        // compliance.edit in the requirement's own customer with the module (phase 0 step 13), and
+        // Kvalitet read access, which compliance.* never implies.
+        $this->access->authorize($user, CustomerPermissionCatalog::COMPLIANCE_EDIT, (int) $requirement->customer_id);
+        abort_unless($this->canReadQuality($user), 403);
 
         if (! $requirement->isActive()) {
             throw ValidationException::withMessages(['requirement' => __('procynia.compliance.validation.quality.requirement_retired')]);
