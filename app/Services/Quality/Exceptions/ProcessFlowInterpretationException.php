@@ -61,6 +61,15 @@ class ProcessFlowInterpretationException extends RuntimeException
         return new self(__('procynia.quality.errors.flow_change_stale'));
     }
 
+    /**
+     * Adopting a proposal made for a working version that has changed since (finding A22). The
+     * newer flow is kept; the user reads it and asks for a proposal against it.
+     */
+    public static function proposalStale(): self
+    {
+        return new self(__('procynia.quality.errors.flow_proposal_stale'));
+    }
+
     /** Accepting a proposal whose operations change nothing in the working version. */
     public static function changeEmpty(): self
     {

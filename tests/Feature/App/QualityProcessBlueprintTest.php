@@ -249,6 +249,7 @@ class QualityProcessBlueprintTest extends TestCase
             $this->simpleFlow(),
             QualityProcessBlueprint::SOURCE_AI,
             $owner,
+            basedOn: QualityProcessBlueprintService::versionHash(null),
         );
 
         foreach (QualityProcessBlueprint::RETIRED_SOURCES as $seeded) {

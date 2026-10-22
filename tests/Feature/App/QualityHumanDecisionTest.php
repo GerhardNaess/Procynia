@@ -70,7 +70,7 @@ class QualityHumanDecisionTest extends TestCase
         $world = $this->world();
         $blueprints = app(QualityProcessBlueprintService::class);
 
-        $adopted = $blueprints->store((int) $world['customer']->id, $world['process'], $this->flow('Foreslått steg'), QualityProcessBlueprint::SOURCE_AI, $world['decider']);
+        $adopted = $blueprints->store((int) $world['customer']->id, $world['process'], $this->flow('Foreslått steg'), QualityProcessBlueprint::SOURCE_AI, $world['decider'], basedOn: $this->currentVersion($world));
         $this->assertSame(QualityProcessBlueprint::SOURCE_AI, $adopted->source);
         $this->assertSame((int) $world['decider']->id, (int) $adopted->generated_by_user_id);
 
@@ -188,7 +188,7 @@ class QualityHumanDecisionTest extends TestCase
         $before = QualityProcessBlueprint::query()->where('quality_item_id', $world['process']->id)->sole();
 
         $attempts = [
-            'adopt' => fn () => $blueprints->store($customerId, $world['process'], $this->flow('Uten rett'), QualityProcessBlueprint::SOURCE_AI, $actor),
+            'adopt' => fn () => $blueprints->store($customerId, $world['process'], $this->flow('Uten rett'), QualityProcessBlueprint::SOURCE_AI, $actor, basedOn: $this->currentVersion($world)),
             'approve' => fn () => $blueprints->approve($customerId, $world['process'], $actor),
             'delete_flow' => fn () => $blueprints->delete($customerId, $world['process'], $actor),
             'delete_item' => fn () => app(QualityItemService::class)->deleteItem($customerId, $world['process'], $actor, true),
@@ -209,6 +209,12 @@ class QualityHumanDecisionTest extends TestCase
         $this->assertSame(QualityProcessBlueprint::STATUS_DRAFT, $after->status, $who);
         $this->assertSame(QualityProcessBlueprint::SOURCE_MANUAL, $after->source, $who);
         $this->assertSame(0, QualityProcessRevision::query()->where('quality_item_id', $world['process']->id)->count(), $who);
+    }
+
+    /** @param  array<string, mixed>  $world */
+    private function currentVersion(array $world): string
+    {
+        return QualityProcessBlueprintService::versionHash(QualityProcessBlueprint::query()->where('quality_item_id', $world['process']->id)->first());
     }
 
     /** @return array<string, mixed> a process with a manual draft flow, and a decider holding every key */

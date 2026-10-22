@@ -129,11 +129,8 @@ class QualityProcessFlowChangeProposer
      */
     public static function fingerprint(array $payload): string
     {
-        return sha1((string) json_encode([
-            $payload['lanes'] ?? [],
-            $payload['nodes'] ?? [],
-            $payload['edges'] ?? [],
-        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        // One definition of a version, shared with adopting an interpretation.
+        return QualityProcessBlueprintService::fingerprint($payload);
     }
 
     /**

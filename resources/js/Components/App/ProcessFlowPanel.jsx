@@ -557,7 +557,9 @@ export default function ProcessFlowPanel({
     // what they are looking at, not what the model first returned.
     function adopt() {
         setSaving(true);
-        router.post(`/app/quality/items/${item.id}/blueprint/adopt`, { ...draft, description }, {
+        // The version the proposal was made for travels with it: the server refuses to put it over
+        // a flow that has changed since (A22), and says so in the error card.
+        router.post(`/app/quality/items/${item.id}/blueprint/adopt`, { ...draft, description, base_hash: proposal?.base_hash }, {
             preserveScroll: true,
             // «Bruk denne prosessflyten» leaves with the proposal (A11Y-014).
             onSuccess: () => refocusIfLost([flowHeadingRef.current]),

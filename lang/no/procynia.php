@@ -912,6 +912,7 @@ return [
             'flow_change_instruction_too_short' => 'Instruksen er for kort. Skriv hva som skal endres, og hvor i prosessen.',
             'flow_change_instruction_too_long' => 'Instruksen er for lang. Beskriv én endring om gangen.',
             'flow_change_without_flow' => 'Prosessen har ingen flyt å endre ennå. Beskriv prosessen først.',
+            'flow_proposal_stale' => 'Prosessflyten er endret etter at forslaget ble laget, så forslaget ble ikke tatt i bruk. Den lagrede flyten er beholdt. Se over den og lag et nytt forslag ut fra flyten slik den er nå.',
             'flow_change_stale' => 'Prosessen er endret siden forslaget ble laget, så forslaget kan ikke brukes. Lag et nytt forslag ut fra flyten slik den er nå.',
             'flow_change_empty' => 'Forslaget inneholder ingen endringer å godta.',
         ],

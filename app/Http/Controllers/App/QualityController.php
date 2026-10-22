@@ -582,6 +582,9 @@ class QualityController extends Controller
         ]);
 
         try {
+            // The version the proposal is made for, read before the model is asked (finding A22).
+            $basedOn = QualityProcessBlueprintService::versionHash($this->blueprints->forItem((int) $customerId, $item));
+
             $proposal = $this->flowInterpreter->interpret(
                 $item,
                 $validated['description'],
@@ -591,7 +594,7 @@ class QualityController extends Controller
             return $this->flowFailed($item, $user, $exception, $validated['description']);
         }
 
-        return $this->flowProposed($item, $proposal);
+        return $this->flowProposed($item, $proposal, $basedOn);
     }
 
     /**
@@ -744,13 +747,25 @@ class QualityController extends Controller
             ]);
         }
 
-        $this->blueprints->store(
-            (int) $customerId,
-            $item,
-            $payload,
-            QualityProcessBlueprint::SOURCE_AI,
-            $user,
-        );
+        try {
+            // Checked again where it is written, under the lock: the flow may have moved on since
+            // accept() compared it (finding A22).
+            $this->blueprints->store(
+                (int) $customerId,
+                $item,
+                $payload,
+                QualityProcessBlueprint::SOURCE_AI,
+                $user,
+                basedOn: $validated['base_hash'],
+            );
+        } catch (ProcessFlowInterpretationException $exception) {
+            return back()->with('flow_change_error', [
+                'quality_item_id' => (int) $item->id,
+                'message' => $exception->getMessage(),
+                'problems' => $exception->problems,
+                'instruction' => (string) ($validated['instruction'] ?? ''),
+            ]);
+        }
 
         return back()->with('success', __('procynia.quality.flash.blueprint_change_accepted'));
     }
@@ -815,6 +830,8 @@ class QualityController extends Controller
         $languageCode = $this->customerContext->resolveLanguageCode($user);
 
         try {
+            $basedOn = QualityProcessBlueprintService::versionHash($this->blueprints->forItem((int) $customerId, $item));
+
             $description = $this->flowClarifier->integrate(
                 $item,
                 $validated['description'],
@@ -842,7 +859,7 @@ class QualityController extends Controller
             $proposal['optional_clarifications'],
         );
 
-        return $this->flowProposed($item, $proposal);
+        return $this->flowProposed($item, $proposal, $basedOn);
     }
 
     /**
@@ -850,10 +867,12 @@ class QualityController extends Controller
      *
      * @param  array{payload: array<string, mixed>, blocking_questions: list<string>, optional_clarifications: list<string>, description: string}  $proposal
      */
-    private function flowProposed(QualityItem $item, array $proposal): RedirectResponse
+    private function flowProposed(QualityItem $item, array $proposal, string $basedOn): RedirectResponse
     {
         return back()->with('flow_proposal', [
             'quality_item_id' => (int) $item->id,
+            // The working version it was made for: adopting it onto any other is refused (A22).
+            'base_hash' => $basedOn,
             'lanes' => $proposal['payload']['lanes'],
             'nodes' => $proposal['payload']['nodes'],
             'edges' => $proposal['payload']['edges'],
@@ -952,16 +971,25 @@ class QualityController extends Controller
 
         $validated = $request->validate($this->blueprintRules() + [
             'description' => ['nullable', 'string', 'max:8000'],
+            'base_hash' => ['required', 'string', 'size:40'],
         ]);
 
-        $this->blueprints->store(
-            (int) $customerId,
-            $item,
-            $validated,
-            QualityProcessBlueprint::SOURCE_AI,
-            $user,
-            $validated['description'] ?? null,
-        );
+        try {
+            $this->blueprints->store(
+                (int) $customerId,
+                $item,
+                $validated,
+                QualityProcessBlueprint::SOURCE_AI,
+                $user,
+                $validated['description'] ?? null,
+                $validated['base_hash'],
+            );
+        } catch (ProcessFlowInterpretationException $exception) {
+            // The flow changed after the proposal was made (finding A22). The newer flow stays and
+            // is what the page now shows; the description stays in the field, so a new proposal
+            // against the flow as it is now is one click away.
+            return $this->flowFailed($item, $user, $exception, (string) ($validated['description'] ?? ''));
+        }
 
         return back()->with('success', __('procynia.quality.flash.blueprint_adopted'));
     }

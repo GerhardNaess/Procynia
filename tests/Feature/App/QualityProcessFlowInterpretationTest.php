@@ -199,11 +199,15 @@ class QualityProcessFlowInterpretationTest extends TestCase
         $this->fakeResponse($this->supplierProposal());
         $proposal = $this->interpret($owner, $process)['flow_proposal'];
 
+        // Made for the process as it stood: no flow yet (finding A22).
+        $this->assertSame(QualityProcessBlueprintService::versionHash(null), $proposal['base_hash']);
+
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/adopt", [
             'lanes' => $proposal['lanes'],
             'nodes' => $proposal['nodes'],
             'edges' => $proposal['edges'],
             'description' => self::DESCRIPTION,
+            'base_hash' => $proposal['base_hash'],
         ])->assertRedirect();
 
         $blueprint = QualityProcessBlueprint::query()->firstOrFail();
@@ -259,6 +263,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
             'nodes' => $corrected,
             'edges' => $proposal['edges'],
             'description' => self::DESCRIPTION,
+            'base_hash' => $proposal['base_hash'],
         ])->assertRedirect();
 
         $stored = collect(QualityProcessBlueprint::query()->firstOrFail()->nodes())
@@ -291,6 +296,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
             'nodes' => $proposal['nodes'],
             'edges' => $proposal['edges'],
             'description' => self::DESCRIPTION,
+            'base_hash' => $proposal['base_hash'],
         ])->assertRedirect();
 
         Http::fake([]);
@@ -727,6 +733,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
             'nodes' => $proposal['nodes'],
             'edges' => $proposal['edges'],
             'description' => self::DESCRIPTION,
+            'base_hash' => $proposal['base_hash'],
         ])->assertRedirect()->assertSessionHasNoErrors();
 
         $blueprint = QualityProcessBlueprint::query()->firstOrFail();

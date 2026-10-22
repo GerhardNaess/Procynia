@@ -7,12 +7,14 @@ use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\QualityProcessRevision;
 use App\Models\User;
+use App\Services\Quality\Exceptions\ProcessFlowInterpretationException;
 use App\Services\Security\HumanDecisionGuard;
 use App\Support\CustomerPermissionCatalog;
 use App\Support\HumanDecision;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 
 /**
  * Every write to a process blueprint goes through here.
@@ -73,11 +75,17 @@ class QualityProcessBlueprintService
         string $source,
         User $actor,
         ?string $description = null,
+        ?string $basedOn = null,
     ): QualityProcessBlueprint {
         // Adopting a flow a machine proposed is a decision a person takes (QUALITY_FLOW_ADOPT, phase
         // 0 step 12) — whatever key it rides on. A manual edit is ordinary editing.
         if ($source === QualityProcessBlueprint::SOURCE_AI) {
             $actor = $this->guard->assert($actor, HumanDecision::QUALITY_FLOW_ADOPT);
+
+            // A proposal is adopted only onto the working version it was made for (finding A22).
+            if ($basedOn === null) {
+                throw new InvalidArgumentException('An AI proposal is adopted only with the version hash it was made for.');
+            }
         }
 
         $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
@@ -114,10 +122,23 @@ class QualityProcessBlueprintService
             $attributes['description'] = $description;
         }
 
-        $blueprint = QualityProcessBlueprint::query()->updateOrCreate(
-            ['quality_item_id' => $item->id],
-            $attributes,
-        );
+        // The check and the write under one lock (finding A22): a proposal's version is compared
+        // with the working version as it is when written, not as it was a moment before. The lock
+        // order is approve()'s — the working version first, the process only when there is none
+        // yet (two first flows for one process then queue on the process) — so the two never wait
+        // on each other in opposite order.
+        $blueprint = DB::transaction(function () use ($item, $attributes, $source, $basedOn): QualityProcessBlueprint {
+            $current = $this->lockedWorkingVersion($item);
+
+            if ($source === QualityProcessBlueprint::SOURCE_AI && ! hash_equals(self::versionHash($current), (string) $basedOn)) {
+                throw ProcessFlowInterpretationException::proposalStale();
+            }
+
+            return QualityProcessBlueprint::query()->updateOrCreate(
+                ['quality_item_id' => $item->id],
+                $attributes,
+            );
+        });
 
         // The flow's activities are nodes the graph answers questions about — which step produced
         // which Wiki article — so a saved flow has to reach it. After commit: the job reads SQL, and on
@@ -126,6 +147,45 @@ class QualityProcessBlueprintService
         ProjectQualityItemToGraph::dispatch((int) $item->id)->afterCommit();
 
         return $blueprint;
+    }
+
+    /**
+     * Which working version a proposal was made against — the flow's lanes, nodes and edges, or the
+     * empty flow when the process has none yet.
+     *
+     * Carried with every AI proposal (an interpretation as well as a change) so adopting it can tell
+     * whether the flow has moved on in between: a proposal made for a different flow than the one
+     * it would replace is a different proposal.
+     */
+    public static function versionHash(?QualityProcessBlueprint $blueprint): string
+    {
+        return self::fingerprint($blueprint === null
+            ? ['lanes' => [], 'nodes' => [], 'edges' => []]
+            : ['lanes' => $blueprint->lanes(), 'nodes' => $blueprint->nodes(), 'edges' => $blueprint->edges()]);
+    }
+
+    /** @param  array<string, mixed>  $payload */
+    public static function fingerprint(array $payload): string
+    {
+        return sha1((string) json_encode([
+            $payload['lanes'] ?? [],
+            $payload['nodes'] ?? [],
+            $payload['edges'] ?? [],
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    }
+
+    /** The working version, locked — or, when there is none yet, the process it would belong to. */
+    private function lockedWorkingVersion(QualityItem $item): ?QualityProcessBlueprint
+    {
+        $current = QualityProcessBlueprint::query()->where('quality_item_id', $item->id)->lockForUpdate()->first();
+
+        if ($current !== null) {
+            return $current;
+        }
+
+        QualityItem::query()->whereKey($item->id)->lockForUpdate()->first();
+
+        return QualityProcessBlueprint::query()->where('quality_item_id', $item->id)->lockForUpdate()->first();
     }
 
     /**
