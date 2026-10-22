@@ -399,6 +399,12 @@ class QualityController extends Controller
         $backToIndex = fn (): RedirectResponse => redirect()
             ->route('app.quality.index', $tab !== null ? ['tab' => $tab] : []);
 
+        // A process that has been approved is retired, never deleted; the service refuses it too.
+        // Said here as the dialog's own error, rather than as a field error nobody would see.
+        if ($this->items->hasApprovedVersion($item)) {
+            return $backToIndex()->with('error', __('procynia.quality.errors.approved_process_not_deletable'));
+        }
+
         // The knowledge a process produced outlives the process by default. Removing it too is a
         // second decision, taken in the same dialog and never implied by the first.
         $deleteWikiPages = $request->boolean('delete_wiki_pages');
@@ -1654,6 +1660,9 @@ class QualityController extends Controller
                     'code' => $item->code,
                     'status' => $item->status,
                     'publication' => $publications[(int) $item->id] ?? null,
+                    // An approved process is retired, never deleted: the menu says so instead.
+                    'has_approved_version' => $item->quality_type === QualityItem::TYPE_PROCESS
+                        && ($publications[(int) $item->id]['revision_number'] ?? null) !== null,
                     'owner_name' => $item->owner?->name,
                     'next_review_at' => $item->next_review_at?->toDateString(),
                     'wiki_link_count' => (int) $item->wiki_links_count,

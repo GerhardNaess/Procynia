@@ -24,9 +24,14 @@ import {
  * navigation this one action never had. Tab reaches the action; Escape closes and returns focus to
  * the trigger.
  *
+ * A process that has been approved is never deleted — its approved versions are the record of
+ * what was decided — so for one the menu says why and points to «Utgått» instead of offering a
+ * delete the server would refuse.
+ *
  * @param {object} item  The row's item. `id`, `title` and `quality_type`, plus
  *                       `produced_wiki_page_count` and `can_delete_produced_wiki_pages`, which
- *                       decide whether the dialog asks what should happen to the knowledge.
+ *                       decide whether the dialog asks what should happen to the knowledge, and
+ *                       `has_approved_version`, which takes the delete away.
  * @param {string} [tab] The Kvalitet tab to come back to. Deleting from the Prosesser list should
  *                       leave the user in Prosesser, not bounce them to Oversikt.
  */
@@ -50,6 +55,7 @@ export default function QualityItemActions({ tq, item, tab = null }) {
     const isProcess = item.quality_type === 'process';
     // A control is not a document, and the dialog never calls it one.
     const isControl = item.quality_type === 'control';
+    const deleteBlocked = isProcess && Boolean(item.has_approved_version);
     const producedWikiPageCount = item.produced_wiki_page_count ?? 0;
     const hasProducedWikiPages = producedWikiPageCount > 0;
     // The choice is only offered when the backend says this reader may actually take it. Offering
@@ -132,19 +138,25 @@ export default function QualityItemActions({ tq, item, tab = null }) {
                     style={{ top: `${menuPosition.top}px`, right: `${menuPosition.right}px` }}
                     className="fixed z-40 w-60 rounded-2xl border border-slate-200 bg-white p-1.5 text-left shadow-lg"
                 >
-                    <button
-                        type="button"
-                        className="block w-full rounded-xl px-3 py-2 text-left text-base font-semibold text-rose-700 transition hover:bg-rose-50"
-                        onClick={() => {
-                            setIsMenuOpen(false);
-                            // Keeping the knowledge is the default, re-asserted every time the
-                            // dialog opens: a choice made and abandoned must never carry over.
-                            setDeleteWikiPages(false);
-                            setIsConfirmOpen(true);
-                        }}
-                    >
-                        {deleteLabel}
-                    </button>
+                    {deleteBlocked ? (
+                        <p className="px-3 py-2 text-base leading-6 text-slate-700">
+                            {tq.delete_process_blocked ?? 'Prosessen har en godkjent versjon og kan ikke slettes. Sett statusen til «Utgått» for å ta den ut av bruk. De godkjente versjonene beholdes.'}
+                        </p>
+                    ) : (
+                        <button
+                            type="button"
+                            className="block w-full rounded-xl px-3 py-2 text-left text-base font-semibold text-rose-700 transition hover:bg-rose-50"
+                            onClick={() => {
+                                setIsMenuOpen(false);
+                                // Keeping the knowledge is the default, re-asserted every time the
+                                // dialog opens: a choice made and abandoned must never carry over.
+                                setDeleteWikiPages(false);
+                                setIsConfirmOpen(true);
+                            }}
+                        >
+                            {deleteLabel}
+                        </button>
+                    )}
                 </div>
             )}
 

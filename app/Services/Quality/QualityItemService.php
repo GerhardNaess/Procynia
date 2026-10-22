@@ -228,7 +228,14 @@ class QualityItemService
      * The source documents are never touched either way. A file the virksomhet uploaded is the
      * virksomhet's, and that was true before this option existed.
      *
+     * A process with an approved version is not deleted at all (phase 0 step 12): the approved
+     * versions are the record of what the virksomhet decided, and a process that is no longer in
+     * use is retired («Utgått») instead. Refused before anything is touched, the Wiki pages
+     * included; the database refuses it too.
+     *
      * @return array{wiki_pages_deleted: int}
+     *
+     * @throws ValidationException when the process has an approved version
      */
     public function deleteItem(int $customerId, QualityItem $item, User $actor, bool $deleteProducedWikiPages = false): array
     {
@@ -237,6 +244,13 @@ class QualityItemService
         $actor = $this->guard->assert($actor, HumanDecision::QUALITY_DELETE);
         $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_DELETE, $customerId);
         $this->assertOwned($customerId, $item);
+
+        if ($this->hasApprovedVersion($item)) {
+            throw ValidationException::withMessages([
+                'item' => __('procynia.quality.errors.approved_process_not_deletable'),
+            ]);
+        }
+
         $deleteProducedWikiPagesAs = $deleteProducedWikiPages ? $actor : null;
 
         $itemId = (int) $item->id;
@@ -270,6 +284,13 @@ class QualityItemService
         $this->reproject($neighbourIds);
 
         return ['wiki_pages_deleted' => $wikiPagesDeleted];
+    }
+
+    /** Whether a process has been approved at least once — and so is retired, never deleted. */
+    public function hasApprovedVersion(QualityItem $item): bool
+    {
+        return $item->quality_type === QualityItem::TYPE_PROCESS
+            && QualityProcessRevision::query()->where('quality_item_id', $item->id)->exists();
     }
 
     // -----------------------------------------------------------------

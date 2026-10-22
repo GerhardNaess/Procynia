@@ -10,6 +10,7 @@ use App\Models\Nationality;
 use App\Models\QualityActivityWikiPage;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
+use App\Models\QualityProcessRevision;
 use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
 use Illuminate\Database\Seeder;
@@ -85,6 +86,12 @@ class E2ETestSeeder extends Seeder
      * E2E database starts empty (docs/testing/e2e-environment.md), and without one they skipped.
      */
     private const STANDING_CONTROL_CODE = 'E2E-KONTROLL';
+
+    /**
+     * A process with an approved version, which is retired and never deleted (phase 0 step 12). The
+     * row menu says so instead of offering «Slett prosess» — see quality-process-row-actions.spec.js.
+     */
+    private const APPROVED_PROCESS_CODE = 'E2E-GODKJENT';
 
     /** @var list<string> */
     private const KNOWLEDGE_PAGE_TITLES = [
@@ -165,6 +172,51 @@ class E2ETestSeeder extends Seeder
         $this->seedPackages($customer, $systemOwner);
         $this->seedQualityProcessFlows($customer, $systemOwner);
         $this->seedStandingControl($customer, $systemOwner);
+        $this->seedApprovedProcess($customer, $systemOwner);
+    }
+
+    private function seedApprovedProcess(Customer $customer, User $owner): void
+    {
+        $item = QualityItem::query()->updateOrCreate(
+            ['customer_id' => $customer->id, 'code' => self::APPROVED_PROCESS_CODE],
+            [
+                'quality_type' => QualityItem::TYPE_PROCESS,
+                'title' => 'E2E godkjent prosess',
+                'purpose' => 'Fast testprosess for E2E, med en godkjent versjon.',
+                'status' => QualityItem::STATUS_ACTIVE,
+                'created_by_user_id' => $owner->id,
+            ],
+        );
+
+        $payload = $this->smallFlowPayload();
+        $approvedAt = now();
+
+        QualityProcessBlueprint::query()->updateOrCreate(
+            ['quality_item_id' => $item->id],
+            [
+                'customer_id' => $customer->id,
+                'payload' => $payload,
+                'status' => QualityProcessBlueprint::STATUS_APPROVED,
+                'source' => QualityProcessBlueprint::SOURCE_MANUAL,
+                'generated_at' => $approvedAt,
+                'generated_by_user_id' => $owner->id,
+                'approved_at' => $approvedAt,
+                'approved_by_user_id' => $owner->id,
+            ],
+        );
+
+        // Written once: an approved version is never changed, so a rerun leaves the first one.
+        QualityProcessRevision::query()->firstOrCreate(
+            ['quality_item_id' => $item->id, 'revision_number' => 1],
+            [
+                'customer_id' => $customer->id,
+                'payload' => $payload,
+                'source' => QualityProcessBlueprint::SOURCE_MANUAL,
+                'approved_by_user_id' => $owner->id,
+                'approved_by_name' => $owner->name,
+                'approved_at' => $approvedAt,
+            ],
+        );
     }
 
     private function seedStandingControl(Customer $customer, User $owner): void

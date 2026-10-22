@@ -18,9 +18,12 @@
   - steg 9, Risiko (`cc3a4e90`, `595deea4`, `b03fd473`, `4c3cd3bf`, E2E-retting `f5e66bf6`), se §2c
   - steg 10, Avvik og forbedringer (`45ece813`, `5079e978`, `6a6df31d`, `9059f765`), se §2d
   - steg 11, Ledelsens gjennomgang (`34d4c8ba`, `3d89f627`, `6f5431fb`), se §2e
+  - isolert E2E-miljø (`cef890b2`), se `docs/testing/e2e-environment.md`
+  - steg 12, Kvalitet (`f958fe57`, `686dba14` og del 3), se §2f
 - Wiki-delen av fase 0 og Risiko (steg 9) er gjennomført og godkjent 2026-10-22.
 - Avvik og forbedringer (steg 10) er gjennomført og godkjent 2026-10-22.
-- Ledelsens gjennomgang (steg 11) er gjennomført 2026-10-22 og venter på vurdering. De andre modulene startes ikke før det.
+- Ledelsens gjennomgang (steg 11) er gjennomført og godkjent 2026-10-22.
+- Kvalitet (steg 12) er gjennomført 2026-10-22 og venter på vurdering. Etterlevelse, Leverandøroppfølging og Mål/KPI startes ikke før det.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -536,6 +539,113 @@ Ny arbeidsversjon for statusendringer anbefales ikke:
 - **Konsekvens for fase 1:**
   - Integrasjonsroller får ikke `management_review.edit` som standard.
   - «Forslag» utformes som i Risiko og Avvik (§2c og §2d).
+
+### 2f. Kvalitet (steg 12) – kartlegging og gjennomføring (2026-10-22)
+
+**Kartlegging før steg 12**
+
+- Modulen er ikke avgrenset av fagområder. Tilgang gis med nøklene `quality.*` på kunden og modulen.
+- System Owner har alle `quality.*`-nøkler uten rolle. Kvalitet er ikke et domene som krever eksplisitt tildeling.
+- Alle rettighetskontroller lå i `QualityController` (`may()`/`authorizePermission`). Tjenestene sjekket bare at radene tilhørte kunden de fikk oppgitt.
+- Godkjenning, godkjenning av AI-forslag og sletting tok `?User`. En aktør på `null` ga godkjente versjoner uten godkjenner.
+
+| Handling | Rettighet | Kontrollert i | Merknad |
+|---|---|---|---|
+| Godkjenne prosessflyt (`approve`) | `quality.approve` (menneskeforbeholdt) | **Bare kontrolleren** | Tjenesten låste arbeidsversjonen og skrev en uforanderlig versjon (`quality_process_revisions`). |
+| Ta i bruk AI-forslag (`adoptFlowProposal`, `acceptFlowChange`) | `quality.edit` | **Bare kontrolleren** | `store(..., SOURCE_AI)`. |
+| Slette prosess, dokument eller kontroll (`deleteItem`) | `quality.delete` (menneskeforbeholdt) | **Bare kontrolleren** | Wiki-sidene prosessen har produsert, slettes først når det er valgt (Wikis egen regel, F3a). |
+| Slette eller forkaste flyt (`blueprints->delete`) | `quality.delete` | **Bare kontrolleren** | Etter første godkjenning er dette «Forkast arbeidsversjon». De godkjente versjonene beholdes. |
+| Opprette dokument, laste opp fil, skrive artikkel fra aktivitet | `quality.create` | **Bare kontrolleren** | Artikkelen overføres til Wiki. Wiki sjekker sin halvdel (`wiki.knowledge.handoff`) selv. |
+| Alle andre skrivinger: metadata, struktur, kontrollfelt, relasjoner, Wiki-koblinger, dokumentkoblinger, evidens, kontroller på aktiviteter, verktøy, avklaringer, manuell flyt | `quality.edit` | **Bare kontrolleren** | En kontroll som registreres fra en aktivitet, opprettes under `quality.edit`, ikke `quality.create`. |
+
+**Gjennomført**
+
+| Commit | Innhold |
+|---|---|
+| `f958fe57` | Godkjenning (`QUALITY_FLOW_APPROVE`), godkjenning av AI-forslag (`QUALITY_FLOW_ADOPT`) og sletting (`QUALITY_DELETE`) går gjennom vakten og deretter riktig nøkkel i tjenestene. Aktøren er påkrevd. Ny `QualityAccessService`: egen kunde, Kvalitet-modulen og nøkkelen. Avklaringer sjekker `quality.edit`. |
+| `686dba14` | Alle ordinære skrivinger sjekker nøkkelen i tjenesten, med påkrevd aktør. `linkDocument` godtar `quality.create` eller `quality.edit`, som i grensesnittet. Kontroll fra aktivitet går via `createActivityControl` under `quality.edit`. |
+| *(steg 12, del 3)* | Godkjente prosessversjoner bevares (A18): en godkjent prosess settes til «Utgått» i stedet for å slettes – i menyen, kontrolleren, tjenesten og databasen. Versjonene kan verken endres eller slettes. |
+
+**Sikkerhetsregler**
+
+1. Godkjenning, godkjenning av AI-forslag og sletting går bare gjennom tjenestene:
+   - vakten nekter integrasjoner, inaktive personer og API-kanalen, også i delegert modus;
+   - deretter kreves riktig nøkkel i personens egen kunde, med Kvalitet-modulen.
+2. Å ta i bruk et AI-forslag er en menneskelig beslutning, selv om nøkkelen (`quality.edit`) ikke er menneskeforbeholdt. Manuell lagring av en arbeidsversjon er ordinær redigering, og en integrasjon med `quality.edit` kan gjøre det (testet). Godkjenning krever alltid en person.
+3. AI-forslag skilles fra godkjenning:
+   - et forslag lagres aldri før en person tar det i bruk;
+   - en versjon som er tatt i bruk, er et utkast til den er godkjent;
+   - kilden (`ai` eller `manual`) følger versjonen inn i den godkjente versjonen.
+4. Andre kunders data er utilgjengelige. Det gjelder også kundens System Owner. Uten Kvalitet-modulen gir nøklene ingen tilgang i tjenestene (nytt; kontrolleren stolte på ruten).
+5. Koblinger mot Enterprise Wiki omgår ikke Wiki:
+   - sletting av produserte Wiki-sider går gjennom `EnterpriseWikiPageDeletionService` (F3a);
+   - artikler fra aktiviteter går gjennom `WikiKnowledgeHandoffService`, som sjekker `wiki.knowledge.handoff`;
+   - Kvalitet sjekker sin egen halvdel (`quality.create`) i tjenesten, også for AI-utkastet, som koster AI selv om ingenting lagres.
+6. **Uendret regel:** System Owner har alle `quality.*`-nøkler og består vakten og tilgangskontrollen i egen kunde.
+
+**Historikk og dataintegritet**
+
+| Spørsmål | Svar |
+|---|---|
+| Bevares tidligere godkjente prosessversjoner? | **Nå ja.** Før fulgte alle godkjente versjoner med når prosessen ble slettet, fordi kaskaden fra `quality_items` gikk forbi modellens vakt (A18). En prosess med en godkjent versjon kan ikke slettes. Den settes til «Utgått», og versjonene står. |
+| Kan godkjente versjoner endres eller slettes direkte i databasen? | Nei (ny trigger). Det eneste som kan endres, er fremmednøkkelen til en slettet bruker (`approved_by_user_id` blir `NULL`). Navnet på den som godkjente, står i `approved_by_name`. |
+| Kan historikk slettes indirekte? | Ikke for godkjente versjoner. Bare sletting av kunden tar dem med. «Forkast arbeidsversjon» rører bare arbeidsversjonen (testet). Se A19 om kontroller med evidens. |
+| Har godkjenninger riktig aktør og tidspunkt? | Ja. Godkjenner, navn og tidspunkt er påkrevd i tjenesten. Aktørtriggeren for `quality_process_revisions.approved_by_user_id` og `quality_process_blueprints.approved_by_user_id` hører til steg 19. |
+| Samtidighet | Godkjenning låser arbeidsversjonen (`lockForUpdate`), og et dobbeltklikk gir ingen ny versjon. Trigger på prosessen fanger en godkjenning som kommer mellom kontrollen og slettingen. Se A21 og A22. |
+
+**Migrering og data**
+
+- `2026_10_22_000008_keep_approved_quality_process_versions` legger til triggere på `quality_items` (DELETE) og `quality_process_revisions` (UPDATE og DELETE).
+- Utviklingsdatabasen har 5 godkjente versjoner fordelt på 3 prosesser. Ingen rader endres. De tre prosessene kan etter dette bare settes til «Utgått».
+- Migreringen kan rulles tilbake. Det er prøvd på testdatabasen (også som mutasjonssjekk).
+- Kjørt på utviklings-, test- og E2E-databasen.
+
+**Arkitekturfunn**
+
+| # | Funn | Vurdering |
+|---|---|---|
+| A18 | Godkjente prosessversjoner fulgte med når prosessen ble slettet, i SQL eller gjennom `QualityItemService::deleteItem`. Modellens vakt (`QualityProcessRevision`) gjelder ikke kaskader. | Rettet (steg 12, del 3). |
+| A19 | En kontroll med evidens kan slettes med `quality.delete`. Evidensen (`quality_item_documents`) og koblingene fra Risiko (`risk_controls`), Etterlevelse (`compliance_requirement_controls`), Avvik og Mål/KPI følger med i kaskaden. Det samme gjelder koblingene til en prosess som ikke er godkjent. | **Ikke endret.** Det er en produktbeslutning om evidens skal regnes som historikk som hindrer sletting, slik godkjente versjoner nå gjør. Bør vurderes sammen med Etterlevelse (steg 13), som bruker kontrollene som dokumentasjon. |
+| A20 | Kvalitet har ingen hendelseslogg for dokumenter. Hvem som endret status, eier eller innhold, og når, registreres ikke. Bare `last_reviewed_by_user_id`, godkjente versjoner og opphavet til artikler finnes. | Ikke endret. Krever ny tabell og en beslutning om hva som skal logges. |
+| A21 | `deleteItem` sletter de produserte Wiki-sidene før prosessen, utenfor én transaksjon. Hvis slettingen av prosessen deretter nektes (for eksempel fordi den ble godkjent i mellomtiden), er sidene borte og prosessen står. | Godtatt. Kontrollen av godkjente versjoner kjøres nå før sidene røres, så bare et samtidig kappløp gjenstår. Wiki-slettingen er sin egen, sporbare beslutning. |
+| A22 | `acceptFlowChange` sjekker `base_hash` og lagrer deretter i to steg, uten lås mellom. En samtidig endring i mellomtiden kan bli overskrevet. | Ikke endret. Vinduet er lite, og resultatet er fortsatt et utkast som må godkjennes. Kan lukkes med lås og hash-kontroll i samme transaksjon før fase 1. |
+| A23 | AI-tolkning og forslag til endring av flyt (`interpretFlow`, `proposeFlowChange`) skriver ikke, men bruker AI. De sjekkes bare i kontrolleren, og tjenestene tar ingen aktør. | Ikke endret. Utkast til artikkel fra aktivitet sjekkes nå i tjenesten. De to andre bør følge samme mønster før de åpnes i API-et. |
+| A24 | To testfiler (`QualityToolTest`, `QualityActivityControlTest`) feilet allerede på `HEAD` fordi en redigerer i Kvalitet slettet et Wiki-dokument direkte. Det krever Wiki-kildeadministrasjon etter `be1aba2b`. | Rettet i testene: System Owner sletter dokumentet. Regelen i Wiki er riktig. |
+| A25 | **Det isolerte E2E-miljøet (oppgave 1):** 4 Kvalitet-spesifikasjoner feilet der, uavhengig av steg 12.<br>– Tre trengte AI-tolkning, og miljøet har med vilje ingen OpenAI-nøkkel.<br>– Én trengte en bruker med `quality.view`, som før kom fra rollene i utviklingsdatabasen.<br>– De var ikke med i verifiseringen av miljøet (`cef890b2`). | Rettet i spesifikasjonene.<br>– `quality-flow-interpret` sier til siden at AI er tilgjengelig, slik `quality-flow-clarify` gjør.<br>– `quality-flow-clarify-sticks` og `quality-flow-describe-without-flow` hopper over med begrunnelse når serveren ikke har AI. De gjør eller trenger ekte AI-kall og er ikke verifisert i miljøet.<br>– `quality-new-process` gir og fjerner selv en rolle med bare `quality.view`.<br>Se `docs/testing/e2e-environment.md`, «Begrensninger». |
+| A26 | Radmenyen i Kvalitet lukkes ved rulling. Når raden ligger under synsfeltet, ruller Playwrights klikk den fram, og menyen lukkes rett etter at den åpnet. | Rettet i `quality-process-row-actions`: raden rulles fram, og testen venter to bildeoppdateringer før klikket (bekreftet: feiler uten, besto 3 av 3 med). En person klikker på en synlig rad, så det er ikke rettet i komponenten. |
+| A6 | Finnes ikke her. `QualityAccessService` bruker `CustomerPermissionService::has()`, så `quality.approve` og `quality.delete` holdes unna integrasjoner. | – |
+
+**Tester**
+
+- `QualityHumanDecisionTest` (7):
+  - en person med nøklene tar alle beslutningene, og godkjenningen bærer navnet deres;
+  - en integrasjon kan lagre en arbeidsversjon manuelt, men ikke ta i bruk AI-forslag, godkjenne eller slette;
+  - disse nektes, og ingenting skrives: API-kanal (delegert), inaktiv person, lesetilgang, redigering uten godkjennings- og slettenøkkel, en annen kundes person med alle nøkler og en annen kundes System Owner, og en kunde uten Kvalitet-modulen.
+- `QualityServiceAuthorizationTest` (5):
+  - 24 skrivinger kalles direkte på tjenestene;
+  - nektes for en leser, for en annen kundes redigerer og for en kunde uten modulen, og ingenting skrives;
+  - hver nøkkel åpner nøyaktig sine egne skrivinger;
+  - fil kan kobles med begge nøklene, og kontroll fra aktivitet med `quality.edit`.
+- `QualityProcessVersionIntegrityTest` (7): tjenesten nekter før Wiki røres; «Utgått» beholder versjonene; menyen og kontrolleren; «Forkast arbeidsversjon»; databasen; slettet godkjenner; kundesletting.
+- Mutasjonssjekket:
+  - vakten og nøkkelen for hver beslutning, modul- og kundekontrollen;
+  - hver av de 27 tilgangskontrollene i tjenestene. Alle fanges unntatt to, som dekkes av en indre kontroll på samme nøkkel (`createActivityControl` inne i `add()`);
+  - kontrollen i tjenesten, kontrollen i kontrolleren, flagget i radene og triggerne.
+- Kjøringer 2026-10-22:
+  - PHP: alle testfiler som berører Kvalitet (31 filer), 498 av 498 bestått.
+  - JS: 970 av 970 bestått.
+  - Frontendbygg og Pint på berørte filer er rene.
+  - E2E i det isolerte miljøet, på en nullstilt database: alle Kvalitet-spesifikasjoner, `compliance-quality`, `risk-controls` og `risk-context` (24 filer, 54 tester).
+    - To kjøringer etter hverandre: 51 bestått, 3 hoppet over, 0 feilet. Telt fra Playwrights JSON-rapport.
+    - De 3 som hoppes over, trenger ekte AI i serveren, og miljøet har ingen nøkkel (A25). De er **ikke verifisert** i dette steget.
+    - Ny test: `quality-process-row-actions` viser at en godkjent prosess ikke tilbyr sletting.
+    - **Rettelse:** En tidligere telling («48 bestått, 1 hoppet over») var feil. Filteret fanget ikke linjen med feilede tester. 4 spesifikasjoner feilet allerede da (A25).
+
+**Klar for senere API-integrasjon**
+
+- Ja for beslutninger og ordinære skrivinger: samme regler i domenet for enhver inngang.
+- Gjenstår før fase 1: A10 (feilformat), A22 og A23, og steg 19 (aktørtriggere for godkjennerkolonnene i Kvalitet).
+- **Føring, som for Risiko, Avvik og Ledelsens gjennomgang:** en AI-agent får ikke `quality.edit` som standard. Forslag til flyt kan senere komme gjennom avgrensede API-operasjoner, men blir en del av prosessen først når en person tar dem i bruk. Godkjenning og sletting forblir menneskeforbeholdt.
 
 ## 3. Avgrensning
 
