@@ -7,6 +7,9 @@ use App\Models\ImprovementActionStatusChange;
 use App\Models\ImprovementActionVerification;
 use App\Models\ImprovementCase;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\HumanDecision;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -37,12 +40,18 @@ use Illuminate\Validation\ValidationException;
  * Tiltak are worked while the case is open or under arbeid. Once the case is closed or cancelled,
  * its tiltak are left as they stood until the case is reopened.
  *
- * Authorization is the caller's: improvement.edit in the case's area for everything but verify(),
- * which takes improvement.close — a decision about the outcome, not the work. The owner is the
- * caller's to check too (ImprovementCaseAccessService::isValidOwner()). This guards state only.
+ * AUTHORIZATION. verify() is a human decision about the outcome, not the work: it checks
+ * HumanDecisionGuard (IMPROVEMENT_CLOSE) and improvement.close in the case's area itself, on the
+ * locked case (phase 0 step 10). The other writes take improvement.edit in the case's area; the
+ * owner is checked with ImprovementCaseAccessService::isValidOwner().
  */
 class ImprovementActionLifecycleService
 {
+    public function __construct(
+        private readonly HumanDecisionGuard $guard,
+        private readonly ImprovementCaseAccessService $access,
+    ) {}
+
     /**
      * @param  array{title: string, description: ?string, owner_user_id: int, due_date: string}  $fields
      */
@@ -139,8 +148,10 @@ class ImprovementActionLifecycleService
             ]);
         }
 
+        $actor = $this->guard->assert($actor, HumanDecision::IMPROVEMENT_CLOSE);
+
         return DB::transaction(function () use ($action, $actor, $result, $note): ImprovementActionVerification {
-            $locked = $this->lockAction($action, 'result');
+            $locked = $this->lockAction($action, 'result', fn (ImprovementCase $case): bool => $this->access->canClose($actor, $case));
 
             // The completion being judged, read inside the locks: no reopening can come between.
             $completion = $locked->status === ImprovementAction::STATUS_COMPLETED
@@ -211,10 +222,18 @@ class ImprovementActionLifecycleService
         });
     }
 
-    /** The case, locked, and still open or under arbeid. Call inside a transaction. */
-    private function lockActiveCase(ImprovementCase $case, string $errorField): ImprovementCase
+    /**
+     * The case, locked, and still open or under arbeid. Call inside a transaction.
+     *
+     * @param  (\Closure(ImprovementCase): bool)|null  $authorized
+     */
+    private function lockActiveCase(ImprovementCase $case, string $errorField, ?\Closure $authorized = null): ImprovementCase
     {
         $locked = ImprovementCase::query()->whereKey($case->id)->lockForUpdate()->firstOrFail();
+
+        if ($authorized !== null && ! $authorized($locked)) {
+            throw new AuthorizationException('This user may not act on this case.');
+        }
 
         if (! $locked->isActive()) {
             throw ValidationException::withMessages([
@@ -225,10 +244,17 @@ class ImprovementActionLifecycleService
         return $locked;
     }
 
-    /** The case and then the tiltak, both locked, in that order. Call inside a transaction. */
-    private function lockAction(ImprovementAction $action, string $errorField): ImprovementAction
+    /**
+     * The case and then the tiltak, both locked, in that order. Call inside a transaction.
+     *
+     * $authorized is the access rule, asked of the locked case before its state is: a person who may
+     * not act on the case is refused (403) before being told anything about it.
+     *
+     * @param  (\Closure(ImprovementCase): bool)|null  $authorized
+     */
+    private function lockAction(ImprovementAction $action, string $errorField, ?\Closure $authorized = null): ImprovementAction
     {
-        $case = $this->lockActiveCase(ImprovementCase::query()->findOrFail($action->improvement_case_id), $errorField);
+        $case = $this->lockActiveCase(ImprovementCase::query()->findOrFail($action->improvement_case_id), $errorField, $authorized);
 
         return ImprovementAction::query()
             ->whereKey($action->id)

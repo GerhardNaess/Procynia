@@ -147,15 +147,20 @@ class ImprovementCaseAccessService
         return $this->can($user, CustomerPermissionCatalog::IMPROVEMENT_EDIT, $case);
     }
 
-    /** Lukk, Avbryt and Gjenåpne — the decisions that end a case or undo an ending. */
+    /**
+     * Lukk, Avbryt and Gjenåpne — the decisions that end a case or undo an ending — and
+     * Effektverifisering. Human decisions: the decision key in the case's area, and the case one the
+     * person can read there. The lifecycle services ask this themselves (phase 0 step 10).
+     */
     public function canClose(User $user, ImprovementCase $case): bool
     {
-        return $this->can($user, CustomerPermissionCatalog::IMPROVEMENT_CLOSE, $case);
+        return $this->canView($user, $case) && $this->can($user, CustomerPermissionCatalog::IMPROVEMENT_CLOSE, $case);
     }
 
+    /** Deleting a case registered by mistake. A human decision; the same rule as canClose(). */
     public function canDelete(User $user, ImprovementCase $case): bool
     {
-        return $this->can($user, CustomerPermissionCatalog::IMPROVEMENT_DELETE, $case);
+        return $this->canView($user, $case) && $this->can($user, CustomerPermissionCatalog::IMPROVEMENT_DELETE, $case);
     }
 
     /**

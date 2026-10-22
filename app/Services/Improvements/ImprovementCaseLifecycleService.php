@@ -6,6 +6,9 @@ use App\Models\ImprovementAction;
 use App\Models\ImprovementCase;
 use App\Models\ImprovementCaseStatusChange;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\HumanDecision;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -20,6 +23,12 @@ use Illuminate\Validation\ValidationException;
  *                                             cancelled — but no verification needed: an avbrutt
  *                                             case ends without a successful conclusion
  *   closed | cancelled → open       reopen()  begrunnelse required
+ *
+ * AUTHORIZATION. Lukk, Avbryt, Gjenåpne and delete() are human decisions (phase 0 step 10): each
+ * checks HumanDecisionGuard (IMPROVEMENT_CLOSE, IMPROVEMENT_DELETE) first and then the person's
+ * right in the case's fagområde (ImprovementCaseAccessService::canClose/canDelete), asked of the case
+ * under its row lock, so the rule holds for every entry point. Start behandling takes
+ * improvement.edit there.
  *
  * Neither ending touches a tiltak. Unfinished tiltak are completed or cancelled by the person first,
  * never by the case.
@@ -38,35 +47,84 @@ class ImprovementCaseLifecycleService
 {
     public function __construct(
         private readonly ImprovementActionVerificationResolver $verifications,
+        private readonly HumanDecisionGuard $guard,
+        private readonly ImprovementCaseAccessService $access,
     ) {}
 
+    /** Start behandling: improvement.edit — work on the case, not a decision about it. */
     public function start(ImprovementCase $case, User $actor): ImprovementCase
     {
-        return $this->transition($case, $actor, [ImprovementCase::STATUS_OPEN], ImprovementCase::STATUS_IN_PROGRESS, null, 'status');
+        return $this->transition($case, $actor, [ImprovementCase::STATUS_OPEN], ImprovementCase::STATUS_IN_PROGRESS, null, 'status',
+            fn (ImprovementCase $locked): bool => $this->access->canView($actor, $locked) && $this->access->canEdit($actor, $locked));
     }
 
     public function close(ImprovementCase $case, User $actor, ?string $result): ImprovementCase
     {
-        return $this->transition($case, $actor, ImprovementCase::ACTIVE_STATUSES, ImprovementCase::STATUS_CLOSED, $this->required($result, 'closing_note'), 'closing_note');
+        $actor = $this->guard->assert($actor, HumanDecision::IMPROVEMENT_CLOSE);
+
+        return $this->transition($case, $actor, ImprovementCase::ACTIVE_STATUSES, ImprovementCase::STATUS_CLOSED, $this->required($result, 'closing_note'), 'closing_note', $this->mayClose($actor));
     }
 
     public function cancel(ImprovementCase $case, User $actor, ?string $reason): ImprovementCase
     {
-        return $this->transition($case, $actor, ImprovementCase::ACTIVE_STATUSES, ImprovementCase::STATUS_CANCELLED, $this->required($reason, 'reason'), 'reason');
+        $actor = $this->guard->assert($actor, HumanDecision::IMPROVEMENT_CLOSE);
+
+        return $this->transition($case, $actor, ImprovementCase::ACTIVE_STATUSES, ImprovementCase::STATUS_CANCELLED, $this->required($reason, 'reason'), 'reason', $this->mayClose($actor));
     }
 
     public function reopen(ImprovementCase $case, User $actor, ?string $reason): ImprovementCase
     {
-        return $this->transition($case, $actor, ImprovementCase::ENDED_STATUSES, ImprovementCase::STATUS_OPEN, $this->required($reason, 'reason'), 'reason');
+        $actor = $this->guard->assert($actor, HumanDecision::IMPROVEMENT_CLOSE);
+
+        return $this->transition($case, $actor, ImprovementCase::ENDED_STATUSES, ImprovementCase::STATUS_OPEN, $this->required($reason, 'reason'), 'reason', $this->mayClose($actor));
+    }
+
+    /**
+     * Delete a case registered by mistake (ImprovementCase::isDeletable(): still open, no history,
+     * no tiltak, nothing pointing at it). A human decision: HumanDecisionGuard, then improvement.delete
+     * in the case's area, then the rule — all on the case as it stands under the row lock.
+     */
+    public function delete(ImprovementCase $case, User $actor): void
+    {
+        $actor = $this->guard->assert($actor, HumanDecision::IMPROVEMENT_DELETE);
+
+        DB::transaction(function () use ($case, $actor): void {
+            $locked = ImprovementCase::query()->whereKey($case->id)->lockForUpdate()->first();
+
+            if ($locked === null || ! $this->access->canDelete($actor, $locked)) {
+                throw new AuthorizationException('This user may not delete this case.');
+            }
+
+            if (! $locked->isDeletable()) {
+                throw ValidationException::withMessages([
+                    'case' => __('procynia.improvements.validation.not_deletable'),
+                ]);
+            }
+
+            $locked->delete();
+        });
+    }
+
+    /** improvement.close in the case's area, judged on the locked case. */
+    private function mayClose(User $actor): \Closure
+    {
+        return fn (ImprovementCase $locked): bool => $this->access->canClose($actor, $locked);
     }
 
     /**
      * @param  list<string>  $from  the statuses the case may be in for this change
+     * @param  \Closure(ImprovementCase): bool  $authorized  the access rule, asked of the locked case
      */
-    private function transition(ImprovementCase $case, User $actor, array $from, string $to, ?string $note, string $errorField): ImprovementCase
+    private function transition(ImprovementCase $case, User $actor, array $from, string $to, ?string $note, string $errorField, \Closure $authorized): ImprovementCase
     {
-        return DB::transaction(function () use ($case, $actor, $from, $to, $note, $errorField): ImprovementCase {
+        return DB::transaction(function () use ($case, $actor, $from, $to, $note, $errorField, $authorized): ImprovementCase {
             $locked = ImprovementCase::query()->whereKey($case->id)->lockForUpdate()->firstOrFail();
+
+            // Asked of the case as it stands now, under the lock: a case moved out of the person's
+            // fagområde a moment ago is judged where it is.
+            if (! $authorized($locked)) {
+                throw new AuthorizationException('This user may not change the status of this case.');
+            }
 
             if (! in_array($locked->status, $from, true)) {
                 throw ValidationException::withMessages([

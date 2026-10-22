@@ -396,7 +396,8 @@ class ImprovementCaseController extends Controller
             return back()->with('error', __('procynia.improvements.validation.not_deletable'));
         }
 
-        $case->delete();
+        // The checks above give the answers people see; the service makes the decision and checks again.
+        $this->lifecycle->delete($case, $user);
 
         return redirect()->route('app.improvements.index')->with('success', __('procynia.improvements.flash.deleted'));
     }
