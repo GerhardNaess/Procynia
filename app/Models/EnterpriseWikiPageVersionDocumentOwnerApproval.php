@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class EnterpriseWikiPageVersionDocumentOwnerApproval extends Model
 {
@@ -84,6 +85,12 @@ class EnterpriseWikiPageVersionDocumentOwnerApproval extends Model
     public function overriddenBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'overridden_by_user_id');
+    }
+
+    /** Every decision taken on this requirement, oldest first — the history behind the current state. */
+    public function decisions(): HasMany
+    {
+        return $this->hasMany(EnterpriseWikiDocumentOwnerDecision::class, 'approval_id')->orderBy('decided_at')->orderBy('id');
     }
 
     public function isPending(): bool

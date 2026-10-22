@@ -114,6 +114,8 @@ class WikiDocumentOwnerApprovalController extends Controller
 
         $comment = isset($validated['comment']) ? trim($validated['comment']) : null;
 
+        $previousStatus = (string) $approval->approval_status;
+
         $this->approvalService->decide($approval, $user, $decision, $comment);
 
         $version = EnterpriseWikiPageVersion::query()->find($approval->enterprise_wiki_page_version_id);
@@ -121,7 +123,8 @@ class WikiDocumentOwnerApprovalController extends Controller
         // A refusal still returns the version to its owner: that is a real objection somebody has
         // to act on. An approval tells nobody anything, because it unblocks nothing — the page was
         // never waiting on it.
-        if ($isRejection) {
+        // Only a NEW refusal sends the version back; the same refusal again is not news (B9).
+        if ($isRejection && $previousStatus !== EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED) {
             $this->returnVersionToOwner($page, $approval, $user, (string) $comment);
         }
 

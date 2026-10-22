@@ -4,6 +4,7 @@ namespace App\Services\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiDocumentOwnerDecision;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
@@ -11,13 +12,20 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\HumanDecision;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 
 class EnterpriseWikiDocumentOwnerApprovalService
 {
     public function __construct(
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
+        private readonly HumanDecisionGuard $guard,
     ) {}
 
     /**
@@ -285,7 +293,16 @@ class EnterpriseWikiDocumentOwnerApprovalService
     }
 
     /**
-     * Apply an approval or rejection decision to the concrete approval row.
+     * Apply an approval or rejection decision to the concrete approval row — decision B9.
+     *
+     * Every decision is an event (EnterpriseWikiDocumentOwnerDecision): who, when, from what, to
+     * what, and why. The approval row keeps the current state, as before, but it is never changed
+     * without that trail. Taken under the row lock, re-checking canDecide() there, so two people
+     * deciding at once are serialised and the second one decides against what the first left.
+     *
+     * - The same decision again is not news: nothing is written.
+     * - A different decision on a decided requirement is a change of mind, and needs a reason.
+     * - Only a person may decide (HumanDecisionGuard), and only canDecide()'s people.
      */
     public function decide(
         EnterpriseWikiPageVersionDocumentOwnerApproval $approval,
@@ -293,26 +310,68 @@ class EnterpriseWikiDocumentOwnerApprovalService
         string $decision,
         ?string $comment = null,
     ): EnterpriseWikiPageVersionDocumentOwnerApproval {
-        $now = now();
-        $isOverride = ! $actor->isSystemOwner() ? false : ((int) $approval->document_owner_user_id !== (int) $actor->id);
+        $actor = $this->guard->assert($actor, HumanDecision::WIKI_DOCUMENT_OWNER_DECIDE);
 
-        $approval->forceFill([
-            'approval_status' => $decision,
-            'approval_comment' => $comment,
-            'decided_at' => $now,
-            'decided_by_user_id' => $actor->id,
-            'is_override' => $isOverride,
-            'override_reason' => $isOverride ? $comment : null,
-            'overridden_by_user_id' => $isOverride ? $actor->id : null,
-            'overridden_at' => $isOverride ? $now : null,
-        ])->save();
+        if (! in_array($decision, [
+            EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED,
+            EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED,
+        ], true)) {
+            throw new InvalidArgumentException("Unknown document-owner decision [{$decision}].");
+        }
+
+        $comment = $comment !== null && trim($comment) !== '' ? trim($comment) : null;
+
+        DB::transaction(function () use ($approval, $actor, $decision, $comment): void {
+            $locked = EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+                ->whereKey($approval->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($locked === null || ! $this->canDecide($locked, $actor)) {
+                throw new AuthorizationException('This user may not decide this document-owner requirement.');
+            }
+
+            $previous = (string) $locked->approval_status;
+
+            if ($previous === $decision) {
+                return;
+            }
+
+            if ($previous !== EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING && $comment === null) {
+                throw ValidationException::withMessages([
+                    'comment' => __('procynia.wiki.document_owner_decision_change_needs_reason'),
+                ]);
+            }
+
+            $now = now();
+            $isOverride = ! $actor->isSystemOwner() ? false : ((int) $locked->document_owner_user_id !== (int) $actor->id);
+
+            EnterpriseWikiDocumentOwnerDecision::query()->create([
+                'customer_id' => $locked->customer_id,
+                'approval_id' => $locked->id,
+                'decided_by_user_id' => $actor->id,
+                'previous_status' => $previous,
+                'decision' => $decision,
+                'comment' => $comment,
+                'is_override' => $isOverride,
+                'decided_at' => $now,
+            ]);
+
+            $locked->forceFill([
+                'approval_status' => $decision,
+                'approval_comment' => $comment,
+                'decided_at' => $now,
+                'decided_by_user_id' => $actor->id,
+                'is_override' => $isOverride,
+                'override_reason' => $isOverride ? $comment : null,
+                'overridden_by_user_id' => $isOverride ? $actor->id : null,
+                'overridden_at' => $isOverride ? $now : null,
+            ])->save();
+        });
 
         return $approval->fresh(['pageVersion.page', 'documentOwner', 'decidedBy', 'overriddenBy']);
     }
 
-    /**
-     * Returns whether the given user can decide this approval row.
-     */
     public function canDecide(EnterpriseWikiPageVersionDocumentOwnerApproval $approval, User $actor): bool
     {
         if (! $actor->is_active || ! $actor->canAccessCustomerFrontend()) {

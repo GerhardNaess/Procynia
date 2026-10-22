@@ -10740,6 +10740,7 @@ return [
         'claim_decision_text_removed' => 'Teksten ble fjernet ved beslutningen.',
         'claim_version_changed' => 'Siden er endret i mellomtiden. Last siden på nytt og prøv igjen.',
         'claim_decision_new_working_version' => 'Den publiserte versjonen er uendret. Endringen ligger i en ny arbeidsversjon som må sendes til gjennomgang før den publiseres.',
+        'document_owner_decision_change_needs_reason' => 'En beslutning som allerede er tatt, kan bare endres med en begrunnelse.',
         'notification_review_withdrawn_title' => 'Gjennomgang trukket tilbake',
         'notification_review_withdrawn_message' => ':actor trakk «:page» tilbake fra gjennomgang. Du har ikke lenger noe å godkjenne på siden.',
         'notification_review_withdrawn_unknown_actor' => 'Sideeier',
