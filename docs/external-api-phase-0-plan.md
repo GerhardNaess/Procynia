@@ -495,6 +495,7 @@ Ny arbeidsversjon for statusendringer anbefales ikke:
 |---|---|---|
 | A15 | En gjennomgang kunne settes fra utkast til ferdigstilt i SQL uten frosset grunnlag og uten ferdigstiller. CHECK krevde bare dato og navn. | Rettet (`6f5431fb`). |
 | A16 | Tillegg bruker samme nøkkel som ferdigstilling (`management_review.finalize`). Det finnes ingen egen nøkkel for å registrere tillegg. | Godtatt. Tillegg er en formell rettelse av det som ble besluttet, og ble behandlet slik i planen (§4.4). Kan vurderes skilt ut senere. |
+| A17 | **Etterlevelse (gjelder steg 13):**<br>– `compliance_audit_check_requirements` peker på `compliance_audit_requirements` (`audit_id`, `requirement_id`) med `NO ACTION`.<br>– Når en revisjon slettes, går både omfanget og kontrollhandlingene med i kaskaden. Om slettingen lykkes, avhenger av rekkefølgen PostgreSQL utløser kaskadene i, og den følger triggerens OID.<br>– I utviklingsdatabasen, som er migrert over tid, går det bra. I en database som er migrert på nytt (E2E-databasen, og produksjon i Azure), feiler slettingen med brudd på fremmednøkkel.<br>– Funnet ble avdekket av det isolerte E2E-miljøet. | **Ikke rettet i modulen.** Etterlevelse startes ikke før det er godkjent. E2E-fiksturen sletter koblingene eksplisitt først. Det bør vurderes i steg 13 om sletting av en revisjon (og sletting av en kunde) i produksjon rammes. Mulig retting: `ON DELETE CASCADE` på koblingen, eller sletting i fast rekkefølge i tjenesten. |
 | A6 | Finnes ikke her. Tilgangstjenesten bruker `CustomerPermissionService::has()`. | – |
 
 **Tester**
@@ -522,6 +523,19 @@ Ny arbeidsversjon for statusendringer anbefales ikke:
 
 - Ja. Beslutninger, redigering og oppfølging har samme regler i domenet for enhver inngang.
 - Gjenstår før fase 1: A10 (feilformat) og steg 19 (aktørtriggere for `management_reviews.finalized_by_user_id` og `management_review_amendments.created_by_user_id`).
+
+**Føring for API-fasen: AI-agenter i Ledelsens gjennomgang (besluttet 2026-10-22)**
+
+- **Utgangspunkt:** en AI-agent (integrasjonsidentitet) skal ikke få generell `management_review.edit` som standard.
+- **Senere** kan agenter, gjennom avgrensede API-operasjoner:
+  - lese relevant informasjon, for eksempel grunnlaget og tidligere gjennomganger i kundemiljøet;
+  - forberede forslag til en gjennomgang, til beslutninger eller til tiltak.
+- Et forslag blir en del av gjennomgangen først når en person med `management_review.edit` tar det i bruk.
+- Ferdigstilling, tillegg og sletting forblir menneskeforbeholdt, uansett rolle.
+- **Dagens modell er uendret i fase 0.** `management_review.edit` er ikke menneskeforbeholdt. En integrasjon med en rolle som har nøkkelen, kan i dag redigere et utkast (`ManagementReviewServiceAccessTest::test_an_integration_with_management_review_edit_may_edit_a_draft`).
+- **Konsekvens for fase 1:**
+  - Integrasjonsroller får ikke `management_review.edit` som standard.
+  - «Forslag» utformes som i Risiko og Avvik (§2c og §2d).
 
 ## 3. Avgrensning
 
