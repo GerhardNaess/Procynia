@@ -296,6 +296,40 @@ test.describe.serial('WCAG Fase 5 — Enterprise Wiki', () => {
         await expect(page.getByText('Til gjennomgang', { exact: true }).first()).toBeVisible();
     });
 
+    /**
+     * Decision B5 (docs/external-api-phase-0-plan.md §4.9): content out for review is not edited,
+     * and the owner gets it back with «Trekk tilbake». Sent again at the end, so the reviewer's
+     * step below still finds the page in review.
+     */
+    test('a page in review is locked for editing; the owner withdraws it from the keyboard and sends it again', async ({ page }) => {
+        await loginAs(page, OWNER.email, OWNER.password);
+        await page.goto(ARTICLE);
+
+        const panel = page.locator('#wiki-review-panel');
+        const edit = page.getByRole('button', { name: 'Rediger artikkel' });
+        await expect(edit).toBeDisabled();
+        await expect(page.getByText('Siden ligger til gjennomgang og kan ikke redigeres. Sideeier kan trekke den tilbake for å gjøre endringer.')).toBeVisible();
+
+        await page.getByRole('button', { name: 'Trekk tilbake', exact: true }).press('Enter');
+        const dialog = page.getByRole('dialog', { name: 'Trekk tilbake fra gjennomgang?' });
+        await expect(dialog).toBeVisible();
+        await expect(dialog).toHaveAccessibleDescription(/Den publiserte versjonen berøres ikke\./);
+        await expect(dialog.getByRole('button', { name: 'Trekk tilbake', exact: true })).toBeFocused();
+        await expectNoAxeViolations(page, '[role="dialog"]', 'trekk tilbake');
+
+        await dialog.getByRole('button', { name: 'Trekk tilbake', exact: true }).press('Enter');
+
+        await expect(dialog).toBeHidden();
+        await expect(toast(page)).toContainText('Siden er trukket tilbake fra gjennomgang og er et utkast igjen.');
+        await expect(panel).toBeFocused();
+        await expect(edit).toBeEnabled();
+
+        await page.getByRole('button', { name: 'Send til gjennomgang', exact: true }).press('Enter');
+        const submit = page.getByRole('dialog', { name: 'Send til gjennomgang' });
+        await submit.getByRole('button', { name: 'Send til gjennomgang', exact: true }).press('Enter');
+        await expect(toast(page)).toContainText('Siden er sendt til gjennomgang hos E2E Kontrollør.');
+    });
+
     test('9–10. the reviewer sends it back: the minimum length is stated, and the result is said and shown (A11Y-118)', async ({ page }) => {
         await loginAs(page, REVIEWER.email, REVIEWER.password);
         await page.goto(ARTICLE);
