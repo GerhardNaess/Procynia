@@ -18,6 +18,7 @@ use App\Services\Compliance\Library\ComplianceApplicabilityService;
 use App\Services\Compliance\Library\ComplianceFrameworkActivationService;
 use App\Services\Compliance\Library\ComplianceFrameworkLibraryImporter;
 use App\Services\EnterpriseWiki\Knowledge\Sources\ComplianceAuditKnowledgeSource;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -150,7 +151,7 @@ class ComplianceAuditChecksTest extends TestCase
     {
         ['customer' => $customer] = $this->complianceContext();
         $auditor = $this->complianceAuditor($customer);
-        $assessor = $this->complianceManager($customer);
+        $assessor = $this->complianceAuditor($customer, [CustomerPermissionCatalog::COMPLIANCE_ASSESS]);
         $audit = $this->complianceAudit($customer, $auditor);
         $source = $this->complianceSource($customer, 'Internt regelverk', null, 'internal');
         $applies = $this->complianceRequirement($source, 'Gjelder', null, 'R.1');
@@ -437,7 +438,7 @@ class ComplianceAuditChecksTest extends TestCase
     {
         ['customer' => $customer] = $this->complianceContext();
         $auditor = $this->complianceAuditor($customer);
-        $assessor = $this->complianceManager($customer);
+        $assessor = $this->complianceAuditor($customer, [CustomerPermissionCatalog::COMPLIANCE_ASSESS]);
         $requirement = $this->complianceRequirement($this->complianceSource($customer), 'Tilgangsstyring', null, 'A.5.15');
         app(ComplianceAssessmentService::class)->assess($requirement, $assessor, ComplianceAssessment::RESULT_PARTIALLY_COMPLIANT, 'Delvis på plass.');
         $assessments = fn (): array => ComplianceAssessment::query()->where('requirement_id', $requirement->id)->orderBy('id')->get(['id', 'result', 'rationale'])->toArray();

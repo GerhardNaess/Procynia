@@ -9,6 +9,9 @@ use App\Models\User;
 use App\Services\Improvements\ImprovementCaseAccessService;
 use App\Services\Improvements\ImprovementCaseCreator;
 use App\Services\Improvements\ImprovementCaseQualityContextService;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -44,6 +47,7 @@ class ComplianceAuditFindingHandoffService
 {
     public function __construct(
         private readonly ComplianceAccessService $access,
+        private readonly HumanDecisionGuard $guard,
         private readonly ImprovementCaseAccessService $improvements,
         private readonly ImprovementCaseCreator $creator,
         private readonly ImprovementCaseQualityContextService $qualityContext,
@@ -81,7 +85,11 @@ class ComplianceAuditFindingHandoffService
      */
     public function handOff(User $user, ComplianceAudit $audit, ComplianceAuditFinding $finding, array $validated): ImprovementCase
     {
-        abort_unless($this->access->canAudit($user), 403);
+        // A person hands a finding off (HumanDecision::COMPLIANCE_AUDIT, phase 0 step 13): the guard,
+        // then compliance.audit in the audit's own customer with the module. Avvik og forbedringer
+        // checks its own half — improvement.edit in the chosen fagområde — in the creator.
+        $user = $this->guard->assert($user, HumanDecision::COMPLIANCE_AUDIT);
+        $this->access->authorize($user, CustomerPermissionCatalog::COMPLIANCE_AUDIT, (int) $audit->customer_id);
 
         return DB::transaction(function () use ($user, $audit, $finding, $validated): ImprovementCase {
             $lockedAudit = ComplianceAudit::query()->whereKey($audit->id)->sharedLock()->firstOrFail();
@@ -90,7 +98,13 @@ class ComplianceAuditFindingHandoffService
                 throw ValidationException::withMessages(['finding' => __('procynia.compliance.audits.findings.validation.handoff_not_allowed')]);
             }
 
-            $locked = ComplianceAuditFinding::query()->whereKey($finding->id)->lockForUpdate()->firstOrFail();
+            // One of this audit's own findings; another audit's is not found.
+            $locked = ComplianceAuditFinding::query()
+                ->where('audit_id', $lockedAudit->id)
+                ->where('customer_id', $lockedAudit->customer_id)
+                ->whereKey($finding->id)
+                ->lockForUpdate()
+                ->firstOrFail();
 
             if ($locked->isHandedOff()) {
                 throw ValidationException::withMessages(['finding' => __('procynia.compliance.audits.findings.validation.already_handed_off')]);

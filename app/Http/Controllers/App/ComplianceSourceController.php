@@ -6,12 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Models\ComplianceSource;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
+use App\Services\Compliance\ComplianceSourceService;
 use App\Support\Compliance\ComplianceValidationMessages;
 use App\Support\CustomerContext;
-use Illuminate\Database\QueryException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Kravkilder, managed from the Krav register — not a main area of their own.
@@ -24,6 +25,7 @@ class ComplianceSourceController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly ComplianceAccessService $access,
+        private readonly ComplianceSourceService $sources,
     ) {}
 
     public function store(Request $request): RedirectResponse
@@ -67,9 +69,9 @@ class ComplianceSourceController extends Controller
         }
 
         try {
-            $source->delete();
-        } catch (QueryException) {
-            // A requirement was registered under it since the check above; its foreign key refused.
+            $this->sources->delete($source, $user);
+        } catch (ValidationException) {
+            // A requirement was registered under it since the check above.
             return back()->with('error', __('procynia.compliance.sources.in_use'));
         }
 

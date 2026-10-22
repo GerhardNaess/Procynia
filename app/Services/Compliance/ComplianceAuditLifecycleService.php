@@ -5,6 +5,9 @@ namespace App\Services\Compliance;
 use App\Models\ComplianceAudit;
 use App\Models\ComplianceAuditStatusChange;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -25,11 +28,17 @@ use Illuminate\Validation\ValidationException;
  * Completing never requires findings and never creates anything: an audit can legitimately end with
  * none. The conclusion it requires is written in the same transaction.
  *
- * Authorization is the caller's (compliance.audit through ComplianceAccessService). This only guards
- * the transition itself.
+ * Each step, and Slett, is a decision a person takes (phase 0 step 13): HumanDecisionGuard first,
+ * then the key — compliance.audit, or compliance.delete — in the audit's own customer with the
+ * module, before the row is locked. The controller asks the same first, for its own status codes.
  */
 class ComplianceAuditLifecycleService
 {
+    public function __construct(
+        private readonly HumanDecisionGuard $guard,
+        private readonly ComplianceAccessService $access,
+    ) {}
+
     public function start(ComplianceAudit $audit, User $actor, ?string $reason = null): ComplianceAudit
     {
         return $this->transition($audit, $actor, [ComplianceAudit::STATUS_PLANNED], ComplianceAudit::STATUS_IN_PROGRESS, $this->optional($reason));
@@ -37,6 +46,7 @@ class ComplianceAuditLifecycleService
 
     public function complete(ComplianceAudit $audit, User $actor, ?string $conclusion, ?string $reason = null): ComplianceAudit
     {
+        $actor = $this->authorizeAudit($actor, $audit);
         $text = trim((string) $conclusion);
 
         if ($text === '') {
@@ -64,6 +74,8 @@ class ComplianceAuditLifecycleService
      */
     private function transition(ComplianceAudit $audit, User $actor, array $from, string $to, ?string $reason, array $fields = []): ComplianceAudit
     {
+        $actor = $this->authorizeAudit($actor, $audit);
+
         return DB::transaction(function () use ($audit, $actor, $from, $to, $reason, $fields): ComplianceAudit {
             $locked = ComplianceAudit::query()->whereKey($audit->id)->lockForUpdate()->firstOrFail();
 
@@ -90,6 +102,36 @@ class ComplianceAuditLifecycleService
 
             return $locked;
         });
+    }
+
+    /**
+     * Slett: an audit registered by mistake — still planned and never moved (isDeletable(), read again
+     * under the lock). Anything else is cancelled instead; the history trigger refuses the delete too.
+     */
+    public function delete(ComplianceAudit $audit, User $actor): void
+    {
+        $actor = $this->guard->assert($actor, HumanDecision::COMPLIANCE_DELETE);
+        $this->access->authorize($actor, CustomerPermissionCatalog::COMPLIANCE_DELETE, (int) $audit->customer_id);
+
+        DB::transaction(function () use ($audit): void {
+            $locked = ComplianceAudit::query()->whereKey($audit->id)->lockForUpdate()->firstOrFail();
+
+            if (! $locked->isDeletable()) {
+                throw ValidationException::withMessages([
+                    'audit' => __('procynia.compliance.audits.validation.not_deletable'),
+                ]);
+            }
+
+            $locked->delete();
+        });
+    }
+
+    private function authorizeAudit(User $actor, ComplianceAudit $audit): User
+    {
+        $actor = $this->guard->assert($actor, HumanDecision::COMPLIANCE_AUDIT);
+        $this->access->authorize($actor, CustomerPermissionCatalog::COMPLIANCE_AUDIT, (int) $audit->customer_id);
+
+        return $actor;
     }
 
     private function required(?string $reason): string

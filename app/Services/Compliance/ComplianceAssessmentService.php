@@ -5,6 +5,9 @@ namespace App\Services\Compliance;
 use App\Models\ComplianceAssessment;
 use App\Models\ComplianceRequirement;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -16,17 +19,26 @@ use Illuminate\Validation\ValidationException;
  * the requirement and its source are copied into the assessment as they read at that moment. A
  * library requirement is assessed only while it applies, and never as Ikke relevant.
  *
- * Authorization is the caller's (compliance.assess through ComplianceAccessService). This only
- * guards the assessment itself.
+ * Assessing is a decision a person takes (HumanDecision::COMPLIANCE_ASSESS, phase 0 step 13): the
+ * guard first, then compliance.assess in the requirement's own customer with the module, before
+ * anything is read or written. The controller asks the same first, for its own status codes.
  */
 class ComplianceAssessmentService
 {
+    public function __construct(
+        private readonly HumanDecisionGuard $guard,
+        private readonly ComplianceAccessService $access,
+    ) {}
+
     /**
      * $documentation is optional: what the assessment points to — a Wiki article, a document
      * reference, a link — one per line. Blank is stored as null.
      */
     public function assess(ComplianceRequirement $requirement, User $actor, string $result, ?string $rationale, ?string $documentation = null): ComplianceAssessment
     {
+        $actor = $this->guard->assert($actor, HumanDecision::COMPLIANCE_ASSESS);
+        $this->access->authorize($actor, CustomerPermissionCatalog::COMPLIANCE_ASSESS, (int) $requirement->customer_id);
+
         $rationale = trim((string) $rationale);
         $documentation = trim((string) $documentation);
 

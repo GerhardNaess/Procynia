@@ -14,6 +14,7 @@ use App\Services\Compliance\ComplianceAuditFindingHandoffService;
 use App\Services\Compliance\ComplianceAuditFindingService;
 use App\Services\Compliance\ComplianceAuditLifecycleService;
 use App\Services\Compliance\ComplianceAuditScopeService;
+use App\Services\Compliance\ComplianceAuditService;
 use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeHandoffService;
 use App\Services\Improvements\ImprovementCaseCreator;
 use App\Support\CalendarDate;
@@ -24,7 +25,6 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -61,6 +61,7 @@ class ComplianceAuditController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly ComplianceAccessService $access,
         private readonly ComplianceAuditLifecycleService $lifecycle,
+        private readonly ComplianceAuditService $audits,
         private readonly ComplianceAuditScopeService $scope,
         private readonly ComplianceAuditFindingService $findings,
         private readonly ComplianceAuditCheckService $checks,
@@ -242,17 +243,7 @@ class ComplianceAuditController extends Controller
         ], ComplianceValidationMessages::messages(), ComplianceValidationMessages::attributes());
 
         // One step: the audit and the scope it was planned with, or neither.
-        $audit = DB::transaction(function () use ($user, $fields, $scope): ComplianceAudit {
-            $audit = ComplianceAudit::query()->create($fields + [
-                'customer_id' => (int) $user->customer_id,
-                'created_by' => $user->id,
-                'updated_by' => $user->id,
-            ]);
-
-            $this->scope->addInitialRequirements($user, $audit, $scope['requirement_ids'] ?? [], $scope['source_ids'] ?? []);
-
-            return $audit;
-        });
+        $audit = $this->audits->create($user, $fields, array_map('intval', $scope['requirement_ids'] ?? []), array_map('intval', $scope['source_ids'] ?? []));
 
         return redirect()
             ->route('app.compliance.audits.show', ['auditId' => $audit->id])
@@ -277,7 +268,7 @@ class ComplianceAuditController extends Controller
 
         $fields = $this->validatedFields($request, $user, $audit->editableFields(), $audit);
 
-        $audit->fill($fields + ['updated_by' => $user->id])->save();
+        $this->audits->update($user, $audit, $fields);
 
         return back()->with('success', __('procynia.compliance.audits.flash.updated'));
     }
@@ -511,7 +502,7 @@ class ComplianceAuditController extends Controller
             return back()->with('error', __('procynia.compliance.audits.validation.not_deletable'));
         }
 
-        $audit->delete();
+        $this->lifecycle->delete($audit, $user);
 
         return redirect()->route('app.compliance.audits.index')->with('success', __('procynia.compliance.audits.flash.deleted'));
     }

@@ -12,6 +12,9 @@ use App\Models\ComplianceSource;
 use App\Models\QualityItem;
 use App\Models\User;
 use App\Services\Quality\QualityProcessContextReader;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
@@ -53,6 +56,7 @@ class ComplianceAuditScopeService
 {
     public function __construct(
         private readonly ComplianceAccessService $access,
+        private readonly HumanDecisionGuard $guard,
         private readonly QualityProcessContextReader $quality,
         private readonly ComplianceStatusResolver $status,
         private readonly ComplianceAssessmentOverview $overview,
@@ -347,14 +351,27 @@ class ComplianceAuditScopeService
      */
     private function authorizeRequirements(User $user, ComplianceAudit $audit): void
     {
-        abort_unless($this->access->canAudit($user), 403);
+        $this->authorizeAudit($user, $audit);
         $this->assertScopeOpen($audit);
     }
 
     private function authorizeProcesses(User $user, ComplianceAudit $audit): void
     {
-        abort_unless($this->access->canAudit($user) && $this->canReadQuality($user), 403);
+        $this->authorizeAudit($user, $audit);
+        abort_unless($this->canReadQuality($user), 403);
         $this->assertScopeOpen($audit);
+    }
+
+    /**
+     * Revisjonsarbeid is a person's (HumanDecision::COMPLIANCE_AUDIT, phase 0 step 13): the guard, then
+     * compliance.audit in the audit's own customer with the module — before anything is read.
+     */
+    private function authorizeAudit(User $user, ComplianceAudit $audit): User
+    {
+        $user = $this->guard->assert($user, HumanDecision::COMPLIANCE_AUDIT);
+        $this->access->authorize($user, CustomerPermissionCatalog::COMPLIANCE_AUDIT, (int) $audit->customer_id);
+
+        return $user;
     }
 
     private function assertScopeOpen(ComplianceAudit $audit): void

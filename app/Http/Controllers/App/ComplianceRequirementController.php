@@ -457,7 +457,7 @@ class ComplianceRequirementController extends Controller
             return back()->with('error', __('procynia.compliance.validation.not_deletable'));
         }
 
-        $requirement->delete();
+        $this->lifecycle->delete($requirement, $user);
 
         return redirect()->route('app.compliance.requirements.index')->with('success', __('procynia.compliance.flash.deleted'));
     }

@@ -5,6 +5,9 @@ namespace App\Services\Compliance;
 use App\Models\ComplianceRequirement;
 use App\Models\ComplianceRequirementStatusChange;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -18,11 +21,18 @@ use Illuminate\Validation\ValidationException;
  * transaction, with the requirement row locked and its status checked again inside the lock, so a
  * double submit or two people at once cannot write the same change twice.
  *
- * Authorization is the caller's (compliance.edit through ComplianceAccessService). This only
- * guards the transition itself.
+ * Retiring and reopening is ordinary register work: compliance.edit, in the requirement's own
+ * customer with the module, checked here (phase 0 step 13). Slett is a decision a person takes:
+ * HumanDecisionGuard, then compliance.delete. The controller asks the same first, for its own
+ * status codes.
  */
 class ComplianceRequirementLifecycleService
 {
+    public function __construct(
+        private readonly HumanDecisionGuard $guard,
+        private readonly ComplianceAccessService $access,
+    ) {}
+
     public function retire(ComplianceRequirement $requirement, User $actor, ?string $reason): ComplianceRequirement
     {
         return $this->transition($requirement, $actor, ComplianceRequirement::STATUS_ACTIVE, ComplianceRequirement::STATUS_RETIRED, $reason);
@@ -33,8 +43,33 @@ class ComplianceRequirementLifecycleService
         return $this->transition($requirement, $actor, ComplianceRequirement::STATUS_RETIRED, ComplianceRequirement::STATUS_ACTIVE, $reason);
     }
 
+    /**
+     * Slett: a requirement registered by mistake — active, never assessed, never moved, in no audit's
+     * scope and named by no finding (isDeletable(), read again under the lock). Anything else is
+     * retired instead; the history triggers and foreign keys refuse the delete too.
+     */
+    public function delete(ComplianceRequirement $requirement, User $actor): void
+    {
+        $actor = $this->guard->assert($actor, HumanDecision::COMPLIANCE_DELETE);
+        $this->access->authorize($actor, CustomerPermissionCatalog::COMPLIANCE_DELETE, (int) $requirement->customer_id);
+
+        DB::transaction(function () use ($requirement): void {
+            $locked = ComplianceRequirement::query()->whereKey($requirement->id)->lockForUpdate()->firstOrFail();
+
+            if (! $locked->isDeletable()) {
+                throw ValidationException::withMessages([
+                    'requirement' => __('procynia.compliance.validation.not_deletable'),
+                ]);
+            }
+
+            $locked->delete();
+        });
+    }
+
     private function transition(ComplianceRequirement $requirement, User $actor, string $from, string $to, ?string $reason): ComplianceRequirement
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::COMPLIANCE_EDIT, (int) $requirement->customer_id);
+
         $note = trim((string) $reason);
 
         if ($note === '') {

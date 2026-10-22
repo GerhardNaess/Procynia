@@ -14,6 +14,9 @@ use App\Models\QualityItem;
 use App\Models\User;
 use App\Services\Improvements\ImprovementCaseAccessService;
 use App\Services\Quality\QualityProcessContextReader;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -50,6 +53,7 @@ class ComplianceAuditFindingService
 {
     public function __construct(
         private readonly ComplianceAccessService $access,
+        private readonly HumanDecisionGuard $guard,
         private readonly QualityProcessContextReader $quality,
         private readonly ImprovementCaseAccessService $improvements,
     ) {}
@@ -172,7 +176,7 @@ class ComplianceAuditFindingService
     /** @param  array<string, mixed>  $input  validated by the controller */
     public function create(User $user, ComplianceAudit $audit, array $input): ComplianceAuditFinding
     {
-        abort_unless($this->access->canAudit($user), 403);
+        $user = $this->authorizeAudit($user, $audit);
 
         $fields = $this->fields($user, $audit, $input, null);
 
@@ -191,13 +195,13 @@ class ComplianceAuditFindingService
     /** @param  array<string, mixed>  $input  validated by the controller */
     public function update(User $user, ComplianceAudit $audit, ComplianceAuditFinding $finding, array $input): void
     {
-        abort_unless($this->access->canAudit($user), 403);
+        $user = $this->authorizeAudit($user, $audit);
 
         $fields = $this->fields($user, $audit, $input, $finding);
 
         DB::transaction(function () use ($user, $audit, $finding, $fields): void {
             $this->lockOpenAudit($audit);
-            $locked = $this->lockOpenFinding($finding);
+            $locked = $this->lockOpenFinding($audit, $finding);
 
             $locked->fill($fields + ['updated_by' => $user->id])->save();
         });
@@ -205,11 +209,11 @@ class ComplianceAuditFindingService
 
     public function delete(User $user, ComplianceAudit $audit, ComplianceAuditFinding $finding): void
     {
-        abort_unless($this->access->canAudit($user), 403);
+        $this->authorizeAudit($user, $audit);
 
         DB::transaction(function () use ($audit, $finding): void {
             $this->lockOpenAudit($audit);
-            $this->lockOpenFinding($finding)->delete();
+            $this->lockOpenFinding($audit, $finding)->delete();
         });
     }
 
@@ -314,6 +318,18 @@ class ComplianceAuditFindingService
         return $id;
     }
 
+    /**
+     * Revisjonsarbeid is a person's (HumanDecision::COMPLIANCE_AUDIT, phase 0 step 13): the guard, then
+     * compliance.audit in the audit's own customer with the module — before anything is read.
+     */
+    private function authorizeAudit(User $user, ComplianceAudit $audit): User
+    {
+        $user = $this->guard->assert($user, HumanDecision::COMPLIANCE_AUDIT);
+        $this->access->authorize($user, CustomerPermissionCatalog::COMPLIANCE_AUDIT, (int) $audit->customer_id);
+
+        return $user;
+    }
+
     /** The audit row, locked against a lifecycle step, still in progress. */
     private function lockOpenAudit(ComplianceAudit $audit): void
     {
@@ -324,10 +340,15 @@ class ComplianceAuditFindingService
         }
     }
 
-    /** The finding row, locked, still not handed off. */
-    private function lockOpenFinding(ComplianceAuditFinding $finding): ComplianceAuditFinding
+    /** The finding row, locked, one of this audit's own, still not handed off. */
+    private function lockOpenFinding(ComplianceAudit $audit, ComplianceAuditFinding $finding): ComplianceAuditFinding
     {
-        $locked = ComplianceAuditFinding::query()->whereKey($finding->id)->lockForUpdate()->firstOrFail();
+        $locked = ComplianceAuditFinding::query()
+            ->where('audit_id', $audit->id)
+            ->where('customer_id', $audit->customer_id)
+            ->whereKey($finding->id)
+            ->lockForUpdate()
+            ->firstOrFail();
 
         if ($locked->isHandedOff()) {
             throw ValidationException::withMessages(['finding' => __('procynia.compliance.audits.findings.validation.handed_off_locked')]);

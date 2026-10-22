@@ -168,7 +168,7 @@ class ComplianceAuditScopeTest extends TestCase
         $already = $this->complianceRequirement($source, 'Allerede i scope', null, 'A.1');
         $active = $this->complianceRequirement($source, 'Aktivt', null, 'A.2');
         $retired = $this->complianceRequirement($source, 'Utgått', null, 'A.3');
-        app(ComplianceRequirementLifecycleService::class)->retire($retired, $auditor, 'Erstattet.');
+        app(ComplianceRequirementLifecycleService::class)->retire($retired, $this->complianceEditor($customer), 'Erstattet.');
         $elsewhere = $this->complianceRequirement($other, 'Annen kilde');
         $this->actingAs($auditor)->post($this->url($audit, 'requirements'), ['requirement_ids' => [$already->id]])->assertSessionHasNoErrors();
 
@@ -205,7 +205,7 @@ class ComplianceAuditScopeTest extends TestCase
         $source = $this->complianceSource($customer);
         $historic = $this->complianceRequirement($source, 'Tidligere krav', null, 'A.9');
         $later = $this->complianceRequirement($source, 'Utgår etterpå', null, 'A.10');
-        app(ComplianceRequirementLifecycleService::class)->retire($historic, $auditor, 'Erstattet av ny versjon.');
+        app(ComplianceRequirementLifecycleService::class)->retire($historic, $this->complianceEditor($customer), 'Erstattet av ny versjon.');
 
         // Offered, after the active ones, and marked.
         $options = $this->props($auditor, $audit)['requirement_options']['requirements'];
@@ -213,7 +213,7 @@ class ComplianceAuditScopeTest extends TestCase
         $this->assertSame('retired', $options[1]['status']);
 
         $this->actingAs($auditor)->post($this->url($audit, 'requirements'), ['requirement_ids' => [$historic->id, $later->id]])->assertSessionHasNoErrors();
-        app(ComplianceRequirementLifecycleService::class)->retire($later, $auditor, 'Gjelder ikke lenger.');
+        app(ComplianceRequirementLifecycleService::class)->retire($later, $this->complianceEditor($customer), 'Gjelder ikke lenger.');
 
         // Both stay in scope, both shown as retired — nothing removed them.
         $requirements = $this->props($auditor, $audit)['requirements'];

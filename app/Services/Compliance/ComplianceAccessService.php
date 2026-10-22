@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerPermissionCatalog;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
@@ -32,6 +33,12 @@ use Illuminate\Database\Eloquent\Builder;
  * the data set *before* any lookup. A requirement the user may not read, or one of another
  * customer, is absent — not listed, not counted, not searchable and 404 by URL, the same answer as
  * an id that does not exist.
+ *
+ * THE SERVICES ASK TOO (phase 0 step 13, docs/external-api-phase-0-plan.md §2i). Every write checks
+ * authorize() itself — the key, in the actor's own customer, with the module — so the rule holds for
+ * any entry point and not only a web request. The decisions (compliance.assess, compliance.audit,
+ * compliance.delete) pass HumanDecisionGuard first; those keys are human-only, which
+ * CustomerPermissionService::has() already withholds from an integration.
  */
 class ComplianceAccessService
 {
@@ -39,6 +46,31 @@ class ComplianceAccessService
         private readonly CustomerPermissionService $permissions,
         private readonly ModuleEntitlementService $entitlements,
     ) {}
+
+    /**
+     * The rule a service applies before it writes: the key, in the actor's own customer — the one the
+     * record belongs to — with the compliance module. canOpenModule() (compliance.view) comes with it,
+     * as it does for every can*() below.
+     */
+    public function may(?User $actor, string $permissionKey, ?int $customerId): bool
+    {
+        $customer = $actor?->customer;
+
+        return $customer !== null
+            && $customerId !== null
+            && (int) $actor->customer_id === $customerId
+            && $this->entitlements->hasModule($customer, 'compliance')
+            && $this->canOpenModule($actor)
+            && $this->permissions->has($actor, $permissionKey);
+    }
+
+    /** The rule, as a refusal (403). */
+    public function authorize(User $actor, string $permissionKey, int $customerId): void
+    {
+        if (! $this->may($actor, $permissionKey, $customerId)) {
+            throw new AuthorizationException("This user may not [{$permissionKey}] in this customer's Etterlevelse og revisjon.");
+        }
+    }
 
     /** Whether the user may open Etterlevelse og revisjon at all. */
     public function canOpenModule(?User $user): bool

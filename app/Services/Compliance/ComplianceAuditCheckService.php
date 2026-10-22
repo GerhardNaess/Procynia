@@ -9,6 +9,9 @@ use App\Models\ComplianceAuditFinding;
 use App\Models\ComplianceAuditRequirement;
 use App\Models\ComplianceRequirement;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -36,6 +39,7 @@ class ComplianceAuditCheckService
 {
     public function __construct(
         private readonly ComplianceAccessService $access,
+        private readonly HumanDecisionGuard $guard,
     ) {}
 
     /** Ny kontrollhandling, Rediger and Slett: compliance.audit on an audit in progress. */
@@ -101,7 +105,7 @@ class ComplianceAuditCheckService
     /** @param  array<string, mixed>  $input  validated by the controller */
     public function create(User $user, ComplianceAudit $audit, array $input): ComplianceAuditCheck
     {
-        abort_unless($this->access->canAudit($user), 403);
+        $user = $this->authorizeAudit($user, $audit);
 
         $fields = $this->fields($input);
         $requirementIds = $this->requirementIds($audit, $input['requirement_ids'] ?? []);
@@ -125,14 +129,14 @@ class ComplianceAuditCheckService
     /** @param  array<string, mixed>  $input  validated by the controller */
     public function update(User $user, ComplianceAudit $audit, ComplianceAuditCheck $check, array $input): void
     {
-        abort_unless($this->access->canAudit($user), 403);
+        $user = $this->authorizeAudit($user, $audit);
 
         $fields = $this->fields($input);
         $requirementIds = $this->requirementIds($audit, $input['requirement_ids'] ?? []);
 
         DB::transaction(function () use ($user, $audit, $check, $fields, $requirementIds): void {
             $this->lockOpenAudit($audit);
-            $locked = ComplianceAuditCheck::query()->whereKey($check->id)->lockForUpdate()->firstOrFail();
+            $locked = $this->lockedCheck($audit, $check);
 
             $locked->fill($fields + ['updated_by' => $user->id])->save();
             $this->syncRequirements($audit, $locked, $requirementIds);
@@ -142,11 +146,11 @@ class ComplianceAuditCheckService
     /** Slett: only a check no finding came from. */
     public function delete(User $user, ComplianceAudit $audit, ComplianceAuditCheck $check): void
     {
-        abort_unless($this->access->canAudit($user), 403);
+        $this->authorizeAudit($user, $audit);
 
         DB::transaction(function () use ($audit, $check): void {
             $this->lockOpenAudit($audit);
-            $locked = ComplianceAuditCheck::query()->whereKey($check->id)->lockForUpdate()->firstOrFail();
+            $locked = $this->lockedCheck($audit, $check);
 
             if (ComplianceAuditFinding::query()->where('check_id', $locked->id)->exists()) {
                 throw ValidationException::withMessages(['check' => __('procynia.compliance.audits.checks.validation.has_findings')]);
@@ -224,6 +228,29 @@ class ComplianceAuditCheckService
                 'requirement_id' => $requirementId,
             ]);
         }
+    }
+
+    /** The check row, locked — and only as one of this audit's own: another audit's check is not found. */
+    private function lockedCheck(ComplianceAudit $audit, ComplianceAuditCheck $check): ComplianceAuditCheck
+    {
+        return ComplianceAuditCheck::query()
+            ->where('audit_id', $audit->id)
+            ->where('customer_id', $audit->customer_id)
+            ->whereKey($check->id)
+            ->lockForUpdate()
+            ->firstOrFail();
+    }
+
+    /**
+     * Revisjonsarbeid is a person's (HumanDecision::COMPLIANCE_AUDIT, phase 0 step 13): the guard, then
+     * compliance.audit in the audit's own customer with the module — before anything is read.
+     */
+    private function authorizeAudit(User $user, ComplianceAudit $audit): User
+    {
+        $user = $this->guard->assert($user, HumanDecision::COMPLIANCE_AUDIT);
+        $this->access->authorize($user, CustomerPermissionCatalog::COMPLIANCE_AUDIT, (int) $audit->customer_id);
+
+        return $user;
     }
 
     /** The audit row, locked against a lifecycle step, still in progress. */
