@@ -17,8 +17,10 @@
   - A4 (`e4e56f50`)
   - steg 9, Risiko (`cc3a4e90`, `595deea4`, `b03fd473`, `4c3cd3bf`, E2E-retting `f5e66bf6`), se §2c
   - steg 10, Avvik og forbedringer (`45ece813`, `5079e978`, `6a6df31d`, `9059f765`), se §2d
+  - steg 11, Ledelsens gjennomgang (`34d4c8ba`, `3d89f627`, `6f5431fb`), se §2e
 - Wiki-delen av fase 0 og Risiko (steg 9) er gjennomført og godkjent 2026-10-22.
-- Avvik og forbedringer (steg 10) er gjennomført 2026-10-22 og venter på vurdering. Ledelsens gjennomgang og de andre modulene startes ikke før det.
+- Avvik og forbedringer (steg 10) er gjennomført og godkjent 2026-10-22.
+- Ledelsens gjennomgang (steg 11) er gjennomført 2026-10-22 og venter på vurdering. De andre modulene startes ikke før det.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -435,6 +437,92 @@ Ny arbeidsversjon for statusendringer anbefales ikke:
   - «Forslag» utformes som i Risiko (§2c). Det bør være samme begrep i begge moduler.
   - Lukk, Avbryt, Gjenåpne, Effektverifisering og Slett forblir menneskeforbeholdt, uansett rolle.
 
+### 2e. Ledelsens gjennomgang (steg 11) – kartlegging og gjennomføring (2026-10-22)
+
+**Kartlegging før steg 11**
+
+- Modulen er ikke avgrenset av fagområder. Tilgang gis med nøklene `management_review.*` på kunden og modulen.
+- `ManagementReviewAccessService` bruker `CustomerPermissionService::has()`. Fratrekket for integrasjoner gjelder derfor allerede. Hullet A6 fra Risiko og Avvik finnes ikke her.
+
+| Handling | Rettighet | Kontrollert i | Merknad |
+|---|---|---|---|
+| Ferdigstill | `management_review.finalize` (menneskeforbeholdt) | **Bare kontrolleren** | Tjenesten låste, sjekket klarhet med ferdigstillerens egen tilgang, frøs grunnlaget og skrev hendelse. |
+| Tillegg etter ferdigstilling | `management_review.finalize` | **Bare kontrolleren** | Tillegget og hendelsen var uforanderlige. |
+| Slette utkast | `management_review.delete` (menneskeforbeholdt) | **Bare kontrolleren** | `isDeletable()` og slettehendelsen lå i tjenesten. |
+| Utkast, konklusjon, deltakere, seksjoner, neste gjennomgang og eier | `management_review.edit` | **Bare kontrolleren** | Seksjonsvurdering sjekket allerede synlighet til seksjonen i tjenesten. |
+| Beslutninger og tiltak: opprette, endre, slette, omfordele, overføre og koble | `management_review.edit` | **Bare kontrolleren** | Overføring til Avvik går via `ImprovementCaseCreator`, som sjekker fagområdet selv. |
+| Oppfølging av tiltak (fullfør, avbryt, gjenåpne) | Tiltakets eier eller `management_review.edit` | `canFollowUp` bare i kontrolleren | |
+
+**Gjennomført**
+
+| Commit | Innhold |
+|---|---|
+| `34d4c8ba` | Ferdigstilling og tillegg bruker vakten `MANAGEMENT_REVIEW_FINALIZE`, og sletting bruker `MANAGEMENT_REVIEW_DELETE`. Deretter kjøres `canFinalizeReview`/`canDeleteReview` på den låste gjennomgangen. Det krever nøkkel, modul og visning i personens egen kunde. |
+| `3d89f627` | Alle ordinære skrivinger sjekker `management_review.edit` i tjenesten, på den låste gjennomgangen (`lockedEditable`). Oppfølging av tiltak sjekker `canFollowUp` for egen kunde. Tilgang sjekkes før eiervalidering. |
+| `6f5431fb` | En gjennomgang kan bare bli ferdigstilt med frosset grunnlag og ferdigstiller (A15). |
+
+**Sikkerhetsregler**
+
+1. Ferdigstilling, tillegg og sletting går bare gjennom tjenestene:
+   - vakten nekter integrasjoner, inaktive personer og API-kanalen, også i delegert modus;
+   - deretter kreves riktig nøkkel for en gjennomgang i egen kunde.
+2. Andre kunders gjennomganger er utilgjengelige. Det gjelder også kundens System Owner. Kontrolleren svarer 404 og tjenesten 403.
+3. **Uendret regel:** System Owner har alle nøkler i dette domenet, som ikke krever eksplisitt tildeling.
+   - System Owner består vakten og tilgangskontrollen.
+   - Klarhet beregnes likevel med ferdigstillerens egen tilgang. Uten en rolle som når de beskyttede seksjonene, er gjennomgangen ikke klar for System Owner, slik som før.
+   - Testen viser begge deler.
+4. Ordinær redigering er ikke menneskeforbeholdt. En integrasjon med `management_review.edit` kan redigere et utkast. Ferdigstilling, tillegg og sletting kan den aldri.
+
+**Historikk og dataintegritet**
+
+| Spørsmål | Svar |
+|---|---|
+| Er en ferdigstilt gjennomgang et uforanderlig øyeblikksbilde? | Ja. Databasen låste allerede gjennomgangen, beslutningene, grunnlaget, tilleggene og hendelsene. Bare eier, neste gjennomgang og oppfølging av tiltak kan endres, og hver slik endring er en hendelse. **Nytt:** overgangen til ferdigstilt krever grunnlag og ferdigstiller (A15). |
+| Registreres tillegg uten å endre tidligere beslutninger? | Ja. Et tillegg er en egen, uforanderlig rad og en hendelse. Konklusjon og beslutninger står urørt (testet). |
+| Kan ferdigstilte gjennomganger eller beslutninger slettes indirekte? | Nei. Det gjelder ferdigstilt gjennomgang, beslutninger i en ferdigstilt gjennomgang og beslutninger som er overført til Avvik. En sak i Avvik som en beslutning peker på, kan heller ikke slettes. Bare sletting av kunden tar alt med seg. |
+| Kan historikk endres eller slettes direkte i databasen? | Nei. Det gjelder grunnlaget, tilleggene og hendelsene. Når et utkast slettes, blir slettehendelsen stående (testet). |
+| Har endringene riktig aktør og tidspunkt? | Ja for hendelser, tillegg, ferdigstilling, oppfølging og seksjonsvurderinger. Deltakere i et utkast har ingen egen aktør. Det er godtatt, fordi et utkast ikke er historikk og blir låst ved ferdigstilling. |
+
+**Migrering og data**
+
+- `2026_10_22_000007_finalize_management_review_only_with_its_snapshot` legger bare til en trigger på overgangen.
+- Utviklingsdatabasen har ett utkast og ingen ferdigstilt gjennomgang. Ingen rader endres.
+- Migreringen kan rulles tilbake. Det er prøvd på testdatabasen.
+
+**Arkitekturfunn**
+
+| # | Funn | Vurdering |
+|---|---|---|
+| A15 | En gjennomgang kunne settes fra utkast til ferdigstilt i SQL uten frosset grunnlag og uten ferdigstiller. CHECK krevde bare dato og navn. | Rettet (`6f5431fb`). |
+| A16 | Tillegg bruker samme nøkkel som ferdigstilling (`management_review.finalize`). Det finnes ingen egen nøkkel for å registrere tillegg. | Godtatt. Tillegg er en formell rettelse av det som ble besluttet, og ble behandlet slik i planen (§4.4). Kan vurderes skilt ut senere. |
+| A6 | Finnes ikke her. Tilgangstjenesten bruker `CustomerPermissionService::has()`. | – |
+
+**Tester**
+
+- `ManagementReviewHumanDecisionTest` (7):
+  - en leder kan ta alle tre beslutningene, med ferdigstiller, grunnlag og forfatter registrert;
+  - System Owner består tilgangskontrollen og møter deretter klarhetskravet som før;
+  - disse nektes, og ingenting skrives: integrasjon, API-kanal (delegert), inaktiv person, lese- og redigeringstilgang uten beslutningsnøkkel, bare lesetilgang, nøkler uten visning, og leder eller System Owner i en annen kunde.
+- `ManagementReviewServiceAccessTest` (5):
+  - redigerer og integrasjon med `management_review.edit` kan;
+  - nekting på alle elleve skrivinger for personer uten rett og for andre kunder;
+  - en leser kan ikke opprette;
+  - oppfølging av tiltak er bare for eieren eller en redigerer.
+- `ManagementReviewHistoryIntegrityTest` (5): overgangsregelen; et uforanderlig øyeblikksbilde med tillegg ved siden av; hendelser med aktør og tid; slettehendelsen; kundesletting.
+- Mutasjonssjekket: vakt, tilgangsregler for beslutninger og redigering, oppfølging av tiltak (også kundekontrollen) og den nye triggeren.
+- Kjøringer 2026-10-22:
+  - PHP: alle testfiler som berører Ledelsens gjennomgang (11 filer), 94 av 94 bestått.
+  - JS: 2130 av 2130 bestått. En første kjøring, samtidig med E2E, rapporterte 970 bestått og 0 feilet. Det er ikke forklart. Ny kjøring alene ga hele suiten.
+  - Frontendbygg og Pint er rene.
+  - E2E for Ledelsens gjennomgang, kunnskapsoverføring og Mine oppgaver: 6 av 7 bestått.
+    - Feilen er en uventet ny innlasting av siden midt i reisetesten. Den er dokumentert med spor under KTF-4 og er ikke knyttet til endringene.
+    - `management-review.spec.js` besto 4 av 4 ved ny kjøring.
+
+**Klar for senere API-integrasjon**
+
+- Ja. Beslutninger, redigering og oppfølging har samme regler i domenet for enhver inngang.
+- Gjenstår før fase 1: A10 (feilformat) og steg 19 (aktørtriggere for `management_reviews.finalized_by_user_id` og `management_review_amendments.created_by_user_id`).
+
 ## 3. Avgrensning
 
 **Med i fase 0:**
@@ -565,7 +653,7 @@ Kontrolleren beholder sine sjekker *før* tjenestekallet, slik at statuskoder og
 | **Leverandør** | `SupplierAssessmentService::record` | `canAssess` | `SupplierAssessmentController:36` |
 | | `SupplierLifecycleService::delete` | `canDelete` | `SupplierManagementController:530` |
 | | `supplier.assure`-tjenestene | **Sjekker allerede selv.** Får bare vakten. | – |
-| **Ledelsens gjennomgåelse** | `ManagementReviewFinalizationService::finalize`, `ManagementReviewService::addAmendment` | `canFinalize` | `ManagementReviewController:217, :248` |
+| **Ledelsens gjennomgåelse** *(gjort, §2e)* | `ManagementReviewFinalizationService::finalize`, `ManagementReviewService::addAmendment` | `canFinalize` | `ManagementReviewController:217, :248` |
 | | `ManagementReviewService::delete` | `canDelete` | `ManagementReviewController:156` |
 | **Kvalitet** | `QualityProcessBlueprintService::approve` | `quality.approve` | `QualityController:1004` |
 | | Godta AI-forslag til flyt (`adoptFlowProposal`, `acceptFlowChange`) | `quality.edit`. Beslutningen `QUALITY_FLOW_ADOPT` er menneskeforbeholdt selv om rettigheten ikke er det. | `QualityController:689, :944` |
@@ -655,7 +743,7 @@ Hver linje er én commit. Hver commit kjører sine målrettede tester før den l
 | 8 | `fix(wiki): guard FinalizeEnterpriseWikiIngest against pages in review` | **F2**: oppdater bare `status IN (draft)`. Testene får en ekstra påstand. | – |
 | 9 | `refactor(risk): decisions and deletion in services; keep risk history` | `canAccept`/`canAssess`, `RiskAssessmentService`, `RiskLifecycleService::delete`, **B3** med trigger. **Gjort** som fire commits (§2c). | 1 |
 | 10 | `refactor(improvements): guard close, cancel, reopen, verify and delete` | **Gjort** som fire commits (§2d) | 1 |
-| 11 | `refactor(management-review): guard finalize, amendment and delete` | | 1 |
+| 11 | `refactor(management-review): guard finalize, amendment and delete` | **Gjort** som tre commits (§2e) | 1 |
 | 12 | `refactor(quality): require an actor and guard flow approval and adoption` | Null-aktører og `QUALITY_FLOW_ADOPT` | 1 |
 | 13 | `refactor(compliance): guard assessment, audit lifecycle and delete` | | 1 |
 | 14 | `refactor(suppliers): guard assessment and delete; guard assure services` | | 1 |

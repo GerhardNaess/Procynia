@@ -9,7 +9,7 @@ Tester som feiler på grunnlinjen og ikke skyldes arbeidet som pågår. Hver fei
 | KTF-1 | **Løst 2026-10-22.** Testfiksturen er rettet, applikasjonen er uendret. | `898a4c08` |
 | KTF-2 | **Løst 2026-10-22.** Testene kontrollerer nå dagens komponenter og den faktiske navigasjonsfunksjonen. | `2d133715` |
 | KTF-3 | **Løst 2026-10-22.** Testen følger dagens Kjøringer-fane. Grensesnittet er uendret. | `be3f517c` (testen), denne loggen |
-| KTF-4 | **Åpen – mulig ustabilitet.** `risk-access.spec.js` feilet én gang, ikke reprodusert. | – |
+| KTF-4 | **Åpen – mulig ustabilitet.** Siden lastes uventet helt på nytt under en E2E-test. Det har skjedd i `risk-access.spec.js` og `management-review.spec.js`. | – |
 | KTF-5 | **Åpen – mulig problem i testinfrastrukturen.** Innloggingen i `a11y-grc-compliance.spec.js` hang i 15 sekunder, mens PHP-FPM-poolen var full. | – |
 
 KTF-4 og KTF-5 står åpne som mulig ustabilitet i E2E. Ingen kjente feil står åpne i PHP eller JS. Dokumentet beholdes som logg, og nye kjente feil føres inn her.
@@ -138,6 +138,36 @@ Den gjenstående muligheten er en sen Inertia-navigering til `?tab=permissions`,
 - `playwright.config.cjs` hadde `trace: 'on-first-retry'` med `retries: 0`, og tok dermed aldri spor. Den har nå `trace: 'retain-on-failure'`, slik at neste feil etterlater et spor som viser hvilken forespørsel som navigerte. Se «Bevaring av spor» nedenfor.
 - Feiler testen igjen, leses sporet. Er årsaken en dobbel lagring, er det en feil i grensesnittet og ikke i testen.
 - En ny kjøring tømte tidligere `test-results/`, og sporet etter KTF-5 gikk tapt på den måten. Det er rettet. Se «Bevaring av spor».
+
+### Ny forekomst 2026-10-22: `management-review.spec.js`, med spor
+
+Kjøringen etter `6f5431fb` ga 6 av 7 bestått. Reisetesten «a management review is created, assessed, decided, finalized and reported» ventet 240 sekunder på `#mr-title`, som den hadde fylt ut sekunder før.
+
+Denne gangen ble sporet og serverloggen bevart (`test-results/run-2026-10-22T15-08-31-513Z/…`). Sporet viser:
+
+- Midt i lesbarhetskontrollen, mens skjermbildet av hele siden ble tatt, kom en **full dokumentforespørsel** (`GET /app/management-reviews`, uten `X-Inertia`).
+- Det er en ny innlasting av den gjeldende siden. Skjemaet for ny gjennomgang ble lukket av den.
+- Etterpå ble alle modulene lastet på nytt fra Vite.
+- Ingen forespørsel feilet: 960 mot Vite, alle 200 eller 304.
+
+Dette er samme signatur som første forekomst. «Interrupted by another navigation to …?tab=permissions» var en navigering til den siden testen allerede sto på. **KTF-4 omdefineres derfor:** siden testen står på, lastes uventet helt på nytt.
+
+Utprøvd og avkreftet som årsak. Prøvene ble kjørt med en åpen side og telling av `load`-hendelser:
+
+| Mulig utløser | Omlastinger |
+|---|---|
+| Endring i en Markdown-fil i `docs/` (Tailwind leser innhold) | 0 |
+| Endring i en PHP-fil under `app/` | 0 |
+| `npm run build` (skriver `public/build`) | 0 |
+| JS-suiten i Docker med repoet montert | 0 |
+| Ingen endring (kontroll) | 0 |
+
+Det som gjenstår:
+
+- E2E kjører mot Vite-utviklingsserveren (`public/hot`), ikke mot bygde ressurser. Vite kan be alle åpne sider laste på nytt over websocketen, for eksempel ved endringer i `lang/`, `routes/` eller `resources/views/` (`refresh: true`), eller når avhengigheter optimaliseres på nytt. Websocket-meldinger tas ikke med i sporet.
+- Vites avhengighetsmappe (`node_modules/.vite`) finnes ikke, selv om utviklingsserveren har kjørt siden 14.10. Det kan tyde på at mellomlageret er fjernet under serveren. Det er ikke bekreftet som årsak.
+
+**Anbefaling, ikke gjennomført:** Kjør E2E mot bygde ressurser eller mot en egen server. Det kan gjøres uten `public/hot` eller med en egen server, som i `project_e2e_isolated_test_db` (`APP_ENV=e2e`, port 8091), slik at utviklingsserveren ikke kan laste sidene på nytt. Begge berører utviklingsmiljøet som er i bruk, og krever en beslutning. Testene er ikke endret.
 
 ## KTF-5 – E2E: innlogging hang mens PHP-FPM-poolen var full (mulig problem i testinfrastrukturen)
 
