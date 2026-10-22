@@ -3,10 +3,21 @@
 **Status:** Planen er godkjent 2026-10-22 med beslutningene B5–B9 (§1). Implementeringen er startet i rekkefølgen i §5.
 
 **Fremdrift:**
-- Ferdig: steg 1 (`3a0d009d`), 3a (`7962a744`), 3b (`dcb7d823`), 3c (`5eac50a4`), E2E (`a11y-wiki.spec.js`), F1c (`2af1ba86`), steg 2 (`cd42a7f2`) og steg 4 / F3a (`d6f58377`).
+- Ferdig:
+  - steg 1 (`3a0d009d`)
+  - steg 3a (`7962a744`), 3b (`dcb7d823`) og 3c (`5eac50a4`), med E2E (`a11y-wiki.spec.js`)
+  - F1c (`2af1ba86`)
+  - steg 2 (`cd42a7f2`)
+  - steg 4 / F3a (`d6f58377`)
+  - F1d (`4e827d93`)
+  - steg 5 (`9b5a5673`, `be1aba2b`)
+  - steg 6 (`9541ef63`, regresjon rettet i `f10a0f81`)
+  - steg 7 (`37c239c5`)
+- Wiki-delen av fase 0 er gjennomført. Neste: de andre modulene (steg 9–17), etter gjennomgang.
 - F1a, F1b og O6 er rettet.
-- F1c er rettet (`2af1ba86`). F1d er bekreftet og venter på beslutning (Å7).
-- Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1).
+- F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
+- Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
+- Full Wiki-suite etter steg 7 (2026-10-22): 2913 bestått, 18 feilet. Alle 18 er KTF-1 eller KTF-2 og fantes før fase 0.
 **Dato:** 2026-10-22
 **Gren:** `feature/external-api-foundation`
 **Bygger på:** [`external-api-architecture.md`](external-api-architecture.md) §4.3, §7 og §14, [`AGENTS.md`](../AGENTS.md), [`enterprise-wiki-architecture.md`](enterprise-wiki-architecture.md) og [`enterprise-wiki-approval-model.md`](enterprise-wiki-approval-model.md).
@@ -65,7 +76,17 @@ Hvert funn er bekreftet eller avkreftet med en isolert test. Testene beskriver d
 | O5 | `approve()` og `reject()` bruker ulike myndighetsregler. System Owner kan sende tilbake, men ikke publisere en versjon de ikke er tildelt. | Bevisst (`User::canFinalApproveEnterpriseWikiVersion`, docblokk). Skal bevares uendret. |
 | O6 *(rettet i 3c, `5eac50a4`)* | `WikiController::mayActOnCurrentVersion()` returnerer `true` for en versjon uten kontrollør. Dermed kan *enhver* Wiki-godkjenner sende den tilbake. Dette motsier `User::canReviewEnterpriseWikiVersion()` («a missing reviewer is broken state, not a licence»). | Strammes inn i steg 3. Bare tildelt kontrollør eller System Owner kan returnere. Sider som allerede står i denne tilstanden, frigjøres med «Trekk tilbake» (B5). |
 | F1c *(rettet, `2af1ba86`)* | Påstandsbeslutninger («Rediger og godkjenn», «Fjern teksten», beste praksis) endrer teksten i den gjeldende versjonen *direkte*, uten ny versjon, også mens siden ligger til godkjenning. Tildelingen beholdes, så kontrolløren vurderer det som står ved godkjenning. Dette er funnbehandling som hører til gjennomgangen, ikke ordinær redigering. | **Besluttet 2026-10-22:** under godkjenning tar bare tildelt kontrollør tekstendrende påstandsbeslutninger. Kvalitetssikrer, sideeier, innsender og System Owner beholder beslutningene som ikke endrer teksten. Endringen spores (aktør, tidspunkt, gammel og ny tekst), vises for sideeier, og havner i versjonen kontrolløren godkjenner. Kontrolløren må fortsatt ha rettigheten til å behandle påstander (QA). |
-| **F1d** | **Bekreftet 2026-10-22.** Når en side er publisert og gjeldende versjon *er* den publiserte, skriver tekstendrende påstandsbeslutninger direkte i den publiserte versjonen. Siden står fortsatt som «godkjent», og ingen har gjennomgått endringen. Dette rammer publisert innhold som svar og grounding bygger på. | Høy. Ikke rettet: rettingen endrer arbeidsflyten og krever beslutning (§9, Å7). Test: `WikiClaimTextDecisionOnPublishedVersionFindingTest`. |
+| **F1d** *(rettet, `4e827d93`)* | **Bekreftet 2026-10-22.** Når en side er publisert og gjeldende versjon *er* den publiserte, skriver tekstendrende påstandsbeslutninger direkte i den publiserte versjonen. Siden står fortsatt som «godkjent», og ingen har gjennomgått endringen. Dette rammer publisert innhold som svar og grounding bygger på. | Høy. **Besluttet og rettet:** beslutningen lager en ny arbeidsversjon via `EnterpriseWikiPageVersionWriter` (`forkPublishedVersionForClaimDecision`). Alle påstander kopieres, siden går til utkast, og publisert versjon og påstandene i den, som grounding leser, er uendret. Samtidige beslutninger gir 409. Test: `WikiClaimTextDecisionOnPublishedVersionTest`. |
+
+### Arkitekturfunn under steg 5–7 (2026-10-22)
+
+| Id | Funn | Vurdering |
+|---|---|---|
+| A1 | Godkjenningstjenestene for Wiki nekter fortsatt med `abort()` (HTTP-unntak), fordi koden ble flyttet uendret og statuskodene skal være like. | Godtatt i fase 0. API-laget i fase 1 må gjøre om `HttpException` til sitt eget feilformat. Domeneunntak kan innføres senere uten endret oppførsel. |
+| A2 | Noen Wiki-handlinger for kildeadministrasjon går ennå ikke gjennom vakten: opplasting (`EnterpriseWikiDocumentUploadService::store(?int, ?int)`), bytte av dokumenteier (skrives i `WikiSourceController::updateOwner`), start av kjøring (`startForDocument` uten aktør) og ny kjøring av mislykkede steg (`attempt()` uten aktør). `HumanDecision` har verdiene `WIKI_SOURCE_UPLOAD`, `WIKI_SOURCE_OWNER_CHANGE` og `WIKI_RUN_START`, men de er ikke koblet til. | Ikke godkjenningsflyt. Kontrollerne sjekker `wiki.source.manage`. Kobles til i steg 20, kontrakttesten, eller før en API-rute åpnes for kildeadministrasjon. Det skal den ikke i v1. |
+| A3 | Regresjonen i steg 6 (`f10a0f81`) ble bare fanget av `WikiControllerTest`. Den var holdt utenfor de målrettede listene på grunn av KTF-1. | KTF-1 bør rettes før steg 9, så hele `WikiControllerTest` igjen kan brukes som sikkerhetsnett. |
+| A4 | Påstandsbeslutninger som ikke endrer tekst («Behold teksten», blokkering), skriver fortsatt `approval_status` og blokkering på påstander i den publiserte versjonen. | Godtatt. Grounding leser bare `claim_text` og `content_origin` fra publisert versjon (`RequirementWikiResearchService`). Status er kvalitetsmetadata, ikke publisert innhold. |
+| A5 | Endepunktene for dokumenteiers godkjenning og avvisning har ingen kaller i grensesnittet lenger. | Herdet i steg 5. Om de skal fjernes, er et eget spørsmål. Fjerning reduserer angrepsflaten. |
 
 ---
 
@@ -416,7 +437,7 @@ Fase 0 er ferdig når alle punktene er oppfylt og har test:
 | Å4 | Visning av lukkede risikoer | **Besluttet: B8** (uendret) |
 | Å5 | Dokumenteiers beslutning kan endres | **Besluttet: B9** (ny beslutning er en egen hendelse, aldri en overskriving) |
 | Å6 | F1c: hvem kan endre tekst via påstandsbeslutninger under godkjenning | **Besluttet:** bare tildelt kontrollør (`2af1ba86`). |
-| Å7 | F1d: hva skal skje når en tekstendrende påstandsbeslutning gjelder den publiserte versjonen? | Anbefaling: beslutningen skriver en ny arbeidsversjon gjennom `EnterpriseWikiPageVersionWriter`. Den publiserte versjonen fortsetter å gjelde, og siden går til utkast via `afterManualEdit()`, som ved vanlig redigering. Alternativ: nekt tekstendringer på publisert versjon og henvis til «Rediger artikkel». |
+| Å7 | F1d | **Besluttet 2026-10-22:** ny arbeidsversjon, publisert versjon uendret (`4e827d93`). |
 
 ---
 
