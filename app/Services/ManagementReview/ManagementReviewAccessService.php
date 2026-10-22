@@ -81,6 +81,33 @@ class ManagementReviewAccessService
         return $this->canOpenModule($user) && $this->permissions->has($user, CustomerPermissionCatalog::MANAGEMENT_REVIEW_DELETE);
     }
 
+    /**
+     * The same rules for one review: the right key, and the review one of this person's customer
+     * that they can read. The services ask these themselves, of the review under its row lock, so the
+     * rule holds for every entry point (phase 0 step 11). Finalizing, amending and deleting are human
+     * decisions; the services also call HumanDecisionGuard.
+     */
+    public function canEditReview(User $user, ManagementReview $review): bool
+    {
+        return $this->canEdit($user) && $this->reaches($user, $review);
+    }
+
+    public function canFinalizeReview(User $user, ManagementReview $review): bool
+    {
+        return $this->canFinalize($user) && $this->reaches($user, $review);
+    }
+
+    public function canDeleteReview(User $user, ManagementReview $review): bool
+    {
+        return $this->canDelete($user) && $this->reaches($user, $review);
+    }
+
+    /** A review the person can read: the module and management_review.view, in their own customer. */
+    public function reaches(User $user, ManagementReview $review): bool
+    {
+        return $this->canOpenModule($user) && (int) $review->customer_id === (int) $user->customer_id;
+    }
+
     /** Whether the user holds a permission key directly — for the section gates. */
     public function holds(User $user, string $permissionKey): bool
     {

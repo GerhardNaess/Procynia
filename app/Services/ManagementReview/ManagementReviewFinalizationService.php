@@ -6,8 +6,11 @@ use App\Models\ManagementReview;
 use App\Models\ManagementReviewEvent;
 use App\Models\ManagementReviewSnapshotSection;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
 use App\Support\FrameworkCatalog;
+use App\Support\HumanDecision;
 use Carbon\CarbonImmutable;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -31,12 +34,25 @@ final class ManagementReviewFinalizationService
         private readonly ManagementReviewReadiness $readiness,
         private readonly ManagementReviewService $reviews,
         private readonly FrameworkCatalog $frameworks,
+        private readonly HumanDecisionGuard $guard,
+        private readonly ManagementReviewAccessService $access,
     ) {}
 
+    /**
+     * A human decision (phase 0 step 11): HumanDecisionGuard first, then management_review.finalize
+     * for a review of the person's own customer, asked of the locked review.
+     */
     public function finalize(User $actor, ManagementReview $review): ManagementReview
     {
+        $actor = $this->guard->assert($actor, HumanDecision::MANAGEMENT_REVIEW_FINALIZE);
+
         return DB::transaction(function () use ($actor, $review): ManagementReview {
             $locked = ManagementReview::query()->whereKey($review->id)->lockForUpdate()->firstOrFail();
+
+            if (! $this->access->canFinalizeReview($actor, $locked)) {
+                throw new AuthorizationException('This user may not finalize this management review.');
+            }
+
             $this->reviews->assertDraft($locked);
 
             $now = CarbonImmutable::now();

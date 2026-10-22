@@ -9,7 +9,10 @@ use App\Models\ManagementReviewEvent;
 use App\Models\ManagementReviewParticipant;
 use App\Models\ManagementReviewSection;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
 use App\Support\FrameworkCatalog;
+use App\Support\HumanDecision;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -28,6 +31,7 @@ final class ManagementReviewService
         private readonly ManagementReviewAccessService $access,
         private readonly ManagementReviewSectionCatalog $catalog,
         private readonly FrameworkCatalog $frameworks,
+        private readonly HumanDecisionGuard $guard,
     ) {}
 
     /** @param  array<string, mixed>  $data  validated */
@@ -152,10 +156,21 @@ final class ManagementReviewService
         });
     }
 
+    /**
+     * Deleting a draft (ManagementReview::isDeletable()). A human decision (phase 0 step 11):
+     * HumanDecisionGuard, then management_review.delete for a review of the person's own customer,
+     * asked of the locked review. The deletion itself is an event, which outlives the review.
+     */
     public function delete(User $actor, ManagementReview $review): void
     {
+        $actor = $this->guard->assert($actor, HumanDecision::MANAGEMENT_REVIEW_DELETE);
+
         DB::transaction(function () use ($actor, $review): void {
             $locked = ManagementReview::query()->whereKey($review->id)->lockForUpdate()->firstOrFail();
+
+            if (! $this->access->canDeleteReview($actor, $locked)) {
+                throw new AuthorizationException('This user may not delete this management review.');
+            }
 
             if (! $locked->isDeletable()) {
                 throw ValidationException::withMessages(['review' => __('procynia.management_review.validation.not_deletable')]);
@@ -196,11 +211,21 @@ final class ManagementReviewService
         });
     }
 
-    /** A correction after finalization. The original stays as it was. */
+    /**
+     * A correction after finalization. The original stays as it was. A human decision, under the same
+     * key as finalizing (phase 0 step 11): HumanDecisionGuard, then management_review.finalize for a
+     * review of the person's own customer, asked of the locked review.
+     */
     public function addAmendment(User $actor, ManagementReview $review, string $text, string $reason): ManagementReviewAmendment
     {
+        $actor = $this->guard->assert($actor, HumanDecision::MANAGEMENT_REVIEW_FINALIZE);
+
         return DB::transaction(function () use ($actor, $review, $text, $reason): ManagementReviewAmendment {
             $locked = ManagementReview::query()->whereKey($review->id)->lockForUpdate()->firstOrFail();
+
+            if (! $this->access->canFinalizeReview($actor, $locked)) {
+                throw new AuthorizationException('This user may not amend this management review.');
+            }
 
             if (! $locked->isFinalized()) {
                 throw ValidationException::withMessages(['text' => __('procynia.management_review.validation.amend_only_finalized')]);
