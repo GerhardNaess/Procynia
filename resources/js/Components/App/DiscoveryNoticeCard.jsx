@@ -202,7 +202,8 @@ export default function DiscoveryNoticeCard({
                     ) : null}
 
                     <div className="flex flex-wrap items-center gap-2.5">
-                        <Heading id={titleId} className="text-[1.7rem] font-semibold tracking-tight text-slate-950">
+                        {/* min-w-0 + break-words: a long compound word in a Doffin title must wrap, not widen the page on a phone. */}
+                        <Heading id={titleId} className="min-w-0 break-words text-[1.7rem] font-semibold tracking-tight text-slate-950">
                             {notice.title}
                         </Heading>
                     </div>
