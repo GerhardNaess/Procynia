@@ -1675,9 +1675,10 @@ class QualityController extends Controller
 
         $producedPages = $this->producedWikiPagesByItem($customerId, $items);
         $publications = $customerId === null ? [] : $this->blueprints->publicationStates($customerId, $items);
+        $deletionBlockers = $customerId === null ? [] : $this->items->deletionBlockers($customerId, $items);
 
         return $items
-            ->map(function (QualityItem $item) use ($producedPages, $publications, $user): array {
+            ->map(function (QualityItem $item) use ($producedPages, $publications, $deletionBlockers, $user): array {
                 /** @var Collection<int, EnterpriseWikiPage> $pages */
                 $pages = $producedPages[(int) $item->id] ?? collect();
 
@@ -1688,9 +1689,11 @@ class QualityController extends Controller
                     'code' => $item->code,
                     'status' => $item->status,
                     'publication' => $publications[(int) $item->id] ?? null,
-                    // An approved process is retired, never deleted: the menu says so instead.
-                    'has_approved_version' => $item->quality_type === QualityItem::TYPE_PROCESS
-                        && ($publications[(int) $item->id]['revision_number'] ?? null) !== null,
+                    // What is retired, never deleted (an approved process, a control with history):
+                    // the menu says why instead of offering a delete the server would refuse.
+                    'delete_blocked_message' => isset($deletionBlockers[(int) $item->id])
+                        ? __($deletionBlockers[(int) $item->id])
+                        : null,
                     'owner_name' => $item->owner?->name,
                     'next_review_at' => $item->next_review_at?->toDateString(),
                     'wiki_link_count' => (int) $item->wiki_links_count,

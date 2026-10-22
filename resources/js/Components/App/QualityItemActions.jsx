@@ -24,14 +24,14 @@ import {
  * navigation this one action never had. Tab reaches the action; Escape closes and returns focus to
  * the trigger.
  *
- * A process that has been approved is never deleted — its approved versions are the record of
- * what was decided — so for one the menu says why and points to «Utgått» instead of offering a
- * delete the server would refuse.
+ * What is retired rather than deleted — a process that has been approved, a control with
+ * registered evidence — gets the reason in the menu, pointing to «Utgått»,
+ * instead of a delete the server would refuse. The reason is the backend's own sentence.
  *
  * @param {object} item  The row's item. `id`, `title` and `quality_type`, plus
  *                       `produced_wiki_page_count` and `can_delete_produced_wiki_pages`, which
  *                       decide whether the dialog asks what should happen to the knowledge, and
- *                       `has_approved_version`, which takes the delete away.
+ *                       `delete_blocked_message`, which takes the delete away.
  * @param {string} [tab] The Kvalitet tab to come back to. Deleting from the Prosesser list should
  *                       leave the user in Prosesser, not bounce them to Oversikt.
  */
@@ -55,7 +55,7 @@ export default function QualityItemActions({ tq, item, tab = null }) {
     const isProcess = item.quality_type === 'process';
     // A control is not a document, and the dialog never calls it one.
     const isControl = item.quality_type === 'control';
-    const deleteBlocked = isProcess && Boolean(item.has_approved_version);
+    const deleteBlockedMessage = item.delete_blocked_message ?? null;
     const producedWikiPageCount = item.produced_wiki_page_count ?? 0;
     const hasProducedWikiPages = producedWikiPageCount > 0;
     // The choice is only offered when the backend says this reader may actually take it. Offering
@@ -138,10 +138,8 @@ export default function QualityItemActions({ tq, item, tab = null }) {
                     style={{ top: `${menuPosition.top}px`, right: `${menuPosition.right}px` }}
                     className="fixed z-40 w-60 rounded-2xl border border-slate-200 bg-white p-1.5 text-left shadow-lg"
                 >
-                    {deleteBlocked ? (
-                        <p className="px-3 py-2 text-base leading-6 text-slate-700">
-                            {tq.delete_process_blocked ?? 'Prosessen har en godkjent versjon og kan ikke slettes. Sett statusen til «Utgått» for å ta den ut av bruk. De godkjente versjonene beholdes.'}
-                        </p>
+                    {deleteBlockedMessage ? (
+                        <p className="px-3 py-2 text-base leading-6 text-slate-700">{deleteBlockedMessage}</p>
                     ) : (
                         <button
                             type="button"

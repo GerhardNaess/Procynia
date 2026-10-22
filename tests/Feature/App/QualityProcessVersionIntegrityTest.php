@@ -91,8 +91,8 @@ class QualityProcessVersionIntegrityTest extends TestCase
         ['owner' => $owner, 'approved' => $approved, 'draft' => $draft] = $this->world();
 
         $rows = collect($this->actingAs($owner)->get('/app/quality?tab=processes')->viewData('page')['props']['items'])->keyBy('id');
-        $this->assertTrue($rows[$approved->id]['has_approved_version']);
-        $this->assertFalse($rows[$draft->id]['has_approved_version']);
+        $this->assertSame(__('procynia.quality.errors.approved_process_not_deletable'), $rows[$approved->id]['delete_blocked_message']);
+        $this->assertNull($rows[$draft->id]['delete_blocked_message']);
 
         $this->actingAs($owner)->delete("/app/quality/items/{$approved->id}?tab=processes")
             ->assertRedirect('/app/quality?tab=processes')

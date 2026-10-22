@@ -308,16 +308,66 @@ class QualityItemService
     /**
      * Why this item may not be deleted, as a translation key — or null when it may.
      *
-     * The page asks this to decide what the row menu offers; deleteItem() asks it before anything is
-     * touched and again under the lock. The database holds the same rules with triggers.
+     * deleteItem() asks this before anything is touched and again under the lock. The database
+     * holds the same rules with triggers. See deletionBlockers().
      */
     public function deletionBlocker(QualityItem $item): ?string
     {
-        if ($this->hasApprovedVersion($item)) {
-            return 'procynia.quality.errors.approved_process_not_deletable';
+        return $this->deletionBlockers((int) $item->customer_id, [$item])[(int) $item->id] ?? null;
+    }
+
+    /**
+     * Why each of these items may not be deleted, keyed by item id; an item that may be deleted has
+     * no entry. A few queries for the whole list, so the register can tell every row's menu.
+     *
+     * What is retired («Utgått») rather than deleted, because deleting it would take history with it:
+     *
+     *  - a process with an approved version (phase 0 step 12) — the versions are the record of what
+     *    was decided;
+     *  - a control with registered evidence (finding A19) — the evidence is the record that the
+     *    control was carried out. Placements on activities and tools are this module's own
+     *    structure and do not count. Links from Risiko and Etterlevelse do not count either, as
+     *    before: Kvalitet is not told about them, and a refusal would tell (an open decision, see
+     *    A19 in docs/external-api-phase-0-plan.md).
+     *
+     * A retired item is still there, with everything attached, and is no longer offered for new
+     * links anywhere.
+     *
+     * @param  iterable<QualityItem>  $items
+     * @return array<int, string>
+     */
+    public function deletionBlockers(int $customerId, iterable $items): array
+    {
+        $byType = collect($items)->groupBy('quality_type')->map(
+            static fn ($group) => $group->map(static fn (QualityItem $item): int => (int) $item->id)->values()->all(),
+        );
+
+        $blockers = [];
+
+        foreach (QualityProcessRevision::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('quality_item_id', $byType->get(QualityItem::TYPE_PROCESS, []))
+            ->distinct()
+            ->pluck('quality_item_id') as $id) {
+            $blockers[(int) $id] = 'procynia.quality.errors.approved_process_not_deletable';
         }
 
-        return null;
+        $controlIds = $byType->get(QualityItem::TYPE_CONTROL, []);
+
+        if ($controlIds !== []) {
+            $withEvidence = QualityItemDocument::query()
+                ->where('customer_id', $customerId)
+                ->whereIn('quality_item_id', $controlIds)
+                ->where('relation_type', QualityItemDocument::RELATION_TYPE_EVIDENCE)
+                ->distinct()
+                ->pluck('quality_item_id');
+
+            foreach ($withEvidence as $id) {
+                $blockers[(int) $id] = 'procynia.quality.errors.control_with_history_not_deletable';
+            }
+        }
+
+        return $blockers;
     }
 
     private function assertDeletable(QualityItem $item): void
