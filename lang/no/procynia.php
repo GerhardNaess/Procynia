@@ -970,6 +970,7 @@ return [
         'invoice_pdf' => 'PDF for faktura :number (åpnes i ny fane)',
         'inactive' => 'Inaktiv',
         'templates_list' => 'Vurderingsmaler',
+        'templates_default_cannot_deactivate' => 'Standardmalen kan ikke deaktiveres. Sett en annen mal som standard først.',
         'table_departments' => 'Avdelinger',
         'table_users' => 'Brukere',
         'table_roles' => 'Egne roller',

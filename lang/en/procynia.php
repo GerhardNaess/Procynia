@@ -966,6 +966,7 @@ return [
         'invoice_pdf' => 'PDF for invoice :number (opens in a new tab)',
         'inactive' => 'Inactive',
         'templates_list' => 'Assessment templates',
+        'templates_default_cannot_deactivate' => 'The default template cannot be deactivated. Set another template as the default first.',
         'table_departments' => 'Departments',
         'table_users' => 'Users',
         'table_roles' => 'Custom roles',

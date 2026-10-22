@@ -194,6 +194,7 @@ export default function GoNoGoTemplatesIndex({ templates }) {
                                         onClick={() => handleToggleActive(template)}
                                         disabled={template.is_default && template.is_active}
                                         aria-label={`${template.is_active ? 'Deaktiver' : 'Aktiver'} ${template.name}`}
+                                        aria-describedby={template.is_default && template.is_active ? `gonogo-template-${template.id}-locked` : undefined}
                                         className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-40"
                                     >
                                         {template.is_active ? 'Deaktiver' : 'Aktiver'}
@@ -207,6 +208,13 @@ export default function GoNoGoTemplatesIndex({ templates }) {
                                     </a>
                                 </div>
                             </div>
+                            {/* Why «Deaktiver» cannot be pressed — the server's own refusal was only ever
+                                reachable through a button that is disabled. */}
+                            {template.is_default && template.is_active && (
+                                <p id={`gonogo-template-${template.id}-locked`} className="mt-3 text-sm text-slate-600">
+                                    {a11y.templates_default_cannot_deactivate ?? 'Standardmalen kan ikke deaktiveres. Sett en annen mal som standard først.'}
+                                </p>
+                            )}
                         </li>
                     ))}
                 </ul>
