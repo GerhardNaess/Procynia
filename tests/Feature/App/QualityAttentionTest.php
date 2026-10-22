@@ -91,7 +91,7 @@ class QualityAttentionTest extends TestCase
         $this->assertSame([(int) $control->id], $this->ids($customer, QualityAttentionService::CONTROLS_WITHOUT_EVIDENCE));
 
         $document = $this->document($customer, 'gjennomgang-q3.pdf');
-        app(QualityItemService::class)->addControlEvidence((int) $customer->id, $control, 'Gjennomgang Q3', null, $document);
+        app(QualityItemService::class)->addControlEvidence((int) $customer->id, $control, 'Gjennomgang Q3', null, $document, $this->qualitySystemOwner((int) $customer->id));
 
         $this->assertSame([], $this->ids($customer, QualityAttentionService::CONTROLS_WITHOUT_EVIDENCE));
 
@@ -109,7 +109,7 @@ class QualityAttentionTest extends TestCase
         $unplaced = $this->item($customer, QualityItem::TYPE_CONTROL, 'Uplassert kontroll');
 
         $placed = app(QualityActivityControlService::class)
-            ->add($process, $blueprint, 'vurder', 'Fire øyne', null)
+            ->add($process, $blueprint, 'vurder', 'Fire øyne', null, $this->qualitySystemOwner((int) $customer->id))
             ->control;
 
         $this->assertSame([(int) $unplaced->id], $this->ids($customer, QualityAttentionService::CONTROLS_WITHOUT_ACTIVITY));
@@ -131,7 +131,7 @@ class QualityAttentionTest extends TestCase
 
         $this->assertSame([(int) $process->id], $this->ids($customer, QualityAttentionService::PROCESSES_WITHOUT_GOVERNING_POLICY));
 
-        app(QualityItemService::class)->relate((int) $customer->id, $policy, $process, QualityItemRelation::TYPE_GOVERNS);
+        app(QualityItemService::class)->relate((int) $customer->id, $policy, $process, QualityItemRelation::TYPE_GOVERNS, $this->qualitySystemOwner((int) $customer->id));
         $this->assertSame([], $this->ids($customer, QualityAttentionService::PROCESSES_WITHOUT_GOVERNING_POLICY));
 
         $policy->update(['status' => QualityItem::STATUS_RETIRED]);
@@ -149,7 +149,7 @@ class QualityAttentionTest extends TestCase
 
             $this->assertContains((int) $process->id, $this->ids($customer, QualityAttentionService::PROCESSES_WITHOUT_GOVERNING_POLICY));
 
-            app(QualityItemService::class)->relate((int) $customer->id, $document, $process, QualityItemRelation::TYPE_GOVERNS);
+            app(QualityItemService::class)->relate((int) $customer->id, $document, $process, QualityItemRelation::TYPE_GOVERNS, $this->qualitySystemOwner((int) $customer->id));
             $this->assertNotContains((int) $process->id, $this->ids($customer, QualityAttentionService::PROCESSES_WITHOUT_GOVERNING_POLICY));
 
             // A retired document governs nothing, whatever its type.
@@ -169,7 +169,7 @@ class QualityAttentionTest extends TestCase
 
         app(QualityActivityControlService::class)->place((int) $customer->id, [
             ['process_id' => $process->id, 'activity_key' => 'vurder', 'control_item_id' => $control->id],
-        ]);
+        ], $this->qualitySystemOwner((int) $customer->id));
 
         $this->assertSame([], $this->ids($customer, QualityAttentionService::CONTROLS_WITHOUT_ACTIVITY));
     }

@@ -41,8 +41,23 @@ class QualityAccessService
     /** The rule, as a refusal (403). */
     public function authorize(User $user, string $permissionKey, int $customerId): void
     {
-        if (! $this->may($user, $permissionKey, $customerId)) {
-            throw new AuthorizationException("This user may not [{$permissionKey}] in this customer's Kvalitet.");
+        $this->authorizeAny($user, [$permissionKey], $customerId);
+    }
+
+    /**
+     * The rule for a write that belongs to more than one action — attaching a file is part of both
+     * registering a document and editing one — as a refusal unless one of the keys holds.
+     *
+     * @param  non-empty-list<string>  $permissionKeys
+     */
+    public function authorizeAny(User $user, array $permissionKeys, int $customerId): void
+    {
+        foreach ($permissionKeys as $permissionKey) {
+            if ($this->may($user, $permissionKey, $customerId)) {
+                return;
+            }
         }
+
+        throw new AuthorizationException('This user may not ['.implode('|', $permissionKeys)."] in this customer's Kvalitet.");
     }
 }

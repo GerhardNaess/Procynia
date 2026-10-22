@@ -7,6 +7,7 @@ use App\Models\QualityItem;
 use App\Models\QualityItemDocument;
 use App\Models\QualityTool;
 use App\Models\User;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 
@@ -16,9 +17,15 @@ use Illuminate\Validation\ValidationException;
  * Nothing here stores a file. A tool is a name and a purpose for a file already in the virksomhet's
  * document archive, and a use is a quality_item_documents row in the `tool` capacity — so removing a
  * use is the seam's ordinary unlink, which leaves the file and the library entry where they are.
+ *
+ * Registering a tool and linking it to a control are quality.edit, checked here (phase 0 step 12).
  */
 class QualityToolService
 {
+    public function __construct(
+        private readonly QualityAccessService $access,
+    ) {}
+
     /**
      * Put a file from the archive into the library.
      *
@@ -28,8 +35,10 @@ class QualityToolService
         int $customerId,
         EnterpriseWikiDocument $document,
         array $attributes,
-        ?User $actor = null,
+        User $actor,
     ): QualityTool {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
+
         if ((int) $document->customer_id !== $customerId) {
             throw ValidationException::withMessages([
                 'enterprise_wiki_document_id' => __('procynia.quality.errors.document_not_found'),
@@ -71,15 +80,17 @@ class QualityToolService
             'title' => $title,
             'description' => $this->nullableText($attributes['description'] ?? null),
             'category' => $category,
-            'created_by_user_id' => $actor?->id,
+            'created_by_user_id' => $actor->id,
         ]);
     }
 
     /**
      * Say that a control is carried out with a tool. Linking it twice is a no-op.
      */
-    public function linkToControl(int $customerId, QualityItem $control, QualityTool $tool, ?User $actor = null): QualityItemDocument
+    public function linkToControl(int $customerId, QualityItem $control, QualityTool $tool, User $actor): QualityItemDocument
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
+
         if ((int) $control->customer_id !== $customerId || (int) $tool->customer_id !== $customerId) {
             throw ValidationException::withMessages([
                 'quality_tool_id' => __('procynia.quality.errors.tool_not_found'),
@@ -101,7 +112,7 @@ class QualityToolService
             [
                 'customer_id' => $customerId,
                 'source' => QualityItemDocument::SOURCE_MANUAL,
-                'created_by_user_id' => $actor?->id,
+                'created_by_user_id' => $actor->id,
             ],
         );
     }

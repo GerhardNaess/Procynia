@@ -16,6 +16,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeHandoffService;
 use App\Services\Quality\Exceptions\ProcessFlowInterpretationException;
 use App\Support\Ai\AiCallContextScope;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -79,6 +80,7 @@ class QualityActivityArticleService
         private readonly QualityActivityKnowledgeResolver $knowledge,
         private readonly EnterpriseWikiPublicationStatusService $publicationStatus,
         private readonly AiCallContextScope $contextScope,
+        private readonly QualityAccessService $access,
     ) {}
 
     /**
@@ -96,7 +98,12 @@ class QualityActivityArticleService
         QualityProcessBlueprint $blueprint,
         string $activityKey,
         string $languageCode,
+        User $actor,
     ): array {
+        // Kvalitet's half of the permission (phase 0 step 12): writing an article from an activity
+        // is quality.create, here as well as in the controller — the draft is an AI call billed to
+        // the customer even though nothing is stored.
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_CREATE, (int) $item->customer_id);
         $this->activityOrFail($blueprint, $activityKey);
 
         // Built before the call rather than inside it: it is a read of the flow and of what the user
@@ -156,6 +163,9 @@ class QualityActivityArticleService
         string $markdown,
         User $actor,
     ): array {
+        // The source module checks its own permission; WikiKnowledgeHandoffService checks Wiki's.
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_CREATE, (int) $item->customer_id);
+
         // Resolved before anything is written: an activity key that is not on this flow is not an
         // activity, and a source created from one would have provenance pointing at nothing.
         $this->activityOrFail($blueprint, $activityKey);

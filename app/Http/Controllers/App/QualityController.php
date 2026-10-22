@@ -334,14 +334,14 @@ class QualityController extends Controller
         UploadedFile $file,
         int $customerId,
         QualityItem $item,
-        ?User $user,
+        User $user,
     ): bool {
         // The uploader owns what they upload, when their role may own a document at all. No new
         // permission is introduced: an ownerless document is a state the store already supports,
         // and reassigning the owner stays where it is, in Wiki → Kildedokumenter.
-        $ownerUserId = ($user?->canBeEnterpriseWikiDocumentOwner() ?? false) ? $user->id : null;
+        $ownerUserId = $user->canBeEnterpriseWikiDocumentOwner() ? $user->id : null;
 
-        $result = $this->documentUploads->store($customerId, $file, $ownerUserId, $user?->id);
+        $result = $this->documentUploads->store($customerId, $file, $ownerUserId, $user->id);
 
         $this->items->linkDocument(
             $customerId,
@@ -478,23 +478,23 @@ class QualityController extends Controller
         ]);
 
         if (array_key_exists('steps', $validated)) {
-            $this->items->replaceProcessSteps((int) $customerId, $item, $validated['steps']);
+            $this->items->replaceProcessSteps((int) $customerId, $item, $validated['steps'], $user);
         }
 
         if (array_key_exists('inputs', $validated)) {
-            $this->items->replaceProcessIo((int) $customerId, $item, 'input', $validated['inputs']);
+            $this->items->replaceProcessIo((int) $customerId, $item, 'input', $validated['inputs'], $user);
         }
 
         if (array_key_exists('outputs', $validated)) {
-            $this->items->replaceProcessIo((int) $customerId, $item, 'output', $validated['outputs']);
+            $this->items->replaceProcessIo((int) $customerId, $item, 'output', $validated['outputs'], $user);
         }
 
         if (array_key_exists('checklist_items', $validated)) {
-            $this->items->replaceChecklistItems((int) $customerId, $item, $validated['checklist_items']);
+            $this->items->replaceChecklistItems((int) $customerId, $item, $validated['checklist_items'], $user);
         }
 
         if (array_key_exists('control', $validated)) {
-            $this->items->updateControlDetail((int) $customerId, $item, $validated['control']);
+            $this->items->updateControlDetail((int) $customerId, $item, $validated['control'], $user);
         }
 
         return back()->with('success', __('procynia.quality.flash.structure_updated'));
@@ -1085,6 +1085,7 @@ class QualityController extends Controller
                 $blueprint,
                 $activityKey,
                 $this->customerContext->resolveLanguageCode($user),
+                $user,
             );
         } catch (ProcessFlowInterpretationException|AiCostControlException $exception) {
             return back()->with('activity_article_error', [
@@ -1251,7 +1252,7 @@ class QualityController extends Controller
         $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $control->customer_id, $customerId);
 
-        $this->activityControls->remove($control);
+        $this->activityControls->remove($control, $user);
 
         return back()->with('success', __('procynia.quality.flash.control_removed'));
     }
@@ -1346,7 +1347,7 @@ class QualityController extends Controller
         $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $relation->customer_id, $customerId);
 
-        $this->items->unrelate((int) $customerId, $relation);
+        $this->items->unrelate((int) $customerId, $relation, $user);
 
         return back()->with('success', __('procynia.quality.flash.unrelated'));
     }
@@ -1389,7 +1390,7 @@ class QualityController extends Controller
         $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $link->customer_id, $customerId);
 
-        $this->items->unlinkWikiPage((int) $customerId, $link);
+        $this->items->unlinkWikiPage((int) $customerId, $link, $user);
 
         return back()->with('success', __('procynia.quality.flash.wiki_unlinked'));
     }
@@ -1530,7 +1531,7 @@ class QualityController extends Controller
         $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $link->customer_id, $customerId);
 
-        $this->items->unlinkDocument((int) $customerId, $link);
+        $this->items->unlinkDocument((int) $customerId, $link, $user);
 
         return back()->with('success', __('procynia.quality.flash.document_unlinked'));
     }

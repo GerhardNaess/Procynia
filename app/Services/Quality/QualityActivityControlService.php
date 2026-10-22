@@ -6,6 +6,7 @@ use App\Models\QualityActivityControl;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -24,12 +25,16 @@ use Illuminate\Validation\ValidationException;
  *
  * The flow is never written. The activity is checked to exist in the working version and is then
  * referred to by its key only, so an approved revision is never touched by a placement.
+ *
+ * Adding, placing and removing are editing the process: quality.edit in the customer, checked here
+ * (phase 0 step 12) and not only by the controller.
  */
 class QualityActivityControlService
 {
     public function __construct(
         private readonly QualityItemService $items,
         private readonly QualityActivityArticleService $activities,
+        private readonly QualityAccessService $access,
     ) {}
 
     /**
@@ -139,17 +144,13 @@ class QualityActivityControlService
         string $activityKey,
         string $title,
         ?string $criterion,
-        ?User $actor = null,
+        User $actor,
     ): QualityActivityControl {
         $customerId = (int) $process->customer_id;
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
 
         return DB::transaction(function () use ($customerId, $process, $activityKey, $title, $criterion, $actor): QualityActivityControl {
-            $control = $this->items->createItem($customerId, [
-                'quality_type' => QualityItem::TYPE_CONTROL,
-                'title' => $title,
-            ], $actor);
-
-            $this->items->updateControlDetail($customerId, $control, ['criterion' => $criterion]);
+            $control = $this->items->createActivityControl($customerId, $title, $criterion, $actor);
 
             return $this->link($customerId, $process, $activityKey, $control, $actor);
         });
@@ -171,8 +172,10 @@ class QualityActivityControlService
      * @param  list<array{process_id: int, activity_key: string, control_item_id: int}>  $placements
      * @return list<QualityActivityControl>
      */
-    public function place(int $customerId, array $placements, ?User $actor = null): array
+    public function place(int $customerId, array $placements, User $actor): array
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
+
         $items = QualityItem::query()
             ->where('customer_id', $customerId)
             ->whereIn('id', collect($placements)->flatMap(fn (array $placement): array => [
@@ -308,12 +311,14 @@ class QualityActivityControlService
             ->all();
     }
 
-    public function remove(QualityActivityControl $link): void
+    public function remove(QualityActivityControl $link, User $actor): void
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, (int) $link->customer_id);
+
         $link->delete();
     }
 
-    private function link(int $customerId, QualityItem $process, string $activityKey, QualityItem $control, ?User $actor): QualityActivityControl
+    private function link(int $customerId, QualityItem $process, string $activityKey, QualityItem $control, User $actor): QualityActivityControl
     {
         return QualityActivityControl::query()->firstOrCreate(
             [
@@ -323,7 +328,7 @@ class QualityActivityControlService
             ],
             [
                 'customer_id' => $customerId,
-                'created_by_user_id' => $actor?->id,
+                'created_by_user_id' => $actor->id,
             ],
         );
     }

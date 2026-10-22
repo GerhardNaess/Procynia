@@ -53,7 +53,39 @@ class QualityItemService
     /**
      * @param  array<string, mixed>  $attributes
      */
-    public function createItem(int $customerId, array $attributes, ?User $actor = null): QualityItem
+    public function createItem(int $customerId, array $attributes, User $actor): QualityItem
+    {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_CREATE, $customerId);
+
+        return $this->insertItem($customerId, $attributes, $actor);
+    }
+
+    /**
+     * A control registered from an activity in a process flow, with its criterion.
+     *
+     * Part of editing the process (quality.edit), as placing a control on an activity always was —
+     * not quality.create, which is registering a document of its own in the register.
+     */
+    public function createActivityControl(int $customerId, string $title, ?string $criterion, User $actor): QualityItem
+    {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
+
+        return DB::transaction(function () use ($customerId, $title, $criterion, $actor): QualityItem {
+            $control = $this->insertItem($customerId, [
+                'quality_type' => QualityItem::TYPE_CONTROL,
+                'title' => $title,
+            ], $actor);
+
+            $this->updateControlDetail($customerId, $control, ['criterion' => $criterion], $actor);
+
+            return $control;
+        });
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function insertItem(int $customerId, array $attributes, User $actor): QualityItem
     {
         $qualityType = (string) ($attributes['quality_type'] ?? '');
 
@@ -72,7 +104,7 @@ class QualityItemService
                 'purpose' => $this->nullableText($attributes['purpose'] ?? null),
                 'owner_user_id' => $this->resolveUserId($customerId, $attributes['owner_user_id'] ?? null, 'owner_user_id'),
                 'status' => $this->normaliseStatus($attributes['status'] ?? null, $qualityType, false),
-                'created_by_user_id' => $actor?->id,
+                'created_by_user_id' => $actor->id,
             ] + $this->reviewAttributes($customerId, $attributes));
 
             // A control is incomplete without its own fields, so the row exists from creation —
@@ -253,8 +285,9 @@ class QualityItemService
      *
      * @param  list<array<string, mixed>>  $steps
      */
-    public function replaceProcessSteps(int $customerId, QualityItem $item, array $steps): void
+    public function replaceProcessSteps(int $customerId, QualityItem $item, array $steps, User $actor): void
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
         $this->assertOwned($customerId, $item);
         $this->assertType($item, QualityItem::TYPE_PROCESS, 'steps');
 
@@ -283,8 +316,9 @@ class QualityItemService
     /**
      * @param  list<array<string, mixed>>  $entries
      */
-    public function replaceProcessIo(int $customerId, QualityItem $item, string $direction, array $entries): void
+    public function replaceProcessIo(int $customerId, QualityItem $item, string $direction, array $entries, User $actor): void
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
         $this->assertOwned($customerId, $item);
         $this->assertType($item, QualityItem::TYPE_PROCESS, 'io');
 
@@ -322,8 +356,9 @@ class QualityItemService
     /**
      * @param  list<array<string, mixed>>  $entries
      */
-    public function replaceChecklistItems(int $customerId, QualityItem $item, array $entries): void
+    public function replaceChecklistItems(int $customerId, QualityItem $item, array $entries, User $actor): void
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
         $this->assertOwned($customerId, $item);
         $this->assertType($item, QualityItem::TYPE_CHECKLIST, 'checklist_items');
 
@@ -352,8 +387,9 @@ class QualityItemService
     /**
      * @param  array<string, mixed>  $attributes
      */
-    public function updateControlDetail(int $customerId, QualityItem $item, array $attributes): QualityControlDetail
+    public function updateControlDetail(int $customerId, QualityItem $item, array $attributes, User $actor): QualityControlDetail
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
         $this->assertOwned($customerId, $item);
         $this->assertType($item, QualityItem::TYPE_CONTROL, 'control');
 
@@ -386,8 +422,9 @@ class QualityItemService
         QualityItem $fromItem,
         QualityItem $toItem,
         string $relationType,
-        ?User $actor = null,
+        User $actor,
     ): QualityItemRelation {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
         $this->assertOwned($customerId, $fromItem, 'from_item_id');
         $this->assertOwned($customerId, $toItem, 'to_item_id');
 
@@ -418,7 +455,7 @@ class QualityItemService
             ],
             [
                 'source' => QualityItemRelation::SOURCE_MANUAL,
-                'created_by_user_id' => $actor?->id,
+                'created_by_user_id' => $actor->id,
             ],
         );
 
@@ -427,8 +464,10 @@ class QualityItemService
         return $relation;
     }
 
-    public function unrelate(int $customerId, QualityItemRelation $relation): void
+    public function unrelate(int $customerId, QualityItemRelation $relation, User $actor): void
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
+
         if ((int) $relation->customer_id !== $customerId) {
             throw ValidationException::withMessages([
                 'relation' => __('procynia.quality.errors.relation_not_found'),
@@ -456,10 +495,11 @@ class QualityItemService
         int $customerId,
         QualityItem $item,
         EnterpriseWikiPage $page,
-        string $linkType = QualityItemWikiLink::LINK_TYPE_DOCUMENTS,
-        ?string $note = null,
-        ?User $actor = null,
+        string $linkType,
+        ?string $note,
+        User $actor,
     ): QualityItemWikiLink {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
         $this->assertOwned($customerId, $item);
 
         if ((int) $page->customer_id !== $customerId) {
@@ -486,7 +526,7 @@ class QualityItemService
                 'customer_id' => $customerId,
                 'note' => $this->nullableText($note),
                 'source' => QualityItemWikiLink::SOURCE_MANUAL,
-                'created_by_user_id' => $actor?->id,
+                'created_by_user_id' => $actor->id,
             ],
         );
 
@@ -495,8 +535,10 @@ class QualityItemService
         return $link;
     }
 
-    public function unlinkWikiPage(int $customerId, QualityItemWikiLink $link): void
+    public function unlinkWikiPage(int $customerId, QualityItemWikiLink $link, User $actor): void
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
+
         if ((int) $link->customer_id !== $customerId) {
             throw ValidationException::withMessages([
                 'link' => __('procynia.quality.errors.link_not_found'),
@@ -530,10 +572,13 @@ class QualityItemService
         int $customerId,
         QualityItem $item,
         EnterpriseWikiDocument $document,
-        string $relationType = QualityItemDocument::RELATION_TYPE_SOURCE,
-        ?string $note = null,
-        ?User $actor = null,
+        string $relationType,
+        ?string $note,
+        User $actor,
     ): QualityItemDocument {
+        // Attaching a file is part of registering a document (quality.create, the create form and
+        // «Last opp») and of editing one (quality.edit, «Koble dokument»).
+        $this->access->authorizeAny($actor, [CustomerPermissionCatalog::QUALITY_CREATE, CustomerPermissionCatalog::QUALITY_EDIT], $customerId);
         $this->assertOwned($customerId, $item);
 
         if ((int) $document->customer_id !== $customerId) {
@@ -561,7 +606,7 @@ class QualityItemService
                 'customer_id' => $customerId,
                 'note' => $this->nullableText($note),
                 'source' => QualityItemDocument::SOURCE_MANUAL,
-                'created_by_user_id' => $actor?->id,
+                'created_by_user_id' => $actor->id,
             ],
         );
     }
@@ -578,10 +623,11 @@ class QualityItemService
         int $customerId,
         QualityItem $control,
         string $title,
-        ?string $description = null,
-        ?EnterpriseWikiDocument $document = null,
-        ?User $actor = null,
+        ?string $description,
+        ?EnterpriseWikiDocument $document,
+        User $actor,
     ): QualityItemDocument {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
         $this->assertOwned($customerId, $control);
 
         if ($control->quality_type !== QualityItem::TYPE_CONTROL) {
@@ -627,7 +673,7 @@ class QualityItemService
             'title' => $title,
             'note' => $this->nullableText($description),
             'source' => QualityItemDocument::SOURCE_MANUAL,
-            'created_by_user_id' => $actor?->id,
+            'created_by_user_id' => $actor->id,
         ]);
     }
 
@@ -638,8 +684,10 @@ class QualityItemService
      * itself is a different act with a different authority — it lives in Wiki → Kildedokumenter,
      * where EnterpriseWikiDocumentDeletionService knows what else is built on it.
      */
-    public function unlinkDocument(int $customerId, QualityItemDocument $link): void
+    public function unlinkDocument(int $customerId, QualityItemDocument $link, User $actor): void
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::QUALITY_EDIT, $customerId);
+
         if ((int) $link->customer_id !== $customerId) {
             throw ValidationException::withMessages([
                 'link' => __('procynia.quality.errors.document_link_not_found'),
