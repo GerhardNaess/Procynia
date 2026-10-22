@@ -20,10 +20,12 @@
   - steg 11, Ledelsens gjennomgang (`34d4c8ba`, `3d89f627`, `6f5431fb`), se §2e
   - isolert E2E-miljø (`cef890b2`), se `docs/testing/e2e-environment.md`
   - steg 12, Kvalitet (`f958fe57`, `686dba14`, `60fd0d16`), se §2f
+  - oppfølging av A19–A23 og JS-grunnlaget (`ef1e0ee6`, `67e3cf2b`, `37f84480`, `7ca3b7a5`, `03428309`), se §2g
 - Wiki-delen av fase 0 og Risiko (steg 9) er gjennomført og godkjent 2026-10-22.
 - Avvik og forbedringer (steg 10) er gjennomført og godkjent 2026-10-22.
 - Ledelsens gjennomgang (steg 11) er gjennomført og godkjent 2026-10-22.
-- Kvalitet (steg 12) er gjennomført 2026-10-22 og venter på vurdering. Etterlevelse, Leverandøroppfølging og Mål/KPI startes ikke før det.
+- Kvalitet (steg 12) er gjennomført og godkjent 2026-10-22.
+- Oppfølgingen av A19–A23 (§2g) er gjennomført 2026-10-22 og venter på vurdering. Etterlevelse og revisjon startes ikke før det.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -516,7 +518,7 @@ Ny arbeidsversjon for statusendringer anbefales ikke:
 - Mutasjonssjekket: vakt, tilgangsregler for beslutninger og redigering, oppfølging av tiltak (også kundekontrollen) og den nye triggeren.
 - Kjøringer 2026-10-22:
   - PHP: alle testfiler som berører Ledelsens gjennomgang (11 filer), 94 av 94 bestått.
-  - JS: 2130 av 2130 bestått. En første kjøring, samtidig med E2E, rapporterte 970 bestått og 0 feilet. Det er ikke forklart. Ny kjøring alene ga hele suiten.
+  - JS: 2130 av 2130 bestått. En første kjøring, samtidig med E2E, rapporterte 970 bestått og 0 feilet. **Forklart senere (§2g):** hele `resources/js/Pages` (1160 tester) ble ikke funnet. Ny kjøring alene ga hele suiten.
   - Frontendbygg og Pint er rene.
   - E2E for Ledelsens gjennomgang, kunnskapsoverføring og Mine oppgaver: 6 av 7 bestått.
     - Feilen er en uventet ny innlasting av siden midt i reisetesten. Den er dokumentert med spor under KTF-4 og er ikke knyttet til endringene.
@@ -605,11 +607,11 @@ Ny arbeidsversjon for statusendringer anbefales ikke:
 | # | Funn | Vurdering |
 |---|---|---|
 | A18 | Godkjente prosessversjoner fulgte med når prosessen ble slettet, i SQL eller gjennom `QualityItemService::deleteItem`. Modellens vakt (`QualityProcessRevision`) gjelder ikke kaskader. | Rettet (steg 12, del 3). |
-| A19 | En kontroll med evidens kan slettes med `quality.delete`. Evidensen (`quality_item_documents`) og koblingene fra Risiko (`risk_controls`), Etterlevelse (`compliance_requirement_controls`), Avvik og Mål/KPI følger med i kaskaden. Det samme gjelder koblingene til en prosess som ikke er godkjent. | **Ikke endret.** Det er en produktbeslutning om evidens skal regnes som historikk som hindrer sletting, slik godkjente versjoner nå gjør. Bør vurderes sammen med Etterlevelse (steg 13), som bruker kontrollene som dokumentasjon. |
-| A20 | Kvalitet har ingen hendelseslogg for dokumenter. Hvem som endret status, eier eller innhold, og når, registreres ikke. Bare `last_reviewed_by_user_id`, godkjente versjoner og opphavet til artikler finnes. | Ikke endret. Krever ny tabell og en beslutning om hva som skal logges. |
-| A21 | `deleteItem` sletter de produserte Wiki-sidene før prosessen, utenfor én transaksjon. Hvis slettingen av prosessen deretter nektes (for eksempel fordi den ble godkjent i mellomtiden), er sidene borte og prosessen står. | Godtatt. Kontrollen av godkjente versjoner kjøres nå før sidene røres, så bare et samtidig kappløp gjenstår. Wiki-slettingen er sin egen, sporbare beslutning. |
-| A22 | `acceptFlowChange` sjekker `base_hash` og lagrer deretter i to steg, uten lås mellom. En samtidig endring i mellomtiden kan bli overskrevet. | Ikke endret. Vinduet er lite, og resultatet er fortsatt et utkast som må godkjennes. Kan lukkes med lås og hash-kontroll i samme transaksjon før fase 1. |
-| A23 | AI-tolkning og forslag til endring av flyt (`interpretFlow`, `proposeFlowChange`) skriver ikke, men bruker AI. De sjekkes bare i kontrolleren, og tjenestene tar ingen aktør. | Ikke endret. Utkast til artikkel fra aktivitet sjekkes nå i tjenesten. De to andre bør følge samme mønster før de åpnes i API-et. |
+| A19 | En kontroll med evidens kan slettes med `quality.delete`. Evidensen (`quality_item_documents`) og koblingene fra Risiko (`risk_controls`), Etterlevelse (`compliance_requirement_controls`), Avvik og Mål/KPI følger med i kaskaden. Det samme gjelder koblingene til en prosess som ikke er godkjent. | **Fulgt opp, se §2g.** Kontroller med registrert evidens settes til «Utgått» og slettes ikke (`7ca3b7a5`). Koblinger fra Risiko og Etterlevelse er en åpen beslutning. |
+| A20 | Kvalitet har ingen hendelseslogg for dokumenter. Hvem som endret status, eier eller innhold, og når, registreres ikke. Bare `last_reviewed_by_user_id`, godkjente versjoner og opphavet til artikler finnes. | **Vurdert, se §2g.** Anbefaling om uforanderlig hendelseslogg. Ikke implementert. |
+| A21 | `deleteItem` sletter de produserte Wiki-sidene før prosessen, utenfor én transaksjon. Hvis slettingen av prosessen deretter nektes (for eksempel fordi den ble godkjent i mellomtiden), er sidene borte og prosessen står. | **Rettet, se §2g** (`67e3cf2b`). |
+| A22 | `acceptFlowChange` sjekker `base_hash` og lagrer deretter i to steg, uten lås mellom. En samtidig endring i mellomtiden kan bli overskrevet. | **Rettet, se §2g** (`37f84480`). |
+| A23 | AI-tolkning og forslag til endring av flyt (`interpretFlow`, `proposeFlowChange`) skriver ikke, men bruker AI. De sjekkes bare i kontrolleren, og tjenestene tar ingen aktør. | **Vurdert, se §2g.** Oversikt og anbefaling. Ikke implementert. |
 | A24 | To testfiler (`QualityToolTest`, `QualityActivityControlTest`) feilet allerede på `HEAD` fordi en redigerer i Kvalitet slettet et Wiki-dokument direkte. Det krever Wiki-kildeadministrasjon etter `be1aba2b`. | Rettet i testene: System Owner sletter dokumentet. Regelen i Wiki er riktig. |
 | A25 | **Det isolerte E2E-miljøet (oppgave 1):** 4 Kvalitet-spesifikasjoner feilet der, uavhengig av steg 12.<br>– Tre trengte AI-tolkning, og miljøet har med vilje ingen OpenAI-nøkkel.<br>– Én trengte en bruker med `quality.view`, som før kom fra rollene i utviklingsdatabasen.<br>– De var ikke med i verifiseringen av miljøet (`cef890b2`). | Rettet i spesifikasjonene.<br>– `quality-flow-interpret` sier til siden at AI er tilgjengelig, slik `quality-flow-clarify` gjør.<br>– `quality-flow-clarify-sticks` og `quality-flow-describe-without-flow` hopper over med begrunnelse når serveren ikke har AI. De gjør eller trenger ekte AI-kall og er ikke verifisert i miljøet.<br>– `quality-new-process` gir og fjerner selv en rolle med bare `quality.view`.<br>Se `docs/testing/e2e-environment.md`, «Begrensninger». |
 | A26 | Radmenyen i Kvalitet lukkes ved rulling. Når raden ligger under synsfeltet, ruller Playwrights klikk den fram, og menyen lukkes rett etter at den åpnet. | Rettet i `quality-process-row-actions`: raden rulles fram, og testen venter to bildeoppdateringer før klikket (bekreftet: feiler uten, besto 3 av 3 med). En person klikker på en synlig rad, så det er ikke rettet i komponenten. |
@@ -633,7 +635,7 @@ Ny arbeidsversjon for statusendringer anbefales ikke:
   - kontrollen i tjenesten, kontrollen i kontrolleren, flagget i radene og triggerne.
 - Kjøringer 2026-10-22:
   - PHP: alle testfiler som berører Kvalitet (31 filer), 498 av 498 bestått.
-  - JS: 970 av 970 bestått.
+  - JS: rapportert som 970 av 970 bestått. **Feil:** det var en delvis kjøring der `resources/js/Pages` manglet (§2g). Hele suiten er 2130 tester, og 2130 av 2130 består (2026-10-22, etter `ef1e0ee6`).
   - Frontendbygg og Pint på berørte filer er rene.
   - E2E i det isolerte miljøet, på en nullstilt database: alle Kvalitet-spesifikasjoner, `compliance-quality`, `risk-controls` og `risk-context` (24 filer, 54 tester).
     - To kjøringer etter hverandre: 51 bestått, 3 hoppet over, 0 feilet. Telt fra Playwrights JSON-rapport.
@@ -644,8 +646,211 @@ Ny arbeidsversjon for statusendringer anbefales ikke:
 **Klar for senere API-integrasjon**
 
 - Ja for beslutninger og ordinære skrivinger: samme regler i domenet for enhver inngang.
-- Gjenstår før fase 1: A10 (feilformat), A22 og A23, og steg 19 (aktørtriggere for godkjennerkolonnene i Kvalitet).
+- Gjenstår før fase 1: A10 (feilformat), A23 (§2g) og steg 19 (aktørtriggere for godkjennerkolonnene i Kvalitet). A22 er rettet.
 - **Føring, som for Risiko, Avvik og Ledelsens gjennomgang:** en AI-agent får ikke `quality.edit` som standard. Forslag til flyt kan senere komme gjennom avgrensede API-operasjoner, men blir en del av prosessen først når en person tar dem i bruk. Godkjenning og sletting forblir menneskeforbeholdt.
+
+### 2g. Oppfølging av A19–A23 og JS-grunnlaget (2026-10-22)
+
+**Beslutning (2026-10-22):** Kontroller med registrert evidens eller relevant historikk skal ikke kunne slettes permanent gjennom ordinær brukerfunksjonalitet. A21 prioriteres. A20 og A23 vurderes og dokumenteres, men implementeres ikke nå.
+
+| Commit | Innhold |
+|---|---|
+| `ef1e0ee6` | JS-testene: `npm run test:unit` finner testfilene selv og skriver ut antallet per katalog (se «JS-grunnlaget»). |
+| `67e3cf2b` | A21: prosessen og Wiki-sidene den har produsert, slettes i én transaksjon. |
+| `37f84480` | A22: et AI-forslag tas bare i bruk på versjonen det ble laget for. |
+| `7ca3b7a5` | A19: en kontroll med registrert evidens settes til «Utgått» og slettes ikke. |
+| `03428309` | E2E-fiksturer rydder Kvalitet-data gjennom en testhjelper som slår av historikktriggerne i sin egen transaksjon (`QualityTestDataPurge`). |
+
+#### A21 – sletting på tvers av Kvalitet og Wiki (rettet)
+
+- **Før:** Wiki-sidene ble slettet og committet før prosessen. Alt som deretter stoppet slettingen av prosessen, ga en halv sletting: sidene borte og prosessen stående. Det kunne være en godkjenning som kom imellom, at Wiki feilet sent, eller en annen feil.
+- **Nå:** `QualityItemService::deleteItem` gjør dette i én transaksjon:
+  1. låser prosessraden (`FOR UPDATE`);
+  2. leser reglene på nytt under låsen (`deletionBlocker()`);
+  3. sletter sidene gjennom `EnterpriseWikiPageDeletionService`, og deretter prosessen.
+- Feiler noe etter at sidene er slettet, rulles sidene tilbake.
+- **Rettighetene i begge moduler er uendret:**
+  - `quality.delete` og vakten sjekkes før transaksjonen.
+  - Wikis egen regel (`wiki.delete` og eierskap til hver side) sjekkes inne i `deletePages`, under samme transaksjon.
+- **Samtidighet:**
+  - En godkjenning av samme prosess setter inn en versjon. Den trenger en lås på prosessen og venter derfor til slettingen er ferdig. Deretter feiler den, fordi prosessen er borte.
+  - En godkjenning som ble committet først, fanges av kontrollen under låsen og av databasetriggeren.
+  - Det samme gjelder en ny artikkel fra en av prosessens aktiviteter.
+- **Etter commit, og bare da:** grafprojeksjonene (begge moduler) og Wikis logglinje «Deleted Wiki pages». En tilbakerullet sletting logges ikke lenger som utført.
+- **Historikk:** godkjente versjoner og prosesser med evidens beskyttes som før (steg 12 og A19). Kildedokumentene røres aldri.
+- **Tester:** `QualityWikiDeletionAtomicityTest` (5) legger inn feil rett etter at Wiki har slettet sidene:
+  - en godkjenning imellom, slik at databasen nekter å slette prosessen;
+  - at Wiki feiler lukket, slik at dialogen sier fra;
+  - en vilkårlig annen feil;
+  - at Wikis egen rettighet nekter.
+
+  Ingenting slettes i noen av tilfellene. Uten transaksjonen feiler 3 av 5.
+- **Gjenstår:** En side som en Wiki-kjøring lager fra prosessens kildedokument *etter* at slettingen startet, er ikke med i valget og blir stående. Det er ingen inkonsistens: siden er vanlig Wiki-kunnskap, og opphavsraden følger prosessen.
+- **Ærlig om låsen:** Med én databaseforbindelse kan ikke testene vise låsen (mutasjonen overlever). Det er transaksjonen og triggeren som sikrer at slettingen er hel. Låsen gjør bare at en samtidig godkjenning venter eller avvises før Wiki røres.
+
+#### A22 – samtidige endringer ved AI-forslag (rettet)
+
+- **Før:**
+  - «Godta endringer» sammenlignet versjonen og lagret deretter i et eget steg, uten lås.
+  - «Bruk denne prosessflyten» (tolkning) hadde ingen versjonskontroll. En flyt som var lagret i mellomtiden, ble overskrevet uten varsel.
+- **Nå:**
+  - Hvert AI-forslag bærer avtrykket av arbeidsversjonen det ble laget for (`QualityProcessBlueprintService::versionHash()`, én definisjon). Avtrykket leses før modellen spørres.
+  - `store()` krever avtrykket for `SOURCE_AI` og sammenligner det under lås, i samme transaksjon som skrivingen.
+  - Låserekkefølgen er den samme som i `approve()`: arbeidsversjonen først, og prosessen bare når det ikke finnes noen arbeidsversjon ennå. Da kan ikke de to vente på hverandre i motsatt rekkefølge.
+- **Hvis flyten er endret:**
+  - Forslaget tas ikke i bruk, og den nyere flyten beholdes.
+  - Brukeren får meldingen «Prosessflyten er endret etter at forslaget ble laget, så forslaget ble ikke tatt i bruk. Den lagrede flyten er beholdt. Se over den og lag et nytt forslag ut fra flyten slik den er nå.»
+  - Beskrivelsen står igjen i feltet, så et nytt forslag mot gjeldende flyt er ett klikk unna.
+- **Tester:** `QualityFlowProposalVersionTest` (5), og tolkningstesten kontrollerer avtrykket på forslaget. Mutasjonssjekket: uten kontrollen feiler 3 tester, og med feil avtrykk på forslaget feiler 4.
+- **Ikke endret, nytt funn A27:** Manuell lagring av flyten er fortsatt «siste lagring vinner». To personer som redigerer samtidig, kan overskrive hverandre. Det er ordinær redigering og ikke en del av A22.
+
+#### A19 – sletting av kontroller med evidens (gjennomført; koblinger åpne)
+
+**Kartlegging av hva en sletting tok med seg:**
+
+| Det som peker på kontrollen | Ved sletting | Synlig for Kvalitet? |
+|---|---|---|
+| Evidens (`quality_item_documents`, `evidence`) | Slettet (kaskade) | Ja, Kvalitets egen |
+| Plasseringer på aktiviteter (`quality_activity_controls`) | Slettet | Ja, Kvalitets egen struktur |
+| Verktøy (`quality_item_documents`, `tool`) | Slettet (selve filen og verktøyet står) | Ja |
+| Risiko (`risk_controls`) | Slettet (risikoen står) | **Nei.** Besluttet tidligere (`0798aa5`, `RiskControlLinkTest`) |
+| Krav i Etterlevelse (`compliance_requirement_controls`) | Slettet (kravet står) | Nei. Etterlevelse krever eksplisitt tildeling |
+| Revisjonsfunn (`compliance_audit_findings.control_item_id`) | Satt til `NULL` (funnet står) | Nei |
+
+**Status:** «Utgått» (`QualityItem::STATUS_RETIRED`) finnes allerede og gjør det beslutningen ber om. Derfor er ingen ny status innført.
+- En utgått kontroll kan ikke plasseres på nye aktiviteter.
+- Den tilbys ikke i velgerne i Etterlevelse og revisjon, i oppmerksomhetslisten eller i Mine oppgaver.
+- Alt som allerede er knyttet til den, blir stående.
+
+**Gjennomført (`7ca3b7a5`):**
+- En kontroll med registrert evidens kan ikke slettes. Den settes til «Utgått», og evidensen, plasseringene og koblingene beholdes.
+- Regelen gjelder i radmenyen (grunnen vises i stedet for «Slett kontroll»), kontrolleren, tjenesten (også under låsen) og databasen (migrering `2026_10_22_000009`).
+- Bare sletting av hele kunden tar kontrollen med.
+- **Data:** 2 av 114 kontroller i utviklingsdatabasen har evidens. Ingen rader er endret.
+
+**Åpen beslutning – koblinger fra Risiko og Etterlevelse:** Disse blokkerer ikke sletting, som før. Det er en konflikt med en tidligere beslutning:
+- Kvalitet skal ikke få vite om koblinger fra Risiko, og sletting i Kvalitet skal ikke nektes på grunn av en kobling brukeren ikke ser (`RiskControlLinkTest::test_nothing_about_the_link_reaches_kvalitet`).
+- Etterlevelse krever eksplisitt tildeling, så en Kvalitet-bruker ser heller ikke kravkoblinger og revisjonsfunn.
+- Å nekte med en melding som nevner koblingen, ville avsløre at den finnes.
+
+Alternativer:
+1. **Behold som nå** (anbefalt inntil videre). Koblingen fjernes når kontrollen slettes, men risikoen, kravet og funnet står.
+2. **Nekt med en nøytral melding** («Kontrollen er i bruk andre steder og kan ikke slettes. Sett den til «Utgått».»). Det avslører bare at noe peker på kontrollen, ikke hva. Det opphever den tidligere beslutningen for Risiko, og testene må endres.
+3. **Nekt bare når brukeren selv kan se koblingen**, og behold kaskaden ellers. Det gir ulik oppførsel for ulike brukere, og det fraråder jeg.
+
+**Gjenstår:** Evidens kan fortsatt fjernes enkeltvis («Fjern», en eksisterende funksjon for å rette feilregistrering). Når all evidens er fjernet, kan kontrollen slettes. Det lukkes best med A20: å fjerne evidens blir en tilbaketrekking som står i historikken.
+
+**Tester:** `QualityControlHistoryTest` (6). Mutasjonssjekket: regelen i tjenesten og triggeren.
+
+#### A20 – revisjonshistorikk i Kvalitet (anbefaling, ikke implementert)
+
+**I dag:**
+- Godkjente flytversjoner er uforanderlige (`quality_process_revisions`, steg 12).
+- Opphavet til artikler fra aktiviteter er registrert (`quality_activity_wiki_pages`).
+- Ellers registreres bare `last_reviewed_by_user_id`, `created_by_user_id` og `generated_by_user_id`/`approved_by_user_id`.
+- Statusendringer, eierskifte, sletting, evidens som fjernes og koblinger som fjernes, etterlater ingen spor.
+
+**Anbefaling:** én tabell, `quality_item_events`, etter samme mønster som `management_review_events` og historikktabellene i Avvik:
+- en rad per hendelse, med `customer_id`, `quality_item_id` (beholdes etter sletting), type og tittel i øyeblikksbilde, `event`, `actor_user_id`, `actor_name`, `occurred_at` og `metadata` (fra/til);
+- skrevet i tjenestene, i samme transaksjon som endringen;
+- en databasetrigger som nekter UPDATE og DELETE, unntatt når kunden slettes, og fremmednøkkelen til en slettet bruker (`actor_user_id` blir `NULL`).
+
+**Hva som bør ha uforanderlig historikk:**
+
+| Prioritet | Endring | Hvorfor |
+|---|---|---|
+| Må | Statusendring (inkludert «Utgått» og tilbake) | Når et styrende dokument eller en kontroll ble tatt ut av bruk, og av hvem |
+| Må | Sletting av element, med tittel, type og kode i øyeblikksbilde | Raden forsvinner, så hendelsen er det eneste sporet |
+| Må | Evidens registrert og fjernet (fjerning blir tilbaketrekking med begrunnelse, og raden står) | Evidens er beviset for at kontrollen er utført, og lukker restpunktet i A19 |
+| Må | Flyt: AI-forslag tatt i bruk (med versjonsavtrykk), arbeidsversjon forkastet, flyt slettet | Godkjenningen er allerede en uforanderlig versjon. Det som leder fram til den og bort fra den, er det ikke |
+| Må | Eierskifte og registrert gjennomgang (dato, intervall, av hvem) | Ansvar og gjennomgang er det revisjoner spør etter (ISO 9001, 7.5) |
+| Bør | Kontroll plassert på eller fjernet fra en aktivitet; styrende dokument koblet eller fjernet (`governs`) | Viser hvordan styringen av prosessen har endret seg |
+| Bør | Endring av tittel, kode og formål (fra/til) | Sporbarhet for innholdet i et styrende dokument |
+| Kan | Struktur (steg, inn/ut, sjekkpunkter), Wiki-koblinger, dokumentkoblinger, verktøy | Arbeidsinnhold. Hendelse uten fullt innhold holder |
+| Ikke | Hver lagring av arbeidsversjonen av flyten; avklaringer | Arbeidsversjonen er et utkast. Godkjente versjoner er historikken |
+
+Dette bør gjøres før API-fasen åpner Kvalitet for integrasjoner. Da registreres også hva en integrasjon har endret, med aktør.
+
+#### A23 – AI-operasjoner som bare kontrolleres i kontrolleren (oversikt, ikke implementert)
+
+Kartlagt 2026-10-22 for alle operasjoner i `config/ai_operations.php`. Stikkprøver er kontrollert i koden. Forklaring til kolonnen «Hvor»:
+- **C:** tilgangen sjekkes bare i kontrolleren, og tjenesten tar ingen aktør.
+- **S:** tilgangen sjekkes også i tjenesten.
+- **J:** operasjonen kjører i køjobber som startes av en handling som er kontrollert.
+
+`AiCallContextScope`/`AiCallContextPolicy` setter og håndhever bare kundekonteksten. `AiUsageGuard` og kostnadskontrollen er kvoter. Ingen av dem er tilgangskontroll.
+
+| Operasjoner | Inngang | Kontroll i dag | Hvor |
+|---|---|---|---|
+| `quality.interpret_process` | `QualityController::interpretFlow` | `quality.edit` | C |
+| `quality.clarify_process` (og tolkning) | `QualityController::answerFlowClarification` | `quality.edit` | C |
+| `quality.propose_process_change` | `QualityController::proposeFlowChange` | `quality.edit` | C |
+| `quality.draft_activity_article` | `QualityController::draftActivityArticle` | `quality.create` og `wiki.knowledge.handoff`. `quality.create` også i `QualityActivityArticleService::draft` (steg 12) | **S** |
+| Artikkel fra aktivitet til Wiki-kjøring | `storeActivityArticle` → `WikiKnowledgeHandoffService::deposit` | `quality.create` og `wiki.knowledge.handoff`, begge i tjenestene | **S**, deretter J |
+| `tender.excel_structure_discovery`, `tender.requirement_extraction`, `tender.requirement_relevance` | `AiController::storeDocuments`, deretter jobber | Synlighet til saken (`SavedNoticeAccessService`) og AI-tilbud (`canUseAiOffer`). **Ingen rettighetsnøkkel** | C, deretter J |
+| `tender.requirement_answer`, `_research`, `_alignment`, `_answer_revision`; `wiki.navigation_plan` | `AiController::generateRequirementWikiAnswer` | Som over. Tjenesten får `int $userId`, ikke en `User` | C |
+| `tender.requirement_assessment`, `_research` | `AiController::refreshAssessments` | Som over | C |
+| `wiki.ask.*`, `wiki.navigation_plan` | `WikiAskController::ask` | `wiki.view`, `canUseAiOffer` og hastighetsgrense. Synlige statuser beregnes i kontrolleren og sendes inn | C |
+| Hele Wiki-kjøringen (`wiki.maintainer_decision`, `generate_page`, `repair_*`, `extract_page_claims`, `verify_claim`, `review_*`, `revise_*`, `propose_inbound_links`, `classify_cross_page_consistency`) | `WikiSourceController::ingest`, deretter `EnterpriseWikiDocumentFlowService::startForDocument` | `wiki.source.manage` i kontrolleren. `startForDocument(int, int)` tar ingen aktør | C, deretter J |
+| Samme (ny kjøring av feilede steg) | `WikiController::retryMaintainerDecision`, `retryFailedPages`, deretter `*FailureRecoveryService::attempt` | `wiki.source.manage` og dokumentrett i kontrolleren | C, deretter J |
+| Samme (overføring fra Risiko, Avvik, LG, Etterlevelse, Leverandør og Mål) | `WikiKnowledgeHandoffController::store`, deretter `handOff`/`deposit` | `canHandOff` og `mayDeposit` i tjenesten | **S**, deretter J |
+| `wiki.extract_page_claims`, `wiki.verify_claim` (manuell redigering) | `WikiController::updateManualMixedBlockEdit`, `updateWorkingVersion` | Vakt og `wiki.review`/`wiki.edit` i tjenestene (steg 5 og 6) | **S** |
+| `wiki.verify_claim` (avstemming av kilder etter opplasting) | `WikiSourceController::store`; i Kvalitet `storeItem`, `storeDocument` og `storeTool` | Wiki: `wiki.source.manage`. **Kvalitet: bare `quality.create`/`quality.edit`** (F3b) | C, deretter J |
+| Eldre `wiki.extract_section_claims`, `wiki.generate_article` og driftskommandoer | Bare konsoll og planlagte jobber | Operatørkontekst, ingen rettighet. Forventet | – |
+
+Ingen nettrute starter AI-arbeid helt uten kontroll.
+
+**Anbefaling: tilgangen flyttes inn i tjenestene, etter mønsteret fra steg 9–12.**
+
+1. **Kvalitet (lite, kan tas først):**
+   - `QualityProcessFlowInterpreter::interpret`, `QualityProcessDescriptionClarifier::integrate` og `QualityProcessFlowChangeProposer::propose` tar `User $actor`.
+   - De kaller `QualityAccessService::authorize($actor, quality.edit, $customerId)` før modellen spørres, slik `QualityActivityArticleService::draft` gjør nå.
+   - Forslagene er ikke menneskeforbeholdt. En integrasjon med `quality.edit` kan be om et forslag, mens det å ta det i bruk forblir menneskelig (`QUALITY_FLOW_ADOPT`).
+2. **Wiki-kjøringen:**
+   - `EnterpriseWikiDocumentFlowService::startForDocument` og gjenopprettingstjenestene tar en aktør og kontrollerer selv `wiki.source.manage` og dokumentretten (`EnterpriseWikiSourceAuthority`).
+   - Systemkall (planlagte jobber og konsoll) går gjennom en egen, eksplisitt systeminngang, slik at «ingen aktør» aldri er en stille standard.
+   - Overføring av kunnskap går allerede gjennom `deposit`, som kontrollerer.
+3. **Spør Wiki:** `EnterpriseWikiQuestionAnswerService::ask` tar `User` og avleder selv `wiki.view` og synlige statuser, i stedet for å få statusene fra kontrolleren.
+4. **Anbud:**
+   - Det finnes ingen `tender.*`-nøkkel i rettighetskatalogen. AI-arbeid på en sak styres av synligheten til saken og AI-tilbudet.
+   - Før API-fasen bør det besluttes om det skal finnes en egen nøkkel for å starte AI-arbeid på en sak (for eksempel `tender.ai.run`). Uansett bør tjenestene få `User` og selv kontrollere synligheten til saken (`SavedNoticeAccessService`) og AI-tilbudet.
+   - Godkjenning og avvisning av krav er allerede menneskeforbeholdt (B4).
+5. **Kvalitetsopplasting som starter avstemming i Wiki (F3b):** dette er fortsatt en beslutning for fase 1, som før.
+6. **Felles:**
+   - Hver AI-tjeneste som startes av en person, tar `User $actor` og sjekker tilgang før kostnad påløper.
+   - En test per operasjon kaller tjenesten direkte med en person uten nøkkel og med en annen kundes person, og viser at ingen AI-kall går ut (`Http::preventStrayRequests()`, som i `QualityServiceAuthorizationTest`).
+
+#### JS-grunnlaget: 2130 eller 970 tester
+
+- **Den komplette suiten er 2130 tester i 103 filer**, fordelt på `Components` 5, `Layouts` 4, `Pages/App` 66 og `Support` 28 (2026-10-22).
+- **To kjøringer rapporterte 970 tester og 0 feil.** Telling per fil viser at 970 er nøyaktig suiten uten `resources/js/Pages`: 86 + 133 + 751 = 970, mens `Pages` alene har 1160.
+- **Årsak:** `node --test "resources/js/**/*.test.js"` lar Node gjøre globbingen, og den hoppet stille over en hel katalog. Fem nye kjøringer ga 2130. Utløseren er ikke reprodusert. En forbigående lesefeil i Docker-monteringen på macOS er den mest sannsynlige.
+- **Retting (`ef1e0ee6`):** `scripts/run-js-unit-tests.mjs` finner filene selv. En katalog som ikke kan leses, stopper kjøringen. Antallet filer per katalog skrives ut før testene kjøres, så en delvis kjøring synes.
+- **Rettelse:** Rapporten for steg 12 («JS: 970 av 970») var en slik delvis kjøring.
+
+#### Tester og kjøringer (2026-10-22)
+
+- **PHP:** alle testfiler som berører Kvalitet, og Risikos og Etterlevelses koblinger til kontroller (36 filer): 519 av 519 bestått. Wiki-slettingen er kjørt i tillegg (8 filer, 85 av 85).
+- **Nye testfiler:** `QualityWikiDeletionAtomicityTest` (5), `QualityFlowProposalVersionTest` (5) og `QualityControlHistoryTest` (6).
+- **Mutasjonssjekket:**
+  - transaksjonen i A21;
+  - versjonskontrollen og avtrykket på forslaget i A22;
+  - evidensregelen i tjenesten og triggeren i A19.
+  - Låsen i A21 overlever mutasjonen, som forklart over.
+- **JS:** 2130 av 2130 bestått i 103 filer. Frontendbygg og Pint på berørte filer er rene.
+- **E2E i det isolerte miljøet:** alle spesifikasjoner for Kvalitet og Etterlevelse, `risk-controls` og `risk-context` (36 filer, 72 tester). Telt fra Playwrights JSON-rapport.
+  - Første kjøring: 60 bestått, 8 feilet og 4 hoppet over. Alle 8 feilene skyldtes A30 (opprydding og følgefeil) eller den tilsiktede endringen i `quality-overview-sections`.
+  - Etter `03428309`: de 7 berørte filene ga 17 bestått og 1 hoppet over. Hele settet ga deretter **69 bestått, 0 feilet og 3 hoppet over**.
+  - **De 3 som hoppes over, er ikke bestått og ikke verifisert.** Alle trenger AI-tolkning, som miljøet med vilje ikke har: A11Y-013 i `a11y-grc-quality`, `quality-flow-clarify-sticks` og `quality-flow-describe-without-flow`.
+
+#### Nye funn
+
+| # | Funn | Vurdering |
+|---|---|---|
+| A27 | Manuell lagring av prosessflyten er «siste lagring vinner». To samtidige redigeringer kan overskrive hverandre uten varsel. | Ikke endret. Kan løses med samme versjonsavtrykk som i A22 (lagre mot versjonen som ble åpnet). Bør vurderes før integrasjoner kan skrive flyt. |
+| A28 | En prosess som ikke er godkjent, og som Risiko, Mål/KPI, Avvik eller Etterlevelse peker på, kan slettes. Koblingene følger med i kaskaden. | Samme åpne spørsmål som koblingene i A19, og bør besluttes sammen med dem. |
+| A29 | Den eksisterende funksjonen «Fjern» på evidens gjør at en kontroll kan tømmes for evidens og deretter slettes. | Se A19 «Gjenstår» og A20. |
+| A30 | Tre E2E-fiksturer ryddet opp ved å slette kontroller med evidens. Det nekter databasen nå. De mislykkede oppryddingene ga også følgefeil (tidsavbrudd i Etterlevelse-spesifikasjoner). | Rettet (`03428309`). |
 
 ## 3. Avgrensning
 
