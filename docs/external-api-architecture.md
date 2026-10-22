@@ -1,6 +1,6 @@
 # Eksternt Procynia-API – arkitektur og implementeringsplan
 
-**Status:** Forslag til arkitekturbeslutning. Ingenting i dette dokumentet er implementert.
+**Status:** Forslag til arkitekturbeslutning. Ingenting i dette dokumentet er implementert. Produktbeslutningene for fase 0 er tatt 2026-10-22 (§7.3). Implementeringsplanen står i [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md).
 **Dato:** 2026-10-22
 **Første konsument:** Siggjo (Advanias AI- og utviklingsmiljø: dashboards i PostgreSQL/Claude, agenter i Microsoft Foundry).
 **Mål:** Et generelt, tilgangsstyrt API som også kan brukes av andre integrasjoner.
@@ -244,6 +244,15 @@ Kartleggingen viser at de fleste beslutningsrettighetene bare kontrolleres i web
 | Anbud: Go/No-go, statusoverganger | Kontroller. `SavedNotice::transitionBidStatus` (:607) lagrer ingen aktør. | Delvis | Middels |
 | Anbud: bekreft eller avvis krav | Kontroller. `RequirementEditorService::transitionRequirementReviewStatus(…, ?User $changedBy = null)` (:313) godtar null-aktør. | Delvis | Middels |
 
+Kartleggingen ble kontrollert mot koden 2026-10-22. I tillegg til tabellen over gjelder:
+
+- Sletting av kildedokumenter og sider, avbrudd og fjerning av kjøringer og dokumenteiers beslutning skjer i tjenester som tar `User`, men ikke sjekker rettigheter.
+- Risikovurdering, sletting av risiko og avvik, og statusoverganger i Anbud skrives direkte i kontrolleren.
+- Godkjenning av krav i Anbud sjekker bare synlighet, så lesere kan godkjenne.
+- Sletting av risiko fjerner vurderinger og aksepter via databasekaskade.
+
+Fullstendig tabell over tjenester og filer: [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §4.4.
+
 Disse tjenestene kontrollerer allerede selv og kan gjenbrukes trygt: `ImprovementCaseCreator::create` (:55, :72/:82), tjenestene for `supplier.assure`, `ComplianceAuditFindingHandoffService::handOff` (:84) og `ManagementReviewDecisionService` sine `handOff`/`link`.
 
 ### 7.2 Anbefalt mekanisme
@@ -253,18 +262,20 @@ Disse tjenestene kontrollerer allerede selv og kan gjenbrukes trygt: `Improvemen
 `CustomerPermissionCatalog` får `humanOnlyPermissions()`:
 
 ```text
-wiki.approve, wiki.review, wiki.delete, wiki.source.manage,
-risk.accept, risk.assess, risk.delete,
+wiki.edit, wiki.review, wiki.approve, wiki.delete, wiki.source.manage,
+quality.approve, quality.delete,
+risk.assess, risk.accept, risk.delete,
+objective.measure, objective.delete,
 improvement.close, improvement.delete,
-objective.delete,
 compliance.assess, compliance.audit, compliance.delete,
 supplier.assess, supplier.assure, supplier.delete,
-management_review.finalize, management_review.delete,
-quality.approve, quality.delete
+management_review.finalize, management_review.delete
 ```
 
-- **[BESLUTNING]** Listen bør bekreftes av produkteier.
-- Utgangspunktet er strengt: alle godkjenninger, faglige vurderinger og slettinger er forbeholdt mennesker. Lesing og opprettelse av forslag er det ikke.
+- **Besluttet 2026-10-22 (§7.3, B1):** Alle godkjenninger, publiseringer, faglige vurderinger og slettinger er forbeholdt mennesker. Lesing og opprettelse av utkast og forslag er det ikke.
+- `wiki.edit` er med fordi en manuell redigering merkes som menneskeskrevet innhold (`CONTENT_ORIGIN_HUMAN_AUTHORED`).
+- `objective.measure` er med fordi en måling er en registrert verdi, ikke et forslag.
+- Kunnskapsoverføring får en egen rettighet, `wiki.knowledge.handoff`, som *ikke* er menneskeforbeholdt. Den skilles fra `wiki.source.manage` (kildeadministrasjon), som er det.
 
 **2. Fjern rettighetene i den effektive rettighetsberegningen.** **[MÅ ENDRES]**
 
@@ -277,6 +288,8 @@ Hver beslutningstjeneste kaller `HumanDecisionGuard::assert($actor, Decision::RI
 - aktøren er `integration`, eller
 - det finnes en aktiv `ApiRequestContext` (også delegert: en agent som handler på vegne av en person, skal ikke kunne godkjenne på personens vegne), eller
 - aktøren er `null`.
+
+Sperren for aktiv `ApiRequestContext` gjelder også delegert modus. Det er besluttet (§7.3, B2).
 
 **4. Flytt rettighetskontrollen ned i tjenestene.** **[MÅ ENDRES]**
 
@@ -293,6 +306,24 @@ Hver beslutningstjeneste kaller `HumanDecisionGuard::assert($actor, Decision::RI
 En `BEFORE INSERT/UPDATE`-trigger avviser at beslutningskolonner peker til en `users`-rad med `role = integration`. Det gjelder blant annet `risk_acceptances.accepted_by_user_id`, publiseringsfeltene i `enterprise_wiki_pages`, beslutningsfeltene i `management_reviews` og `enterprise_wiki_claim_decisions.decided_by_user_id`. Mønsteret finnes allerede for historikktabellene.
 
 **7. Ingen API-ruter for beslutninger.** API-et eksponerer aldri endepunkter for godkjenning, uansett hva som skjer med punktene over.
+
+### 7.3 Produktbeslutninger og verifiserte funn (2026-10-22)
+
+| # | Beslutning |
+|---|---|
+| B1 | Integrasjoner og AI-agenter utfører aldri endelige godkjenninger, publiseringer eller andre formelle beslutninger. De kan opprette utkast og forslag gjennom egne, avgrensede rettigheter. Kildeadministrasjon, kunnskapsoverføring og formell godkjenning er adskilte rettigheter. |
+| B2 | Menneskeforbeholdte beslutninger er ikke tilgjengelige via API-et, heller ikke når en agent handler på vegne av en autentisert person. |
+| B3 | En risiko med vurderinger, aksepter eller annen beslutningshistorikk kan ikke slettes permanent. Historikken bevares, og «Lukket» brukes i stedet. |
+| B4 | Godkjenning og avvisning av krav i Anbud krever en eksplisitt rettighet (`decide_bid_requirements` i Tilganger-matrisen) og en identifiserbar menneskelig aktør. Lesetilgang til saken er ikke nok. |
+
+Funn fra kartleggingen er verifisert med isolerte tester:
+
+- **F1a og F1b** (bekreftet): manuell redigering av en side som ligger til godkjenning, og påstandsreparasjon på en publisert side, bryter godkjenningsflyten. Ingenting ugjennomgått publiseres.
+- **F2** (avkreftet i praksis): `FinalizeEnterpriseWikiIngest` kan ikke nå en side som ligger til godkjenning.
+- **F3a** (bekreftet): Kvalitet sletter Wiki-sider uten `wiki.delete`.
+- **F4** (bekreftet): endringer i roller, QA og Tilganger har ikke revisjonsspor.
+
+Detaljer, tester og rettingsrekkefølge står i [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §2.
 
 ---
 
@@ -448,7 +479,7 @@ Agenter skal kunne *foreslå*, ikke *beslutte*. I prioritert rekkefølge:
 
 1. **Gjenbruk eksisterende «trygge» opprettelser** som allerede kontrollerer selv og ender i en tilstand et menneske må ta stilling til:
    - `ImprovementCaseCreator::create` → saken opprettes som «Åpen». Eier og behandling er menneskelig.
-   - `WikiKnowledgeHandoffService` → innholdet blir et *kildedokument* som går gjennom vanlig kjøring og menneskelig godkjenning. Dette er den eneste lovlige veien inn i Wiki: agenter skriver aldri sider direkte. Tjenesten må først kalle `canHandOff` og maksimumsgrensen selv (§7.1).
+   - `WikiKnowledgeHandoffService` → innholdet blir et *kildedokument* som går gjennom vanlig kjøring og menneskelig godkjenning. Dette er den eneste lovlige veien inn i Wiki: agenter skriver aldri sider direkte. Tjenesten må først kalle `canHandOff` og maksimumsgrensen selv (§7.1). Den krever rettigheten `wiki.knowledge.handoff`, ikke `wiki.source.manage` (§7.3, B1). En integrasjon blir aldri dokumenteier.
 2. **[BESLUTNING]** Én generisk forslagstype (`agent_suggestions`) som vises i «Mine oppgaver» hos ansvarlig person, og som bare et menneske kan ta i bruk eller avvise. Den gjelder for eksempel «foreslå ny risikovurdering» eller «foreslå revisjon av Wiki-side».
    - Den skal være *én* modell og én `MyTaskSource`, ikke en per modul.
    - Det er en ny modell, og AGENTS.md («unngå unødvendige modeller») krever at behovet er dokumentert først.
@@ -555,6 +586,8 @@ Agenter skal kunne *foreslå*, ikke *beslutte*. I prioritert rekkefølge:
 | K14 | Infrastruktur uten API Management, WAF eller VNet. MFA mangler. Ingress-område ikke verifisert. | Offentlig API-flate uten et ekstra lag | **[BESLUTNING]** Azure API Management eller Front Door med WAF foran `/api`. Uavhengig av det: ratebegrensning og logging i appen. |
 | K15 | Ingen DPIA eller databehandleravtaler dokumentert. Ny AI-leverandør (Claude) via Siggjo. | Juridisk hinder for kopiering til Siggjo | DPIA og databehandleravtaler før fase 3. |
 | K16 | `notices` har arbeidsflytfelt som deles mellom kunder | Anbud-API kan lekke arbeidsflyttilstand | Anbud holdes utenfor til feltene er kundeavgrenset. |
+| K17 | Manuelle Wiki-endringer tar ikke hensyn til åpen godkjenning eller publisering (F1a, F1b) | Fireøyneprinsippet ved overlevering kan brytes, og en endring på en publisert side får ingen vei til godkjenning | Rettes i fase 0, steg 3. |
+| K18 | `wiki.source.manage` dekker både kildeadministrasjon og kunnskapsoverføring | Fase 4 ville gi agenter sletting av kilder for å kunne overføre kunnskap | Ny rettighet `wiki.knowledge.handoff` (B1). |
 
 ---
 
@@ -563,6 +596,8 @@ Agenter skal kunne *foreslå*, ikke *beslutte*. I prioritert rekkefølge:
 Hver fase avsluttes med målrettede tester. Full testsuite kjøres bare som milepæl ved slutten av fase 1, 2 og 4, i tråd med testregimet i `AGENTS.md`.
 
 ### Fase 0 – Beslutninger og herding (ingen API)
+
+Detaljert plan, med rekkefølge, commits og akseptansekriterier: [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md). Punkt 1 «liste over menneskeforbeholdte rettigheter» er besluttet (§7.3).
 
 1. Arkitekturbeslutninger:
    - identitetsmodell (§4)
@@ -578,6 +613,10 @@ Hver fase avsluttes med målrettede tester. Full testsuite kjøres bare som mile
    - null-aktører fjernet
    - Wiki-arbeidsflyten trukket ut i tjenester
    - databasetriggere for de mest kritiske beslutningskolonnene
+   - `wiki.knowledge.handoff` skilt fra `wiki.source.manage` (B1)
+   - risiko med historikk kan ikke slettes (B3)
+   - eksplisitt rettighet for godkjenning av krav i Anbud (B4)
+   - retting av F1a, F1b, F2 og F3a, og revisjonsspor for tilgangsendringer (F4)
 
    Tester: `HumanDecisionContractTest` og eksisterende modultester.
 
@@ -638,7 +677,7 @@ Hver fase avsluttes med målrettede tester. Full testsuite kjøres bare som mile
 1. Identitetsmodell C (§4) – anbefalt.
 2. Scopes og app-roller som tak, og presisering av Entra-invarianten (§5.4).
 3. Egen Entra-registrering for API-et (§5.2).
-4. Endelig liste over menneskeforbeholdte rettigheter (§7.2).
+4. ~~Endelig liste over menneskeforbeholdte rettigheter (§7.2).~~ Besluttet 2026-10-22 (§7.3). Det samme gjelder sperren i delegert modus, sletting av risiko og godkjenning av krav i Anbud.
 5. Siggjo-dataflyt: A, B eller begge (§9.2). Kopiering krever DPIA og databehandleravtale.
 6. Generisk forslagsmodell (§10.1).
 7. API Management eller WAF foran API-et (K14).
