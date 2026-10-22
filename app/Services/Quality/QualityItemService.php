@@ -9,6 +9,7 @@ use App\Models\QualityChecklistItem;
 use App\Models\QualityControlDetail;
 use App\Models\QualityItem;
 use App\Models\QualityItemDocument;
+use App\Models\QualityItemEvent;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
 use App\Models\QualityProcessIo;
@@ -324,8 +325,8 @@ class QualityItemService
      *
      *  - a process with an approved version (phase 0 step 12) — the versions are the record of what
      *    was decided;
-     *  - a control with registered evidence, withdrawn evidence included (findings A19, A29) — the
-     *    evidence is the record that the control was carried out;
+     *  - an item with registered evidence, withdrawn evidence included (findings A19, A29) — the
+     *    evidence is the record that the work was carried out;
      *  - a process or control another module points at — Risiko, Mål og KPI, Avvik og forbedringer,
      *    Etterlevelse og revisjon (findings A19, A28, decided 2026-10-22). Those links are the other
      *    module's record of relying on it, and they are kept.
@@ -382,18 +383,20 @@ class QualityItemService
             $blockers[(int) $id] = 'procynia.quality.errors.approved_process_not_deletable';
         }
 
-        if ($controlIds !== []) {
-            // Withdrawn evidence counts too: it is still the record (A29).
-            $withEvidence = QualityItemDocument::query()
-                ->where('customer_id', $customerId)
-                ->whereIn('quality_item_id', $controlIds)
-                ->where('relation_type', QualityItemDocument::RELATION_TYPE_EVIDENCE)
-                ->distinct()
-                ->pluck('quality_item_id');
+        // Evidence on any item, withdrawn evidence included: it is still the record (A29), and a
+        // delete would take it along by cascade.
+        $controlIdSet = array_flip($controlIds);
+        $withEvidence = QualityItemDocument::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('quality_item_id', $byType->flatten()->all())
+            ->where('relation_type', QualityItemDocument::RELATION_TYPE_EVIDENCE)
+            ->distinct()
+            ->pluck('quality_item_id');
 
-            foreach ($withEvidence as $id) {
-                $blockers[(int) $id] = 'procynia.quality.errors.control_with_history_not_deletable';
-            }
+        foreach ($withEvidence as $id) {
+            $blockers[(int) $id] = isset($controlIdSet[(int) $id])
+                ? 'procynia.quality.errors.control_with_history_not_deletable'
+                : 'procynia.quality.errors.item_with_evidence_not_deletable';
         }
 
         return $blockers;
@@ -783,19 +786,29 @@ class QualityItemService
             ]);
         }
 
-        return QualityItemDocument::query()->firstOrCreate(
-            [
-                'quality_item_id' => $item->id,
-                'enterprise_wiki_document_id' => $document->id,
-                'relation_type' => $relationType,
-            ],
-            [
-                'customer_id' => $customerId,
-                'note' => $this->nullableText($note),
-                'source' => QualityItemDocument::SOURCE_MANUAL,
-                'created_by_user_id' => $actor->id,
-            ],
-        );
+        return DB::transaction(function () use ($customerId, $item, $document, $relationType, $note, $actor): QualityItemDocument {
+            // Only an active link counts: withdrawn evidence stays as history, and the same file
+            // may be registered as evidence again (A29).
+            $link = QualityItemDocument::query()->whereNull('withdrawn_at')->firstOrCreate(
+                [
+                    'quality_item_id' => $item->id,
+                    'enterprise_wiki_document_id' => $document->id,
+                    'relation_type' => $relationType,
+                ],
+                [
+                    'customer_id' => $customerId,
+                    'note' => $this->nullableText($note),
+                    'source' => QualityItemDocument::SOURCE_MANUAL,
+                    'created_by_user_id' => $actor->id,
+                ],
+            );
+
+            if ($link->wasRecentlyCreated && $relationType === QualityItemDocument::RELATION_TYPE_EVIDENCE) {
+                $this->recordEvidenceEvent(QualityItemEvent::EVIDENCE_REGISTERED, $link, $actor);
+            }
+
+            return $link;
+        });
     }
 
     /**
@@ -838,11 +851,13 @@ class QualityItemService
                 ]);
             }
 
-            // One file is evidence for one control once; the unique index would refuse the second.
+            // One file is active evidence for one control once; the unique index would refuse the
+            // second. Withdrawn evidence is history and does not count (A29).
             $alreadyEvidence = QualityItemDocument::query()
                 ->where('quality_item_id', $control->id)
                 ->where('enterprise_wiki_document_id', $document->id)
                 ->where('relation_type', QualityItemDocument::RELATION_TYPE_EVIDENCE)
+                ->whereNull('withdrawn_at')
                 ->exists();
 
             if ($alreadyEvidence) {
@@ -852,16 +867,22 @@ class QualityItemService
             }
         }
 
-        return QualityItemDocument::query()->create([
-            'customer_id' => $customerId,
-            'quality_item_id' => $control->id,
-            'enterprise_wiki_document_id' => $document?->id,
-            'relation_type' => QualityItemDocument::RELATION_TYPE_EVIDENCE,
-            'title' => $title,
-            'note' => $this->nullableText($description),
-            'source' => QualityItemDocument::SOURCE_MANUAL,
-            'created_by_user_id' => $actor->id,
-        ]);
+        return DB::transaction(function () use ($customerId, $control, $document, $title, $description, $actor): QualityItemDocument {
+            $evidence = QualityItemDocument::query()->create([
+                'customer_id' => $customerId,
+                'quality_item_id' => $control->id,
+                'enterprise_wiki_document_id' => $document?->id,
+                'relation_type' => QualityItemDocument::RELATION_TYPE_EVIDENCE,
+                'title' => $title,
+                'note' => $this->nullableText($description),
+                'source' => QualityItemDocument::SOURCE_MANUAL,
+                'created_by_user_id' => $actor->id,
+            ]);
+
+            $this->recordEvidenceEvent(QualityItemEvent::EVIDENCE_REGISTERED, $evidence, $actor);
+
+            return $evidence;
+        });
     }
 
     /**
@@ -881,7 +902,61 @@ class QualityItemService
             ]);
         }
 
+        // Evidence is withdrawn, never deleted (A29): the database refuses the delete as well.
+        if ($link->relation_type === QualityItemDocument::RELATION_TYPE_EVIDENCE) {
+            $this->withdrawEvidence($link, $actor);
+
+            return;
+        }
+
         $link->delete();
+    }
+
+    /**
+     * «Trekk tilbake»: the evidence stops counting, and stays — with who withdrew it and when, and an
+     * event in the item's history. Final: withdrawn evidence is not withdrawn again or restored; the
+     * same thing registered anew is a new row. Locked, so two withdrawals at once record one.
+     */
+    private function withdrawEvidence(QualityItemDocument $link, User $actor): void
+    {
+        DB::transaction(function () use ($link, $actor): void {
+            $locked = QualityItemDocument::query()->whereKey($link->id)->lockForUpdate()->firstOrFail();
+
+            if ($locked->isWithdrawn()) {
+                throw ValidationException::withMessages([
+                    'link' => __('procynia.quality.errors.evidence_already_withdrawn'),
+                ]);
+            }
+
+            $locked->forceFill([
+                'withdrawn_at' => now(),
+                'withdrawn_by_user_id' => $actor->id,
+                'withdrawn_by_name' => $actor->name,
+            ])->save();
+
+            $this->recordEvidenceEvent(QualityItemEvent::EVIDENCE_WITHDRAWN, $locked, $actor);
+        });
+    }
+
+    /** One line of the item's history (quality_item_events), in the caller's transaction. */
+    private function recordEvidenceEvent(string $event, QualityItemDocument $evidence, User $actor): void
+    {
+        $evidence->loadMissing('document:id,original_filename');
+
+        QualityItemEvent::query()->create([
+            'customer_id' => $evidence->customer_id,
+            'quality_item_id' => $evidence->quality_item_id,
+            'quality_item_document_id' => $evidence->id,
+            'event' => $event,
+            'actor_user_id' => $actor->id,
+            'actor_name' => $actor->name,
+            'occurred_at' => now(),
+            'metadata' => array_filter([
+                'title' => $evidence->title,
+                'filename' => $evidence->document?->original_filename,
+                'enterprise_wiki_document_id' => $evidence->enterprise_wiki_document_id,
+            ], static fn (mixed $value): bool => $value !== null),
+        ]);
     }
 
     // -----------------------------------------------------------------

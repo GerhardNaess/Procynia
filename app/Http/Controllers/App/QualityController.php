@@ -1567,7 +1567,10 @@ class QualityController extends Controller
 
         $this->items->unlinkDocument((int) $customerId, $link, $user);
 
-        return back()->with('success', __('procynia.quality.flash.document_unlinked'));
+        // Evidence is withdrawn rather than removed (A29), and the message says which happened.
+        return back()->with('success', __($link->relation_type === QualityItemDocument::RELATION_TYPE_EVIDENCE
+            ? 'procynia.quality.flash.evidence_withdrawn'
+            : 'procynia.quality.flash.document_unlinked'));
     }
 
     /**
@@ -1762,9 +1765,11 @@ class QualityController extends Controller
             ->with('controlDetail')
             ->get();
         $placements = $this->activityControls->placementsByControl($customerId);
+        // Active evidence: what is withdrawn no longer counts (A29), though it stays on the control.
         $evidenceCounts = QualityItemDocument::query()
             ->where('customer_id', $customerId)
             ->where('relation_type', QualityItemDocument::RELATION_TYPE_EVIDENCE)
+            ->whereNull('withdrawn_at')
             ->whereIn('quality_item_id', $controls->modelKeys())
             ->selectRaw('quality_item_id, count(*) as aggregate')
             ->groupBy('quality_item_id')
@@ -2162,6 +2167,10 @@ class QualityController extends Controller
             ->map(static fn (QualityItemDocument $link): array => [
                 'id' => (int) $link->id,
                 'relation_type' => $link->relation_type,
+                // Withdrawn evidence stays in the list as history, without actions (A29).
+                'withdrawn' => $link->isWithdrawn(),
+                'withdrawn_at' => $link->withdrawn_at?->toDateString(),
+                'withdrawn_by' => $link->withdrawn_by_name,
                 'note' => $link->note,
                 'document_id' => (int) $link->enterprise_wiki_document_id,
                 'filename' => $link->document?->original_filename,
@@ -2193,6 +2202,10 @@ class QualityController extends Controller
             ->orderBy('id')
             ->get()
             ->map(static fn (QualityItemDocument $evidence): array => [
+                // Withdrawn evidence is listed apart, as history, with who withdrew it and when (A29).
+                'withdrawn' => $evidence->isWithdrawn(),
+                'withdrawn_at' => $evidence->withdrawn_at?->toDateString(),
+                'withdrawn_by' => $evidence->withdrawn_by_name,
                 'id' => (int) $evidence->id,
                 // Evidence attached as a plain file before evidence had a name falls back to it.
                 'title' => $evidence->title ?? $evidence->document?->original_filename,

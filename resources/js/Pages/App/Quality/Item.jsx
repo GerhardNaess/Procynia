@@ -471,6 +471,9 @@ function ControlEvidencePanel({ td, ta = {}, item, canEdit, evidence, documentOp
     const headingRef = useRef(null);
     const focusFirstError = useFocusFirstError(formRef);
     const removeId = (entry) => `control-evidence-remove-${entry.id}`;
+    // Withdrawn evidence no longer counts, and stays on the control as history (A29).
+    const active = evidence.filter((entry) => ! entry.withdrawn);
+    const withdrawn = evidence.filter((entry) => entry.withdrawn);
 
     function submit(event) {
         event.preventDefault();
@@ -486,13 +489,13 @@ function ControlEvidencePanel({ td, ta = {}, item, canEdit, evidence, documentOp
             <h2 ref={headingRef} tabIndex={-1} className="text-xl font-semibold text-slate-950">{td.evidence_heading ?? 'Evidens'}</h2>
             <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{td.evidence_help ?? ''}</p>
 
-            {evidence.length === 0 ? (
+            {active.length === 0 ? (
                 <p className="mt-4 text-base text-slate-600">
                     {td.evidence_empty ?? 'Ingen evidens er registrert for denne kontrollen ennå.'}
                 </p>
             ) : (
                 <ul className="mt-4 divide-y divide-slate-100">
-                    {evidence.map((entry, index) => (
+                    {active.map((entry, index) => (
                         <li key={entry.id} className="flex flex-wrap items-start gap-3 py-3">
                             <div className="min-w-0 flex-1 space-y-1">
                                 <p className="font-semibold text-slate-950">{entry.title}</p>
@@ -534,7 +537,7 @@ function ControlEvidencePanel({ td, ta = {}, item, canEdit, evidence, documentOp
                                     aria-label={`${td.evidence_remove ?? 'Fjern'} – ${entry.title}`}
                                     onClick={() => {
                                         if (window.confirm(td.evidence_remove_confirm ?? 'Fjern evidensen fra kontrollen?')) {
-                                            removeRow(`/app/quality/document-links/${entry.id}`, evidence.map(removeId), index, headingRef);
+                                            removeRow(`/app/quality/document-links/${entry.id}`, active.map(removeId), index, headingRef);
                                         }
                                     }}
                                 >
@@ -544,6 +547,34 @@ function ControlEvidencePanel({ td, ta = {}, item, canEdit, evidence, documentOp
                         </li>
                     ))}
                 </ul>
+            )}
+
+            {withdrawn.length > 0 && (
+                <div className="mt-6 border-t border-slate-100 pt-6">
+                    <h3 className="text-base font-semibold text-slate-900">{td.evidence_withdrawn_heading ?? 'Trukket tilbake'}</h3>
+                    <p className="mt-1 text-base text-slate-600">
+                        {td.evidence_withdrawn_help ?? 'Evidens som ikke lenger teller. Den beholdes som historikk og kan ikke slettes.'}
+                    </p>
+                    <ul className="mt-3 divide-y divide-slate-100">
+                        {withdrawn.map((entry) => (
+                            <li key={entry.id} className="space-y-1 py-3">
+                                <p className="font-semibold text-slate-700 line-through decoration-slate-400">{entry.title}</p>
+                                {entry.description && (
+                                    <p className="whitespace-pre-line text-base text-slate-600">{entry.description}</p>
+                                )}
+                                <p className="text-base text-slate-600">
+                                    {entry.added_by ? `${td.evidence_added_by ?? 'Lagt til av'} ${entry.added_by}` : ''}
+                                    {entry.added_by && entry.added_at ? ' · ' : ''}
+                                    {entry.added_at ?? ''}
+                                    {(entry.added_by || entry.added_at) ? ' · ' : ''}
+                                    {(td.evidence_withdrawn_meta ?? 'Trukket tilbake :date av :name')
+                                        .replace(':date', entry.withdrawn_at ?? '')
+                                        .replace(':name', entry.withdrawn_by ?? '')}
+                                </p>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
             )}
 
             {canEdit && (
@@ -1251,6 +1282,9 @@ function DocumentsPanel({
     relationTypeLabels,
 }) {
     const tdoc = tq.documents ?? {};
+    const isEvidence = (link) => link.relation_type === 'evidence';
+    // Only these rows have a button; focus moves among them after one goes (A11Y-014).
+    const removable = documents.filter((link) => ! link.withdrawn);
     const isControl = item.quality_type === 'control';
     const statusLabels = tdoc.statuses ?? {};
     const [search, setSearch] = useState(documentSearch ?? '');
@@ -1312,7 +1346,7 @@ function DocumentsPanel({
                 </p>
             ) : (
                 <ul className="mt-4 divide-y divide-slate-100">
-                    {documents.map((link, index) => (
+                    {documents.map((link) => (
                         <li key={link.id} className="flex flex-wrap items-center gap-3 py-3">
                             <a
                                 href={link.download_url}
@@ -1335,19 +1369,34 @@ function DocumentsPanel({
                                 {link.uploaded_at ? ` · ${link.uploaded_at}` : ''}
                             </span>
                             {link.note && <span className="text-base text-slate-600">{link.note}</span>}
-                            {canEdit && (
+                            {/* Evidence is withdrawn, never removed: it stays here as history (A29). */}
+                            {link.withdrawn && (
+                                <>
+                                    <StatusBadge tone="slate">{tdoc.withdrawn ?? 'Trukket tilbake'}</StatusBadge>
+                                    <span className="text-base text-slate-600">
+                                        {(tdoc.withdrawn_meta ?? 'Trukket tilbake :date av :name')
+                                            .replace(':date', link.withdrawn_at ?? '')
+                                            .replace(':name', link.withdrawn_by ?? '')}
+                                    </span>
+                                </>
+                            )}
+                            {canEdit && ! link.withdrawn && (
                                 <button
                                     type="button"
                                     id={removeId(link)}
                                     className={`ml-auto ${ROW_DESTRUCTIVE}`}
-                                    aria-label={`${tdoc.unlink ?? 'Fjern kobling'} – ${link.filename}`}
+                                    aria-label={`${isEvidence(link) ? (tdoc.withdraw ?? 'Trekk tilbake') : (tdoc.unlink ?? 'Fjern kobling')} – ${link.filename}`}
                                     onClick={() => {
-                                        if (window.confirm(tdoc.unlink_confirm ?? 'Fjern koblingen?')) {
-                                            removeRow(`/app/quality/document-links/${link.id}`, documents.map(removeId), index, headingRef);
+                                        const question = isEvidence(link)
+                                            ? (tdoc.withdraw_confirm ?? 'Trekke tilbake evidensen?')
+                                            : (tdoc.unlink_confirm ?? 'Fjern koblingen?');
+
+                                        if (window.confirm(question)) {
+                                            removeRow(`/app/quality/document-links/${link.id}`, removable.map(removeId), removable.indexOf(link), headingRef);
                                         }
                                     }}
                                 >
-                                    {tdoc.unlink ?? 'Fjern kobling'}
+                                    {isEvidence(link) ? (tdoc.withdraw ?? 'Trekk tilbake') : (tdoc.unlink ?? 'Fjern kobling')}
                                 </button>
                             )}
                         </li>

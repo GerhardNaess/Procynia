@@ -98,6 +98,9 @@ class QualityProcessContextReader
             ->where('customer_id', $customerId)
             ->whereIn('quality_item_id', $controlIds)
             ->where('relation_type', QualityItemDocument::RELATION_TYPE_EVIDENCE)
+            // What other modules show is the evidence in force; withdrawn evidence is Kvalitet's
+            // history (A29).
+            ->whereNull('withdrawn_at')
             ->with(['document:id,original_filename', 'createdBy:id,name'])
             ->orderBy('id')
             ->get()

@@ -531,7 +531,7 @@ class QualityActivityControlTest extends TestCase
         $this->assertNull($props['control_evidence'][0]['download_url']);
     }
 
-    public function test_evidence_may_point_at_an_existing_document_and_removing_it_keeps_the_file(): void
+    public function test_evidence_may_point_at_an_existing_document_and_withdrawing_it_keeps_the_file(): void
     {
         $customer = $this->customer();
         $editor = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW, CustomerPermissionCatalog::QUALITY_EDIT]);
@@ -561,9 +561,11 @@ class QualityActivityControlTest extends TestCase
             ->assertSessionHasErrors('enterprise_wiki_document_id');
 
         $evidenceId = $props['control_evidence'][0]['id'];
+        // «Trekk tilbake»: withdrawn, never deleted (A29) — the row stays as history.
         $this->actingAs($editor)->delete("/app/quality/document-links/{$evidenceId}")->assertRedirect();
 
-        $this->assertSame(0, QualityItemDocument::query()->where('quality_item_id', $control->id)->count());
+        $this->assertSame(1, QualityItemDocument::query()->where('quality_item_id', $control->id)->count());
+        $this->assertSame(0, QualityItemDocument::query()->where('quality_item_id', $control->id)->whereNull('withdrawn_at')->count());
         $this->assertNotNull(EnterpriseWikiDocument::query()->find($document->id));
     }
 

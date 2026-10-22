@@ -78,11 +78,29 @@ class QualityItemDocument extends Model
         'note',
         'source',
         'created_by_user_id',
+        'withdrawn_at',
+        'withdrawn_by_user_id',
+        'withdrawn_by_name',
     ];
 
     protected $casts = [
         'document_removed_at' => 'datetime',
+        'withdrawn_at' => 'datetime',
     ];
+
+    /**
+     * Evidence is withdrawn, never deleted (finding A29): the row stays as the record that it was
+     * registered, with who withdrew it and when. Only evidence can be withdrawn.
+     */
+    public function isWithdrawn(): bool
+    {
+        return $this->withdrawn_at !== null;
+    }
+
+    public function withdrawnBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'withdrawn_by_user_id');
+    }
 
     /**
      * Detach evidence from a file that is about to be deleted, so the FK cascade leaves it standing.

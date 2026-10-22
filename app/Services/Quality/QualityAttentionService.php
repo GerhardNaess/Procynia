@@ -84,7 +84,9 @@ class QualityAttentionService
                     ->from('quality_item_documents')
                     ->whereColumn('quality_item_documents.quality_item_id', 'quality_items.id')
                     ->where('quality_item_documents.customer_id', $customerId)
-                    ->where('quality_item_documents.relation_type', QualityItemDocument::RELATION_TYPE_EVIDENCE);
+                    ->where('quality_item_documents.relation_type', QualityItemDocument::RELATION_TYPE_EVIDENCE)
+                    // Withdrawn evidence does not count as evidence (A29).
+                    ->whereNull('quality_item_documents.withdrawn_at');
             })
             ->get();
     }
