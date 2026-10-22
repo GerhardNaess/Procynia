@@ -514,6 +514,111 @@ class EnterpriseWikiClaimContentRepairService
     }
 
     /**
+     * A text-changing claim decision on a published page never touches the published version —
+     * finding F1d (docs/external-api-phase-0-plan.md §2).
+     *
+     * Claim decisions edit their version in place. When that version is the one readers, Spør Wiki
+     * and tender answers rely on (published_version_id), the decision first gets a working version
+     * of its own: an exact copy written through EnterpriseWikiPageVersionWriter — the same lock,
+     * numbering, single-current constraint and provenance guards as every version — with every claim
+     * and its source references copied onto it. The decision then runs on the copy of its claim, and
+     * the page returns to draft (afterManualEdit), from where the change goes through the ordinary
+     * review. The published version and its claims, which grounding reads, are left exactly as they
+     * were.
+     *
+     * Under the page lock it re-checks that the claim's version is still current and still the
+     * published one; otherwise somebody changed the page first, and the decision is refused rather
+     * than applied to a version nobody is looking at. Call it inside the caller's transaction, so a
+     * decision that fails afterwards takes the new version with it.
+     *
+     * @return EnterpriseWikiClaim the claim's copy on the new working version
+     */
+    public function forkPublishedVersionForClaimDecision(EnterpriseWikiPage $page, EnterpriseWikiClaim $claim, User $actor): EnterpriseWikiClaim
+    {
+        $actor = $this->guard->assert($actor, HumanDecision::WIKI_CLAIM_DECIDE);
+
+        return DB::transaction(function () use ($page, $claim, $actor): EnterpriseWikiClaim {
+            $locked = EnterpriseWikiPage::query()->whereKey($page->id)->lockForUpdate()->first();
+            $current = EnterpriseWikiPageVersion::query()
+                ->where('enterprise_wiki_page_id', $page->id)
+                ->where('is_current', true)
+                ->lockForUpdate()
+                ->first();
+
+            if ($locked === null
+                || $current === null
+                || $locked->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW
+                || (int) $current->id !== (int) $claim->enterprise_wiki_page_version_id
+                || (int) ($locked->published_version_id ?? 0) !== (int) $current->id
+            ) {
+                throw new EnterpriseWikiReviewConflict(__('procynia.wiki.claim_version_changed'));
+            }
+
+            $workingVersion = $this->versionWriter->writeNewCurrentVersion($page->id, [
+                'content_markdown' => $current->content_markdown,
+                'content_blocks_json' => $current->content_blocks_json,
+                'best_practice_review_json' => $current->best_practice_review_json,
+                'generated_by_model' => null,
+                'generation_prompt_hash' => null,
+                'created_by_user_id' => $actor->id,
+            ]);
+
+            $copies = $this->copyEveryClaim($current, $workingVersion);
+
+            // Keep any run pivot pointing at the page's live version, as an ordinary edit does.
+            EnterpriseWikiIngestRunPage::query()
+                ->where('enterprise_wiki_page_id', $page->id)
+                ->where('generated_page_version_id', $current->id)
+                ->update(['generated_page_version_id' => $workingVersion->id]);
+
+            $this->publicationSettlement->afterManualEdit($locked);
+
+            Log::info('[PROCYNIA][WIKI_CLAIM_DECISION_FORK] Published version kept; claim decision continues on a new working version.', [
+                'page_id' => (int) $page->id,
+                'published_version_id' => (int) $current->id,
+                'working_version_id' => (int) $workingVersion->id,
+                'claim_id' => (int) $claim->id,
+                'actor_user_id' => (int) $actor->id,
+            ]);
+
+            return EnterpriseWikiClaim::query()->findOrFail($copies[(int) $claim->id]);
+        });
+    }
+
+    /**
+     * Every claim of a version, with its source references, onto another version — the copy a fork
+     * needs, where nothing changed yet. (copyClaimsForUnchangedBlocks() leaves out the blocks an edit
+     * changed, and claims with no block anchor.)
+     *
+     * @return array<int, int> original claim id => copy id
+     */
+    private function copyEveryClaim(EnterpriseWikiPageVersion $from, EnterpriseWikiPageVersion $to): array
+    {
+        $copies = [];
+
+        $claims = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $from->id)
+            ->with('sourceReferences')
+            ->orderBy('position_order')
+            ->orderBy('id')
+            ->get();
+
+        foreach ($claims as $claim) {
+            $copy = EnterpriseWikiClaim::query()->create($this->claimClonePayload($claim, $to));
+
+            foreach ($claim->sourceReferences as $sourceReference) {
+                EnterpriseWikiSourceReference::query()->create(array_merge([
+                    'enterprise_wiki_claim_id' => $copy->id,
+                ], $this->sourceReferenceClonePayload($sourceReference)));
+            }
+
+            $copies[(int) $claim->id] = (int) $copy->id;
+        }
+
+        return $copies;
+    }
+
+    /**
      * Content that is out for review is not edited directly — decision B5. The reviewer decides what
      * they were handed; the page owner withdraws the page to change it.
      */

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Exceptions\EnterpriseWikiReviewConflict;
 use App\Http\Controllers\Concerns\AuthorizesWikiPermissions;
 use App\Http\Controllers\Concerns\PreservesWikiReviewReturnUrl;
 use App\Http\Controllers\Controller;
@@ -9,12 +10,14 @@ use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiClaimDecision;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiBestPracticeSectionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimCanonicalizationService;
+use App\Services\EnterpriseWiki\EnterpriseWikiClaimContentRepairService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimFindingExplainer;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
@@ -26,6 +29,7 @@ use App\Support\CustomerPermissionCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Claim review decisions — a System Owner, or any user with the QA capability and effective
@@ -60,6 +64,7 @@ class WikiClaimController extends Controller
         private readonly CustomerPermissionService $customerPermissions,
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
         private readonly EnterpriseWikiPageReviewService $pageReviews,
+        private readonly EnterpriseWikiClaimContentRepairService $claimContentRepair,
     ) {}
 
     public function approve(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
@@ -77,56 +82,67 @@ class WikiClaimController extends Controller
 
         $this->abortIfAlreadyDecided($claim);
 
-        // F1c: changing the text while the page is in review is the assigned reviewer's alone.
-        // Asked before anything is written; keeping the text as it stands is not a change.
-        if ($this->approvalWouldChangeText($claim, $validated['approved_text'] ?? null)) {
-            $this->pageReviews->assertMayChangeClaimText($user, $page, $claim);
-        }
+        $changesText = $this->approvalWouldChangeText($claim, $validated['approved_text'] ?? null);
 
-        $textBeforeBestPracticeEdit = (string) $claim->claim_text;
-        $this->applyBestPracticeTextEdit($claim, $validated['approved_text'] ?? null);
-        $bestPracticeEdited = (string) $claim->fresh()->claim_text !== $textBeforeBestPracticeEdit;
+        // One transaction: a decision that forks a published version (F1d) and then fails leaves
+        // neither the new working version nor half a decision behind.
+        [$claim, $textEdited, $forked] = DB::transaction(function () use ($claim, $page, $user, $validated, $changesText): array {
+            $forked = false;
 
-        $textBeforeEdit = (string) $claim->claim_text;
-        $sourceFindingEdited = $this->applySourceBasedFindingTextEdit($claim, $validated['approved_text'] ?? null);
-        $textEdited = $sourceFindingEdited || $bestPracticeEdited;
+            if ($changesText) {
+                // F1c: in review, only the assigned reviewer changes the text. F1d: never in the
+                // published version — the decision moves to a new working version first.
+                $this->pageReviews->assertMayChangeClaimText($user, $page, $claim);
+                [$claim, $forked] = $this->claimForTextChange($page, $claim, $user);
+            }
 
-        // The edit happens in place on the version, so the decision row is where the replaced
-        // wording survives: who changed it, when, and from what to what.
-        $this->storeDecision(
-            $claim->fresh(),
-            $user->id,
-            EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
-            $validated['comment'] ?? null,
-            $textEdited ? ['claim_text' => $bestPracticeEdited ? $textBeforeBestPracticeEdit : $textBeforeEdit] : [],
-            $textEdited ? ['claim_text' => (string) $claim->fresh()->claim_text] : [],
-        );
+            $textBeforeBestPracticeEdit = (string) $claim->claim_text;
+            $this->applyBestPracticeTextEdit($claim, $validated['approved_text'] ?? null);
+            $bestPracticeEdited = (string) $claim->fresh()->claim_text !== $textBeforeBestPracticeEdit;
 
-        if ($sourceFindingEdited) {
-            $this->pageLinksService->materializeWikilinksForPage($page);
-        }
+            $textBeforeEdit = (string) $claim->claim_text;
+            $sourceFindingEdited = $this->applySourceBasedFindingTextEdit($claim, $validated['approved_text'] ?? null);
+            $textEdited = $sourceFindingEdited || $bestPracticeEdited;
 
-        if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
-            $this->pageLinksService->materializeWikilinksForPage($page);
+            // The edit happens in place on the (working) version, so the decision row is where the
+            // replaced wording survives: who changed it, when, and from what to what.
+            $this->storeDecision(
+                $claim->fresh(),
+                $user->id,
+                EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
+                $validated['comment'] ?? null,
+                $textEdited ? ['claim_text' => $bestPracticeEdited ? $textBeforeBestPracticeEdit : $textBeforeEdit] : [],
+                $textEdited ? ['claim_text' => (string) $claim->fresh()->claim_text] : [],
+            );
 
-            $claim->fresh()->update([
-                'review_metadata' => array_merge($claim->fresh()->review_metadata ?? [], [
-                    'visible_wiki_link_result' => str_contains((string) $claim->fresh()->claim_text, '[[')
-                        ? 'materialized_from_approved_text'
-                        : 'no_visible_link_needed',
-                ]),
-            ]);
-        }
+            if ($sourceFindingEdited) {
+                $this->pageLinksService->materializeWikilinksForPage($page->fresh());
+            }
 
-        $this->cascadeBestPracticeDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED, $validated['comment'] ?? null);
-        $this->cascadeBlockDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED, $validated['comment'] ?? null);
+            if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
+                $this->pageLinksService->materializeWikilinksForPage($page->fresh());
+
+                $claim->fresh()->update([
+                    'review_metadata' => array_merge($claim->fresh()->review_metadata ?? [], [
+                        'visible_wiki_link_result' => str_contains((string) $claim->fresh()->claim_text, '[[')
+                            ? 'materialized_from_approved_text'
+                            : 'no_visible_link_needed',
+                    ]),
+                ]);
+            }
+
+            $this->cascadeBestPracticeDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED, $validated['comment'] ?? null);
+            $this->cascadeBlockDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED, $validated['comment'] ?? null);
+
+            return [$claim, $textEdited, $forked];
+        });
 
         return redirect()
             ->route('app.wiki.show', $this->wikiShowRouteParamsForReviewReturn($request, $page->slug, $claim->id))
-            ->with('success', $this->decisionMessage(
-                $sourceFindingEdited || $bestPracticeEdited ? 'claim_flash_approved_edited' : 'claim_flash_approved',
+            ->with('success', $this->withForkNote($this->decisionMessage(
+                $textEdited ? 'claim_flash_approved_edited' : 'claim_flash_approved',
                 $claim->fresh(),
-            ));
+            ), $forked));
     }
 
     public function reject(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
@@ -160,58 +176,100 @@ class WikiClaimController extends Controller
         // Rejecting removes the text for exactly these two kinds of claim (below).
         $removesText = $isSourceBasedFinding || $claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE;
 
-        // F1c: removing text while the page is in review is the assigned reviewer's alone — asked
-        // before the decision is stored, so a refusal leaves nothing half-written.
-        if ($removesText) {
-            $this->pageReviews->assertMayChangeClaimText($user, $page, $claim);
-        }
+        // One transaction, for the same reason as approve().
+        [$claim, $forked] = DB::transaction(function () use ($claim, $page, $user, $validated, $removesText, $isSourceBasedFinding): array {
+            $forked = false;
 
-        $this->storeDecision(
-            $claim,
-            $user->id,
-            EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED,
-            $validated['comment'] ?? null,
-            $removesText ? ['claim_text' => (string) $claim->claim_text] : [],
-            $removesText ? ['text_removed' => true] : [],
-        );
+            // F1c: removing text while the page is in review is the assigned reviewer's alone. F1d:
+            // never from the published version. Both before the decision is stored, so a refusal
+            // leaves nothing half-written.
+            if ($removesText) {
+                $this->pageReviews->assertMayChangeClaimText($user, $page, $claim);
+                [$claim, $forked] = $this->claimForTextChange($page, $claim, $user);
+            }
 
-        if ($removesText) {
-            // What the page owner reads on the card: this decision took text out of the page.
-            $claim->fresh()->update([
-                'review_metadata' => array_merge((array) ($claim->fresh()->review_metadata ?? []), [
-                    'text_removed_by_decision' => true,
-                ]),
-            ]);
-        }
+            $this->storeDecision(
+                $claim,
+                $user->id,
+                EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED,
+                $validated['comment'] ?? null,
+                $removesText ? ['claim_text' => (string) $claim->claim_text] : [],
+                $removesText ? ['text_removed' => true] : [],
+            );
 
-        // The claim covers the whole block and the source supports none of it, so "fjern teksten"
-        // removes exactly what the reviewer was shown — the same blanking a rejected best-practice
-        // block gets.
-        if ($isSourceBasedFinding) {
-            $this->removeSourceBasedFindingText($claim);
-            $this->pageLinksService->materializeWikilinksForPage($page->fresh());
-        }
+            if ($removesText) {
+                // What the page owner reads on the card: this decision took text out of the page.
+                $claim->fresh()->update([
+                    'review_metadata' => array_merge((array) ($claim->fresh()->review_metadata ?? []), [
+                        'text_removed_by_decision' => true,
+                    ]),
+                ]);
+            }
 
-        // v0.7 binding quality-strategy rule: "avvis" on a best-practice addition means "fjern
-        // teksten" — the only two outcomes for text the system added beyond the source are keep
-        // (approve) or remove (reject). Strips the block's markdown from the live page; the
-        // decision itself (approval_status=rejected) is recorded regardless, above.
-        if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
-            $this->removeBestPracticeText($claim);
-            $this->pageLinksService->materializeWikilinksForPage($page->fresh());
-        }
+            // The claim covers the whole block and the source supports none of it, so "fjern
+            // teksten" removes exactly what the reviewer was shown — the same blanking a rejected
+            // best-practice block gets.
+            if ($isSourceBasedFinding) {
+                $this->removeSourceBasedFindingText($claim);
+                $this->pageLinksService->materializeWikilinksForPage($page->fresh());
+            }
 
-        $this->cascadeBestPracticeDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED, $validated['comment'] ?? null);
-        $this->cascadeBlockDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED, $validated['comment'] ?? null);
+            // v0.7 binding quality-strategy rule: "avvis" on a best-practice addition means "fjern
+            // teksten" — the only two outcomes for text the system added beyond the source are keep
+            // (approve) or remove (reject). Strips the block's markdown from the live page; the
+            // decision itself (approval_status=rejected) is recorded regardless, above.
+            if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
+                $this->removeBestPracticeText($claim);
+                $this->pageLinksService->materializeWikilinksForPage($page->fresh());
+            }
 
-        $textRemoved = $removesText;
+            $this->cascadeBestPracticeDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED, $validated['comment'] ?? null);
+            $this->cascadeBlockDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED, $validated['comment'] ?? null);
+
+            return [$claim, $forked];
+        });
 
         return redirect()
             ->route('app.wiki.show', $this->wikiShowRouteParamsForReviewReturn($request, $page->slug, $claim->id))
-            ->with('success', $this->decisionMessage(
-                $textRemoved ? 'claim_flash_rejected_removed' : 'claim_flash_rejected',
+            ->with('success', $this->withForkNote($this->decisionMessage(
+                $removesText ? 'claim_flash_rejected_removed' : 'claim_flash_rejected',
                 $claim->fresh(),
-            ));
+            ), $forked));
+    }
+
+    /**
+     * The claim a text-changing decision acts on.
+     *
+     * Only a claim of the page's current version can change its text: one of an older version is
+     * history, and editing it would rewrite what a version once said (409, the page re-reads
+     * itself). When the current version is also the published one, the decision moves to a new
+     * working version first (F1d) and acts on the claim's copy there.
+     *
+     * @return array{0: EnterpriseWikiClaim, 1: bool} the claim to act on, and whether a working version was created
+     */
+    private function claimForTextChange(EnterpriseWikiPage $page, EnterpriseWikiClaim $claim, User $user): array
+    {
+        $versionId = (int) $claim->enterprise_wiki_page_version_id;
+        $currentId = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->where('is_current', true)
+            ->value('id');
+
+        if ((int) $currentId !== $versionId) {
+            throw new EnterpriseWikiReviewConflict(__('procynia.wiki.claim_version_changed'));
+        }
+
+        if ((int) ($page->fresh()?->published_version_id ?? 0) !== $versionId) {
+            return [$claim, false];
+        }
+
+        return [$this->claimContentRepair->forkPublishedVersionForClaimDecision($page, $claim, $user), true];
+    }
+
+    /** The flash says so when the decision went into a new working version instead of the published one. */
+    private function withForkNote(string $message, bool $forked): string
+    {
+        return $forked ? $message.' '.__('procynia.wiki.claim_decision_new_working_version') : $message;
     }
 
     /**

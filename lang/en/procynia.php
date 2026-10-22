@@ -10734,6 +10734,8 @@ return [
         'claim_text_locked_in_review' => 'The page is in review. Only the assigned reviewer can change or remove the text.',
         'claim_decision_text_edited' => 'The text was changed by this decision.',
         'claim_decision_text_removed' => 'The text was removed by this decision.',
+        'claim_version_changed' => 'The page has changed in the meantime. Reload the page and try again.',
+        'claim_decision_new_working_version' => 'The published version is unchanged. The change is in a new working version, which has to be sent for review before it is published.',
         'notification_review_withdrawn_title' => 'Review withdrawn',
         'notification_review_withdrawn_message' => ':actor withdrew «:page» from review. You no longer have anything to approve on the page.',
         'notification_review_withdrawn_unknown_actor' => 'The page owner',
