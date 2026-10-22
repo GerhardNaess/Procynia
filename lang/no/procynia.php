@@ -9389,7 +9389,7 @@ return [
         'show_page_help_item_publish_title' => 'Godkjenn og publiser',
         'show_page_help_item_publish_text' => 'Arbeidsversjonen blir den publiserte kunnskapen på siden. Ingenting annet må være ferdig først.',
         'show_page_help_item_edit_title' => 'Rediger artikkel',
-        'show_page_help_item_edit_text' => 'Endrer arbeidsversjonen. Den publiserte versjonen berøres ikke før den nye er godkjent.',
+        'show_page_help_item_edit_text' => 'Endrer arbeidsversjonen. Den publiserte versjonen berøres ikke før den nye er godkjent. Mens siden ligger til gjennomgang, kan den ikke redigeres.',
 
         'show_page_help_section_quality' => 'Kvalitetssikring',
         'show_page_help_item_quality_who_title' => 'Kvalitetssikrer',
@@ -10732,6 +10732,7 @@ return [
         'withdraw_hint' => 'Siden ligger til gjennomgang og kan ikke redigeres. Trekk den tilbake hvis du vil endre noe før kontrolløren tar stilling.',
         'withdraw_success' => 'Siden er trukket tilbake fra gjennomgang og er et utkast igjen.',
         'withdraw_not_in_review' => 'Siden ligger ikke lenger til gjennomgang. Siden er oppdatert med gjeldende status.',
+        'edit_locked_in_review' => 'Siden ligger til gjennomgang og kan ikke redigeres. Sideeier kan trekke den tilbake for å gjøre endringer.',
         'notification_review_withdrawn_title' => 'Gjennomgang trukket tilbake',
         'notification_review_withdrawn_message' => ':actor trakk «:page» tilbake fra gjennomgang. Du har ikke lenger noe å godkjenne på siden.',
         'notification_review_withdrawn_unknown_actor' => 'Sideeier',

@@ -32,11 +32,12 @@ use RuntimeException;
  * database constraint guarantees it can never silently succeed even if some future writer
  * bypasses this class.
  *
- * OPEN REVIEWS. A page in pending_review never gets a new current version from here unless the
- * caller says it writes on a person's behalf ($allowDuringReview). The review assignment lives on
- * the submitted version, so an automated version under an open review would strand that review
- * (see EnterpriseWikiPageUnderReviewException). Checked under the same page lock as the write, so
- * a page that entered review while an AI call was in flight is refused as well.
+ * OPEN REVIEWS. A page in pending_review never gets a new current version from here — not even
+ * from a person's own edit (decision B5, docs/external-api-phase-0-plan.md §4.9) — unless the
+ * caller is the withdrawal of a deleted document's content ($allowDuringReview). The review
+ * assignment lives on the submitted version, so any new version under an open review would
+ * strand that review (see EnterpriseWikiPageUnderReviewException). Checked under the same page
+ * lock as the write, so a page that entered review while an AI call was in flight is refused too.
  */
 class EnterpriseWikiPageVersionWriter
 {
@@ -70,8 +71,10 @@ class EnterpriseWikiPageVersionWriter
      * @param  (Closure(EnterpriseWikiPageVersion): void)|null  $restoreBlocks  Reconstructs
      *                                                                          content_blocks_json on the freshly written version. Null for an ordinary caller that
      *                                                                          already supplies its own blocks.
-     * @param  bool  $allowDuringReview  True only for a write made on a person's behalf (a manual
-     *                                   edit, the withdrawal of a deleted document's content).
+     * @param  bool  $allowDuringReview  True only for the withdrawal of a deleted document's
+     *                                   content, which must leave the Wiki even from a page in
+     *                                   review. A person's manual edit is refused like any other
+     *                                   write: content out for review is not edited (decision B5).
      *
      * @throws EnterpriseWikiPageVersionBlockProvenanceLostException
      * @throws EnterpriseWikiPageUnderReviewException

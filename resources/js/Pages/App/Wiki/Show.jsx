@@ -108,7 +108,7 @@ function getWikiShowHelpSections(tw) {
                 },
                 {
                     title: tw.show_page_help_item_edit_title ?? 'Rediger artikkel',
-                    text: tw.show_page_help_item_edit_text ?? 'Endrer arbeidsversjonen. Den publiserte versjonen berøres ikke før den nye er godkjent.',
+                    text: tw.show_page_help_item_edit_text ?? 'Endrer arbeidsversjonen. Den publiserte versjonen berøres ikke før den nye er godkjent. Mens siden ligger til gjennomgang, kan den ikke redigeres.',
                 },
             ],
         },
@@ -2387,6 +2387,16 @@ export default function WikiShow({
                                 {tw.wiki_block_edit_label ?? 'Rediger teksten'}
                             </button>
                         </div>
+                    )}
+
+                    {/* Out for review, the text is not edited (decision B5): said where the editor
+                        would have been offered, rather than the action silently missing. */}
+                    {String(claim.id) === targetClaimId && canHandleClaim && canEditWikiClaims && targetBlockKey
+                        && contentBlocks.find((block) => block.block_key === targetBlockKey)?.content_origin === 'mixed'
+                        && manualBlockEdit?.locked_in_review === true && (
+                        <p className="text-base leading-6 text-slate-600">
+                            {tw.edit_locked_in_review ?? 'Siden ligger til gjennomgang og kan ikke redigeres. Sideeier kan trekke den tilbake for å gjøre endringer.'}
+                        </p>
                     )}
 
                     {canHandleClaim && isPendingDecision && (

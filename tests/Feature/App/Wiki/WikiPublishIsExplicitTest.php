@@ -22,14 +22,13 @@ use Tests\TestCase;
  * enterprise_wiki_pages.published_version_id. What this file defends is the part of that guarantee
  * that currently holds by side effect rather than by design.
  *
- * THE CASE THAT MATTERS. A page owner may still save a new working version while their page sits in
- * pending_review, so the reviewer's "Godkjenn og publiser" could reach a version they never saw.
- * It does not, because EnterpriseWikiPageVersionWriter does not carry submitted_by_user_id,
- * submitted_at or reviewer_user_id onto the version it creates, and assertMayReviewCurrentVersion()
- * refuses a version with no valid submission. That check is commented as a guard against legacy
- * data; it is also the only thing standing between a reviewer and publishing unseen content. A
- * well-meaning change that copied those fields forward would reopen it silently, so it is pinned
- * down here.
+ * THE CASE THAT MATTERS. A page in pending_review cannot be edited (decision B5): the reviewer
+ * decides exactly the version they were handed, and the owner changes it only by withdrawing it
+ * first. Underneath that rule a second line still holds: EnterpriseWikiPageVersionWriter does not
+ * carry submitted_by_user_id, submitted_at or reviewer_user_id onto a version it creates, and
+ * approve() refuses a version with no valid submission. That is what keeps a page stranded before
+ * B5 — still in review with an unassigned working version — from ever being published, so both
+ * are pinned down here.
  */
 class WikiPublishIsExplicitTest extends TestCase
 {
@@ -42,10 +41,14 @@ class WikiPublishIsExplicitTest extends TestCase
     }
 
     // =========================================================================
-    // A version that landed during review is never published
+    // What was handed over is what is decided (decision B5)
     // =========================================================================
 
-    public function test_a_version_saved_during_review_cannot_be_published(): void
+    /**
+     * The owner cannot change a version that is out for review, so the reviewer's «Godkjenn og
+     * publiser» publishes exactly what they were handed.
+     */
+    public function test_a_page_in_review_cannot_be_edited_so_the_reviewer_publishes_what_was_handed_over(): void
     {
         [$page, $owner, $reviewer, $v1] = $this->pageOutForReview();
 
@@ -54,77 +57,36 @@ class WikiPublishIsExplicitTest extends TestCase
                 'expected_page_version_id' => $v1->id,
                 'blocks' => [['block_key' => 'block-0001', 'markdown' => 'Tekst kontrolløren aldri så.']],
             ])
-            ->assertRedirect();
+            ->assertSessionHas('error', __('procynia.wiki.edit_locked_in_review'));
 
-        $this->assertSame(2, (int) $this->currentVersion($page)->version_number, 'the save really happened');
+        $this->assertSame((int) $v1->id, (int) $this->currentVersion($page)->id, 'nothing was saved');
 
-        // 409, not a silent publish: the reviewer is allowed to review, the version in front of
-        // them is simply not the one that was handed over.
-        $this->actingAs($reviewer)
-            ->patch("/app/wiki/{$page->slug}/approve")
-            ->assertStatus(409);
+        $this->actingAs($reviewer)->patch("/app/wiki/{$page->slug}/approve")->assertRedirect();
 
-        $page->refresh();
-        $this->assertNull($page->published_version_id, 'nothing may be published behind the reviewer');
-        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->status);
-    }
-
-    /** The refusal has to tell the reviewer what to do, not just fail. */
-    public function test_the_refusal_names_the_way_out(): void
-    {
-        [$page, $owner, $reviewer, $v1] = $this->pageOutForReview();
-
-        $this->actingAs($owner)->patch("/app/wiki/{$page->slug}/working-version", [
-            'expected_page_version_id' => $v1->id,
-            'blocks' => [['block_key' => 'block-0001', 'markdown' => 'Ny tekst.']],
-        ]);
-
-        $response = $this->actingAs($reviewer)->patch("/app/wiki/{$page->slug}/approve");
-
-        $this->assertStringContainsString('Send siden tilbake', $response->exception->getMessage());
+        $this->assertSame((int) $v1->id, (int) $page->fresh()->published_version_id);
     }
 
     /**
-     * The mechanism, stated directly: a freshly written working version carries no submission, and
-     * that is what makes it unpublishable until someone hands it over again.
+     * The supported way to change it: withdraw, edit, send again. The new version carries no
+     * submission until it is handed over, and then it is the one that is published.
      */
-    public function test_a_new_working_version_carries_no_submission(): void
-    {
-        [$page, $owner, , $v1] = $this->pageOutForReview();
-
-        $this->assertNotNull($v1->fresh()->submitted_by_user_id, 'v1 was submitted');
-
-        $this->actingAs($owner)->patch("/app/wiki/{$page->slug}/working-version", [
-            'expected_page_version_id' => $v1->id,
-            'blocks' => [['block_key' => 'block-0001', 'markdown' => 'Ny tekst.']],
-        ]);
-
-        $v2 = $this->currentVersion($page);
-        $this->assertNull($v2->submitted_by_user_id);
-        $this->assertNull($v2->submitted_at);
-        $this->assertNull($v2->reviewer_user_id);
-    }
-
-    /** Resubmitting the new version is the supported way forward, and it publishes that version. */
-    public function test_resubmitting_the_new_version_lets_it_be_published(): void
+    public function test_withdrawing_editing_and_resubmitting_publishes_the_new_version(): void
     {
         [$page, $owner, $reviewer, $v1] = $this->pageOutForReview();
 
+        $this->actingAs($owner)->patch("/app/wiki/{$page->slug}/withdraw")->assertRedirect();
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->fresh()->status);
+
         $this->actingAs($owner)->patch("/app/wiki/{$page->slug}/working-version", [
             'expected_page_version_id' => $v1->id,
             'blocks' => [['block_key' => 'block-0001', 'markdown' => 'Ny tekst.']],
-        ]);
+        ])->assertSessionHas('success');
 
         $v2 = $this->currentVersion($page);
-
-        // The exact route out that the refusal tells the reviewer to take.
-        $this->actingAs($reviewer)
-            ->patch("/app/wiki/{$page->slug}/reject", ['reason' => 'Ny arbeidsversjon kom inn under gjennomgang.'])
-            ->assertRedirect();
-        $this->assertSame(EnterpriseWikiPage::STATUS_REJECTED, $page->fresh()->status);
-
-        $this->actingAs($owner)->patch("/app/wiki/{$page->slug}/submit")->assertRedirect();
-        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->fresh()->status);
+        $this->assertSame(2, (int) $v2->version_number);
+        $this->assertNull($v2->submitted_by_user_id);
+        $this->assertNull($v2->submitted_at);
+        $this->assertNull($v2->reviewer_user_id);
 
         $this->actingAs($owner)->patch("/app/wiki/{$page->slug}/submit", ['reviewer_user_id' => $reviewer->id])->assertRedirect();
         $this->actingAs($reviewer)->patch("/app/wiki/{$page->slug}/approve")->assertRedirect();
@@ -132,43 +94,43 @@ class WikiPublishIsExplicitTest extends TestCase
         $this->assertSame((int) $v2->id, (int) $page->fresh()->published_version_id);
     }
 
+    // =========================================================================
+    // Pages a manual edit stranded before decision B5
+    // =========================================================================
+
     /**
-     * The page must never end up with no way out. Before the reviewer could always send a page
-     * back, a version saved during review left the page unable to be approved (409), unable to be
-     * rejected (409 as well) and unable to be resubmitted (422: it was already in review) — stuck
-     * in pending_review with no action left in the interface.
+     * Before B5 an edit during review left the page in pending_review with a working version nobody
+     * was handed. Such a page may still exist. It is never published: approve() refuses a version
+     * with no valid submission, and says what to do instead.
      */
-    public function test_a_page_is_never_left_with_no_way_out(): void
+    public function test_a_stranded_unassigned_version_is_never_published(): void
     {
-        [$page, $owner, $reviewer, $v1] = $this->pageOutForReview();
+        [$page, , $reviewer] = $this->strandedPage();
 
-        $this->actingAs($owner)->patch("/app/wiki/{$page->slug}/working-version", [
-            'expected_page_version_id' => $v1->id,
-            'blocks' => [['block_key' => 'block-0001', 'markdown' => 'Ny tekst.']],
-        ]);
+        $response = $this->actingAs($reviewer)->patch("/app/wiki/{$page->slug}/approve");
 
-        // Approval is closed, as it must be.
-        $this->actingAs($reviewer)->patch("/app/wiki/{$page->slug}/approve")->assertStatus(409);
+        $response->assertStatus(409);
+        $this->assertStringContainsString('Send siden tilbake', $response->exception->getMessage());
+        $this->assertNull($page->fresh()->published_version_id, 'nothing may be published behind the reviewer');
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
+    }
 
-        // Sending it back is not: it publishes nothing and hands the page to its owner.
-        $this->actingAs($reviewer)
-            ->patch("/app/wiki/{$page->slug}/reject", ['reason' => 'Arbeidsversjonen ble endret underveis.'])
-            ->assertRedirect();
+    /** And it is never left with no way out: its owner withdraws it, and it is a draft again. */
+    public function test_a_stranded_page_is_never_left_with_no_way_out(): void
+    {
+        [$page, $owner] = $this->strandedPage();
 
-        $this->assertSame(EnterpriseWikiPage::STATUS_REJECTED, $page->fresh()->status);
+        $this->actingAs($owner)->patch("/app/wiki/{$page->slug}/withdraw")->assertRedirect();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->fresh()->status);
         $this->assertNull($page->fresh()->published_version_id, 'and still publishes nothing');
     }
 
     /** Sending back is still a review decision — an outsider cannot do it. */
     public function test_rejecting_an_unsubmitted_version_still_needs_the_capability(): void
     {
-        [$page, $owner, , $v1] = $this->pageOutForReview();
+        [$page] = $this->strandedPage();
         $outsider = $this->user($page->customer_id, User::BID_ROLE_CONTRIBUTOR);
-
-        $this->actingAs($owner)->patch("/app/wiki/{$page->slug}/working-version", [
-            'expected_page_version_id' => $v1->id,
-            'blocks' => [['block_key' => 'block-0001', 'markdown' => 'Ny tekst.']],
-        ]);
 
         $this->actingAs($outsider)
             ->patch("/app/wiki/{$page->slug}/reject", ['reason' => 'Jeg mener dette er feil.'])
@@ -267,6 +229,30 @@ class WikiPublishIsExplicitTest extends TestCase
             ->assertRedirect();
 
         return [$page->fresh(), $owner, $reviewer, $version];
+    }
+
+    /**
+     * The state an edit during review left behind before decision B5: still in pending_review, the
+     * submitted version superseded by one that carries no submission. Written directly, because no
+     * code path produces it any more.
+     *
+     * @return array{0: EnterpriseWikiPage, 1: User, 2: User, 3: EnterpriseWikiPageVersion}
+     */
+    private function strandedPage(): array
+    {
+        [$page, $owner, $reviewer, $v1] = $this->pageOutForReview();
+
+        $v1->forceFill(['is_current' => false])->save();
+        $v2 = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 2,
+            'is_current' => true,
+            'content_markdown' => "# Google Cloud\n\nTekst kontrolløren aldri så.",
+            'content_blocks_json' => $v1->content_blocks_json,
+            'created_by_user_id' => $owner->id,
+        ]);
+
+        return [$page->fresh(), $owner, $reviewer, $v2];
     }
 
     private function currentVersion(EnterpriseWikiPage $page): EnterpriseWikiPageVersion

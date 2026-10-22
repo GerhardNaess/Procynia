@@ -2,6 +2,7 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Exceptions\EnterpriseWikiReviewConflict;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiCanonicalFact;
 use App\Models\EnterpriseWikiClaim;
@@ -13,6 +14,10 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
 use App\Services\Ai\Wiki\WikiSemanticReviserAiClient;
+use App\Services\Permissions\CustomerPermissionService;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -65,6 +70,8 @@ class EnterpriseWikiClaimContentRepairService
         private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
         private readonly EnterpriseWikiPageVersionWriter $versionWriter,
         private readonly EnterpriseWikiPublicationSettlementService $publicationSettlement,
+        private readonly HumanDecisionGuard $guard,
+        private readonly CustomerPermissionService $permissions,
     ) {}
 
     /**
@@ -99,6 +106,12 @@ class EnterpriseWikiClaimContentRepairService
     ): array {
         [$submittedMarkdownByBlockKey, $actor] = $this->normalizeManualMixedBlockEdits($contentBlockKey, $markdownOrActor, $actor);
 
+        $actor = $this->guard->assert($actor, HumanDecision::WIKI_CLAIM_REPAIR);
+
+        // Before any AI call: a page in review is not edited, so there is nothing to extract or
+        // verify. Checked again under the page lock when the version is staged and promoted.
+        $this->refuseWhileInReview($page->id);
+
         return $this->applyBlockEdits(
             $run,
             $page,
@@ -106,7 +119,8 @@ class EnterpriseWikiClaimContentRepairService
             $reviewClaim,
             $submittedMarkdownByBlockKey,
             $actor,
-            static fn (User $editor): bool => $editor->canApproveWikiClaims(),
+            fn (User $editor): bool => $editor->canApproveWikiClaims()
+                && $this->permissions->has($editor, CustomerPermissionCatalog::WIKI_REVIEW),
             // Claim repair exists to fix ONE mixed-provenance block's text against its source. That
             // restriction is this flow's own invariant and stays exactly as it was.
             static function (array $block, string $blockKey): void {
@@ -158,11 +172,19 @@ class EnterpriseWikiClaimContentRepairService
     ): array {
         [$submittedMarkdownByBlockKey] = $this->normalizeManualMixedBlockEdits($edits, $actor, null);
 
-        if (! $actor->canSubmitEnterpriseWikiPage($page)) {
+        $actor = $this->guard->assert($actor, HumanDecision::WIKI_PAGE_EDIT);
+
+        if (! $actor->canSubmitEnterpriseWikiPage($page)
+            || ! $this->permissions->has($actor, CustomerPermissionCatalog::WIKI_EDIT)) {
             throw new \InvalidArgumentException('User cannot edit this Wiki page.');
         }
 
         return DB::transaction(function () use ($page, $expectedCurrentVersion, $submittedMarkdownByBlockKey, $actor): array {
+            // What was handed to a reviewer is what they decide (decision B5). The page owner takes
+            // it back with «Trekk tilbake» to change it. Under the page lock, so a submit that won
+            // the race is seen.
+            $this->refuseWhileInReview($page->id, lock: true);
+
             $current = EnterpriseWikiPageVersion::query()
                 ->whereKey($expectedCurrentVersion->id)
                 ->lockForUpdate()
@@ -194,9 +216,8 @@ class EnterpriseWikiClaimContentRepairService
 
             // Through the writer, so the page lock, the version numbering, the single-current
             // constraint, best-practice carry-forward and the block/provenance guards all apply —
-            // there is no staged phase to keep it out of them any more. A person's own edit, so
-            // the writer's open-review refusal (meant for automated writers) does not apply; what
-            // a person may edit is the controller's and the edit policy's decision, unchanged.
+            // there is no staged phase to keep it out of them any more. Its open-review refusal
+            // applies to a person's edit too, as the second line behind the check above.
             $newVersion = $this->versionWriter->writeNewCurrentVersion($page->id, [
                 'content_markdown' => $this->markdownFromBlocks($blocks),
                 'content_blocks_json' => $blocks,
@@ -204,7 +225,7 @@ class EnterpriseWikiClaimContentRepairService
                 'generated_by_model' => null,
                 'generation_prompt_hash' => null,
                 'created_by_user_id' => $actor->id,
-            ], allowDuringReview: true);
+            ]);
 
             // Claims are copied forward ONLY for blocks the user left alone. A claim verified
             // against the old wording says nothing about the new one, so for a changed block it is
@@ -493,6 +514,23 @@ class EnterpriseWikiClaimContentRepairService
     }
 
     /**
+     * Content that is out for review is not edited directly — decision B5. The reviewer decides what
+     * they were handed; the page owner withdraws the page to change it.
+     */
+    private function refuseWhileInReview(int $pageId, bool $lock = false): void
+    {
+        $query = EnterpriseWikiPage::query()->whereKey($pageId);
+
+        if ($lock) {
+            $query->lockForUpdate();
+        }
+
+        if ($query->value('status') === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            throw new EnterpriseWikiReviewConflict(__('procynia.wiki.edit_locked_in_review'));
+        }
+    }
+
+    /**
      * @param  list<string>  $submittedBlockKeys
      */
     private function assertManualMixedBlockEditScope(
@@ -610,6 +648,12 @@ class EnterpriseWikiClaimContentRepairService
 
             if ($lockedPage === null || (int) $lockedPage->customer_id !== (int) $run->customer_id) {
                 throw new \RuntimeException("Page [{$page->id}] is no longer available for run [{$run->id}].");
+            }
+
+            // Sent for review while this edit was under way: the version under review stays the one
+            // the reviewer was handed (decision B5); a staged version is cleaned up by the caller.
+            if ($lockedPage->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+                throw new EnterpriseWikiReviewConflict(__('procynia.wiki.edit_locked_in_review'));
             }
 
             $current = EnterpriseWikiPageVersion::query()
@@ -826,6 +870,12 @@ class EnterpriseWikiClaimContentRepairService
                 throw new \RuntimeException("Page [{$page->id}] is no longer available for run [{$run->id}].");
             }
 
+            // Sent for review while this edit was under way: the version under review stays the one
+            // the reviewer was handed (decision B5); a staged version is cleaned up by the caller.
+            if ($lockedPage->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+                throw new EnterpriseWikiReviewConflict(__('procynia.wiki.edit_locked_in_review'));
+            }
+
             $current = EnterpriseWikiPageVersion::query()
                 ->whereKey($expectedCurrentVersion->id)
                 ->lockForUpdate()
@@ -886,6 +936,10 @@ class EnterpriseWikiClaimContentRepairService
                 'claims_claimed_at' => null,
                 'claims_claim_token' => null,
             ]);
+
+            // The same settlement as an ordinary edit: a published page goes back to draft, keeps
+            // serving its published version, and the repaired text has a route into review.
+            $this->publicationSettlement->afterManualEdit($lockedPage);
 
             return $canonicalFactIds;
         });

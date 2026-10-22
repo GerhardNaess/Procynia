@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\App\Wiki;
 
+use App\Exceptions\EnterpriseWikiReviewConflict;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiCanonicalFact;
 use App\Models\EnterpriseWikiClaim;
@@ -378,20 +379,15 @@ class EnterpriseWikiClaimContentRepairServiceTest extends TestCase
     }
 
     /**
-     * Characterisation of a known gap — docs/external-api-phase-0-plan.md, finding F1b.
+     * Finding F1b (docs/external-api-phase-0-plan.md §2): claim repair used to promote its version
+     * without settling publication, so an approved page kept status approved with an unpublished
+     * current version and no route into review.
      *
-     * The ordinary working-version edit settles publication through
-     * EnterpriseWikiPublicationSettlementService::afterManualEdit(): an approved page goes back to
-     * draft, keeps serving its published version, and can be sent for review. Claim repair promotes
-     * its new version without that call, so an approved page keeps status approved with an
-     * unpublished current version — the state EnterpriseWikiPublicationStatusService reports as
-     * blocked ("edited after publish"), because submit() only accepts a draft.
-     *
-     * Readers are safe: grounding reads published_version_id only. What breaks is the route to get
-     * the edit reviewed. When the settlement call is added this test fails, and its status
-     * assertions should flip to draft / draftNextStep.
+     * Now it settles like an ordinary edit (EnterpriseWikiPublicationSettlementService::afterManualEdit):
+     * the page goes back to draft, readers keep the published version, and the repaired text can be
+     * sent for review.
      */
-    public function test_manual_mixed_block_edit_leaves_a_published_page_approved_with_unpublished_changes(): void
+    public function test_manual_mixed_block_edit_returns_a_published_page_to_draft_with_a_route_into_review(): void
     {
         $fixture = $this->createManualMixedBlockEditFixture();
         $newMarkdown = 'Kunden bidrar til dokumentert kontroll etter revisjonen.';
@@ -437,11 +433,66 @@ class EnterpriseWikiClaimContentRepairServiceTest extends TestCase
 
         $this->assertTrue((bool) $current->is_current);
         $this->assertSame((int) $fixture['version']->id, (int) $page->published_version_id, 'readers keep the approved text');
-        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->status, 'F1b: not returned to draft');
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->status, 'returned to draft so it can be reviewed');
 
-        $status = app(EnterpriseWikiPublicationStatusService::class)->forPage($page, $current);
+        $status = app(EnterpriseWikiPublicationStatusService::class)->forPage($page, $current, ['can_submit' => true, 'eligible_reviewer_count' => 1]);
         $this->assertSame(EnterpriseWikiPublicationStatusService::STATE_PUBLISHED_WITH_CHANGES, $status['state']);
-        $this->assertSame('blocked', $status['next_step'], 'F1b: the edit has no route into review');
+        $this->assertNotSame('blocked', $status['next_step'], 'the repaired text has a route into review');
+        $this->assertSame([], $status['blocking_reasons']);
+    }
+
+    /**
+     * Decision B5 under a race: the page is sent for review while the repair's AI calls run. The
+     * promotion re-reads the page under its lock and refuses, the staged version is cleaned up, and
+     * the version the reviewer was handed stays current.
+     */
+    public function test_manual_mixed_block_edit_refuses_a_page_sent_for_review_while_it_ran(): void
+    {
+        $fixture = $this->createManualMixedBlockEditFixture();
+        $newMarkdown = 'Kunden bidrar til dokumentert kontroll etter revisjonen.';
+        $versionsBefore = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $fixture['page']->id)->count();
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaimsForManualMixedBlock')
+            ->once()
+            ->andReturnUsing(function () use ($fixture, $newMarkdown): array {
+                // Somebody submits the page while the model is thinking.
+                $fixture['page']->forceFill(['status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW])->save();
+
+                return ['claims' => [[
+                    'text' => $newMarkdown,
+                    'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+                    'excerpt' => 'Kunden bidrar til dokumentert kontroll',
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+                    'source_element_keys' => [],
+                    'best_practice_reason' => null,
+                    'conflict_note' => null,
+                ]]];
+            });
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->andReturn($this->verificationResult(
+                supportingSourceElementKeys: ['source-edited-1'],
+                reason: 'Påstanden er støttet av kildereferansen.',
+            ));
+
+        try {
+            $this->service()->applyManualMixedBlockEdit(
+                $fixture['run']->fresh(),
+                $fixture['page']->fresh(),
+                $fixture['version']->fresh(),
+                $fixture['reviewClaim']->fresh(),
+                'block-0002',
+                $newMarkdown,
+                $fixture['actor']->fresh(),
+            );
+            $this->fail('the promotion must refuse a page that entered review');
+        } catch (EnterpriseWikiReviewConflict) {
+        }
+
+        $this->assertSame($versionsBefore, EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $fixture['page']->id)->count(), 'the staged version is cleaned up');
+        $this->assertTrue((bool) $fixture['version']->fresh()->is_current);
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $fixture['page']->fresh()->status);
     }
 
     /**

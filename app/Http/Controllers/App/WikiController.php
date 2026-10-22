@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Exceptions\EnterpriseWikiReviewConflict;
 use App\Exceptions\EnterpriseWikiWithdrawalNotRepresentableException;
 use App\Http\Controllers\Concerns\AuthorizesWikiPermissions;
 use App\Http\Controllers\Concerns\PreservesWikiReviewReturnUrl;
@@ -41,6 +42,7 @@ use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use App\Support\EnterpriseWiki\WikiQualityCheckPresentation;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -2203,6 +2205,11 @@ class WikiController extends Controller
             return $this->manualMixedBlockEditConflictRedirect($page, $claim, $backUrl);
         }
 
+        // Content out for review is not edited directly (decision B5). Said before any AI call.
+        if ($page->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            return $this->editLockedInReviewRedirect(['slug' => $page->slug, 'claim_id' => $claim->id, 'back_url' => $backUrl]);
+        }
+
         $runPage = EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_ingest_run_id', $run->id)
             ->where('enterprise_wiki_page_id', $page->id)
@@ -2227,6 +2234,10 @@ class WikiController extends Controller
                 $submittedBlocks,
                 $user,
             );
+        } catch (EnterpriseWikiReviewConflict) {
+            return $this->editLockedInReviewRedirect(['slug' => $page->slug, 'claim_id' => $claim->id, 'back_url' => $backUrl]);
+        } catch (AuthorizationException $e) {
+            throw $e;
         } catch (\InvalidArgumentException $e) {
             if ($this->isManualMixedBlockEditConflict($e)) {
                 return $this->manualMixedBlockEditConflictRedirect($page, $claim, $backUrl);
@@ -2349,6 +2360,11 @@ class WikiController extends Controller
             return $this->workingVersionEditConflictRedirect($page, $request);
         }
 
+        // Content out for review is not edited directly (decision B5); «Trekk tilbake» first.
+        if ($page->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            return $this->editLockedInReviewRedirect($this->workingVersionReturnParams($request, $page));
+        }
+
         $normalizedBlocks = $this->validatedManualMixedBlockEditBlocks($submittedBlocks, $currentVersion);
 
         try {
@@ -2358,6 +2374,10 @@ class WikiController extends Controller
                 $normalizedBlocks,
                 $user,
             );
+        } catch (EnterpriseWikiReviewConflict) {
+            return $this->editLockedInReviewRedirect($this->workingVersionReturnParams($request, $page));
+        } catch (AuthorizationException $e) {
+            throw $e;
         } catch (\InvalidArgumentException $e) {
             if ($this->isManualMixedBlockEditConflict($e)) {
                 return $this->workingVersionEditConflictRedirect($page, $request);
@@ -2396,6 +2416,19 @@ class WikiController extends Controller
                 $this->claimCarriedForwardByEdit($request, $page, $editResult),
             ))
             ->with('success', 'Endringene er lagret i en ny arbeidsversjon.');
+    }
+
+    /**
+     * The answer when somebody tries to edit content that is out for review. The writing is still
+     * in the editor; the message says why it was not saved and what to do instead.
+     *
+     * @param  array<string, mixed>  $routeParams
+     */
+    private function editLockedInReviewRedirect(array $routeParams): RedirectResponse
+    {
+        return redirect()
+            ->route('app.wiki.show', array_filter($routeParams, static fn (mixed $value): bool => $value !== null))
+            ->with('error', __('procynia.wiki.edit_locked_in_review'));
     }
 
     /**
@@ -2551,6 +2584,14 @@ class WikiController extends Controller
             return $context;
         }
 
+        // Out for review: what the reviewer was handed is what they decide (decision B5). Shown
+        // with its reason rather than hidden, because the way forward is «Trekk tilbake».
+        if ($page->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            $context['unavailable_reason'] = 'in_review';
+
+            return $context;
+        }
+
         $context['can_edit'] = true;
         $context['update_url'] = route('app.wiki.working-version.update', ['slug' => $page->slug], false);
 
@@ -2558,7 +2599,7 @@ class WikiController extends Controller
     }
 
     /**
-     * @return array{run_id: int, update_url_template: string}|null
+     * @return array{run_id: int, update_url_template: string}|array{locked_in_review: true}|null
      */
     private function manualMixedBlockEditContext(
         EnterpriseWikiPage $page,
@@ -2567,6 +2608,12 @@ class WikiController extends Controller
     ): ?array {
         if (! $currentVersion instanceof EnterpriseWikiPageVersion) {
             return null;
+        }
+
+        // Out for review: the text is not edited directly (decision B5). No run context, so no
+        // editor opens, and the claim card says why instead of the action simply not being there.
+        if ($page->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            return ['locked_in_review' => true];
         }
 
         $runPage = EnterpriseWikiIngestRunPage::query()

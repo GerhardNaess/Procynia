@@ -9385,7 +9385,7 @@ return [
         'show_page_help_item_publish_title' => 'Approve and publish',
         'show_page_help_item_publish_text' => 'The working version becomes the published knowledge on the page. Nothing else has to be finished first.',
         'show_page_help_item_edit_title' => 'Edit article',
-        'show_page_help_item_edit_text' => 'Changes the working version. The published version is untouched until the new one is approved.',
+        'show_page_help_item_edit_text' => 'Changes the working version. The published version is untouched until the new one is approved. While the page is in review it cannot be edited.',
 
         'show_page_help_section_quality' => 'Quality assurance',
         'show_page_help_item_quality_who_title' => 'Quality reviewer',
@@ -10728,6 +10728,7 @@ return [
         'withdraw_hint' => 'The page is in review and cannot be edited. Withdraw it if you want to change something before the reviewer decides.',
         'withdraw_success' => 'The page has been withdrawn from review and is a draft again.',
         'withdraw_not_in_review' => 'The page is no longer in review. The page has been updated with its current status.',
+        'edit_locked_in_review' => 'The page is in review and cannot be edited. The page owner can withdraw it to make changes.',
         'notification_review_withdrawn_title' => 'Review withdrawn',
         'notification_review_withdrawn_message' => ':actor withdrew «:page» from review. You no longer have anything to approve on the page.',
         'notification_review_withdrawn_unknown_actor' => 'The page owner',

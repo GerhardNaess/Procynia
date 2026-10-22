@@ -133,6 +133,12 @@ export function articleEditUnavailableText(reason, tw) {
             ?? 'Denne versjonen kan ikke redigeres manuelt.';
     }
 
+    // Out for review: the reviewer decides what they were handed (decision B5).
+    if (reason === 'in_review') {
+        return tw.edit_locked_in_review
+            ?? 'Siden ligger til gjennomgang og kan ikke redigeres. Sideeier kan trekke den tilbake for å gjøre endringer.';
+    }
+
     return null;
 }
 
