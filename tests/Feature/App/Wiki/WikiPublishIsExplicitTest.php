@@ -12,6 +12,7 @@ use App\Models\User;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -33,6 +34,7 @@ use Tests\TestCase;
 class WikiPublishIsExplicitTest extends TestCase
 {
     use DatabaseTransactions;
+    use GrantsWikiPermissions;
 
     protected function setUp(): void
     {
@@ -110,7 +112,7 @@ class WikiPublishIsExplicitTest extends TestCase
         $response = $this->actingAs($reviewer)->patch("/app/wiki/{$page->slug}/approve");
 
         $response->assertStatus(409);
-        $this->assertStringContainsString('Send siden tilbake', $response->exception->getMessage());
+        $this->assertSame(__('procynia.wiki.approve_refused_missing_assignment'), $response->exception->getMessage());
         $this->assertNull($page->fresh()->published_version_id, 'nothing may be published behind the reviewer');
         $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
     }
@@ -124,6 +126,33 @@ class WikiPublishIsExplicitTest extends TestCase
 
         $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->fresh()->status);
         $this->assertNull($page->fresh()->published_version_id, 'and still publishes nothing');
+    }
+
+    /**
+     * Nobody takes over a review they were never given (O6, docs/external-api-phase-0-plan.md §2):
+     * not the person the earlier version was handed to, not another Wiki approver, and not a System
+     * Owner. The version in front of them was handed to nobody; its owner withdraws it.
+     */
+    public function test_nobody_decides_a_version_that_was_handed_to_nobody(): void
+    {
+        [$page, , $formerReviewer] = $this->strandedPage();
+        // Every Wiki permission and the approver capability: the refusal can only come from the
+        // rule that the version was handed to somebody else, never from a missing grant.
+        $otherApprover = $this->grantWikiPermissions($page->customer_id, $this->user($page->customer_id, User::BID_ROLE_CONTRIBUTOR));
+        $otherApprover->forceFill(['is_wiki_approver' => true])->save();
+        $this->assertTrue($otherApprover->fresh()->canApproveWikiPages());
+        $systemOwner = $this->user($page->customer_id, User::BID_ROLE_SYSTEM_OWNER);
+
+        foreach ([$formerReviewer, $otherApprover, $systemOwner] as $approver) {
+            $this->actingAs($approver)->get(route('app.wiki.show', ['slug' => $page->slug]))
+                ->assertInertia(fn ($inertia) => $inertia->where('review_assignment.can_send_back', false));
+            $this->actingAs($approver)
+                ->patch("/app/wiki/{$page->slug}/reject", ['reason' => 'Overtar en gjennomgang jeg ikke fikk.'])
+                ->assertForbidden();
+        }
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
+        $this->assertNull($page->fresh()->reviewed_by_user_id);
     }
 
     /** Sending back is still a review decision — an outsider cannot do it. */

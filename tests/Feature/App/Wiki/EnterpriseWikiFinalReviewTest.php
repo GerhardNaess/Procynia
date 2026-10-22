@@ -379,21 +379,27 @@ class EnterpriseWikiFinalReviewTest extends TestCase
     }
 
     /**
-     * But it can always be sent back. Refusing that too used to leave the page unable to be
-     * approved, rejected or resubmitted — stuck in pending_review with no action left. Rejecting
-     * publishes nothing; it hands the page to its owner, who can submit the new version properly.
+     * But it is never stuck. Such a version was handed to nobody, so nobody decides it — a Wiki
+     * approver who was never given the review does not take it over (O6,
+     * docs/external-api-phase-0-plan.md §2). The way out is the page owner's: withdrawing it
+     * («Trekk tilbake», decision B5) publishes nothing and returns it to draft, from where the new
+     * version is submitted properly.
      */
-    public function test_a_pending_page_without_an_assignment_can_still_be_sent_back(): void
+    public function test_a_pending_page_without_an_assignment_is_withdrawn_by_its_owner_not_decided_by_an_approver(): void
     {
         $case = $this->unassignedPendingPage();
+        $owner = User::query()->findOrFail($case['page']->owner_user_id);
 
         $this->actingAs($case['reviewer'])
             ->patch("/app/wiki/{$case['page']->slug}/reject", ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
-            ->assertRedirect();
+            ->assertForbidden();
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $case['page']->fresh()->status);
+
+        $this->actingAs($owner)->patch("/app/wiki/{$case['page']->slug}/withdraw")->assertRedirect();
 
         $page = $case['page']->fresh();
-        $this->assertSame(EnterpriseWikiPage::STATUS_REJECTED, $page->status);
-        $this->assertNull($page->published_version_id, 'sending back still publishes nothing');
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->status);
+        $this->assertNull($page->published_version_id, 'withdrawing still publishes nothing');
     }
 
     /** @return array<string, mixed> */

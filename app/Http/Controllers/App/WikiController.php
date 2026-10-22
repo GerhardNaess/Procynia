@@ -3713,7 +3713,7 @@ class WikiController extends Controller
             'not_in_review' => 422,
             default => 403,
         }, match ($blocker) {
-            'missing_assignment' => 'Arbeidsversjonen er endret etter at siden ble sendt til gjennomgang, og kan ikke godkjennes som den er. Send siden tilbake, så kan den sendes til gjennomgang på nytt.',
+            'missing_assignment' => __('procynia.wiki.approve_refused_missing_assignment'),
             'unresolved_source_findings' => __('procynia.wiki.publication_blocker_unresolved_source_findings'),
             'own_submission' => 'Du kan ikke godkjenne en versjon du selv har sendt til gjennomgang.',
             'missing_capability' => 'Du har ikke tilgang til å godkjenne Wiki-sider.',
@@ -3729,9 +3729,10 @@ class WikiController extends Controller
      * calls it to decide whether to show "Send tilbake"; the endpoint calls it to decide whether to
      * honour one.
      *
-     * An unsubmitted version names no reviewer, so "whose turn is it" has no answer from the version
-     * itself. The capability plus the page's own ownership is what remains, and a System Owner
-     * always qualifies.
+     * Only the person the version was handed to, or a System Owner sending it back
+     * (User::canReviewEnterpriseWikiVersion). A version nobody was handed — a page stranded by an
+     * edit during review before decision B5 — is decided by nobody: a general Wiki approver does not
+     * take over a review they were never given. Its owner withdraws it («Trekk tilbake») instead.
      */
     private function mayActOnCurrentVersion(User $user, EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version): bool
     {
@@ -3748,9 +3749,7 @@ class WikiController extends Controller
             return false;
         }
 
-        return $version->reviewer_user_id !== null
-            ? $user->canReviewEnterpriseWikiVersion($version, $page)
-            : true;
+        return $user->canReviewEnterpriseWikiVersion($version, $page);
     }
 
     /**
