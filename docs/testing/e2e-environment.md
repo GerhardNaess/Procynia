@@ -61,6 +61,7 @@ Uendret fra før (se `known-test-failures.md`, «Bevaring av spor»):
 
 - `E2ETestSeeder` lager E2E-kunden, brukerne, pakkene og faste Kvalitet-prosesser. Den lager nå også en fast kontroll (`E2E-KONTROLL`).
   - Uten kontrollen hoppet `risk-controls.spec.js` og Risiko-reisen over steget («No control in Kvalitet in this environment»). Tidligere fant de en kontroll blant dataene utviklingsdatabasen hadde samlet opp.
+- `E2ETestSeeder` lager også en prosess med en godkjent versjon (`E2E-GODKJENT`, «E2E godkjent prosess»). Den kan bare settes til «Utgått», aldri slettes (steg 12).
 - Den første kjøringen i en database som er migrert fra bunnen, avdekket A17 (`external-api-phase-0-plan.md`): rekkefølgen kaskadene utløses i, gjorde at oppryddingen i `ComplianceE2EFixture` feilet.
   - Fiksturen sletter nå koblingene eksplisitt først.
   - Rettingen i modulen hører til Etterlevelse (steg 13).
@@ -76,3 +77,9 @@ Uendret fra før (se `known-test-failures.md`, «Bevaring av spor»):
 - **Køjobber kjører ikke.** En spesifikasjon som trenger en jobb fullført (for eksempel en ekte Wiki-kjøring), må bruke en fikstur. Tidligere kjørte E2E mot utviklingsmiljøets køarbeidere, med AI.
 - **Ny database etter `reset`:** `procynia_e2e` starter tom. `E2ETestSeeder` lager brukerne, og spesifikasjonene lager resten selv.
 - **Én kjøring om gangen:** Playwright kjører med én arbeider (`workers: 1`), og miljøet er ment for én Playwright-kjøring om gangen.
+  - To kjøringer samtidig deler database og seeder hverandres data. Resultatet av begge er da verdiløst.
+- **Ingen AI.** `OPENAI_API_KEY` er tom med vilje: en testkjøring skal ikke bruke AI-kall eller sende tekst til en leverandør.
+  - Spesifikasjoner som trenger ekte AI-tolkning i serveren, hopper over med en begrunnelse (`tests/e2e/helpers/quality.js`, `serverHasFlowAi()`). Det gjelder `quality-flow-clarify-sticks`, `quality-flow-describe-without-flow` og A11Y-013 i `a11y-grc-quality`.
+  - Spesifikasjoner som bare forsvarer nettleserens halvdel, sier til siden at AI er tilgjengelig og stubber forespørselen (`quality-flow-clarify`, `quality-flow-interpret`).
+  - De tre som hoppes over, er ikke verifisert i dette miljøet. De må kjøres mot et miljø med AI før noe som berører dem, regnes som verifisert.
+- **Ingen rettigheter fra utviklingsdatabasen.** En spesifikasjon som trenger en bruker med bestemte nøkler, gir dem selv og fjerner dem etterpå (for eksempel `quality-new-process`, rollen «E2E Kvalitet leser»).

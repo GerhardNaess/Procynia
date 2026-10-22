@@ -88,14 +88,28 @@ for (const viewport of [{ width: 1366, height: 900 }, PHONE]) {
     });
 }
 
-test('a user without quality.create sees the list but no «Ny prosess»', async ({ page }) => {
-    await loginAs(page, USER.email, USER.password);
-    await page.goto('/app/quality?tab=processes');
-    await expect(page.getByRole('heading', { name: 'Prosesser', level: 2 })).toBeVisible();
+// The spec owns the reader it tests: a role holding quality.view and nothing else, given to the E2E
+// contributor for this test and taken away after. It used to lean on whatever roles the development
+// database had collected; the isolated E2E database starts without any (docs/testing/e2e-environment.md).
+const READER_ROLE = 'E2E Kvalitet leser';
+const userQuery = "\\App\\Models\\User::where('email', 'e2e.user@procynia.test')->firstOrFail()";
+const removeReaderRole = `\\App\\Models\\CustomerRole::where('name', '${READER_ROLE}')->get()->each(function (\\$role) { \\$role->users()->detach(); \\$role->delete(); });`;
 
-    // The contributor's quality permissions come from the customer's settings; whichever they are,
-    // the button follows quality.create exactly as the backend does.
-    const { stdout } = await tinker("echo json_encode(app(\\App\\Services\\Permissions\\CustomerPermissionService::class)->has(\\App\\Models\\User::where('email', 'e2e.user@procynia.test')->first(), 'quality.create'));");
-    const canCreate = stdout.trim().endsWith('true');
-    await expect(page.getByRole('button', { name: 'Ny prosess', exact: true })).toHaveCount(canCreate ? 1 : 0);
+test('a user without quality.create sees the list but no «Ny prosess»', async ({ page }) => {
+    await tinker(removeReaderRole);
+    await tinker(`\\$user = ${userQuery}; \\$role = \\App\\Models\\CustomerRole::create(['customer_id' => \\$user->customer_id, 'name' => '${READER_ROLE}', 'is_active' => true]); \\$role->syncPermissions(['quality.view']); \\$user->customerRoles()->attach(\\$role->id, ['customer_id' => \\$user->customer_id]);`);
+
+    try {
+        await loginAs(page, USER.email, USER.password);
+        await page.goto('/app/quality?tab=processes');
+        await expect(page.getByRole('heading', { name: 'Prosesser', level: 2 })).toBeVisible();
+
+        // The button follows quality.create exactly as the backend does, whatever else the
+        // contributor holds.
+        const { stdout } = await tinker(`echo json_encode(app(\\App\\Services\\Permissions\\CustomerPermissionService::class)->has(${userQuery}, 'quality.create'));`);
+        const canCreate = stdout.trim().endsWith('true');
+        await expect(page.getByRole('button', { name: 'Ny prosess', exact: true })).toHaveCount(canCreate ? 1 : 0);
+    } finally {
+        await tinker(removeReaderRole);
+    }
 });

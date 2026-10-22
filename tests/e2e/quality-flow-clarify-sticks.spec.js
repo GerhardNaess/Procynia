@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, loginAs } from './helpers/auth.js';
+import { NO_FLOW_AI, serverHasFlowAi } from './helpers/quality.js';
 
 /**
  * The reported bug, in the running app: answer a clarification and watch it stay answered.
@@ -87,6 +88,8 @@ async function generate(page) {
 
 test('an answered clarification does not come back', async ({ page }) => {
     test.setTimeout(300000);
+    // Both provider calls behind «Bruk svaret» are real, by design: it cannot run without AI.
+    test.skip(! await serverHasFlowAi(), NO_FLOW_AI);
 
     const errors = [];
     page.on('pageerror', (error) => errors.push(`${error.name}: ${error.message}`));

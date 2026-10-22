@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, loginAs } from './helpers/auth.js';
+import { NO_FLOW_AI, serverHasFlowAi } from './helpers/quality.js';
 
 /**
  * A process that has no flow yet can still be described.
@@ -19,6 +20,10 @@ import { SYSTEM_OWNER, loginAs } from './helpers/auth.js';
  * as far as asking, and this test must not spend a provider call to find out.
  */
 test('a process with no flow can be described, and the button is only off while it reads', async ({ page }) => {
+    // The refusals it reads are the server's own, and the server checks for AI before it reads the
+    // description: without AI it answers «not available» instead.
+    test.skip(! await serverHasFlowAi(), NO_FLOW_AI);
+
     await loginAs(page, SYSTEM_OWNER.email, SYSTEM_OWNER.password);
     await page.goto('/app/quality');
 

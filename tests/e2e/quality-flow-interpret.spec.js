@@ -15,6 +15,9 @@ import { SYSTEM_OWNER, loginAs } from './helpers/auth.js';
  * and the button comes back. The response is aborted deliberately — whether the model answers is a
  * separate question from whether the browser managed to ask, and this test must not spend a
  * provider call to find out.
+ *
+ * For the same reason the Flyt tab is told AI is available, as quality-flow-clarify.spec.js does:
+ * what is defended is the browser's half, and the isolated E2E environment has no provider key.
  */
 test('the generate button sends a request instead of serialising the click event', async ({ page }) => {
     const errors = [];
@@ -37,6 +40,17 @@ test('the generate button sends a request instead of serialising the click event
     }
 
     await link.first().click();
+
+    // The Inertia visit to the Flyt tab, answered with the generate button on it.
+    await page.route(/\/app\/quality\/items\/\d+\?tab=flow/, async (route) => {
+        const response = await route.fetch();
+        const body = await response.json();
+
+        body.props.flow_ai_available = true;
+
+        await route.fulfill({ response, json: body });
+    });
+
     await page.getByRole('tab', { name: 'Flyt' }).or(page.getByRole('link', { name: 'Flyt' })).first().click();
 
     const description = 'Når en ny leverandør skal opprettes registrerer innkjøper leverandøren i systemet. Deretter godkjenner økonomi leverandøren.';
