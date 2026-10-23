@@ -113,6 +113,7 @@ class CustomerEnvironmentController extends Controller
             Customer::PERMISSION_CREATE_DEPARTMENTS,
             Customer::PERMISSION_CREATE_USERS,
             Customer::PERMISSION_VIEW_ALL_CASES,
+            Customer::PERMISSION_DECIDE_BID_REQUIREMENTS,
             Customer::PERMISSION_APPROVE_WIKI_CLAIMS,
             Customer::PERMISSION_APPROVE_WIKI_PAGES,
             Customer::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER,
@@ -256,6 +257,12 @@ class CustomerEnvironmentController extends Controller
                 'key' => Customer::PERMISSION_VIEW_ALL_CASES,
                 'label' => 'Se alle saker',
                 'roles' => $settings[Customer::PERMISSION_VIEW_ALL_CASES],
+            ],
+            [
+                'key' => Customer::PERMISSION_DECIDE_BID_REQUIREMENTS,
+                'label' => __('procynia.customer_env.permission_decide_bid_requirements'),
+                'description' => __('procynia.customer_env.permission_decide_bid_requirements_help'),
+                'roles' => $settings[Customer::PERMISSION_DECIDE_BID_REQUIREMENTS],
             ],
             // The two Wiki approval rows sit together and used to read almost identically —
             // "Godkjenne Wiki-påstander" and "Godkjenne Wiki-sider" — which is exactly how an

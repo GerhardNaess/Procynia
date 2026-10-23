@@ -28,6 +28,13 @@ class Customer extends Model
     public const PERMISSION_APPROVE_WIKI_PAGES = 'approve_wiki_pages';
 
     /**
+     * Approving, rejecting and restoring a tender requirement (B4). A decision about what the bid
+     * must answer, so seeing the case is not enough: it takes this permission and the right to work
+     * on the case (SavedNoticeAccessService::canManage).
+     */
+    public const PERMISSION_DECIDE_BID_REQUIREMENTS = 'decide_bid_requirements';
+
+    /**
      * Supplemental capabilities a user carries alongside their bid_role, not instead of it. They
      * appear as their own columns in the access matrix so a permission can be granted to "whoever
      * holds this capability" without touching anyone's ordinary role.
@@ -44,6 +51,8 @@ class Customer extends Model
         self::PERMISSION_CREATE_DEPARTMENTS => ['system_owner'],
         self::PERMISSION_CREATE_USERS => ['system_owner', 'bid_manager', 'contributor'],
         self::PERMISSION_VIEW_ALL_CASES => ['system_owner', 'bid_manager', 'contributor'],
+        // Everyone who could decide requirements before B4 keeps it until a System Owner narrows it.
+        self::PERMISSION_DECIDE_BID_REQUIREMENTS => ['system_owner', 'bid_manager', 'contributor'],
         // The two Wiki decisions default to the two capabilities named after them, and neither
         // spills into the other: QA vouches for a claim against its source, a Wiki approver
         // publishes the page. Nobody is a Wiki approver until someone is made one, so this default

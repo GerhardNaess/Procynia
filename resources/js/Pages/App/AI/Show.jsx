@@ -890,6 +890,9 @@ export default function AiShow({
         translations = {},
         auth = {},
         can_use_ai_offer: canUseAiOffer = true,
+        // Approve, reject, restore and «Avvis alle» (B4). The server answers 403 regardless; this
+        // only keeps a person from being offered a decision that is not theirs to take.
+        can_decide_requirements: canDecideRequirements = false,
         ai_quota: aiQuota = null,
     } = usePage().props;
     const tai = translations?.ai ?? {};
@@ -2778,7 +2781,7 @@ export default function AiShow({
                                     )
                                 ) : null}
 
-                                {canUseAiOffer && extractedRequirementRows.length > 0 && requirementsRejectAllUrl ? (
+                                {canUseAiOffer && canDecideRequirements && extractedRequirementRows.length > 0 && requirementsRejectAllUrl ? (
                                     showBulkRejectConfirm ? (
                                         <div
                                             ref={bulkConfirmPanelRef}
@@ -2971,7 +2974,9 @@ export default function AiShow({
                                 {visibleRequirementRows.map((requirement) => {
                                     const sourceTypeMeta = REQUIREMENT_SOURCE_TYPE_META[requirement.source_type] ?? REQUIREMENT_SOURCE_TYPE_META.ai_candidate;
                                     const approvalStatus = requirement.approval_status ?? 'draft';
-                                    const approvalActions = REQUIREMENT_APPROVAL_ACTIONS[approvalStatus] ?? REQUIREMENT_APPROVAL_ACTIONS.draft;
+                                    const approvalActions = canDecideRequirements
+                                        ? (REQUIREMENT_APPROVAL_ACTIONS[approvalStatus] ?? REQUIREMENT_APPROVAL_ACTIONS.draft)
+                                        : [];
                                     const workStatus = requirement.work_status ?? 'not_started';
                                     const workStatusMeta = WORK_STATUS_META[workStatus] ?? WORK_STATUS_META.not_started;
                                     const assignedUserId = requirement.assigned_user_id !== null && requirement.assigned_user_id !== undefined

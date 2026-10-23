@@ -2766,6 +2766,8 @@ return [
         'tab_departments' => 'Departments',
         'tab_users' => 'Users',
         'tab_permissions' => 'Permissions',
+        'permission_decide_bid_requirements' => 'Approve and reject tender requirements',
+        'permission_decide_bid_requirements_help' => 'Can approve, reject and restore requirements in cases they can work on. Read access to the case is not enough.',
         'show' => 'Show',
         'hide' => 'Hide',
         'dept_heading' => 'Departments',

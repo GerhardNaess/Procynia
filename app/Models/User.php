@@ -391,6 +391,23 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
+     * May this user approve, reject or restore tender requirements at all (B4)? The matrix half of
+     * the rule only; whether they may do it on a given case is SavedNoticeAccessService::canManage,
+     * and RequirementEditorService::mayDecide() puts the two together.
+     */
+    public function canDecideBidRequirements(): bool
+    {
+        if (! $this->canAccessCustomerFrontend() || $this->customer_id === null) {
+            return false;
+        }
+
+        $customer = $this->customer;
+
+        return $customer !== null
+            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_DECIDE_BID_REQUIREMENTS, $this->isQa(), $this->isWikiApprover());
+    }
+
+    /**
      * Manual Wiki claim approval/undo (WikiClaimController::approve()/unapprove()). System
      * Owner always passes (Customer::roleHasPermission() short-circuits true for that role);
      * otherwise this is granted only when the customer's permission gallery lists either the

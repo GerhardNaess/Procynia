@@ -2770,6 +2770,8 @@ return [
         'tab_departments' => 'Avdelinger',
         'tab_users' => 'Brukere',
         'tab_permissions' => 'Tilganger',
+        'permission_decide_bid_requirements' => 'Godkjenne og avvise krav i anbud',
+        'permission_decide_bid_requirements_help' => 'Kan godkjenne, avvise og gjenopprette krav i saker de kan jobbe i. Lesetilgang til saken er ikke nok.',
         'show' => 'Vis',
         'hide' => 'Skjul',
         'dept_heading' => 'Avdelinger',

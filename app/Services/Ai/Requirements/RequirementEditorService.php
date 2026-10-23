@@ -11,10 +11,35 @@ use App\Models\SavedNoticeAiDocumentChunk;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementRevision;
 use App\Models\User;
+use App\Services\SavedNoticeAccessService;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\HumanDecision;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 
 class RequirementEditorService
 {
+    public function __construct(
+        private readonly HumanDecisionGuard $guard,
+        private readonly SavedNoticeAccessService $access,
+    ) {}
+
+    /**
+     * May this person approve, reject or restore requirements in this case (B4)? The permission in
+     * the Tilganger matrix, the right to work on the case (readers never), an active case, and a
+     * customer that holds Anbud. Read by the controller to answer early and to show the buttons;
+     * transitionRequirementReviewStatus() asks it again under lock, where it actually holds.
+     */
+    public function mayDecide(User $actor, SavedNotice $notice): bool
+    {
+        return $actor->customer_id !== null
+            && (int) $actor->customer_id === (int) $notice->customer_id
+            && $notice->archived_at === null
+            && $actor->canDecideBidRequirements()
+            && (bool) $notice->customer?->hasModule('tender')
+            && $this->access->canManage($actor, $notice);
+    }
+
     /**
      * Purpose: Persist one AI-generated requirement candidate as a traceable aggregate row.
      * Inputs: The source AI document and chunk plus the extracted candidate data.
@@ -38,6 +63,16 @@ class RequirementEditorService
                     'superseded_at' => null,
                 ],
                 $publicationOverrides,
+                // Extraction proposes requirements; deciding them is a person's act (B4). Whatever
+                // the candidate or the overrides carry, an AI candidate is born undecided.
+                [
+                    'approval_status' => SavedNoticeAiRequirement::APPROVAL_STATUS_DRAFT,
+                    'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
+                    'approved_at' => null,
+                    'approved_by_user_id' => null,
+                    'rejected_at' => null,
+                    'rejected_by_user_id' => null,
+                ],
             ));
 
             $snapshot = RequirementSnapshotData::fromRequirement($requirement)->toArray();
@@ -265,7 +300,7 @@ class RequirementEditorService
      * Returns: The persisted canonical requirement row.
      * Side effects: Writes a revision row and updates approval metadata.
      */
-    public function approveRequirement(SavedNoticeAiRequirement $requirement, ?User $changedBy = null): SavedNoticeAiRequirement
+    public function approveRequirement(SavedNoticeAiRequirement $requirement, User $changedBy): SavedNoticeAiRequirement
     {
         return $this->transitionRequirementReviewStatus(
             requirement: $requirement,
@@ -280,7 +315,7 @@ class RequirementEditorService
      * Returns: The persisted canonical requirement row.
      * Side effects: Writes a revision row and clears active work assignments.
      */
-    public function rejectRequirement(SavedNoticeAiRequirement $requirement, ?User $changedBy = null): SavedNoticeAiRequirement
+    public function rejectRequirement(SavedNoticeAiRequirement $requirement, User $changedBy): SavedNoticeAiRequirement
     {
         return $this->transitionRequirementReviewStatus(
             requirement: $requirement,
@@ -295,7 +330,7 @@ class RequirementEditorService
      * Returns: The persisted canonical requirement row.
      * Side effects: Writes a revision row and clears approval metadata.
      */
-    public function restoreRequirement(SavedNoticeAiRequirement $requirement, ?User $changedBy = null): SavedNoticeAiRequirement
+    public function restoreRequirement(SavedNoticeAiRequirement $requirement, User $changedBy): SavedNoticeAiRequirement
     {
         return $this->transitionRequirementReviewStatus(
             requirement: $requirement,
@@ -313,9 +348,21 @@ class RequirementEditorService
     public function transitionRequirementReviewStatus(
         SavedNoticeAiRequirement $requirement,
         string $reviewStatus,
-        ?User $changedBy = null,
+        User $changedBy,
     ): SavedNoticeAiRequirement {
+        // A person, never an integration or the API, and never nobody (B2, B4).
+        $changedBy = $this->guard->assert($changedBy, HumanDecision::TENDER_REQUIREMENT_DECIDE);
+
         return DB::transaction(function () use ($requirement, $reviewStatus, $changedBy): SavedNoticeAiRequirement {
+            // Decided on the row as it stands under lock, in the case it belongs to now — never on
+            // a copy the caller loaded earlier.
+            $requirement = SavedNoticeAiRequirement::query()->lockForUpdate()->findOrFail($requirement->getKey());
+            $notice = SavedNotice::query()->with('customer')->findOrFail($requirement->saved_notice_id);
+
+            if (! $this->mayDecide($changedBy, $notice)) {
+                throw new AuthorizationException('This person may not decide requirements in this case.');
+            }
+
             $normalizedReviewStatus = in_array($reviewStatus, SavedNoticeAiRequirement::REVIEW_STATUSES, true)
                 ? $reviewStatus
                 : SavedNoticeAiRequirement::REVIEW_STATUS_PENDING;
@@ -353,7 +400,7 @@ class RequirementEditorService
                 $changedFields[] = 'rejected_by_user_id';
                 $requirement->forceFill([
                     'approved_at' => now(),
-                    'approved_by_user_id' => $changedBy?->id,
+                    'approved_by_user_id' => $changedBy->id,
                     'rejected_at' => null,
                     'rejected_by_user_id' => null,
                 ]);
@@ -368,7 +415,7 @@ class RequirementEditorService
                     'approved_at' => null,
                     'approved_by_user_id' => null,
                     'rejected_at' => now(),
-                    'rejected_by_user_id' => $changedBy?->id,
+                    'rejected_by_user_id' => $changedBy->id,
                     'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
                     'assigned_user_id' => null,
                 ]);

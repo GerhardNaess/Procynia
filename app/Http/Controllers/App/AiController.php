@@ -170,6 +170,9 @@ class AiController extends Controller
             'answer_basis_text_store_url' => route('app.ai.answer-basis.texts.store', ['savedNotice' => $record->id]),
             'export_docx_url' => route('app.ai.requirements.export.docx', ['savedNotice' => $record->id]),
             'can_use_ai_offer' => $canUseAiOffer,
+            // Approve, reject, restore and «Avvis alle» (B4). Everything else on the page is
+            // ordinary case work and does not depend on it.
+            'can_decide_requirements' => $this->requirementEditorService->mayDecide($request->user(), $record),
             'ai_quota' => $this->aiQuotaPayload($record),
         ]);
     }
@@ -799,6 +802,8 @@ class AiController extends Controller
         $ownedRequirement = $record->aiRequirements()
             ->whereKey($requirement->id)
             ->firstOrFail();
+        // B4: seeing the case is not enough. The service asks again under lock.
+        abort_unless($this->requirementEditorService->mayDecide($request->user(), $record), 403);
 
         $validated = $request->validate([
             'review_status' => ['required', 'string', Rule::in(SavedNoticeAiRequirement::REVIEW_STATUSES)],
@@ -856,6 +861,7 @@ class AiController extends Controller
     {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
+        abort_unless($this->requirementEditorService->mayDecide($request->user(), $record), 403);
 
         $requirements = $record->aiRequirements()
             ->where('source_type', SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE)
