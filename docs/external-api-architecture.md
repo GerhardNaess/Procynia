@@ -698,6 +698,8 @@ Forutsetning: A23 og A46 holdes utenfor til kravene i fase 0-planen §2n er oppf
 
 ## 15. Åpne beslutninger
 
+Beslutningsgrunnlag med anbefalinger, alternativer og konsekvenser for punktene under: [`external-api-phase-1-decisions.md`](external-api-phase-1-decisions.md) (2026-10-23, til beslutning).
+
 1. Identitetsmodell C (§4) – anbefalt.
 2. Scopes og app-roller som tak, og presisering av Entra-invarianten (§5.4).
 3. Egen Entra-registrering for API-et (§5.2).

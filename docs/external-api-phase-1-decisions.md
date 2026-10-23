@@ -1,0 +1,396 @@
+# Eksternt API – beslutningsgrunnlag for fase 1
+
+**Status:** Til beslutning. Ingenting i dette dokumentet er implementert. API fase 1 startes ikke før beslutningene i §13 er godkjent.
+**Dato:** 2026-10-23
+**Gren:** `feature/external-api-foundation`
+**Bygger på:** [`external-api-architecture.md`](external-api-architecture.md) (særlig §4, §5, §8.3, §9 og §15), [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §2n, [`operations/entra-sso.md`](operations/entra-sso.md), [`operations/security.md`](operations/security.md) §9 og [`AGENTS.md`](../AGENTS.md).
+
+Dokumentet er et kort grunnlag for å ta de åpne arkitekturbeslutningene. Arkitekturdokumentet er fortsatt referansen for detaljene. Der dette dokumentet anbefaler noe annet enn arkitekturdokumentet, står det eksplisitt.
+
+Merking:
+
+- **[BESLUTTET]** – tatt tidligere, med referanse. Tas ikke opp igjen.
+- **[ANBEFALT]** – må godkjennes. Alternativer og konsekvenser står ved siden av.
+- **[UTSATT]** – trengs ikke for første leveranse. Besluttes når behovet er konkret.
+
+Grunnprinsipp for anbefalingene: **den enkleste løsningen som er sikker for lesing, og ingenting som bare trengs for skriving, delegert modus eller kopiering med persontilgang før det behovet finnes.**
+
+---
+
+## 1. Sammendrag
+
+| # | Beslutning | Anbefaling |
+|---|---|---|
+| D1 | Identitetsmodell | Modell C: integrasjonsbruker i `users` (`role = integration`), én per (klient, kunde), med egen legitimasjon i `api_clients` og `api_client_customer_grants`. |
+| D2 | Tilgangsmodus i fase 1 | **Bare applikasjonsmodus.** Delegert modus bygges når et personlig dashboard eller «Mine oppgaver» faktisk skal brukes. |
+| D3 | Entra-registrering | Egen app-registrering «Procynia API» (`api://procynia`), én app-rolle `Procynia.Read.All`, v2-tokens. |
+| D4 | Entra-invarianten | App-rollen er bare et tak for API-operasjoner. Hva integrasjonen ser, bestemmes av Procynia-roller og fagområder. Presiseres i `entra-sso.md`. |
+| D5 | Klientlegitimasjon | Siggjo autentiserer med managed identity eller federert legitimasjon. Ingen klienthemmeligheter. |
+| D6 | Kundevalg | Headeren `Procynia-Customer` velger blant aktive tildelinger. Én klientregistrering for alle Siggjo-kunder. |
+| D7 | Data til Siggjo | Agenter leser live. Dashboards henter et fullt øyeblikksbilde av det integrasjonen ser, og erstatter det ved hver synkronisering. Ingen tilgangsprojeksjon eller endringslogg i første leveranse. |
+| D8 | Felt i svarene | Strukturerte felt, tittel og eier. Lang fritekst og kommentarer holdes utenfor til DPIA er gjort. |
+| D9 | Første endepunkter | `me`, Risiko, Mål og KPI, Avvik og forbedringer, Revisjoner, Etterlevelsesstatus og samlet oppmerksomhet. Bare `GET`. |
+| D10 | Logging | Strukturert logg til stderr (Log Analytics) og `last_used_at` på tildelingen. Ingen `api_request_log`-tabell før skrive-API. |
+| D11 | AI på API-kanalen | Alle AI-kall nektes når forespørselen kommer via API-et. Det gjør A23 teknisk uoppnåelig, ikke bare urutet. |
+| D12 | API Management eller WAF | Ikke i pilot med testdata. Besluttes før første kunde med ekte data. |
+| D13 | Registrering av klienter | Interne administratorer registrerer klienter i Filament. Kundens System Owner gir og trekker tildelinger. |
+| D14 | Personvern | DPIA og databehandleravtaler før ekte kundedata går til Siggjo. Blokkerer ikke bygging og pilot på testkunde. |
+
+A10 løses med én felles feilrenderer for `api/*` (§8). A23 og A46 holdes utilgjengelige med fire uavhengige lag (§9).
+
+---
+
+## 2. Allerede besluttet
+
+Disse ligger fast og påvirker alle anbefalingene under:
+
+| Beslutning | Kilde |
+|---|---|
+| Første API-versjon er kontrollert lesetilgang. | Arkitektur §8.3 (2026-10-23) |
+| Integrasjoner og AI-agenter tar aldri endelige godkjenninger, publiseringer eller andre formelle beslutninger (B1). | Arkitektur §7.3 |
+| Menneskeforbeholdte beslutninger er ikke tilgjengelige via API-et, heller ikke i delegert modus (B2). | Arkitektur §7.3 |
+| Listen over menneskeforbeholdte rettigheter, og at den trekkes fra for integrasjoner. | Arkitektur §7.2, fase 0 §4.1 |
+| Vakten (`HumanDecisionGuard`) nekter `role = integration` og enhver forespørsel der `ActorChannel::isApi()` er sann. Databasetriggerne nekter integrasjonsaktører i 44 beslutningskolonner. | Fase 0 §2n, K4–K5 |
+| A23 og A46 eksponeres ikke før kravene i fase 0 §2n er oppfylt. | Fase 0 §2n |
+| Anbud og Wiki er utenfor v1. Leverandører og Ledelsens gjennomgang kan komme i v1.1. | Arkitektur §8.3 |
+| Ingen globale scopes. Kundeseparasjon er tilgangstjenestene og regelen om aldri route-bundet modell. | Arkitektur K8, audit F-04 |
+| Kopi uten tilgangsavgrensning (alternativ C i arkitektur §9.2) er forkastet. | Arkitektur §9.2 |
+| Ingen vektorindeks over Wiki-innhold hos Siggjo uten egen beslutning. Utgangspunktet er nei. | Arkitektur K13, §15.9 |
+
+---
+
+## 3. Identitetsmodell (D1, D2)
+
+### D1 – Modell C **[ANBEFALT]**
+
+Som arkitektur §4.2: `api_clients` (én ekstern applikasjon), `api_client_customer_grants` (kunden har gitt klienten tilgang) og én `users`-rad med `role = integration` per (klient, kunde).
+
+| Alternativ | Konsekvens |
+|---|---|
+| **C (anbefalt)** | Tjenester, rettigheter, fagområder og historikk virker uendret, fordi aktøren er en `User`. Fase 0 har allerede gjort det trygt: vakten, rettighetstrekket og triggerne kjenner `role = integration`. Det som gjenstår, er menneske-sperren i arkitektur §4.3 (`User::scopeHumans()`, varsler, lisens, «Brukere», `resolvedBidRole()`). |
+| A – vanlig `users`-rad | Telles i lisens, kan bli eier, får varsler, faller tilbake til `contributor` i Anbud. Forkastet. |
+| B – egen `Principal`-modell | Hundrevis av `User $actor`-signaturer og historikk-FK-er må endres. Forkastet. |
+
+Integrasjonsbrukeren får vanlige kunderoller og fagområder. System Owner velger dem i den nye fanen **Kundemiljø → Integrasjoner**. Selv om en bred rolle tildeles, kan integrasjonen aldri få en menneskeforbeholdt rettighet (fase 0, K4). Etterlevelse og Leverandøroppfølging krever eksplisitt rolle, også for integrasjonen.
+
+**Anbefaling for rollevalg:** Ingen ny rolletype. System Owner lager eller velger en lesende rolle i den eksisterende rolleredigeringen. Det holder fordi v1 bare har `GET`-ruter, og fordi rettighetstrekket gjelder uansett.
+
+### D2 – Bare applikasjonsmodus i fase 1 **[ANBEFALT]** (avvik fra arkitekturen)
+
+Arkitektur §5.3 beskriver både delegert modus og applikasjonsmodus. Anbefalingen er å bygge bare applikasjonsmodus nå.
+
+| | Applikasjonsmodus | Delegert modus |
+|---|---|---|
+| Hva Siggjo trenger | Dashboards for virksomheten og agenter som leser kundens data | Personlige dashboards og «Mine oppgaver» |
+| Hva som må bygges | Klientvalidering, tildeling, integrasjonsbruker | I tillegg: brukerkobling `oid` → `user_identities`, samtykke, on-behalf-of-flyt hos Siggjo, frontend-tilgangskontroll per kall |
+| Kjent behov i dag | Ja | Ikke konkretisert |
+
+**Konsekvens av å utsette delegert modus:**
+- `GET /my-tasks` utgår fra første leveranse (gir bare mening for en person).
+- `ApiRequestContext` lages slik at modus er et felt. Delegert modus kan legges til uten å endre vakten, fordi vakten allerede nekter all API-kanal (B2).
+- Ingen delegerte scopes defineres i Entra før de trengs.
+
+**Alternativ:** bygge begge modusene nå, som i arkitektur §14 fase 1. Det gir mer kode og flere sikkerhetstester for en bruk som ikke er bestilt.
+
+---
+
+## 4. Microsoft Entra ID, scopes, roller og kundetilgang (D3–D6)
+
+### D3 – Egen registrering for API-et **[ANBEFALT]** (arkitektur §15.3)
+
+- Ny app-registrering «Procynia API», adskilt fra innloggingsappen (`AUTH_ENTRA_CLIENT_ID`). Da kan API-tilgang og innlogging styres, roteres og slås av hver for seg.
+- App ID URI `api://procynia`. Manifestet setter `accessTokenAcceptedVersion: 2`, slik at alle tokens har samme format og `iss`.
+- Multi-tenant, fordi Siggjos identitet ligger i Advanias tenant og ikke i Procynias.
+- **Én app-rolle:** `Procynia.Read.All` (type `Application`). Ingen delegerte scopes før D2 åpner for det. Ingen rolle per modul.
+
+**Konsekvens av én rolle:** Entra kan ikke begrense en klient til enkelte moduler. Det er bevisst. Modulvalget ligger i Procynia-rollene og i modulpakken til kunden, og det er der det skal styres. En egen rolle per modul ville gjort Entra til en ny tilgangskilde (se D4).
+
+### D4 – App-rollen er et tak, ikke en tildeling **[ANBEFALT]** (arkitektur §5.4, §15.2)
+
+- `Procynia.Read.All` betyr bare «kan kalle leseendepunktene». Om integrasjonen får se en bestemt risiko, avgjøres av integrasjonsbrukerens Procynia-roller og fagområder.
+- Effektive scopes = tokenets roller ∩ tildelingens scopes ∩ klientens tak (arkitektur §5.3 punkt 7).
+- `entra-sso.md` presiseres med én setning: «Entra-app-roller på Procynia API gir bare adgang til å kalle API-et. De tildeler aldri Procynia-roller, rettigheter eller fagområder.»
+
+**Alternativ:** forby app-roller helt og styre alt med `api_clients`. Da må tokenet fortsatt valideres, men Entra-administratoren hos klienten kan ikke se eller begrense hva klienten har lov til. Det gir dårligere kontroll hos Advania og ingen sikkerhetsgevinst.
+
+### D5 – Ingen klienthemmeligheter **[ANBEFALT]** (nytt)
+
+- Siggjo-komponenter i Azure (Foundry-agenter, synkroniseringsjobben) bruker **managed identity**. Utenfor Azure brukes **federert legitimasjon** (workload identity federation) eller sertifikat.
+- Klienthemmeligheter tillates ikke i `api_clients`. Procynia lagrer bare app-ID (`azp`) og hjem-tenant, aldri en hemmelighet.
+
+**Konsekvens:** Ingen hemmelighet å lekke, rotere eller oppbevare i Procynia. Siggjo må sette opp app-rolletildelingen for sin managed identity i Advanias tenant. Det er en engangsjobb for Advanias Entra-administrator.
+
+### D6 – Kunden velges fra aktive tildelinger **[ANBEFALT]** (arkitektur §5.3 punkt 5)
+
+Siggjos token kommer fra Advanias tenant og sier ikke hvilken kunde kallet gjelder. Validering per forespørsel:
+
+```text
+1. Signatur (RS256, JWKS for tokenets tid), aud = api://procynia, exp/nbf, iss = …/{tid}/v2.0
+2. (azp, tid) må finnes i api_clients som (entra_app_id, home_tenant_id), med is_enabled = true
+   → begge må stemme. Det er dette som gjør multi-tenant trygt: en fremmed app med samme rolle avvises.
+3. Ingen scp-claim, og roles ∋ Procynia.Read.All → applikasjonsmodus
+4. Procynia-Customer: <customer_id> → api_client_customer_grants (klient + kunde, revoked_at IS NULL)
+   → integration_user_id. Headeren er bare en velger. Uten aktiv tildeling: 403, samme svar som for en kunde som ikke finnes.
+5. Kunden er aktiv, integrasjonsbrukeren er aktiv
+6. Auth::setUser(integrasjonsbruker), ApiRequestContext bindes som ActorChannel, ingen sesjon
+```
+
+| Alternativ | Konsekvens |
+|---|---|
+| **Header blant tildelinger (anbefalt)** | Én registrering og én identitet hos Siggjo for alle kunder. Kunden avledes alltid fra en tildeling som kundens System Owner har gitt. |
+| Én app-registrering per kunde | Tokenet binder selv kunden, og en lekket identitet rammer bare én kunde. Men hver nye kunde krever ny registrering og rolletildeling i Entra, og Siggjo må holde én identitet per kunde. |
+
+**Konsekvens av anbefalingen:** En kompromittert Siggjo-identitet gir lesetilgang hos alle kunder som har gitt tildeling. Det begrenses av D5 (ingen hemmelighet å stjele), lesetilgang alene, ratebegrensning per kunde, og at hver kunde kan trekke tildelingen. Velger dere per-kunde-registrering senere, endres bare trinn 4.
+
+---
+
+## 5. Kundeseparasjon i hvert kall
+
+Ingen nye regler. Det som er nytt, er at API-stacken må følge dem og at testene beviser det.
+
+| Lag | Hvordan | Status |
+|---|---|---|
+| Kunde fra identitet, aldri fra input | Kunden kommer fra tildelingen (D6). `CustomerContext` leser `Auth::user()`, som er integrasjonsbrukeren med `customer_id`. | Tildelingen **[MÅ UTVIKLES]**, `CustomerContext` **[FINNES]** |
+| Poster hentes via tilgangstjenesten | `findVisible*()` med aktøren. Ingen route model binding mot kundeeide modeller. Annen kundes id gir 404. | Tjenestene **[FINNES]** |
+| Lister bygges fra `visible*()` | Filtre og markører legges oppå builderen. Markøren er opak og inneholder bare siste id og filtrene, aldri kunden. Den kan derfor ikke peke ut av builderen. | **[MÅ UTVIKLES]** |
+| Modul | `EnsureModuleIsEnabled` med `api.v1.*` i `route_modules`. Gir allerede 403 som JSON. | **[MÅ ENDRES]** (kartet) |
+| Rettighet og fagområde | `CustomerPermissionService`, `*AccessService::can*()` og fagområdeslogikken med integrasjonsbrukeren. | **[FINNES]** |
+| Strukturell test | `CrossTenantIsolationTest` utvides til `app/Http/Controllers/Api/**`. Ny `ApiRouteContractTest` (§9). | **[MÅ UTVIKLES]** |
+| Atferdstest | Per endepunkt: token for kunde A med id-er, filtre og markører fra kunde B gir 404 eller tom liste. Tildeling som er trukket tilbake gir 403 i neste kall. | **[MÅ UTVIKLES]** |
+
+Det trengs ingen globale scopes og ingen ny tilgangsmotor.
+
+---
+
+## 6. Data til Siggjos dashboards og AI-agenter (D7, D8)
+
+### D7 – To bruksmønstre, ett API **[ANBEFALT]** (arkitektur §15.5, avvik fra §9.3)
+
+**Agenter (Foundry):** leser live fra API-et i applikasjonsmodus. Hvert verktøy svarer til ett endepunkt. Agenten ser nøyaktig det integrasjonsbrukeren ser. Ingen kopi.
+
+**Dashboards (Siggjos PostgreSQL):** en synkroniseringsjobb hos Siggjo henter *hele* listen for hver modul, med sidevis henting, og **erstatter** kundens data i Siggjo ved hver kjøring.
+
+- **Slettinger håndteres av seg selv:** det som ikke kommer med i neste øyeblikksbilde, fjernes. Det løser arkitektur K9 (harde slettinger og FK-kaskader uten hendelser) uten endringslogg.
+- **Tilgangsendringer håndteres av seg selv:** endres integrasjonsbrukerens roller eller fagområder, gir neste øyeblikksbilde det nye omfanget. Trekkes tildelingen, får Siggjo 403 og skal slette kundens data innen fristen i databehandleravtalen.
+- **Hvem i Siggjo som ser dataene:** integrasjonens synlige data er *ett* datasett. Kunden bestemmer, i avtalen med Siggjo, hvilket publikum dashboardet har (for eksempel ledergruppen). System Owner velger roller og fagområder for integrasjonen ut fra det publikummet.
+
+| Alternativ | Konsekvens |
+|---|---|
+| **Øyeblikksbilde med kundebestemt publikum (anbefalt)** | Ingenting nytt i Procynia utover lese-API-et. Ingen tilgangslogikk hos Siggjo. Forsinkelse = synkroniseringsintervallet (forslag: hver time). Passer når dashboardet har én målgruppe per kunde. |
+| Tilgangsprojeksjon, endringslogg og RLS (arkitektur §9.3, alternativ B) | Riktig når ett dashboard skal vise *ulike* data til ulike personer. Krever `access-projection`, `api_change_events` med tombstones, avstemming, kobling `oid` → `user_id` hos Siggjo og RLS-regler. Mye mer å bygge og teste. |
+| Bare live-kall fra dashboards (alternativ A) | Krever delegert modus (D2) for personlige visninger. Egnet senere for personlige dashboards. |
+
+**Konsekvens av anbefalingen:** Ansvaret for hvem som ser dashboardet, ligger i avtalen mellom kunden og Siggjo, ikke i Procynias regler. Det er akseptabelt så lenge datasettet aldri er større enn det kunden selv har valgt for integrasjonen. Det er ikke alternativ C, som er forkastet: der så alle i kunden alt. Trenger én kunde ulike visninger per person, er det et konkret behov for alternativ B, og det besluttes da.
+
+**Volum:** øyeblikksbilde fungerer for dagens størrelser (hundrer til noen tusen rader per modul). Blir én modul for stor til å hentes hver time, er det signalet for en endringslogg.
+
+### D8 – Felt i svarene **[ANBEFALT]** (arkitektur §9.3 punkt 8)
+
+- **Med:** id-er, tittel, status, nivåer og poeng, datoer, fagområde, eier (id og navn), tellere og avledet tilstand (for eksempel `is_review_overdue`, KPI-status).
+- **Ikke med i v1:** beskrivelser, begrunnelser, kommentarer, vedlegg og personnavn utover eier.
+- Svarene har stabile id-er, ingen webruter (arkitektur §8.2).
+
+**Konsekvens:** agentene kan svare på «hvilke risikoer er høye og over frist», men ikke på «hva handler denne risikoen om». Fritekst legges til som eget felt når DPIA og databehandleravtale med Siggjos AI-leverandør er på plass (D14). Det er en utvidelse uten brudd i `v1`.
+
+---
+
+## 7. Første leveranse: lesebaserte endepunkter (D9)
+
+**[ANBEFALT]** Bare `GET`. Alle under `/api/v1`, alle med samme middleware og scope.
+
+| Endepunkt | Tilgang via | Presentasjon | Arbeid |
+|---|---|---|---|
+| `GET /me` | Integrasjonsbruker, tildeling, moduler, effektive rettigheter, fagområder | Ny | Liten |
+| `GET /risks`, `GET /risks/{id}` | `RiskAccessService::visibleRisks`/`findVisible` | `RiskPresenter` trekkes ut av `RiskController` | Middels |
+| `GET /objectives`, `GET /objectives/{id}` (med KPI-er og status) | `ObjectiveAccessService::visibleObjectives`/`visibleKpis` | `KpiPresenter` **[FINNES]**, målraden trekkes ut | Liten–middels |
+| `GET /kpis/{id}/measurements` | `findVisibleKpi` | `KpiPresenter::history` **[FINNES]** | Liten |
+| `GET /improvement-cases`, `GET /improvement-cases/{id}` | `ImprovementCaseAccessService::visibleCases`/`findVisible` | `ImprovementCasePresenter` trekkes ut, `now()` erstattes med `$today` | Middels |
+| `GET /compliance/audits`, `GET /compliance/audits/{id}` | `ComplianceAccessService::visibleAudits`/`findVisibleAudit` | `ComplianceAuditPresenter` trekkes ut | Middels |
+| `GET /compliance/status` | `visibleRequirements`, `ComplianceStatusResolver` | Aggregeringen trekkes ut av `ComplianceAssessmentController::index` | Middels |
+| `GET /attention` | Oppmerksomhetstjenestene per modul, bare for moduler aktøren har | Ny samling over eksisterende tjenester | Liten–middels |
+
+Presentasjonsklassene tas i bruk av både web og API i samme commit, slik at grensesnittene ikke glir fra hverandre (arkitektur §8.2).
+
+**Ikke i første leveranse:**
+
+| Utelatt | Hvorfor |
+|---|---|
+| `GET /my-tasks` | Bare meningsfullt i delegert modus (D2) |
+| `GET /access-projection`, `GET /changes`, `GET /{entity}/ids` | Trengs ikke med øyeblikksbilde (D7) |
+| Leverandører, Ledelsens gjennomgang | v1.1, samme mønster |
+| Wiki, Anbud, Kvalitet | Arkitektur §8.3, A23, A46 |
+
+**Til avklaring med Siggjo:** hvilke moduler pilotdashboardet faktisk trenger. Trenger piloten bare Risiko og Mål og KPI, leveres de først og resten etter.
+
+**Fellesregler** (arkitektur §8.4): markørbasert henting (`limit` ≤ 200), UTC i ISO 8601, `meta.as_of` og `meta.request_id`, OpenAPI 3.1 i repoet, ratebegrensning per (klient, kunde) med 429 og `Retry-After`.
+
+---
+
+## 8. A10 – felles feilformat
+
+**Status:** `bootstrap/app.php` har en tom `withExceptions`. Tjenestene kaster `HumanDecisionRefused` (arver `AuthorizationException`), `RiskHistoryProtected` og `EnterpriseWikiReviewConflict` (arver `ConflictHttpException`), `ValidationException` og, i Wiki, `HttpException` via `abort()` (A1).
+
+**[ANBEFALT]** Én renderer i `withExceptions` som bare gjelder `api/*`. Webgrensesnittet påvirkes ikke.
+
+| Unntak | Status | `error.code` |
+|---|---|---|
+| Ugyldig eller manglende token | 401 | `unauthenticated` |
+| `AuthorizationException` (inkl. `HumanDecisionRefused`), manglende modul, scope eller tildeling | 403 | `forbidden` |
+| `ModelNotFoundException`, `NotFoundHttpException`, ikke synlig | 404 | `not_found` |
+| `ConflictHttpException` og arvinger | 409 | `conflict` |
+| `ValidationException` | 422 | `validation_failed` (med feltene) |
+| `ThrottleRequestsException` | 429 | `rate_limited` |
+| Annen `HttpException` (A1) | Unntakets status | Fra fast liste, ellers `error` |
+| Alt annet | 500 | `server_error` |
+
+Regler:
+- Format: `{"error": {"code": "…", "message": "…", "request_id": "…"}}`.
+- Meldingen er en fast tekst per kode. Den røper aldri modul, post eller person (B10). Unntakets egen melding sendes ikke ut, bortsett fra feltene i 422.
+- 403 og 404 skilles ikke fra «finnes ikke» utover det tilgangstjenestene allerede gjør.
+
+**Konsekvens:** I et rent lese-API er det i praksis 401, 403, 404, 422 og 429 som forekommer. 409 og `HumanDecisionRefused` blir relevante først ved skriving, men rendereren dekker dem fra start. Én testklasse per kode.
+
+**Alternativ:** egne domeneunntak i stedet for `abort()` i Wiki (A1). Ikke nødvendig nå, siden Wiki ikke er i API-et.
+
+---
+
+## 9. A23 og A46 – teknisk utilgjengelige
+
+Ingen av dem kan nås gjennom en enkelt glemt regel. Fire uavhengige lag:
+
+| Lag | Hvordan | Dekker |
+|---|---|---|
+| 1. Ingen rute | Første leveranse har bare `GET`. `ApiRouteContractTest` feiler hvis en `api.v1.*`-rute har en annen metode enn `GET`/`HEAD`. | A23 og A46 (begge er skriving eller AI-arbeid) |
+| 2. Ingen modul | `route_modules` for `api.v1.*` har ikke Kvalitet, Wiki eller Anbud. `ApiRouteContractTest` feiler hvis en API-rute peker til de modulene. | A23 og A46 |
+| 3. Ingen kode | `ApiRouteContractTest` skanner `app/Http/Controllers/Api/**` og nekter referanser til `QualityProcessFlowInterpreter`, `QualityProcessDescriptionClarifier`, `QualityProcessFlowChangeProposer`, `EnterpriseWikiQuestionAnswerService`, `NoticeController` og `SavedNotice`. | A23 og A46 |
+| 4a. Ingen AI på API-kanalen (D11) | `AiCallContextPolicy` nekter ethvert AI-kall når `ActorChannel::isApi()` er sann. Én sjekk der alle AI-kall allerede passerer, og én test. | A23, også via en vei ingen har tenkt på |
+| 4b. Ingen webinngang | En integrasjon slipper ikke inn i kundefrontenden (`canAccessCustomerFrontend`, A9). Webrutene for A23 og A46 kan derfor ikke kalles med integrasjonsbrukeren. | A23 og A46 |
+
+### D11 – AI nektes på API-kanalen **[ANBEFALT]** (nytt)
+
+**Hvorfor:** Lese-API-et skal aldri starte AI-arbeid. Lag 1–3 gjør A23 urutet, men en presentasjonsklasse eller oppmerksomhetstjeneste som i fremtiden kaller en AI-tjeneste, ville gått rett gjennom. Lag 4a stopper det der pengene brukes.
+
+**Hvor:** `OpenAiClient` er eneste vei ut til modellen og kaller allerede `AiCallContextPolicy::enforce()` før hvert kall. Sperren gjelder kall i selve API-forespørselen. En køjobb kjører uten API-kanal, men et lese-API kan ikke starte køjobber, fordi det ikke har skriveruter (lag 1).
+
+**Konsekvens:** Når et AI-endepunkt eventuelt åpnes (A23 løst, egen beslutning), erstattes forbudet med en eksplisitt liste over tillatte operasjoner og `strict` kontekstkontroll (arkitektur K12). Til da finnes det ingen.
+
+**Alternativ:** bare lag 1–3. Enklere med én test mindre, men A23 er da beskyttet av konvensjon i stedet for av koden.
+
+**A46 trenger ikke besluttes nå.** Om «Flytt til historikk» med utfall er en menneskelig beslutning, avgjøres når Anbud skal inn i API-et. Lag 1–3 og 4b holder den utenfor til da. Det er ingen `HumanDecision` for A46, så vakten er ikke et av lagene.
+
+---
+
+## 10. Logging av autentisering, tilgang og bruk (D10)
+
+**[ANBEFALT]** (avvik fra arkitektur §10.3, som foreslår en `api_request_log`-tabell)
+
+| Hva | Hvor | Felter |
+|---|---|---|
+| Hver API-forespørsel | Strukturert logg, prefiks `[PROCYNIA][API]`, `event = api_request`, til stderr og Log Analytics | `request_id`, `api_client_id`, `customer_id`, `actor_user_id`, `mode`, rutenavn, metode, status, varighet, antall rader |
+| Avvist token eller tildeling | `[PROCYNIA][AUTH]`, `event = api_token_rejected`, nivå `warning` | `reason` (fast liste: `invalid_signature`, `wrong_audience`, `expired`, `unknown_client`, `client_disabled`, `mode_not_allowed`, `no_active_grant`, `actor_inactive`), `azp`, `tid`, `ip` |
+| Ratebegrensning | `[PROCYNIA][API]`, `event = api_throttled` | `api_client_id`, `customer_id`, `retry_after` |
+| Tildeling gitt, endret eller trukket tilbake | `customer_access_changes` via `CustomerAccessChangeRecorder` **[FINNES]** | Aktør (System Owner), før og etter |
+| Siste bruk | `api_client_customer_grants.last_used_at`, oppdatert høyst én gang per minutt | Vises i **Kundemiljø → Integrasjoner** |
+
+**Logges aldri:** token, `Authorization`-header, forespørsels- eller svarinnhold, verdier i spørrestrengen (bare navnene på filtrene). Samme regel og samme type test som innloggingen i `security.md` §9.1.
+
+| Alternativ | Konsekvens |
+|---|---|
+| **Logg + `last_used_at` (anbefalt)** | Ingen ny tabell som vokser med hver forespørsel. Drift ser alt i Log Analytics. Kunden ser hvem som har tilgang, hvem som ga den og når den sist ble brukt. |
+| `api_request_log` i databasen | Kunden kan få en bruksrapport i Procynia. Krever retensjon, indekser og opprydding. Trengs senest ved skrive-API (fase 4), når påvirkede id-er skal kunne etterprøves sammen med domenehistorikken. |
+
+**Forutsetning før produksjon:** retensjon og lesetilgang i Log Analytics må være satt (`security.md` §9: «Må verifiseres i produksjon»).
+
+---
+
+## 11. Verifisering før produksjonssetting
+
+Fase 0 er godkjent uten disse. Ingen av dem blokkerer at fase 1 bygges. Alle må være gjort før koden settes i produksjon.
+
+| # | Verifisering | Når | Hvordan | Godkjent når |
+|---|---|---|---|---|
+| V1 | Redis-testene (`RedisRuntimeContractTest`, tre tester) | Før merge av `feature/external-api-foundation` til `main` | Kjøres mot en egen Redis-instans med passord og egen database, ikke mot utviklingsstakkens DB 0. Enklest: en Redis-tjeneste i det isolerte E2E-miljøet (`scripts/e2e-env.sh`), med `REDIS_PASSWORD` gitt til testprosessen. | 3 av 3 bestått, ingen hoppet over |
+| V2 | Ekte AI-kall og Wiki-kjøring med køarbeidere | Før merge til `main`, etter V1 | På utviklingsstakken med en egen testkunde, etter omstart av alle `queue-*`-arbeidere. Minst: én Wiki-kjøring fra opplasting til publisert side via tildelt kontrollør, én «Overfør til Wiki», ett kravsvar og én vurdering i Anbud, ett AI-forslag i Kvalitet og ett «Spør Wiki»-svar. Kostnaden er liten, men det er ekte OpenAI-kall og må startes eksplisitt. | Alle fullført uten feil. Beslutningskolonnene har menneskelig aktør. Ingen `unattributed` i AI-bruksloggen. |
+| V3 | Migreringer og deploy i Azure | Før produksjonsdeploy av fase 0, i staging først | (1) Datakontrollen fra steg 19 kjøres mot en kopi av produksjonsdata. (2) Migreringene 000005–000014 kjøres i staging. (3) Triggerne og funksjonene kontrolleres i katalogen. (4) `down()` prøves i staging. (5) Røyktest av beslutningsflytene i alle ni moduler. (6) Produksjon i et vedlikeholdsvindu med backup rett før. | Staging og produksjon har samme triggere. Røyktesten er grønn. Ingen rader stoppet av triggerne. |
+| V4 | Integrasjons- og sikkerhetstester for API-et | Automatiske: i fase 1 og 2, som en del av hver commit. Ekte Entra: før første kunde med ekte data. | Automatisk: arkitektur §11.2 punkt 1–4, 6 og 9, `ApiRouteContractTest` (§9), feilformatet (§8) og D11. Med ekte Entra i staging: gyldig token fra en managed identity, feil `aud`, annen tenant, fremmed app med samme rolle, deaktivert klient, trukket tildeling, og `Procynia-Customer` for en kunde uten tildeling. | Alle automatiske tester grønne. Staging-sjekklisten signert. |
+
+V1–V3 hører til fase 0 og kan gjøres parallelt med bygging av fase 1. V4 hører til API-et. API-et eksponeres ikke mot en kunde med ekte data før V1–V4 og D14 er oppfylt.
+
+---
+
+## 12. Eksisterende kode som gjenbrukes
+
+| Behov | Gjenbrukes | Status |
+|---|---|---|
+| JWKS og signatur | `EntraOidcClient::jwks()` og `firebase/php-jwt`. JWKS-hentingen trekkes ut slik at innlogging og API deler den. | **[MÅ ENDRES]** (uttrekk) |
+| Entra-konfigurasjon | `EntraConfig` | **[FINNES]** |
+| Kanal og vakt | `ActorChannel` (bundet som `scoped` i `AppServiceProvider`), `HumanDecisionGuard`. `ApiRequestContext` implementerer `ActorChannel`. | **[FINNES]** |
+| Integrasjonskontotypen | `User::ROLE_INTEGRATION`, `isIntegration()`, rettighetstrekket i `CustomerPermissionService` | **[FINNES]**. Menneske-sperren i arkitektur §4.3 **[MÅ ENDRES]** |
+| Rettigheter og fagområder | `CustomerPermissionService`, `CustomerPermissionCatalog`, fagområdeslogikken i Risiko, Mål og Avvik | **[FINNES]** |
+| Tilgang per modul | `RiskAccessService`, `ObjectiveAccessService`, `ImprovementCaseAccessService`, `ComplianceAccessService` (`visible*`, `findVisible*`) | **[FINNES]** |
+| Avledet tilstand | `RiskAssessment::latestForRisks`, `RiskScoringPolicy`, `RiskReviewSchedule`, `KpiTargetPolicy`, `KpiMeasurementResolver`, `ImprovementActionVerificationResolver`, `ComplianceStatusResolver` | **[FINNES]** |
+| Oppmerksomhet | `RiskAttentionService`, `ObjectiveAttentionService`, `ImprovementAttentionService`, `ComplianceAttentionService`, `ComplianceAuditAttentionService` | **[FINNES]** |
+| Presentasjon | `KpiPresenter` | **[FINNES]**. Risiko, Avvik, Revisjon og etterlevelsesstatus **[MÅ ENDRES]** (uttrekk) |
+| Modulsperre | `EnsureModuleIsEnabled`, `config/procynia_modules.php` → `route_modules` | **[MÅ ENDRES]** (kart) |
+| Ratebegrensning | `RateLimiter::for(...)` som `entra-auth` i `AppServiceProvider` | **[FINNES]** (mønster) |
+| Revisjonsspor for tildelinger | `CustomerAccessChangeRecorder`, `customer_access_changes` | **[FINNES]** |
+| AI-sperre (D11) | `AiCallContextPolicy` | **[MÅ ENDRES]** (én sjekk) |
+| Tester | `CrossTenantIsolationTest`, `HumanDecisionContractTest`, `EntraAuthenticationTest` (testnøkler og falsk JWKS), `UsesProjectPostgresConnection`, `ModuleEntitlementService::activatePackage` | **[FINNES]** |
+| Senere | `MyTasksService` (delegert modus), `ManagementReviewPresenter` og `SupplierAccessService` (v1.1) | **[FINNES]** |
+
+Ingen ny tilgangsmotor, ingen ny rettighetsmodell og ingen ny historikkmodell.
+
+---
+
+## 13. Beslutninger som må tas
+
+**Før fase 1 kan starte:**
+
+| # | Beslutning | Anbefaling | Arkitektur |
+|---|---|---|---|
+| D1 | Identitetsmodell | C | §15.1 |
+| D2 | Bare applikasjonsmodus i fase 1 | Ja | Nytt |
+| D3 | Egen Entra-registrering, én app-rolle | Ja | §15.3 |
+| D4 | App-rollen som tak, presisering i `entra-sso.md` | Ja | §15.2 |
+| D5 | Ingen klienthemmeligheter | Ja | Nytt |
+| D6 | Kundevalg via header blant aktive tildelinger | Ja | §5.3 |
+| D10 | Logg og `last_used_at`, ingen loggtabell ennå | Ja | Avvik fra §10.3 |
+| D11 | AI nektes på API-kanalen | Ja | Nytt |
+| D13 | Interne administratorer registrerer klienter, System Owner gir tildeling | Ja | §15.8 (første del) |
+
+**Før lese-endepunktene (fase 2):**
+
+| # | Beslutning | Anbefaling |
+|---|---|---|
+| D7 | Øyeblikksbilde med kundebestemt publikum | Ja (§15.5) |
+| D8 | Bare strukturerte felt i v1 | Ja |
+| D9 | Endepunktene i §7, med modulrekkefølge avklart med Siggjo | Ja |
+
+**Før første kunde med ekte data:**
+
+| # | Beslutning | Anbefaling |
+|---|---|---|
+| D12 | API Management eller Front Door med WAF | Besluttes da. Ikke nødvendig for pilot med testdata, fordi applikasjonen selv validerer token, kunde og rate. (§15.7, K14) |
+| D14 | DPIA og databehandleravtaler med Advania/Siggjo og Siggjos AI-leverandør | Påkrevd (K15) |
+
+**[UTSATT]** – trengs ikke nå:
+
+- Delegert modus og «Mine oppgaver» (D2).
+- Tilgangsprojeksjon, endringslogg og RLS hos Siggjo (D7, alternativ B).
+- Generisk forslagsmodell (§15.6) og alt annet som skriver.
+- Om A46 er en menneskelig beslutning (§9).
+- Avdelingsomfang for integrasjoner i Anbud.
+- Vektorindeks over Wiki hos Siggjo (§15.9). Utgangspunktet er nei.
+- Kommersiell pakking av integrasjoner (§15.8, andre del). Bør avklares før første betalende kunde, men påvirker ikke arkitekturen.
+
+---
+
+## 14. Rekkefølge etter godkjenning
+
+Til orientering. Starter ikke før §13 er godkjent.
+
+1. **Fase 1 – ramme:** menneske-sperren (`scopeHumans()`, varsler, lisens, «Brukere», `resolvedBidRole()`), `api_clients` og `api_client_customer_grants` med Filament og **Kundemiljø → Integrasjoner**, tokenvalidering for applikasjonsmodus, `ApiRequestContext`, `routes/api.php` med middleware, feilformatet (A10), ratebegrensning, logging, D11, `GET /me`, OpenAPI-skjelett, `ApiRouteContractTest`.
+2. **Fase 2 – lesing:** presentasjonsklassene trukket ut og brukt av web og API, deretter endepunktene i §7 i rekkefølgen Siggjo trenger.
+3. **Pilot:** én testkunde, Siggjos managed identity i staging, V4 med ekte Entra.
+
+Full PHP-suite kjøres som milepæl ved slutten av fase 1 og fase 2, ikke underveis.
