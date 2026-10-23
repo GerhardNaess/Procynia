@@ -28,10 +28,11 @@ test.afterAll(async () => {
 
 /**
  * A KPI, end to end, by an ordinary user with a role for one area: create an objective, give it a
- * KPI, open it, edit it, retire it and reopen it (reading the history), delete it, delete the
- * objective. The role has no objective.measure, so no measurement is offered.
+ * KPI, open it, edit it, retire it and reopen it (reading the history) — after which it and its
+ * objective are kept — and delete a KPI registered by mistake. The role has no objective.measure,
+ * so no measurement is offered.
  */
-test('a KPI is created under an objective, edited, retired, reopened and deleted', async ({ page }) => {
+test('a KPI is created under an objective, edited, retired and reopened, and one registered by mistake deleted', async ({ page }) => {
     test.setTimeout(120_000);
 
     const { area_name: areaName } = await seedObjectiveEditor(suffix);
@@ -174,20 +175,31 @@ test('a KPI is created under an objective, edited, retired, reopened and deleted
     await expect(history.locator('li').nth(1)).toContainText('Avsluttet av E2E User');
     await page.screenshot({ path: 'test-results/kpis-05-reopened.png', fullPage: true });
 
-    // Slett KPI: back on the objective, with no KPI left.
+    // A KPI that has been retired keeps its history: it is not deleted, even when reopened (A40).
+    await expect(page.getByRole('button', { name: 'Slett KPI' })).toHaveCount(0);
+
+    // Slett KPI is for a KPI registered by mistake — one never measured or retired.
+    const mistakeTitle = objectiveE2eName(suffix, 'Registrert ved en feil');
+    await page.goto(objectiveUrl);
+    await kpiSection.getByRole('button', { name: 'Ny KPI' }).click();
+    await page.locator('#kpi-title').fill(mistakeTitle);
+    await page.locator('#kpi-unit').selectOption({ label: 'Prosentandel' });
+    await page.locator('#kpi-target-min').fill('90');
+    await page.getByRole('button', { name: 'Lagre', exact: true }).click();
+    await page.waitForURL(/\/kpis\/\d+$/);
+    const mistakeUrl = page.url();
     page.once('dialog', (dialog) => dialog.accept());
     await page.getByRole('button', { name: 'Slett KPI' }).click();
     await page.waitForURL(objectiveUrl);
     await expect(page.getByText('KPI-en er slettet.')).toBeVisible();
-    await expect(kpiSection).toContainText('Ingen KPI-er er registrert for dette målet ennå.');
-    expect((await page.goto(kpiUrl)).status()).toBe(404);
+    await expect(kpiSection).not.toContainText(mistakeTitle);
+    await expect(kpiSection).toContainText(editedKpiTitle);
+    expect((await page.goto(mistakeUrl)).status()).toBe(404);
 
-    // Slett mål.
+    // The objective keeps its retired-and-reopened KPI, so it is closed rather than deleted.
     await page.goto(objectiveUrl);
-    page.once('dialog', (dialog) => dialog.accept());
-    await page.getByRole('button', { name: 'Slett mål' }).click();
-    await page.waitForURL(/\/app\/objectives$/);
-    await expect(page.getByText('Målet er slettet.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Slett mål' })).toHaveCount(0);
+    expect((await page.goto(kpiUrl)).status()).toBe(200);
 });
 
 /**

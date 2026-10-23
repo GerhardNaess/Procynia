@@ -7,10 +7,11 @@ cleanUpObjectiveE2eData(suffix);
 
 /**
  * Mål, end to end. System Owner names a fagområde and a role in Kundemiljø → Tilganger and hands it
- * to an ordinary user, who then creates, opens, edits, closes, reopens and deletes an objective
- * there, reading the history after each status change.
+ * to an ordinary user, who then creates, opens, edits, closes and reopens an objective there,
+ * reading the history after each status change. An objective that has been closed is kept; one
+ * registered by mistake is deleted.
  */
-test('an objective is created, edited, closed, reopened and deleted by someone with a role for its area', async ({ page }) => {
+test('an objective is created, edited, closed and reopened, and one registered by mistake deleted, by someone with a role for its area', async ({ page }) => {
     test.setTimeout(120_000);
 
     const areaName = objectiveE2eName(suffix, 'Reise');
@@ -139,12 +140,24 @@ test('an objective is created, edited, closed, reopened and deleted by someone w
     await expect(page.getByRole('button', { name: 'Rediger' })).toBeVisible();
     await page.screenshot({ path: 'test-results/objectives-05-reopened.png', fullPage: true });
 
-    // Slett. The history goes with the objective.
+    // An objective that has been closed keeps its history: it is not deleted, even when reopened (A40).
+    await expect(page.getByRole('button', { name: 'Slett mål' })).toHaveCount(0);
+
+    // Slett is for an objective registered by mistake — one never closed.
+    const mistakeTitle = objectiveE2eName(suffix, 'Registrert ved en feil');
+    await page.goto('/app/objectives');
+    await page.getByRole('button', { name: 'Nytt mål' }).click();
+    await page.locator('#objective-title').fill(mistakeTitle);
+    await page.locator('#objective-area').selectOption({ label: areaName });
+    await page.locator('#objective-owner').selectOption({ index: 1 });
+    await page.getByRole('button', { name: 'Lagre', exact: true }).click();
+    await page.waitForURL(/\/app\/objectives\/\d+$/);
     page.once('dialog', (dialog) => dialog.accept());
     await page.getByRole('button', { name: 'Slett mål' }).click();
     await page.waitForURL(/\/app\/objectives$/);
     await expect(page.getByText('Målet er slettet.')).toBeVisible();
-    await expect(page.locator('tbody tr', { hasText: editedTitle })).toHaveCount(0);
+    await expect(page.locator('tbody tr', { hasText: mistakeTitle })).toHaveCount(0);
+    await expect(page.locator('tbody tr', { hasText: editedTitle })).toHaveCount(1);
 });
 
 /**
