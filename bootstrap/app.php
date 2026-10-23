@@ -1,18 +1,22 @@
 <?php
 
 use App\Http\Middleware\AddSecurityHeaders;
+use App\Http\Middleware\Api\ForceJsonResponse;
 use App\Http\Middleware\EnsureCustomerFrontendAccess;
 use App\Http\Middleware\EnsureHealthToken;
 use App\Http\Middleware\EnsureModuleIsEnabled;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\SetCustomerLocale;
+use App\Services\Api\ApiErrorResponder;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
+        api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
@@ -34,6 +38,10 @@ return Application::configure(basePath: dirname(__DIR__))
             'customer.module' => EnsureModuleIsEnabled::class,
         ]);
 
+        $middleware->api(prepend: [
+            ForceJsonResponse::class,
+        ]);
+
         $middleware->web(append: [
             SetCustomerLocale::class,
             HandleInertiaRequests::class,
@@ -44,5 +52,11 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // The external API answers every failure in its own format (A10). The web application is
+        // untouched: the callback declines anything outside /api.
+        $exceptions->render(function (Throwable $e, Request $request) {
+            return $request->is('api', 'api/*')
+                ? app(ApiErrorResponder::class)->render($e, $request)
+                : null;
+        });
     })->create();
