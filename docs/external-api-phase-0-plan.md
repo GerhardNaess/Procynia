@@ -26,7 +26,8 @@
   - steg 13, Etterlevelse og revisjon (`3b66c55d`, `5228b3e3`, `7ccb97f3`), se §2i
   - A34 (`db5699e1`) og A35 (`4ecae0ce`), se §2i
   - steg 14, Leverandøroppfølging (`9e757eca`, `1ffb9586`, `87c3131e`, E2E-retting `5e887aaf`), se §2j
-  - A36, kritikalitet og livsløp (commit «criticality and lifecycle are a person's decision»), se §2j
+  - A36, kritikalitet og livsløp (`334380d8`), se §2j
+  - steg 15, Mål og KPI (`3a6131f5`, `27405c7a`, `f3072ba1`, `2d9aee4a`), se §2k
 - Wiki-delen av fase 0 og Risiko (steg 9) er gjennomført og godkjent 2026-10-22.
 - Avvik og forbedringer (steg 10) er gjennomført og godkjent 2026-10-22.
 - Ledelsens gjennomgang (steg 11) er gjennomført og godkjent 2026-10-22.
@@ -37,7 +38,8 @@
 - Etterlevelse og revisjon (steg 13) er gjennomført og godkjent 2026-10-22.
 - A34 og A35 er gjennomført og godkjent 2026-10-23 (§2i). Etterlevelse og revisjon er ferdig i fase 0.
 - Leverandøroppfølging (steg 14) er gjennomført og godkjent 2026-10-23 (§2j).
-- A36 er gjennomført 2026-10-23, og A37 og A38 er besluttet (§2j). Det venter på vurdering. Mål og KPI startes ikke før det.
+- A36 er gjennomført og godkjent 2026-10-23, og A37 og A38 er besluttet (§2j). Leverandøroppfølging er ferdig i fase 0.
+- Mål og KPI (steg 15) er gjennomført 2026-10-23 (§2k). A39 og A40 venter på beslutning. Anbud startes ikke før resultatet er vurdert.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -415,7 +417,7 @@ Ny arbeidsversjon for statusendringer anbefales ikke:
 |---|---|---|
 | A13 | Historikktriggerne i Avvik dekket bare UPDATE. Sletting fjernet historikk, direkte eller gjennom kaskade. | Rettet (`6a6df31d`). Andre moduler med `*_status_changes` bør kontrolleres på samme måte når de tas: Kvalitet, Ledelsens gjennomgang, Leverandør og Mål/KPI. |
 | A14 | Regelen om at en avsluttet sak må gjenåpnes før den endres, lå i kontrolleren og uten lås for endring av sak og årsaksanalyse. | Ligger nå i tjenesten under lås (`9059f765`). |
-| A6 | Samme hull som i Risiko, i `ImprovementCaseAccessService`. | Rettet (`45ece813`). Gjenstår for Mål og KPI (steg 15). |
+| A6 | Samme hull som i Risiko, i `ImprovementCaseAccessService`. | Rettet (`45ece813`). Rettet for Mål og KPI i steg 15 (`3a6131f5`, §2k). |
 
 **Tester**
 
@@ -1425,6 +1427,126 @@ En leverandør med historikk kan ikke slettes, heller ikke i SQL (sammensatt fre
   - Forslag til leverandører, profilsvar og dokumentasjon kan senere komme gjennom avgrensede API-operasjoner. De blir registrert først når en person tar dem i bruk.
   - Vurdering, kontroll, aktsomhet, kontrollkrav, kritikalitet, livsløp og sletting forblir menneskeforbeholdt.
 
+### 2k. Mål og KPI (steg 15) – kartlegging og gjennomføring (2026-10-23)
+
+#### Kartlegging før steget
+
+- Modulen styres av fagområder, som Risiko og Avvik. Nøklene er `objective.view`/`edit`/`measure`/`delete`. `measure` (B7) og `delete` er menneskeforbeholdte. Et mål har ett fagområde, og en KPI arver det fra målet.
+- `ObjectiveAccessService` leser parene (rettighet, fagområde) direkte fra rollene (`BusinessAreaGrants`). Fratrekket for integrasjoner i `CustomerPermissionService::has()` gjaldt derfor ikke her (**A6**, samme hull som i Risiko og Avvik).
+- System Owner har ingen tilgang til mål uten en rolle, som i Risiko. Uendret.
+- Ingen tjeneste i modulen kalte `HumanDecisionGuard`, og ingen sjekket rettighet, kunde eller modul. Alt lå i kontrollerne.
+
+**Formelle beslutninger og ordinær registrering:**
+
+| Handling | Rettighet | Art | Kontrollert før steget |
+|---|---|---|---|
+| Registrer måling (`KpiMeasurementService::record`), også retting av en periode | `objective.measure` | Menneskelig beslutning (B7): verdien styrer KPI-status og oppmerksomhet | **Bare kontrolleren** |
+| Trekk tilbake måling (`withdraw`) | `objective.measure` | Menneskelig beslutning | **Bare kontrolleren** |
+| Slett mål, Slett KPI | `objective.delete` | Formell beslutning | **Bare kontrolleren**, som slettet selv |
+| Nytt mål, Rediger (også flytting mellom fagområder og eier) | `objective.edit` | Ordinær registrering | **Bare kontrolleren**, som skrev selv |
+| Ny KPI, Rediger KPI (målverdi, enhet, frekvens, eier) | `objective.edit` | Ordinær registrering | **Bare kontrolleren**, som skrev selv |
+| Lukk mål (Nådd, Ikke nådd, Avbrutt), Gjenåpne | `objective.edit` | Livsløp med historikk. Se A39. | **Bare kontrolleren** |
+| Avslutt KPI, Gjenåpne KPI | `objective.edit` | Livsløp med historikk. Se A39. | **Bare kontrolleren** |
+| Endre kobling (KPI → Kvalitet-prosess og aktivitet) | `objective.edit` og Kvalitet-lesing | Ordinær registrering | **Bare kontrolleren** |
+| Overfør til Wiki | `objective.edit` og `wiki.knowledge.handoff` | Overlevering | I tjenesten (`WikiKnowledgeHandoffService` → `ObjectiveKnowledgeSource::canHandOff` = `canEdit`): kunde og fagområde, **ikke modulen** |
+
+**Historikk før steget:** Målinger (`kpi_measurements`) og statusendringer (`objective_status_changes`, `kpi_status_changes`) var beskyttet **bare av modellene**. Det samme hullet som A13 i Avvik:
+- SQL utenom modellene kunne endre eller slette målinger og statusendringer.
+- Fremmednøklene kaskaderer. En KPI eller et mål som ble slettet i SQL, eller gjennom Eloquent utenom `isDeletable()`, tok målingene med seg. Modellvaktene kjører ikke ved kaskade.
+- Produktregelen var riktig: en KPI med måling (også tilbaketrukket) avsluttes og slettes ikke, og et mål med målinger lukkes. Hver måling har et øyeblikksbilde av målverdien den ble vurdert mot.
+
+**Koblinger til andre moduler:** Kvalitet (`kpi_processes`, `kpi_activities`; prosessen beskyttes av B10, og koblinger til et steg som fjernes, ryddes av A31), Wiki (overføring), Ledelsens gjennomgåelse (`ObjectivesSection`, bare lesing), Mine oppgaver (`ObjectiveTaskSource`, bare lesing) og varsler (`AssignmentNotifier`, `UserNotificationAccessScope`, bare lesing). Ingen import, masseoppdatering, admin-ressurs, kommando eller jobb skriver i modulen.
+
+#### Gjennomført
+
+| Commit | Innhold |
+|---|---|
+| `3a6131f5` | **A6.** `ObjectiveAccessService::areaIdsFor()` og `reachesAllAreas()` holder menneskeforbeholdte nøkler (`objective.measure`, `objective.delete`) unna integrasjoner. `view` og `edit` når fagområdene som før. |
+| `27405c7a` | Målinger og sletting i tjenestene. `KpiMeasurementService::record`/`withdraw` kaller vakten (`OBJECTIVE_MEASURE`) og deretter `objective.measure` på målet slik det står under lås. `ObjectiveLifecycleService::delete` og `KpiLifecycleService::delete` (nye) kaller vakten (`OBJECTIVE_DELETE`), `objective.delete` og historikkregelen under lås (409). `ObjectiveAccessService::authorize()`, og `canInArea()`, og dermed alle `can*()`, krever at kunden har modulen. |
+| `f3072ba1` | Registerarbeid i tjenestene. `ObjectiveRegistration` (ny) og `KpiRegistration` (ny) har skrivingen som lå i kontrollerne, med `objective.edit`, eierregelen, flytteregelen og enhetslåsen, under lås. `KpiRegistration` skriver bare KPI-ens egne felt, aldri kunde, mål eller status. Lukk mål, Gjenåpne, Avslutt KPI, Gjenåpne KPI og Endre kobling sjekker `objective.edit` (og Kvalitet-lesing) i tjenesten. |
+| `2d9aee4a` | Historikken i databasen (migrering `2026_10_23_000003`). En KPI med måling slettes ikke, og gjennom kaskaden heller ikke et mål med målinger. En måling endres bare ved å trekkes tilbake, én gang, og slettes bare med KPI-en. Statusendringer endres aldri. Å nulle en slettet bruker er tillatt, og kundens egen sletting tar alt med seg. Modellvakter i `Kpi` og `Objective`. E2E-opprydding gjennom `ObjectiveTestDataPurge`. |
+
+#### Sikkerhetsregler
+
+1. **Formelle beslutninger tas av personer.** Registrere og trekke tilbake målinger (B7), og slette mål og KPI-er.
+   - Vakten nekter integrasjoner, inaktive personer og API-kanalen, også i delegert modus.
+   - Deretter kreves nøkkelen i målets fagområde.
+2. **Kundeseparasjon, fagområde og modul gjelder i tjenesten.** Hver skriving krever:
+   - nøkkelen og `objective.view` i målets fagområde, fra samme rolle;
+   - aktørens egen kunde, som må være målets;
+   - at kunden har modulen.
+
+   En annen kundes person og System Owner nektes, også med «Alle». En kunde uten modulen nektes. Tjenestene vurderer målet slik det står under lås. Et mål som nettopp er flyttet til et annet fagområde, vurderes der det står nå.
+3. **System Owner uten rolle har verken beslutninger eller registerarbeid.** Uendret, og nå testet i tjenestene.
+4. **Det som er målt, beholder historikken.** En KPI med måling og et mål med målinger slettes ikke, verken i tjenesten, modellen eller SQL. Målinger endres bare ved én tilbaketrekking. Statushistorikken er uforanderlig.
+5. **Ordinært registerarbeid** (`objective.edit`) er ikke menneskeforbeholdt. En integrasjon som har nøkkelen, kan gjøre det (testet). Se A39.
+6. **Overføring til Wiki** er ikke en beslutning. Tjenesten sjekker `objective.edit` i målets kunde og fagområde, nå også modulen. Resultatet behandles av personer i Wiki.
+7. **Brukerne merker ingen endring.** Kontrollerne sjekker fortsatt først, så statuskoder og meldinger er uendret. Ingen nye statuser, skjermbilder, felt eller dialoger.
+
+#### Tester
+
+- `ObjectiveHumanDecisionTest` (11):
+  - en integrasjon får ikke `measure` eller `delete` gjennom fagområdene, men `view` og `edit` som før;
+  - en person med nøklene tar alle beslutningene, og historikken bærer navnet deres;
+  - et mål eller en KPI med måling slettes ikke av tjenesten (409);
+  - fire beslutninger kalles direkte på tjenestene og nektes, uten at noe skrives: integrasjon, API-kanal (delegert), inaktiv person, leser og redigerer, beslutningsnøkler i et annet fagområde, nøklene uten `objective.view`, nøkler og visning fra to roller, System Owner uten rolle, en annen kundes person, «Alle» og System Owner, og en kunde uten modul;
+  - hver beslutningsnøkkel gir bare sine egne beslutninger;
+  - et mål som nettopp er flyttet, vurderes der det står nå.
+- `ObjectiveServiceAuthorizationTest` (9):
+  - en redigerer og en integrasjon med `objective.edit` gjør registerarbeidet;
+  - ti skrivinger nektes for leser, måler, sletter, redigering uten visning, et annet fagområde, System Owner uten rolle, en annen kundes redigerer og System Owner, og en kunde uten modul, og ingenting skrives;
+  - Endre kobling krever Kvalitet-lesing;
+  - statusreglene (lukket mål, avsluttet KPI), eierregelen og flytteregelen holdes av tjenestene;
+  - registreringen skriver aldri kunde, mål eller status.
+- `ObjectiveHistoryProtectionTest` (8): sletting uten målinger som før (også lukket mål og avsluttet KPI); tjeneste, modell og SQL nekter med historikk; alle endringer av en måling utenom én tilbaketrekking nektes; statushistorikken er uforanderlig; aktøren nulles når personen slettes; kundens sletting; oppryddingsveien.
+- **Skrevet om:** `KpiMeasurementTest::test_an_objective_with_measurement_history_is_closed_not_deleted` låste den gamle regelen (en direkte sletting i databasen fjerner et mål med historikk). Den rydder nå gjennom `ObjectiveTestDataPurge`.
+- **Fikstur:** kunden i `ObjectiveAccessServiceTest` har nå modulen, som alle andre fiksturer i modulen.
+- **Mutasjonssjekket, 51 mutanter:**
+  - A6 og tilgang (5): integrasjonsfratrekket i begge metodene, modulen, `authorize()`. Kundesjekken i `canInArea()` overlever, og er ekvivalent: fagområdene hentes fra aktørens egen kunde, så en annen kundes fagområde kan aldri treffe. Den beholdes som forsvar i dybden.
+  - Beslutninger (12): vakten og regelen i hver tjeneste, feil nøkkel, historikkregelen og vurdering på gammel kopi. Den siste overlevde først fordi testens KPI ikke hadde målet lastet. Testen ble gjort lik kontrolleren og fanger den nå.
+  - Registerarbeid (18): regelen i hver tjeneste, statusreglene, eierregelen, flytting til et fagområde uten `objective.edit`, egne felt, Kvalitet-lesing og overføringen til Wiki. Flyttemutanten overlevde først fordi eierregelen også slo til. En egen test fanger den nå.
+  - Historikk (16): hver del av triggerne, unntaket for kundens sletting og for nulling av slettet bruker, og begge modellvaktene. Migreringen ble rullet tilbake og kjørt på nytt for hver mutant.
+  - **Alle fanges, unntatt den ekvivalente kundesjekken.**
+
+#### Tester og kjøringer (2026-10-23)
+
+- **Grunnlinje før steget:** alle testfiler for Mål og KPI, filene som berører modulen fra andre moduler (fagområdeslettinger, moduler og pakker, varsler, Styring, Mine oppgaver, navigasjon, Kvalitet-koblinger, kunnskapsoverføring), `RiskAccessTest`, `RiskHumanDecisionTest`, `ImprovementHumanDecisionTest`, oversettelsestesten, `tests/Unit/Objectives` og `tests/Unit/Services/Security`: **514 av 514 bestått.**
+- **PHP etter steget:** de samme filene, de tre nye, historikktestene i Risiko og Avvik, og alle filer som berører Ledelsens gjennomgåelse, Mine oppgaver, varsler, kunnskapsoverføring eller `HumanDecision` (75 filer): **1023 av 1023 bestått, ingen hoppet over.**
+- **JS:** 2130 av 2130 bestått. Ingen frontendendring, så bygget er ikke kjørt på nytt (det er nyere enn siste frontendendring). Pint er rent på berørte filer.
+- **E2E i det isolerte miljøet:** alle spesifikasjoner for Mål og KPI (9 filer), `my-tasks-governance`, `package-change`, `permission-sections` og `app-navigation` (13 filer, 48 tester), i én kjøring. Telt fra Playwrights JSON-rapport, med `caffeinate`.
+  - **32 bestått, 16 feilet, 0 hoppet over.** Alle spesifikasjonene for Mål og KPI og de tre andre består.
+  - **Alle 16 feilene er i `app-navigation`, og de skyldes ikke steget.** Feilen gjentar seg når filen kjøres alene (17 bestått, 16 feilet). Testene forventer at den delte brukeren `e2e.user` ser Wiki og Styring. I det isolerte miljøet har brukeren ingen roller, fordi `E2ETestSeeder` bevisst ikke lager roller. Dermed er `wiki.view`, `quality.view`, `risk.view` og `objective.view` alle `false` (kontrollert i E2E-appen). Menyen avhenger av `CustomerPermissionService`, som steget ikke endrer. Diffen fra `334380d8` berører bare filer i Mål og KPI.
+  - **Ikke verifisert mot grunnlinjen med en egen kjøring.** Spesifikasjonen er ikke kjørt i det isolerte miljøet i noe tidligere steg. Den bør få en forutsetning (en rolle for `e2e.user`, som de andre spesifikasjonene lager selv) og føres som kjent testfeil til det er gjort. Ikke rettet her, fordi det ligger utenfor Mål og KPI.
+
+**Migreringer:** én, `2026_10_23_000003_keep_objective_and_kpi_history`. Den legger bare til triggere og endrer ingen rader (utviklingsdatabasen: 2 mål, 1 KPI, 0 målinger). Den er reverserbar (`down()` er kjørt for hver av de 16 historikkmutantene). Kjørt på `procynia_test` og utviklingsdatabasen. E2E-databasen migreres av `scripts/e2e-env.sh up`.
+
+**Endringer i brukeropplevelsen:** ingen. Skjemaer, knapper, meldinger, statuskoder og hvem som kan gjøre hva er som før. To forskjeller gjelder bare samtidige handlinger:
+- En måling som registreres i samme øyeblikk som målet lukkes eller slettes, venter på den andre handlingen, i stedet for å bli lagret under et lukket mål.
+- En ny KPI eller en endring som lagres i samme øyeblikk som målet lukkes, avvises med den eksisterende meldingen om at målet er lukket.
+
+#### Funn som krever beslutning
+
+| # | Funn | Anbefaling |
+|---|---|---|
+| A39 | **«Lukk mål» er registerarbeid (`objective.edit`), ikke menneskeforbeholdt.** Utfallet (Nådd, Ikke nådd, Avbrutt) er virksomhetens konklusjon om måloppnåelse. Det vises i Ledelsens gjennomgåelse og overføres til Wiki. «Avslutt KPI» avgjør at KPI-en ikke lenger skal måles, og fjerner den fra oppmerksomhet og Mine oppgaver. En integrasjon med `objective.edit` kan i dag gjøre begge deler og gjenåpne. Historikken er fullstendig (aktør, tidspunkt, utfall, begrunnelse). | Behandle «Lukk mål», «Gjenåpne», «Avslutt KPI» og «Gjenåpne KPI» som menneskelige beslutninger, etter samme mønster som A36: én ny verdi, `HumanDecision::OBJECTIVE_LIFECYCLE`, på `objective.edit`. Ingen endring i skjermbilder og ingen migrering. Alternativ: behold som i dag og løs det med føringen for agenter nedenfor. |
+| A40 | **Et mål eller en KPI uten målinger kan slettes med statushistorikken sin.** Et mål som er lukket som «Nådd», med begrunnelse, kan slettes så lenge ingen KPI har målinger. Statusendringene følger med i kaskaden. Regelen er «registrert ved en feil», og den gjelder bare målinger. I Avvik (A13) og Risiko (B3) hindrer også statushistorikk sletting. | Lav–middels. Enkleste konsekvente løsning: et mål eller en KPI med statusendring slettes ikke (`isDeletable()`, og triggerne utvidet). Det er en synlig endring: «Slett» forsvinner etter første lukking. Alternativ: behold dagens regel. |
+
+**Lav, ikke rettet:**
+- Endringer i målverdi, toleranse, frekvens, eier og fagområde har ingen egen historikk. Bare siste verdi og `updated_by` lagres. Hver måling har likevel et øyeblikksbilde av målverdien den ble vurdert mot, så vurderingene i historikken står. Det er ordinært registerarbeid, som stamdata i Leverandøroppfølging.
+- Koblinger til Kvalitet (`kpi_processes`, `kpi_activities`) har ingen historikk. De er ordinært registerarbeid.
+
+**Klar for senere API-integrasjon**
+
+- Ja. Lesing, beslutninger og registerarbeid ligger i domenet med samme regler for enhver inngang.
+- Gjenstår før fase 1:
+  - A10 (feilformat);
+  - steg 19 (aktørtrigger for `kpi_measurements.recorded_by_user_id`);
+  - A39.
+- **Føring (anbefalt, som for de andre modulene):**
+  - En AI-agent får ikke `objective.edit` som standard.
+  - Forslag til mål, KPI-er og målverdier kan senere komme gjennom avgrensede API-operasjoner. De blir registrert først når en person tar dem i bruk.
+  - Målinger (B7) og sletting forblir menneskeforbeholdt. Lukking og avslutning avhenger av A39.
+
 ## 3. Avgrensning
 
 **Med i fase 0:**
@@ -1649,7 +1771,7 @@ Hver linje er én commit. Hver commit kjører sine målrettede tester før den l
 | 12 | `refactor(quality): require an actor and guard flow approval and adoption` | Null-aktører og `QUALITY_FLOW_ADOPT` | 1 |
 | 13 | `refactor(compliance): guard assessment, audit lifecycle and delete` | **Gjort** som tre commits (§2i) | 1 |
 | 14 | `refactor(suppliers): guard assessment and delete; guard assure services` | **Gjort** som tre commits (§2j) | 1 |
-| 15 | `refactor(objectives): guard measurements and delete` | | 1 |
+| 15 | `refactor(objectives): guard measurements and delete` | **Gjort** som fire commits (§2k) | 1 |
 | 16 | `feat(tender): require an explicit permission to decide requirements` | **B4**, `RequirementEditorService` uten null-aktør, rettighet i Tilganger, grensesnitt | 1 |
 | 17 | `feat(tender): record who changes a bid status` | `SavedNoticeStatusService` og `saved_notice_status_changes` | 1 |
 | 18 | `feat(security): audit trail for access changes` | **F4**: `customer_access_changes`. `AdministrativeChangeAuditTrailTest` skrives om til «sporet skrives». | – |
