@@ -42,6 +42,8 @@ use Tests\TestCase;
  * own customer and the `objectives` module, whatever the entry point.
  *
  * It is ordinary registration, not a human decision: an integration holding objective.edit does it.
+ * Closing, retiring and reopening are human decisions on the same key (A39), checked here too for
+ * people; ObjectiveLifecycleDecisionTest refuses them to integrations and the API.
  */
 class ObjectiveServiceAuthorizationTest extends TestCase
 {
@@ -87,16 +89,19 @@ class ObjectiveServiceAuthorizationTest extends TestCase
         $this->assertSame(1, EnterpriseWikiDocument::query()->where('customer_id', $case['customer']->id)->count());
     }
 
-    /** Register work is not a human decision: an integration holding objective.edit does it too. */
+    /**
+     * Register work is not a human decision: an integration holding objective.edit does it too.
+     * Closing, retiring and reopening are (A39) — ObjectiveLifecycleDecisionTest.
+     */
     public function test_an_integration_with_objective_edit_does_the_register_work(): void
     {
         $case = $this->case();
 
-        foreach ($this->work($case, $case['integration'], handOff: false) as $write) {
+        foreach ($this->work($case, $case['integration'], handOff: false, lifecycle: false) as $write) {
             $write();
         }
 
-        $this->assertWritten($case, $case['integration']);
+        $this->assertWritten($case, $case['integration'], lifecycle: false);
     }
 
     /** Each lacks exactly what the work needs; nothing is written. */
@@ -243,7 +248,7 @@ class ObjectiveServiceAuthorizationTest extends TestCase
      * @param  array<string, mixed>  $case
      * @return array<string, callable(): mixed>
      */
-    private function work(array $case, User $actor, bool $handOff = true): array
+    private function work(array $case, User $actor, bool $handOff = true, bool $lifecycle = true): array
     {
         $work = [
             'create objective' => fn () => app(ObjectiveRegistration::class)->create($actor, $this->objectiveFields($case, 'Nytt mål')),
@@ -257,6 +262,10 @@ class ObjectiveServiceAuthorizationTest extends TestCase
             'link to kvalitet' => fn () => app(KpiQualityContextService::class)->syncProcess($actor, $case['kpi'], (int) $case['process']->id, true, ['registrer-hendelse']),
         ];
 
+        if (! $lifecycle) {
+            unset($work['close objective'], $work['reopen objective'], $work['retire kpi'], $work['reopen kpi']);
+        }
+
         if ($handOff) {
             $work['hand off to wiki'] = fn () => app(WikiKnowledgeHandoffService::class)->handOff($actor, 'objective', $case['objective'], 'Læring', ['about'], 'Dette bør andre vite.');
         }
@@ -265,18 +274,23 @@ class ObjectiveServiceAuthorizationTest extends TestCase
     }
 
     /** @param array<string, mixed> $case */
-    private function assertWritten(array $case, User $actor): void
+    private function assertWritten(array $case, User $actor, bool $lifecycle = true): void
     {
         $this->assertSame(1, Objective::query()->where('customer_id', $case['customer']->id)->where('title', 'Nytt mål')->where('created_by', $actor->id)->count());
         $this->assertSame('Endret mål', $case['objective']->fresh()->title);
-        $this->assertSame(Objective::STATUS_CANCELLED, $case['spare']->fresh()->status);
-        $this->assertSame(Objective::STATUS_ACTIVE, $case['closed']->fresh()->status);
         $this->assertSame(1, Kpi::query()->where('objective_id', $case['objective']->id)->where('title', 'Ny KPI')->count());
         $this->assertSame('Endret KPI', $case['kpi']->fresh()->title);
-        $this->assertSame(Kpi::STATUS_RETIRED, $case['spareKpi']->fresh()->status);
-        $this->assertSame(Kpi::STATUS_ACTIVE, $case['retired']->fresh()->status);
         $this->assertSame(1, KpiProcess::query()->where('kpi_id', $case['kpi']->id)->count());
         $this->assertSame(1, KpiActivity::query()->where('kpi_id', $case['kpi']->id)->count());
+
+        if (! $lifecycle) {
+            return;
+        }
+
+        $this->assertSame(Objective::STATUS_CANCELLED, $case['spare']->fresh()->status);
+        $this->assertSame(Objective::STATUS_ACTIVE, $case['closed']->fresh()->status);
+        $this->assertSame(Kpi::STATUS_RETIRED, $case['spareKpi']->fresh()->status);
+        $this->assertSame(Kpi::STATUS_ACTIVE, $case['retired']->fresh()->status);
         $this->assertSame((int) $actor->id, (int) ObjectiveStatusChange::query()->where('objective_id', $case['spare']->id)->latest('id')->value('changed_by_user_id'));
         $this->assertSame((int) $actor->id, (int) KpiStatusChange::query()->where('kpi_id', $case['spareKpi']->id)->latest('id')->value('changed_by_user_id'));
     }

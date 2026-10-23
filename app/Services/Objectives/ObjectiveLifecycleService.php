@@ -27,8 +27,10 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
  * A reopening clears closed_* (closing_note included) because they describe a closing that no
  * longer stands; the closing itself, note and all, stays in its history row.
  *
- * Closing and reopening are register work on objective.edit (not human-only), checked here on the
- * objective as it stands under the lock: the key in its area, the actor's customer, the module.
+ * Closing and reopening are a person's decision (A39): the outcome is the organisation's conclusion on
+ * goal attainment. HumanDecisionGuard (OBJECTIVE_LIFECYCLE) refuses an integration and the API, also
+ * delegated; then objective.edit — the same key as before — on the objective as it stands under the
+ * lock: the key in its area, the actor's customer, the module.
  *
  * Slett mål is a person's decision (phase 0 step 15): HumanDecisionGuard, then objective.delete in
  * the objective's area (ObjectiveAccessService), then the history rule — an objective whose KPIs
@@ -47,6 +49,7 @@ class ObjectiveLifecycleService
             throw new InvalidArgumentException("Not a closing outcome [{$outcome}].");
         }
 
+        $actor = $this->guard->assert($actor, HumanDecision::OBJECTIVE_LIFECYCLE);
         $note = $this->normalized($note);
 
         return DB::transaction(function () use ($objective, $actor, $outcome, $note): Objective {
@@ -86,6 +89,7 @@ class ObjectiveLifecycleService
 
     public function reopen(Objective $objective, User $actor, string $reason): Objective
     {
+        $actor = $this->guard->assert($actor, HumanDecision::OBJECTIVE_LIFECYCLE);
         $reason = $this->normalized($reason);
 
         if ($reason === null) {

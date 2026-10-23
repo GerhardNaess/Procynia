@@ -19,7 +19,9 @@ namespace App\Support;
  * register work around it does, but it is the organisation's own statement of applicability. How
  * important a supplier is (Kritikalitet) and whether it is in use (Ta i bruk, Avslutt, Gjenåpne) need
  * only supplier.edit, as registering it does, but they decide which control requirements apply and
- * whether the business relies on the supplier (A36).
+ * whether the business relies on the supplier (A36). Closing an objective (Nådd, Ikke nådd, Avbrutt),
+ * retiring a KPI and reopening either need only objective.edit, as registering them does, but they are
+ * the organisation's conclusion on goal attainment and its decision to stop measuring (A39).
  *
  * See docs/external-api-phase-0-plan.md §4.3–§4.4.
  */
@@ -54,6 +56,8 @@ enum HumanDecision: string
     case RISK_DELETE = 'risk.delete';
 
     case OBJECTIVE_MEASURE = 'objective.measure';
+    /** Lukk mål, Gjenåpne, Avslutt KPI and Gjenåpne KPI (A39). */
+    case OBJECTIVE_LIFECYCLE = 'objective.lifecycle';
     case OBJECTIVE_DELETE = 'objective.delete';
 
     /** Close, cancel and reopen a case, and verify the effect of an action. */
@@ -106,6 +110,7 @@ enum HumanDecision: string
             self::RISK_ACCEPT => CustomerPermissionCatalog::RISK_ACCEPT,
             self::RISK_DELETE => CustomerPermissionCatalog::RISK_DELETE,
             self::OBJECTIVE_MEASURE => CustomerPermissionCatalog::OBJECTIVE_MEASURE,
+            self::OBJECTIVE_LIFECYCLE => CustomerPermissionCatalog::OBJECTIVE_EDIT,
             self::OBJECTIVE_DELETE => CustomerPermissionCatalog::OBJECTIVE_DELETE,
             self::IMPROVEMENT_CLOSE => CustomerPermissionCatalog::IMPROVEMENT_CLOSE,
             self::IMPROVEMENT_DELETE => CustomerPermissionCatalog::IMPROVEMENT_DELETE,

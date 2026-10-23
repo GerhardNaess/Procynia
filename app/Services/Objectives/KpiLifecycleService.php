@@ -23,9 +23,10 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
  * measurements exist, whether a period's measurement is missing depends on whether the KPI was
  * active then — which only the history can tell after a reopening has overwritten the status.
  *
- * Retiring and reopening are register work on objective.edit (not human-only), checked here: the
- * key in the objective's area as it stands now, the actor's customer, the module — and the objective
- * active, since a closed objective's KPIs are left as they were until it is reopened.
+ * Retiring and reopening are a person's decision (A39): whether the KPI is still measured.
+ * HumanDecisionGuard (OBJECTIVE_LIFECYCLE) first; then objective.edit — the same key as before — in the
+ * objective's area as it stands now, the actor's customer, the module — and the objective active,
+ * since a closed objective's KPIs are left as they were until it is reopened.
  *
  * Slett KPI is a person's decision (phase 0 step 15): HumanDecisionGuard, then objective.delete in
  * the objective's area (ObjectiveAccessService), then the history rule — a KPI with a measurement,
@@ -40,6 +41,7 @@ class KpiLifecycleService
 
     public function retire(Kpi $kpi, User $actor, ?string $note): Kpi
     {
+        $actor = $this->guard->assert($actor, HumanDecision::OBJECTIVE_LIFECYCLE);
         $note = $this->normalized($note);
 
         return DB::transaction(function () use ($kpi, $actor, $note): Kpi {
@@ -59,6 +61,7 @@ class KpiLifecycleService
 
     public function reopen(Kpi $kpi, User $actor, string $reason): Kpi
     {
+        $actor = $this->guard->assert($actor, HumanDecision::OBJECTIVE_LIFECYCLE);
         $reason = $this->normalized($reason);
 
         if ($reason === null) {
