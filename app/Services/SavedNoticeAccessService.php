@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 
 class SavedNoticeAccessService
@@ -33,11 +34,24 @@ class SavedNoticeAccessService
             return false;
         }
 
-        if (! $this->canView($actor, $notice)) {
+        // Commenting writes to the case: a per-case reader grant shows it, but does not let the
+        // person write to it (A41).
+        if (! $this->canManage($actor, $notice)) {
             return false;
         }
 
         return $actor->resolvedBidRole() !== User::BID_ROLE_VIEWER;
+    }
+
+    /**
+     * May this person add an aksjon to the case (A41)? Case work on the case page: the right to
+     * work on the case, never the reader role — as for comments, but also on an archived case,
+     * where aksjoner could always be recorded.
+     */
+    public function canAddInfoItem(User $actor, SavedNotice $notice): bool
+    {
+        return $actor->resolvedBidRole() !== User::BID_ROLE_VIEWER
+            && $this->canManage($actor, $notice);
     }
 
     public function canArchive(User $actor, SavedNotice $notice): bool
@@ -50,7 +64,8 @@ class SavedNoticeAccessService
             return false;
         }
 
-        return $this->canView($actor, $notice);
+        // The same as commenting: a reader grant never moves the case (A41).
+        return $this->canManage($actor, $notice);
     }
 
     public function canReopenAfterNoGo(User $actor, SavedNotice $notice): bool
@@ -137,6 +152,39 @@ class SavedNoticeAccessService
         return $this->manageableQueryFor($user)
             ->whereKey($notice->getKey())
             ->exists();
+    }
+
+    /**
+     * May this person do case work on this case (A41)? Uploading tender documents, adding, editing
+     * and deleting requirements, generating and editing answers, assessments, the answer basis,
+     * responsibility and tasks. Seeing a case is not enough: a reader (the bid role «viewer», or a
+     * per-case reader grant) reads and exports. The right to work on the case, never the reader
+     * role (as for comments and archiving — the role reads even on a case it saved), an active case,
+     * the person's own customer, and a customer that holds Anbud.
+     */
+    public function mayWork(User $actor, SavedNotice $notice): bool
+    {
+        return $actor->customer_id !== null
+            && (int) $actor->customer_id === (int) $notice->customer_id
+            && $notice->archived_at === null
+            && $actor->resolvedBidRole() !== User::BID_ROLE_VIEWER
+            && (bool) $notice->customer?->hasModule('tender')
+            && $this->canManage($actor, $notice);
+    }
+
+    /**
+     * The same rule where the work is done, so a second way in cannot skip it. The controller asks
+     * mayWork() first to answer early; the services call this.
+     *
+     * @throws AuthorizationException
+     */
+    public function authorizeWork(?User $actor, SavedNotice $notice): User
+    {
+        if (! $actor instanceof User || ! $this->mayWork($actor, $notice)) {
+            throw new AuthorizationException('This person may not work on this case.');
+        }
+
+        return $actor;
     }
 
     private function applyVisibility(Builder $query, User $user, bool $requireManage): Builder

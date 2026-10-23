@@ -7,6 +7,7 @@ use App\Models\SavedNoticeAiAnswerBasisItem;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\User;
 use App\Services\DocumentTextExtractor;
+use App\Services\SavedNoticeAccessService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -19,20 +20,24 @@ class RequirementAnswerBasisService
 {
     public function __construct(
         private readonly DocumentTextExtractor $documentTextExtractor,
+        private readonly SavedNoticeAccessService $access,
     ) {
     }
 
     /**
      * Purpose: Create one or more document-based answer basis items for a visible AI case.
-     * Inputs: The saved notice, uploaded files, and optional creator user.
+     * Inputs: The saved notice, uploaded files, and the person adding them.
      * Returns: The persisted answer basis item collection.
      * Side effects: Stores uploaded files and extracts text for generation use.
      */
     public function createDocumentItems(
         SavedNotice $savedNotice,
         array $files,
-        ?User $createdByUser,
+        User $createdByUser,
     ): Collection {
+        // Case work (A41): seeing the case is not enough.
+        $this->access->authorizeWork($createdByUser, $savedNotice->fresh() ?? $savedNotice);
+
         $createdItems = new Collection();
 
         foreach ($files as $file) {
@@ -48,7 +53,7 @@ class RequirementAnswerBasisService
 
     /**
      * Purpose: Create one text-based answer basis item for a visible AI case.
-     * Inputs: The saved notice, title, body text, and optional creator user.
+     * Inputs: The saved notice, title, body text, and the person adding it.
      * Returns: The persisted answer basis item.
      * Side effects: Stores a new answer basis row in the database.
      */
@@ -56,8 +61,10 @@ class RequirementAnswerBasisService
         SavedNotice $savedNotice,
         string $title,
         string $bodyText,
-        ?User $createdByUser,
+        User $createdByUser,
     ): SavedNoticeAiAnswerBasisItem {
+        $this->access->authorizeWork($createdByUser, $savedNotice->fresh() ?? $savedNotice);
+
         $normalizedTitle = $this->normalizeTitle($title);
         $normalizedBodyText = $this->normalizeBodyText($bodyText);
 
@@ -86,12 +93,14 @@ class RequirementAnswerBasisService
 
     /**
      * Purpose: Remove one answer basis item and its stored source file when applicable.
-     * Inputs: The answer basis item to delete.
+     * Inputs: The answer basis item to delete and the person deleting it.
      * Returns: None.
      * Side effects: Removes database rows and deletes the stored file when present.
      */
-    public function deleteItem(SavedNoticeAiAnswerBasisItem $answerBasisItem): void
+    public function deleteItem(SavedNoticeAiAnswerBasisItem $answerBasisItem, User $actor): void
     {
+        $this->access->authorizeWork($actor, SavedNotice::query()->findOrFail($answerBasisItem->saved_notice_id));
+
         $storedPath = (string) ($answerBasisItem->stored_path ?? '');
 
         DB::transaction(function () use ($answerBasisItem): void {
@@ -105,14 +114,17 @@ class RequirementAnswerBasisService
 
     /**
      * Purpose: Synchronize the selected answer basis items for one requirement.
-     * Inputs: The requirement and the selected basis item ids.
+     * Inputs: The requirement, the selected basis item ids and the person choosing them.
      * Returns: The canonical selected basis item collection.
      * Side effects: Updates the requirement-to-basis selection pivot rows.
      */
     public function syncRequirementSelection(
         SavedNoticeAiRequirement $requirement,
         array $answerBasisItemIds,
+        User $actor,
     ): Collection {
+        $this->access->authorizeWork($actor, SavedNotice::query()->findOrFail($requirement->saved_notice_id));
+
         $normalizedIds = $this->normalizeSelectedIds($answerBasisItemIds);
 
         $selectedItemIds = SavedNoticeAiAnswerBasisItem::query()

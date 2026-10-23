@@ -10,6 +10,7 @@ use App\Models\SavedNoticeAiRequirementAssessment;
 use App\Models\User;
 use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\Commercial\CustomerAiCaseUsageRecorder;
+use App\Services\SavedNoticeAccessService;
 use App\Support\Ai\AiCallContextScope;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -42,6 +43,7 @@ class RequirementWikiAssessmentService
     public function __construct(
         private readonly RequirementWikiResearchService $researchService,
         private readonly RequirementWikiAssessmentAiClient $assessmentAiClient,
+        private readonly SavedNoticeAccessService $access,
         private readonly CustomerAiCaseUsageRecorder $caseUsageRecorder = new CustomerAiCaseUsageRecorder,
         private readonly AiCallContextScope $contextScope = new AiCallContextScope,
     ) {}
@@ -66,10 +68,14 @@ class RequirementWikiAssessmentService
         SavedNoticeAiRequirement $requirement,
         int $customerId,
         string $languageCode,
-        ?int $userId = null,
+        User $actor,
         ?string $caseInstructions = null,
         ?string $requirementUserPrompt = null,
     ): SavedNoticeAiRequirementAssessment {
+        // Case work that spends AI capacity (A41), asked before research or any AI call.
+        $this->access->authorizeWork($actor, SavedNotice::query()->findOrFail($requirement->saved_notice_id));
+        $userId = (int) $actor->id;
+
         return $this->contextScope->within(new AiCallContext(
             customerId: $customerId,
             userId: $userId,

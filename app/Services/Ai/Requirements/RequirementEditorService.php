@@ -32,12 +32,8 @@ class RequirementEditorService
      */
     public function mayDecide(User $actor, SavedNotice $notice): bool
     {
-        return $actor->customer_id !== null
-            && (int) $actor->customer_id === (int) $notice->customer_id
-            && $notice->archived_at === null
-            && $actor->canDecideBidRequirements()
-            && (bool) $notice->customer?->hasModule('tender')
-            && $this->access->canManage($actor, $notice);
+        return $actor->canDecideBidRequirements()
+            && $this->access->mayWork($actor, $notice);
     }
 
     /**
@@ -123,9 +119,12 @@ class RequirementEditorService
     public function createManualRequirement(
         SavedNotice $savedNotice,
         RequirementEditData $data,
-        ?User $changedBy = null,
+        User $changedBy,
     ): SavedNoticeAiRequirement {
         return DB::transaction(function () use ($savedNotice, $data, $changedBy): SavedNoticeAiRequirement {
+            // Case work (A41): the case as it stands now, not the copy the caller holds.
+            $this->access->authorizeWork($changedBy, SavedNotice::query()->sharedLock()->findOrFail($savedNotice->getKey()));
+
             $requirement = SavedNoticeAiRequirement::query()->create([
                 'saved_notice_id' => $savedNotice->id,
                 'saved_notice_ai_document_id' => null,
@@ -204,9 +203,11 @@ class RequirementEditorService
     public function updateRequirement(
         SavedNoticeAiRequirement $requirement,
         RequirementEditData $data,
-        ?User $changedBy = null,
+        User $changedBy,
     ): SavedNoticeAiRequirement {
         return DB::transaction(function () use ($requirement, $data, $changedBy): SavedNoticeAiRequirement {
+            $this->access->authorizeWork($changedBy, SavedNotice::query()->sharedLock()->findOrFail($requirement->saved_notice_id));
+
             $beforeSnapshot = RequirementSnapshotData::fromRequirement($requirement)->toArray();
             $changedFields = [];
             $userChangedFields = [];

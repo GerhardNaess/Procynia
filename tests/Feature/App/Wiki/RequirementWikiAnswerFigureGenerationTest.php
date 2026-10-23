@@ -155,7 +155,7 @@ class RequirementWikiAnswerFigureGenerationTest extends TestCase
             ],
         );
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertSame("Første avsnitt.\n\nAndre avsnitt.", $answer->answer_text);
         $this->assertStringNotContainsString('fig:63:img3', (string) $answer->answer_text);
@@ -177,7 +177,7 @@ class RequirementWikiAnswerFigureGenerationTest extends TestCase
             [['key' => 'S1', 'heading' => 'S', 'text' => 'Svar uten figurer.', 'used_page_ids' => [$page->id], 'figure_refs' => []]],
         );
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertSame([], $answer->answer_figures);
         $this->assertSame('Svar uten figurer.', $answer->answer_text);
@@ -197,7 +197,7 @@ class RequirementWikiAnswerFigureGenerationTest extends TestCase
             ],
         );
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertCount(1, $answer->answer_figures);
         $this->assertSame('S1', $answer->answer_figures[0]['section_key']);
@@ -215,9 +215,9 @@ class RequirementWikiAnswerFigureGenerationTest extends TestCase
         );
 
         $service = app(RequirementWikiAnswerService::class);
-        $service->generate($requirement, $customer->id, 'no');
+        $service->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
-        $edited = $service->updateAnswerText($requirement, 'Et helt omskrevet svar fra tilbudslederen.');
+        $edited = $service->updateAnswerText($requirement, 'Et helt omskrevet svar fra tilbudslederen.', $this->caseWorker($requirement));
 
         $this->assertSame('Et helt omskrevet svar fra tilbudslederen.', $edited->answer_text);
         $this->assertCount(1, $edited->answer_figures);
@@ -235,7 +235,7 @@ class RequirementWikiAnswerFigureGenerationTest extends TestCase
             [['key' => 'S1', 'heading' => 'S', 'text' => 'Første generering.', 'used_page_ids' => [$page->id], 'figure_refs' => ['fig:63:img3']]],
         );
         // Resolved after mocking so the service is built with the mocked clients, not the real ones.
-        $first = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $first = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
         $this->assertSame('fig:63:img3', $first->answer_figures[0]['figure_ref']);
 
         // Second run: the model picks a different figure from the same page.
@@ -243,7 +243,7 @@ class RequirementWikiAnswerFigureGenerationTest extends TestCase
             $this->researchContext($requirement, $page->id, [$this->figure(), $this->figure('img8', 9)]),
             [['key' => 'S1', 'heading' => 'S', 'text' => 'Andre generering.', 'used_page_ids' => [$page->id], 'figure_refs' => ['fig:63:img8']]],
         );
-        $second = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $second = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertCount(1, $second->answer_figures);
         $this->assertSame('fig:63:img8', $second->answer_figures[0]['figure_ref']);
@@ -263,7 +263,7 @@ class RequirementWikiAnswerFigureGenerationTest extends TestCase
             [['key' => 'S1', 'heading' => 'S', 'text' => 'Svar.', 'used_page_ids' => [$page->id], 'figure_refs' => ['fig:999:img1']]],
         );
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertSame([], $answer->answer_figures);
     }

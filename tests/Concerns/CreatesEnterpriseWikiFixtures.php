@@ -10,6 +10,8 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\SavedNoticeAiRequirement;
+use App\Models\User;
 use Illuminate\Support\Str;
 
 /**
@@ -52,6 +54,30 @@ trait CreatesEnterpriseWikiFixtures
             'nationality_id' => $nationality->id,
             'is_active' => true,
         ]);
+    }
+
+    /**
+     * A person who may work on the requirement's case (A41): its customer's System Owner. Answer
+     * and assessment generation are case work and refuse anyone else.
+     */
+    protected function caseWorker(SavedNoticeAiRequirement $requirement): User
+    {
+        $customerId = (int) $requirement->savedNotice()->value('customer_id');
+
+        return User::query()
+            ->where('customer_id', $customerId)
+            ->where('bid_role', User::BID_ROLE_SYSTEM_OWNER)
+            ->where('email', 'like', 'case-worker-%')
+            ->first()
+            ?? User::query()->create([
+                'name' => 'Case Worker',
+                'email' => 'case-worker-'.Str::lower(Str::random(10)).'@procynia.test',
+                'password' => bcrypt('secret-only-local'),
+                'customer_id' => $customerId,
+                'role' => User::ROLE_CUSTOMER_ADMIN,
+                'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
+                'is_active' => true,
+            ]);
     }
 
     /**

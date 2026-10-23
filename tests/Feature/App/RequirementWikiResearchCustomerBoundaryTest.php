@@ -8,6 +8,7 @@ use App\Models\Nationality;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementWikiAnswer;
+use App\Models\User;
 use App\Services\Ai\Wiki\RequirementWikiAlignmentAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerService;
@@ -61,10 +62,14 @@ class RequirementWikiResearchCustomerBoundaryTest extends TestCase
         $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('generateAnswer'));
         $this->mock(RequirementWikiAlignmentAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('assessAlignment'));
 
+        // The owning customer's own System Owner: the case-work rule (A41) lets them through, so
+        // what refuses below is the customer boundary in research().
+        $worker = $world['worker'];
+
         $attempts = [
             'research' => fn () => app(RequirementWikiResearchService::class)->research($world['requirement'], (int) $other['customer']->id, 'no'),
-            'answer' => fn () => app(RequirementWikiAnswerService::class)->generate($world['requirement'], (int) $other['customer']->id, 'no'),
-            'assessment' => fn () => app(RequirementWikiAssessmentService::class)->assessRequirement($world['requirement'], (int) $other['customer']->id, 'no'),
+            'answer' => fn () => app(RequirementWikiAnswerService::class)->generate($world['requirement'], (int) $other['customer']->id, 'no', $worker),
+            'assessment' => fn () => app(RequirementWikiAssessmentService::class)->assessRequirement($world['requirement'], (int) $other['customer']->id, 'no', $worker),
         ];
 
         foreach ($attempts as $what => $attempt) {
@@ -84,7 +89,7 @@ class RequirementWikiResearchCustomerBoundaryTest extends TestCase
         $this->assertSame([], $context['pages']);
     }
 
-    /** @return array{customer: Customer, requirement: SavedNoticeAiRequirement} */
+    /** @return array{customer: Customer, requirement: SavedNoticeAiRequirement, worker: User} */
     private function world(string $name): array
     {
         $language = Language::query()->firstOrCreate(['code' => 'no'], ['name_en' => 'Norwegian', 'name_no' => 'Norsk']);
@@ -127,6 +132,16 @@ class RequirementWikiResearchCustomerBoundaryTest extends TestCase
             'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
         ]);
 
-        return ['customer' => $customer, 'requirement' => $requirement];
+        $worker = User::query()->create([
+            'name' => 'System Owner '.$name,
+            'email' => 'boundary-'.Str::lower(Str::random(10)).'@procynia.test',
+            'password' => bcrypt('secret-only-local'),
+            'customer_id' => $customer->id,
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
+            'is_active' => true,
+        ]);
+
+        return ['customer' => $customer, 'requirement' => $requirement, 'worker' => $worker];
     }
 }

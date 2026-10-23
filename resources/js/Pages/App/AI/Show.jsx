@@ -893,6 +893,9 @@ export default function AiShow({
         // Approve, reject, restore and «Avvis alle» (B4). The server answers 403 regardless; this
         // only keeps a person from being offered a decision that is not theirs to take.
         can_decide_requirements: canDecideRequirements = false,
+        // Case work (A41): a reader sees the case and exports it, and is offered nothing that writes.
+        // The server leaves every write URL out for them and answers 403 regardless.
+        can_work: canWork = false,
         ai_quota: aiQuota = null,
     } = usePage().props;
     const tai = translations?.ai ?? {};
@@ -2517,7 +2520,7 @@ export default function AiShow({
                             </p>
                         </div>
 
-                        {canUseAiOffer ? (
+                        {canUseAiOffer ? (canWork ? (
                             <form ref={uploadFormRef} onSubmit={submitDocuments} className="space-y-4">
                                 {/* FilePickerField (A11Y-011): one name («Velg filer»), the chosen files and the
                                     allowed types as its description, the rejection as an alert tied to it,
@@ -2552,7 +2555,7 @@ export default function AiShow({
                                     </button>
                                 </div>
                             </form>
-                        ) : (
+                        ) : null) : (
                             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-base leading-6 text-amber-900">
                                 {tai.ai_access_unavailable_message}
                             </div>
@@ -2697,27 +2700,31 @@ export default function AiShow({
                             </div>
 
                             <div className="flex flex-wrap gap-2">
-                                <button
-                                    id="ai-manual-requirement-toggle"
-                                    type="button"
-                                    onClick={() => setShowManualRequirementForm((value) => !value)}
-                                    disabled={requirementUpdatesLocked && !showManualRequirementForm}
-                                    aria-expanded={showManualRequirementForm}
-                                    className={`${DISCLOSURE_INLINE} px-4 py-2`}
-                                >
-                                    {showManualRequirementForm ? tai.hide_requirement_form : tai.show_requirement_form}
-                                </button>
+                                {requirementsStoreUrl ? (
+                                    <button
+                                        id="ai-manual-requirement-toggle"
+                                        type="button"
+                                        onClick={() => setShowManualRequirementForm((value) => !value)}
+                                        disabled={requirementUpdatesLocked && !showManualRequirementForm}
+                                        aria-expanded={showManualRequirementForm}
+                                        className={`${DISCLOSURE_INLINE} px-4 py-2`}
+                                    >
+                                        {showManualRequirementForm ? tai.hide_requirement_form : tai.show_requirement_form}
+                                    </button>
+                                ) : null}
 
-                                <button
-                                    type="button"
-                                    onClick={() => setShowAdvancedAI((value) => !value)}
-                                    aria-expanded={showAdvancedAI}
-                                    className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-                                >
-                                    {showAdvancedAI ? tai.hide_advanced : tai.advanced}
-                                </button>
+                                {assessmentRefreshUrl ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowAdvancedAI((value) => !value)}
+                                        aria-expanded={showAdvancedAI}
+                                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                                    >
+                                        {showAdvancedAI ? tai.hide_advanced : tai.advanced}
+                                    </button>
+                                ) : null}
 
-                                {canUseAiOffer && showAdvancedAI ? (
+                                {canUseAiOffer && showAdvancedAI && assessmentRefreshUrl ? (
                                     <>
                                         <button
                                             id="ai-refresh-assessments"
@@ -2857,7 +2864,7 @@ export default function AiShow({
                             </div>
                         </div>
 
-                        {showManualRequirementForm ? (
+                        {showManualRequirementForm && requirementsStoreUrl ? (
                             <form ref={manualRequirementFormRef} onSubmit={submitManualRequirement} className="mt-5 space-y-4 rounded-[22px] border border-violet-200 bg-violet-50/40 p-4">
                             <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div className="space-y-1">
@@ -3148,7 +3155,7 @@ export default function AiShow({
                                                         ) : null}
                                                     </div>
                                                     <div className="flex flex-wrap gap-2">
-                                                        {canOpenAnswerWorkspace ? (
+                                                        {canOpenAnswerWorkspace && requirement.wiki_answer_generate_url ? (
                                                             <>
                                                                 <button
                                                                     id={`ai-req-${requirement.id}-prompt`}
@@ -3552,7 +3559,7 @@ export default function AiShow({
                                                                     id={`ai-req-${requirement.id}-work-status`}
                                                                     value={workStatus}
                                                                     onChange={(event) => updateRequirementWork(requirement, event.target.value, assignedUserId, `ai-req-${requirement.id}-work-status`)}
-                                                                    disabled={requirementUpdatesLocked}
+                                                                    disabled={requirementUpdatesLocked || !requirement.work_update_url}
                                                                     className="w-full rounded-2xl border border-field-border bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
                                                                     {WORK_STATUS_OPTIONS.map((option) => (
@@ -3570,7 +3577,7 @@ export default function AiShow({
                                                                     id={`ai-req-${requirement.id}-assignee`}
                                                                     value={assignedUserId}
                                                                     onChange={(event) => updateRequirementWork(requirement, workStatus, event.target.value, `ai-req-${requirement.id}-assignee`)}
-                                                                    disabled={requirementUpdatesLocked}
+                                                                    disabled={requirementUpdatesLocked || !requirement.work_update_url}
                                                                     className="w-full rounded-2xl border border-field-border bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
                                                                     <option value="">{tai.unassigned}</option>
@@ -3585,16 +3592,18 @@ export default function AiShow({
                                                     ) : null}
 
                                                     <div className="flex flex-wrap gap-2">
-                                                        <button
-                                                            id={`ai-req-${requirement.id}-edit`}
-                                                            type="button"
-                                                            aria-expanded={isEditingThisRequirement}
-                                                            onClick={() => startEditingRequirement(requirement)}
-                                                            disabled={requirementUpdatesLocked && !isEditingThisRequirement}
-                                                            className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
-                                                        >
-                                                            {tai.edit_requirement}
-                                                        </button>
+                                                        {requirement.edit_url ? (
+                                                            <button
+                                                                id={`ai-req-${requirement.id}-edit`}
+                                                                type="button"
+                                                                aria-expanded={isEditingThisRequirement}
+                                                                onClick={() => startEditingRequirement(requirement)}
+                                                                disabled={requirementUpdatesLocked && !isEditingThisRequirement}
+                                                                className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            >
+                                                                {tai.edit_requirement}
+                                                            </button>
+                                                        ) : null}
 
                                                         {requirement.delete_url && confirmDeleteRequirementId !== requirement.id && confirmRejectRequirementId !== requirement.id ? (
                                                             <button
@@ -3745,11 +3754,11 @@ export default function AiShow({
                                         <div className="text-base font-semibold uppercase tracking-[0.12em] text-violet-600">
                                             {tai.wiki_answer_for_requirement} {activeRequirementDisplayIdentifier}
                                         </div>
+                                        {activeRequirement.wiki_answer_generate_url ? (
                                         <button
                                             id="wiki-answer-generate-button"
                                             type="button"
                                             onClick={() => { void requestWikiAnswerGeneration(activeRequirement); }}
-                                            disabled={!activeRequirement.wiki_answer_generate_url}
                                             aria-disabled={(
                                                 wikiAnswerGeneratingRequirementId === activeRequirement.id
                                                 || wikiAnswerSavingRequirementId === activeRequirement.id
@@ -3761,6 +3770,7 @@ export default function AiShow({
                                                 ? tai.generating_wiki_answer
                                                 : (activeRequirementWikiAnswer?.coverage_status ? tai.wiki_answer_regenerate : tai.generate_wiki_answer)}
                                         </button>
+                                        ) : null}
                                     </div>
 
                                     {/* Shown, not spoken: requestWikiAnswerGeneration announces the start and the
@@ -3807,7 +3817,7 @@ export default function AiShow({
                                                         ) : null}
                                                     </div>
                                                     <div className="flex flex-wrap items-center gap-2">
-                                                        {isEditingActiveWikiAnswer ? null : (
+                                                        {isEditingActiveWikiAnswer || !activeRequirement.wiki_answer_update_url ? null : (
                                                             <button
                                                                 id="wiki-answer-edit-button"
                                                                 type="button"

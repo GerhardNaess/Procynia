@@ -892,7 +892,7 @@ class NoticeController extends Controller
         $canReopenAfterNoGo = $this->savedNoticeAccess->canReopenAfterNoGo($user, $record);
 
         return Inertia::render('App/Notices/SavedShow', [
-            'notice' => $this->savedNoticeCasePayload($record, $canManageCase, $canManageContributorAccess, $canComment, $canArchive, $canReopenAfterNoGo),
+            'notice' => $this->savedNoticeCasePayload($record, $canManageCase, $canManageContributorAccess, $canComment, $canArchive, $canReopenAfterNoGo, $this->savedNoticeAccess->canAddInfoItem($user, $record)),
             'goNoGoData' => $record->bid_status === SavedNotice::BID_STATUS_GO_NO_GO
                 ? $this->buildGoNoGoData($record, $customerId, $user, $canManageCase)
                 : null,
@@ -1068,6 +1068,9 @@ class NoticeController extends Controller
         $record = $this->customerSavedNoticeVisibleQuery($user)
             ->whereKey($savedNotice->id)
             ->firstOrFail();
+
+        // A new aksjon is case work: seeing the case is not enough (A41).
+        abort_unless($this->savedNoticeAccess->canAddInfoItem($user, $record), 403);
 
         $validated = $request->validate([
             'type' => ['required', 'string', Rule::in(SavedNoticeInfoItem::TYPES)],
@@ -1990,6 +1993,7 @@ class NoticeController extends Controller
         bool $canComment,
         bool $canArchive,
         bool $canReopenAfterNoGo,
+        bool $canAddInfoItem,
     ): array {
         $nextDeadline = $this->nextRelevantSavedNoticeDeadline($notice);
         $isMutableCase = $notice->archived_at === null && $canManageCase;
@@ -2039,8 +2043,10 @@ class NoticeController extends Controller
             'documents' => $documentsPayload['documents'],
             'download_all_url' => $documentsPayload['download_all_url'],
             'info_items' => [
-                'can_create' => true,
-                'store_url' => route('app.notices.saved.info-items.store', ['savedNotice' => $notice->id]),
+                'can_create' => $canAddInfoItem,
+                'store_url' => $canAddInfoItem
+                    ? route('app.notices.saved.info-items.store', ['savedNotice' => $notice->id])
+                    : null,
                 'defaults' => [
                     'type' => SavedNoticeInfoItem::TYPE_NOTE,
                     'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,

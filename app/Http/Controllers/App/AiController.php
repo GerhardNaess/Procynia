@@ -138,7 +138,9 @@ class AiController extends Controller
 
         $analysisCase = $this->analysisCasePayload($record);
         $requirements = $this->requirementLoader->loadForCase($record->id);
-        $requirementsPayload = $this->aiRequirementsPayload($requirements);
+        // A reader sees the case and exports it; every way to change it is left out (A41).
+        $canWork = $this->savedNoticeAccess->mayWork($request->user(), $record);
+        $requirementsPayload = $this->aiRequirementsPayload($requirements, $canWork);
         $requirementsOverview = $this->requirementsOverviewPayload($requirements);
         $canUseAiOffer = $this->customerCanUseAiOffer($request->user());
 
@@ -157,19 +159,20 @@ class AiController extends Controller
             'requirements_count' => count($requirementsPayload),
             'requirements_overview' => $requirementsOverview,
             'requirements' => $requirementsPayload,
-            'requirements_store_url' => route('app.ai.requirements.store', ['savedNotice' => $record->id]),
-            'requirements_reject_all_url' => route('app.ai.requirements.reject-all', ['savedNotice' => $record->id]),
-            'requirements_delete_all_url' => route('app.ai.requirements.destroy-all', ['savedNotice' => $record->id]),
-            'assessment_refresh_url' => route('app.ai.requirements.assessment.refresh', ['savedNotice' => $record->id]),
+            'requirements_store_url' => $canWork ? route('app.ai.requirements.store', ['savedNotice' => $record->id]) : null,
+            'requirements_reject_all_url' => $canWork ? route('app.ai.requirements.reject-all', ['savedNotice' => $record->id]) : null,
+            'requirements_delete_all_url' => $canWork ? route('app.ai.requirements.destroy-all', ['savedNotice' => $record->id]) : null,
+            'assessment_refresh_url' => $canWork ? route('app.ai.requirements.assessment.refresh', ['savedNotice' => $record->id]) : null,
             'assigned_user_options' => $this->customerRequirementAssigneeOptions((int) $record->customer_id),
             'assignable_users' => $this->customerAssignableUsers((int) $record->customer_id),
-            'documents_upload_url' => route('app.ai.documents.store', ['savedNotice' => $record->id]),
-            'documents' => $this->aiDocumentsPayload($record),
-            'answer_basis_items' => $this->aiAnswerBasisItemsPayload($record->answerBasisItems),
-            'answer_basis_documents_upload_url' => route('app.ai.answer-basis.documents.store', ['savedNotice' => $record->id]),
-            'answer_basis_text_store_url' => route('app.ai.answer-basis.texts.store', ['savedNotice' => $record->id]),
+            'documents_upload_url' => $canWork ? route('app.ai.documents.store', ['savedNotice' => $record->id]) : null,
+            'documents' => $this->aiDocumentsPayload($record, $canWork),
+            'answer_basis_items' => $this->aiAnswerBasisItemsPayload($record->answerBasisItems, $canWork),
+            'answer_basis_documents_upload_url' => $canWork ? route('app.ai.answer-basis.documents.store', ['savedNotice' => $record->id]) : null,
+            'answer_basis_text_store_url' => $canWork ? route('app.ai.answer-basis.texts.store', ['savedNotice' => $record->id]) : null,
             'export_docx_url' => route('app.ai.requirements.export.docx', ['savedNotice' => $record->id]),
             'can_use_ai_offer' => $canUseAiOffer,
+            'can_work' => $canWork,
             // Approve, reject, restore and «Avvis alle» (B4). Everything else on the page is
             // ordinary case work and does not depend on it.
             'can_decide_requirements' => $this->requirementEditorService->mayDecide($request->user(), $record),
@@ -223,7 +226,9 @@ class AiController extends Controller
                 'updated_at' => $analysisCase['updated_at'],
             ],
             'ai_instructions' => (string) ($this->customerAiInstructions($record) ?? ''),
-            'ai_instructions_update_url' => route('app.ai.instructions.update', ['savedNotice' => $record->id]),
+            'ai_instructions_update_url' => $this->savedNoticeAccess->mayWork($request->user(), $record)
+                ? route('app.ai.instructions.update', ['savedNotice' => $record->id])
+                : null,
         ]);
     }
 
@@ -240,7 +245,7 @@ class AiController extends Controller
      */
     public function updateAiInstructions(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
-        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
 
         $validated = $request->validate([
@@ -344,7 +349,7 @@ class AiController extends Controller
      */
     public function storeDocuments(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
-        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
 
         $request->validate([
@@ -558,7 +563,7 @@ class AiController extends Controller
         SavedNotice $savedNotice,
         SavedNoticeAiDocument $document,
     ): RedirectResponse {
-        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
         $ownedDocument = $record->aiDocuments()
             ->whereKey($document->id)
@@ -643,7 +648,7 @@ class AiController extends Controller
      */
     public function storeAnswerBasisDocuments(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
-        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
 
         $request->validate([
@@ -670,7 +675,7 @@ class AiController extends Controller
      */
     public function storeAnswerBasisText(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
-        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
 
         $validated = $request->validate([
@@ -701,13 +706,13 @@ class AiController extends Controller
         SavedNotice $savedNotice,
         SavedNoticeAiAnswerBasisItem $answerBasisItem,
     ): RedirectResponse {
-        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
         $ownedItem = $record->answerBasisItems()
             ->whereKey($answerBasisItem->id)
             ->firstOrFail();
 
-        $this->requirementAnswerBasisService->deleteItem($ownedItem);
+        $this->requirementAnswerBasisService->deleteItem($ownedItem, $request->user());
 
         return redirect()
             ->route('app.ai.show', ['savedNotice' => $record->id])
@@ -832,7 +837,7 @@ class AiController extends Controller
      */
     public function storeRequirement(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
-        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
 
         $validated = $request->validate([
@@ -904,7 +909,7 @@ class AiController extends Controller
         SavedNotice $savedNotice,
         SavedNoticeAiRequirement $requirement,
     ): RedirectResponse {
-        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
 
         $ownedRequirement = $record->aiRequirements()
@@ -938,7 +943,7 @@ class AiController extends Controller
      */
     public function destroyAllRequirements(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
-        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
 
         $deletedCount = DB::transaction(static function () use ($record): int {
@@ -975,7 +980,7 @@ class AiController extends Controller
         SavedNotice $savedNotice,
         SavedNoticeAiRequirement $requirement,
     ): RedirectResponse {
-        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
         $ownedRequirement = $record->aiRequirements()
             ->whereKey($requirement->id)
@@ -1007,7 +1012,7 @@ class AiController extends Controller
         SavedNotice $savedNotice,
         SavedNoticeAiRequirement $requirement,
     ): JsonResponse {
-        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
 
         $ownedRequirement = $record->aiRequirements()
@@ -1043,7 +1048,7 @@ class AiController extends Controller
         ])->loadCount('revisions');
 
         return response()->json([
-            'requirement' => $this->aiRequirementPayload($ownedRequirement),
+            'requirement' => $this->aiRequirementPayload($ownedRequirement, true),
             'assigned_user_id' => $ownedRequirement->assigned_user_id !== null ? (int) $ownedRequirement->assigned_user_id : null,
             'assigned_user' => $ownedRequirement->assignedUser ? [
                 'id' => $ownedRequirement->assignedUser->id,
@@ -1066,10 +1071,7 @@ class AiController extends Controller
     ): RedirectResponse {
         [$user, $customerId] = $this->frontendContext($request);
 
-        $record = $this->savedNoticeAccess->visibleQueryFor($user)
-            ->where('customer_id', $customerId)
-            ->whereKey($savedNotice->id)
-            ->firstOrFail();
+        $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
 
         $ownedRequirement = $record->aiRequirements()
@@ -1130,7 +1132,7 @@ class AiController extends Controller
         SavedNotice $savedNotice,
         SavedNoticeAiRequirement $requirement,
     ): JsonResponse {
-        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
         $ownedRequirement = $record->aiRequirements()
             ->whereKey($requirement->id)
@@ -1158,7 +1160,7 @@ class AiController extends Controller
                 $ownedRequirement,
                 (int) $record->customer_id,
                 $languageCode,
-                $request->user()?->id,
+                $request->user(),
                 $this->customerAiInstructions($record),
                 $userAnswerPrompt,
             );
@@ -1205,7 +1207,7 @@ class AiController extends Controller
         SavedNotice $savedNotice,
         SavedNoticeAiRequirement $requirement,
     ): JsonResponse {
-        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
         $ownedRequirement = $record->aiRequirements()
             ->whereKey($requirement->id)
@@ -1218,6 +1220,7 @@ class AiController extends Controller
         $wikiAnswer = $this->requirementWikiAnswerService->updateAnswerText(
             $ownedRequirement,
             (string) $validated['answer_text'],
+            $request->user(),
         );
 
         return response()->json($this->aiRequirementWikiAnswerResponsePayload($wikiAnswer, $ownedRequirement));
@@ -1234,7 +1237,7 @@ class AiController extends Controller
         SavedNotice $savedNotice,
         SavedNoticeAiRequirement $requirement,
     ): JsonResponse {
-        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
         $ownedRequirement = $record->aiRequirements()
             ->whereKey($requirement->id)
@@ -1249,6 +1252,7 @@ class AiController extends Controller
             $record,
             $ownedRequirement,
             $validated['answer_basis_item_ids'],
+            $request->user(),
         );
 
         $selectedAnswerBasisItems = collect($selectedAnswerBasisItems->all());
@@ -1260,7 +1264,7 @@ class AiController extends Controller
                 ->map(static fn (mixed $value): int => (int) $value)
                 ->values()
                 ->all(),
-            'answer_basis_items' => $this->aiAnswerBasisItemsPayload($selectedAnswerBasisItems),
+            'answer_basis_items' => $this->aiAnswerBasisItemsPayload($selectedAnswerBasisItems, true),
         ]);
     }
 
@@ -1274,10 +1278,12 @@ class AiController extends Controller
         SavedNotice $record,
         SavedNoticeAiRequirement $requirement,
         array $answerBasisItemIds,
+        User $actor,
     ): Collection {
         $selectedItems = $this->requirementAnswerBasisService->syncRequirementSelection(
             $requirement,
             $answerBasisItemIds,
+            $actor,
         );
 
         return $selectedItems->filter(static fn (SavedNoticeAiAnswerBasisItem $item): bool => (int) $item->saved_notice_id === (int) $record->id)
@@ -1294,7 +1300,7 @@ class AiController extends Controller
      */
     public function refreshAssessments(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
-        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
         $userId = $request->user()?->id;
         $confirmedRequirements = $this->requirementLoader->loadApprovedForCase($record->id);
@@ -1321,7 +1327,7 @@ class AiController extends Controller
                     $requirement,
                     (int) $record->customer_id,
                     $languageCode,
-                    $userId,
+                    $request->user(),
                     $customerAiInstructions,
                 );
             } catch (AiCostControlException $exception) {
@@ -1489,11 +1495,11 @@ class AiController extends Controller
      * Returns: An ordered array of document rows for the AI case view.
      * Side effects: None.
      */
-    private function aiDocumentsPayload(SavedNotice $notice): array
+    private function aiDocumentsPayload(SavedNotice $notice, bool $canWork): array
     {
         return $notice->aiDocuments
             ->unique('original_filename')
-            ->map(fn (SavedNoticeAiDocument $document): array => $this->aiDocumentPayload($document))
+            ->map(fn (SavedNoticeAiDocument $document): array => $this->aiDocumentPayload($document, $canWork))
             ->values()
             ->all();
     }
@@ -1504,14 +1510,14 @@ class AiController extends Controller
      * Returns: An ordered array of answer basis rows for the AI case view.
      * Side effects: None.
      */
-    private function aiAnswerBasisItemsPayload(Collection $answerBasisItems): array
+    private function aiAnswerBasisItemsPayload(Collection $answerBasisItems, bool $canWork): array
     {
         if (method_exists($answerBasisItems, 'loadMissing')) {
             $answerBasisItems->loadMissing('createdBy');
         }
 
         return $answerBasisItems
-            ->map(fn (SavedNoticeAiAnswerBasisItem $answerBasisItem): array => $this->aiAnswerBasisItemPayload($answerBasisItem))
+            ->map(fn (SavedNoticeAiAnswerBasisItem $answerBasisItem): array => $this->aiAnswerBasisItemPayload($answerBasisItem, $canWork))
             ->values()
             ->all();
     }
@@ -1522,7 +1528,7 @@ class AiController extends Controller
      * Returns: A frontend-ready array for one answer basis row.
      * Side effects: None.
      */
-    private function aiAnswerBasisItemPayload(SavedNoticeAiAnswerBasisItem $answerBasisItem): array
+    private function aiAnswerBasisItemPayload(SavedNoticeAiAnswerBasisItem $answerBasisItem, bool $canWork): array
     {
         return [
             'id' => $answerBasisItem->id,
@@ -1540,10 +1546,10 @@ class AiController extends Controller
             'created_by' => $answerBasisItem->createdBy?->name,
             'created_at' => optional($answerBasisItem->created_at)?->toIso8601String(),
             'updated_at' => optional($answerBasisItem->updated_at)?->toIso8601String(),
-            'delete_url' => route('app.ai.answer-basis.destroy', [
+            'delete_url' => $canWork ? route('app.ai.answer-basis.destroy', [
                 'savedNotice' => $answerBasisItem->saved_notice_id,
                 'answerBasisItem' => $answerBasisItem->id,
-            ]),
+            ]) : null,
         ];
     }
 
@@ -1553,7 +1559,7 @@ class AiController extends Controller
      * Returns: A frontend-ready array for one AI document row.
      * Side effects: None.
      */
-    private function aiDocumentPayload(SavedNoticeAiDocument $document): array
+    private function aiDocumentPayload(SavedNoticeAiDocument $document, bool $canWork): array
     {
         $storedPath = (string) $document->stored_path;
         $previewMode = $this->documentPreviewService->previewMode($document);
@@ -1594,10 +1600,10 @@ class AiController extends Controller
                     'document' => $document->id,
                 ])
                 : null,
-            'delete_url' => route('app.ai.documents.destroy', [
+            'delete_url' => $canWork ? route('app.ai.documents.destroy', [
                 'savedNotice' => $document->saved_notice_id,
                 'document' => $document->id,
-            ]),
+            ]) : null,
         ];
     }
 
@@ -1711,10 +1717,10 @@ class AiController extends Controller
      * Returns: An ordered array of requirement rows for the AI case view.
      * Side effects: None.
      */
-    private function aiRequirementsPayload(Collection $requirements): array
+    private function aiRequirementsPayload(Collection $requirements, bool $canWork): array
     {
         return $requirements
-            ->map(fn (SavedNoticeAiRequirement $requirement): array => $this->aiRequirementPayload($requirement))
+            ->map(fn (SavedNoticeAiRequirement $requirement): array => $this->aiRequirementPayload($requirement, $canWork))
             ->values()
             ->all();
     }
@@ -1725,27 +1731,18 @@ class AiController extends Controller
      * Returns: A single frontend-ready requirement array.
      * Side effects: None.
      */
-    private function aiRequirementPayload(SavedNoticeAiRequirement $requirement): array
+    private function aiRequirementPayload(SavedNoticeAiRequirement $requirement, bool $canWork): array
     {
         $selectedAnswerBasisItems = collect($requirement->answerBasisItems->all());
+        $route = static fn (string $name): ?string => $canWork
+            ? route($name, ['savedNotice' => $requirement->saved_notice_id, 'requirement' => $requirement->id])
+            : null;
 
         $viewData = RequirementViewData::fromRequirement($requirement, [
-            'review_status_update_url' => route('app.ai.requirements.review-status.update', [
-                'savedNotice' => $requirement->saved_notice_id,
-                'requirement' => $requirement->id,
-            ]),
-            'edit_url' => route('app.ai.requirements.update', [
-                'savedNotice' => $requirement->saved_notice_id,
-                'requirement' => $requirement->id,
-            ]),
-            'work_update_url' => route('app.ai.requirements.work.update', [
-                'savedNotice' => $requirement->saved_notice_id,
-                'requirement' => $requirement->id,
-            ]),
-            'assigned_user_update_url' => route('app.ai.requirements.assigned-user.update', [
-                'savedNotice' => $requirement->saved_notice_id,
-                'requirement' => $requirement->id,
-            ]),
+            'review_status_update_url' => $route('app.ai.requirements.review-status.update'),
+            'edit_url' => $route('app.ai.requirements.update'),
+            'work_update_url' => $route('app.ai.requirements.work.update'),
+            'assigned_user_update_url' => $route('app.ai.requirements.assigned-user.update'),
         ]);
 
         return array_merge(
@@ -1757,24 +1754,15 @@ class AiController extends Controller
                     ->map(static fn (mixed $value): int => (int) $value)
                     ->values()
                     ->all(),
-                'answer_basis_selection_sync_url' => route('app.ai.requirements.answer-basis.sync', [
-                    'savedNotice' => $requirement->saved_notice_id,
-                    'requirement' => $requirement->id,
-                ]),
+                'answer_basis_selection_sync_url' => $route('app.ai.requirements.answer-basis.sync'),
                 'wiki_answer' => $this->aiRequirementWikiAnswerPayload($requirement->wikiAnswer),
                 // Only AI-extracted candidates are deletable; a manually added requirement is the
                 // user's own work and has no delete affordance.
                 'delete_url' => $requirement->source_type === SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE
-                    ? route('app.ai.requirements.destroy', ['savedNotice' => $requirement->saved_notice_id, 'requirement' => $requirement->id])
+                    ? $route('app.ai.requirements.destroy')
                     : null,
-                'wiki_answer_generate_url' => route('app.ai.requirements.wiki-answer.generate', [
-                    'savedNotice' => $requirement->saved_notice_id,
-                    'requirement' => $requirement->id,
-                ]),
-                'wiki_answer_update_url' => route('app.ai.requirements.wiki-answer.update', [
-                    'savedNotice' => $requirement->saved_notice_id,
-                    'requirement' => $requirement->id,
-                ]),
+                'wiki_answer_generate_url' => $route('app.ai.requirements.wiki-answer.generate'),
+                'wiki_answer_update_url' => $route('app.ai.requirements.wiki-answer.update'),
                 'assessment' => $this->aiRequirementAssessmentPayload($requirement->assessment),
             ],
         );
@@ -2202,6 +2190,20 @@ class AiController extends Controller
             ->whereNull('archived_at')
             ->whereKey($savedNotice->id)
             ->firstOrFail();
+    }
+
+    /**
+     * The case for anything that creates, changes or deletes information, or starts AI work (A41):
+     * a case the person cannot see is 404 as before; one they can only read is 403. The services
+     * ask SavedNoticeAccessService::authorizeWork() again where the work is done.
+     */
+    private function workableAiSavedNotice(Request $request, SavedNotice $savedNotice): SavedNotice
+    {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+
+        abort_unless($this->savedNoticeAccess->mayWork($request->user(), $record), 403);
+
+        return $record;
     }
 
     /**

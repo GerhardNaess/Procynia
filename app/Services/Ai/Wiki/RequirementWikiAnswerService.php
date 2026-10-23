@@ -4,8 +4,11 @@ namespace App\Services\Ai\Wiki;
 
 use App\Data\Ai\AiCallContext;
 use App\Models\EnterpriseWikiClaim;
+use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementWikiAnswer;
+use App\Models\User;
+use App\Services\SavedNoticeAccessService;
 use App\Support\Ai\AiCallContextScope;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -82,6 +85,7 @@ class RequirementWikiAnswerService
         private readonly RequirementWikiAnswerAiClient $answerAiClient,
         private readonly RequirementWikiAlignmentAiClient $alignmentAiClient,
         private readonly RequirementWikiAnswerRevisionAiClient $revisionAiClient,
+        private readonly SavedNoticeAccessService $access,
         private readonly AiCallContextScope $contextScope = new AiCallContextScope,
     ) {}
 
@@ -106,10 +110,15 @@ class RequirementWikiAnswerService
         SavedNoticeAiRequirement $requirement,
         int $customerId,
         string $languageCode,
-        ?int $userId = null,
+        User $actor,
         ?string $caseInstructions = null,
         ?string $requirementUserPrompt = null,
     ): SavedNoticeAiRequirementWikiAnswer {
+        // Generating an answer is case work and spends AI capacity (A41): asked before research or
+        // any AI call, on the case as it stands now.
+        $this->access->authorizeWork($actor, SavedNotice::query()->findOrFail($requirement->saved_notice_id));
+        $userId = (int) $actor->id;
+
         return $this->contextScope->within(new AiCallContext(
             customerId: $customerId,
             userId: $userId,
@@ -184,15 +193,17 @@ class RequirementWikiAnswerService
      * Purpose: Persist a hand-edit of an already-generated Wiki answer's text — mirrors
      *          RequirementAnswerDraftService::updateAnswerDraft() so the Wiki answer is an editable
      *          operative draft, not read-only AI output.
-     * Inputs: The requirement and the edited answer text.
+     * Inputs: The requirement, the edited answer text and the person editing it.
      * Returns: The persisted (refreshed) Wiki-answer row.
      * Side effects: Updates answer_text on the existing saved_notice_ai_requirement_wiki_answers row.
      *
      * @throws RuntimeException when the text is empty/whitespace-only, or when the requirement has
      *                          no Wiki answer yet to edit (generate() must run at least once first).
      */
-    public function updateAnswerText(SavedNoticeAiRequirement $requirement, string $answerText): SavedNoticeAiRequirementWikiAnswer
+    public function updateAnswerText(SavedNoticeAiRequirement $requirement, string $answerText, User $actor): SavedNoticeAiRequirementWikiAnswer
     {
+        $this->access->authorizeWork($actor, SavedNotice::query()->findOrFail($requirement->saved_notice_id));
+
         $normalizedText = trim(str_replace(["\r\n", "\r"], "\n", $answerText));
 
         if ($normalizedText === '') {

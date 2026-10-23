@@ -1513,13 +1513,15 @@ export default function SavedNoticeShow({ notice }) {
                                     </p>
                                 </div>
 
-                                <button
-                                    type="button"
-                                    onClick={openInfoItemCreator}
-                                    className={DISCLOSURE_ACTION}
-                                >
-                                    {tsn.new_action}
-                                </button>
+                                {infoItems.can_create ? (
+                                    <button
+                                        type="button"
+                                        onClick={openInfoItemCreator}
+                                        className={DISCLOSURE_ACTION}
+                                    >
+                                        {tsn.new_action}
+                                    </button>
+                                ) : null}
                             </div>
 
                             {isCreatingInfoItem ? (

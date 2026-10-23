@@ -78,7 +78,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->mockAnswerClient([$this->section('S1', 'Svaret.', [$page->id])]);
         $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertIsArray($answer->research_trace);
         $this->assertArrayHasKey('research', $answer->research_trace);
@@ -109,7 +109,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
             ->andReturn(['answer_sections' => [$this->section('S1', 'Svaret.', [$page->id])]]));
         $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
 
-        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', null, 'Skriv formelt og presist.');
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement), 'Skriv formelt og presist.');
     }
 
     public function test_no_case_instructions_forwards_null_to_the_answer_ai_client(): void
@@ -127,7 +127,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
             ->andReturn(['answer_sections' => [$this->section('S1', 'Svaret.', [$page->id])]]));
         $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
 
-        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
     }
 
     /**
@@ -156,7 +156,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
             $requirement,
             $customer->id,
             'no',
-            null,
+            $this->caseWorker($requirement),
             'Skriv formelt.',
             'Fokuser spesielt på ansvarsfordeling.',
         );
@@ -177,7 +177,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
             ->andReturn(['answer_sections' => [$this->section('S1', 'Svaret.', [$page->id])]]));
         $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
 
-        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
     }
 
     /**
@@ -194,9 +194,9 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->mockAnswerClient([$this->section('S1', 'Opprinnelig svar.', [$page->id])]);
         $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
 
-        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
-        $updated = app(RequirementWikiAnswerService::class)->updateAnswerText($requirement, 'Redigert svar.');
+        $updated = app(RequirementWikiAnswerService::class)->updateAnswerText($requirement, 'Redigert svar.', $this->caseWorker($requirement));
 
         $this->assertSame('Redigert svar.', $updated->answer_text);
         $this->assertSame(
@@ -212,7 +212,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
 
         $this->expectException(RuntimeException::class);
 
-        app(RequirementWikiAnswerService::class)->updateAnswerText($requirement, 'Redigert svar.');
+        app(RequirementWikiAnswerService::class)->updateAnswerText($requirement, 'Redigert svar.', $this->caseWorker($requirement));
     }
 
     public function test_update_answer_text_throws_when_the_text_is_blank(): void
@@ -225,11 +225,11 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->mockAnswerClient([$this->section('S1', 'Opprinnelig svar.', [$page->id])]);
         $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
 
-        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->expectException(RuntimeException::class);
 
-        app(RequirementWikiAnswerService::class)->updateAnswerText($requirement, '   ');
+        app(RequirementWikiAnswerService::class)->updateAnswerText($requirement, '   ', $this->caseWorker($requirement));
     }
 
     public function test_old_answers_without_the_new_fields_can_still_be_loaded(): void
@@ -277,7 +277,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
             $this->assessment('S2', 'aligned', [$page->id]),
         ]);
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertSame('full', $answer->coverage_status);
         $this->assertCount(2, $answer->alignment_trace['sections']);
@@ -305,7 +305,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
             $this->assessment('S3', 'aligned', [$page->id]),
         ]);
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertSame('full', $answer->coverage_status);
         $this->assertSame(3, count($answer->alignment_trace['sections']));
@@ -335,7 +335,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
             $this->assessment('S4', 'aligned', [$page->id]),
         ]);
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertSame('full', $answer->coverage_status);
         $this->assertCount(4, $answer->alignment_trace['sections']);
@@ -361,7 +361,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
             $this->assessment('S2', 'best_practice'),
         ]);
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertSame('partial', $answer->coverage_status);
     }
@@ -376,7 +376,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->mockAnswerClient([$this->section('S1', 'Beste praksis-svar.', [])]);
         $this->mockAlignmentClient([$this->assessment('S1', 'best_practice')]);
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertSame('none', $answer->coverage_status);
     }
@@ -391,7 +391,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->mockAnswerClient([$this->section('S1', 'Et fortsatt nyttig ekspertutkast basert på beste praksis.', [])]);
         $this->mockAlignmentClient([$this->assessment('S1', 'best_practice')]);
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertSame('none', $answer->coverage_status);
         $this->assertSame('Et fortsatt nyttig ekspertutkast basert på beste praksis.', $answer->answer_text);
@@ -414,7 +414,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->mock(RequirementWikiAlignmentAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('assessAlignment'));
         $this->mock(RequirementWikiAnswerRevisionAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('reviseSections'));
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertSame('none', $answer->coverage_status);
         $this->assertCount(1, $answer->alignment_trace['sections']);
@@ -445,7 +445,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
             ->once()
             ->andReturn(['S1' => ['heading' => '', 'text' => 'Kunden eier prosessen videre etter etablering.', 'used_page_ids' => [$page->id]]]));
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertSame('Kunden eier prosessen videre etter etablering.', $answer->answer_text);
         $this->assertSame('full', $answer->coverage_status);
@@ -478,7 +478,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
             ->once()
             ->andReturn(['S1' => ['heading' => '', 'text' => 'Justert tekst som fortsatt kan avvike.', 'used_page_ids' => []]]));
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertTrue($answer->has_possible_conflict);
         $this->assertSame('Justert tekst som fortsatt kan avvike.', $answer->answer_text);
@@ -497,7 +497,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->mockAlignmentClient([$this->assessment('S1', 'best_practice')]);
         $this->mock(RequirementWikiAnswerRevisionAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('reviseSections'));
 
-        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
     }
 
     public function test_partially_aligned_sections_never_trigger_a_revision(): void
@@ -511,7 +511,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->mockAlignmentClient([$this->assessment('S1', 'partially_aligned', [$page->id])]);
         $this->mock(RequirementWikiAnswerRevisionAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('reviseSections'));
 
-        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
     }
 
     public function test_only_conflicted_sections_are_sent_to_revision_and_others_are_preserved(): void
@@ -551,7 +551,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
                 });
         });
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertCount(1, $capturedRevisionInput);
         $this->assertSame('S2', $capturedRevisionInput[0]['key']);
@@ -592,7 +592,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
             ->once()
             ->andReturn(['S2' => ['heading' => '', 'text' => 'Korrigert avsnitt.', 'used_page_ids' => [$page->id]]]));
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertSame('full', $answer->coverage_status);
         $this->assertFalse($answer->has_possible_conflict);
@@ -610,7 +610,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->mockResearchService($this->fakeResearchContext($requirement, [], 'no_relevant_candidates'));
         $this->mockAnswerClient([$this->section('S1', 'Beste praksis.', [])]);
 
-        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $requirement->refresh();
         $this->assertSame('Eksisterende svarutkast som aldri skal endres.', $requirement->answer_draft_text);
@@ -624,12 +624,12 @@ class RequirementWikiAnswerServiceTest extends TestCase
 
         $this->mockResearchService($this->fakeResearchContext($requirement, [], 'no_relevant_candidates'));
         $this->mockAnswerClient([$this->section('S1', 'Første generering.', [])]);
-        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
         $this->mockAnswerClient([$this->section('S1', 'Nytt svar.', [$page->id])]);
         $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
-        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $count = SavedNoticeAiRequirementWikiAnswer::query()->where('saved_notice_ai_requirement_id', $requirement->id)->count();
         $this->assertSame(1, $count);
@@ -670,7 +670,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->mockAnswerClient([$this->section('S1', 'Nytt svar.', [$page->id])]);
         $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertNull($answer->stale_at);
         $this->assertNull($answer->stale_reason);
@@ -699,7 +699,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->mockAnswerClient([$this->section('S1', 'Svar.', [$directPage->id, $linkedPage->id])]);
         $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$directPage->id, $linkedPage->id])]);
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $byId = collect($answer->sources)->keyBy('enterprise_wiki_page_id');
         $this->assertSame('direct_search', $byId[$directPage->id]['selection_type']);
@@ -727,7 +727,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->mockAnswerClient([$this->section('S1', 'Dokumentert svar.', [$page->id])]);
         $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertSame('source_based', $answer->alignment_trace['sections'][0]['provenance_type']);
         $this->assertTrue($answer->alignment_trace['has_source_based_support']);
@@ -756,7 +756,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->mockAnswerClient([$this->section('S1', 'Forslag basert på beste praksis.', [$page->id])]);
         $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $this->assertSame('best_practice', $answer->alignment_trace['sections'][0]['provenance_type']);
         $this->assertFalse($answer->alignment_trace['has_source_based_support']);
@@ -796,7 +796,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
             $this->assessment('S2', 'aligned', [$suggestionPage->id]),
         ]);
 
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
 
         $sectionsByKey = collect($answer->alignment_trace['sections'])->keyBy('section_key');
         $this->assertSame('source_based', $sectionsByKey['S1']['provenance_type']);
@@ -863,7 +863,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
 
         // Real collaborators here (not mocked) — the exception must originate from the real
         // RequirementWikiResearchService, propagated unchanged through the answer service.
-        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $this->caseWorker($requirement));
     }
 
     private function section(string $key, string $text, array $usedPageIds, string $heading = ''): array

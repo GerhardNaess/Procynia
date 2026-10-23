@@ -143,25 +143,28 @@ export default function AiInstructions({
                                         value={form.data.ai_instructions}
                                         onChange={(event) => form.setData('ai_instructions', event.target.value)}
                                         rows={16}
-                                        disabled={form.processing || !aiInstructionsUpdateUrl}
+                                        readOnly={!aiInstructionsUpdateUrl}
+                                        disabled={form.processing}
                                         className="w-full rounded-2xl border border-field-border bg-white px-3 py-3 text-base text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                         placeholder="Skriv faste regler for tone, stil, terminologi og kapitalisering."
                                     />
                                 )}
                             </FormField>
 
-                            <div className="flex justify-end">
-                                {/* Stays focusable while it saves (aria-disabled): a disabled button would
-                                    drop the keyboard focus that pressed it to <body>. */}
-                                <button
-                                    type="submit"
-                                    disabled={!aiInstructionsUpdateUrl}
-                                    aria-disabled={form.processing || undefined}
-                                    className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 aria-disabled:cursor-not-allowed aria-disabled:opacity-60 ${PRIMARY_COLOURS}`}
-                                >
-                                    {form.processing ? 'Lagrer...' : 'Lagre endring'}
-                                </button>
-                            </div>
+                            {/* A reader of the case reads the instruction; the server leaves the URL out (A41). */}
+                            {aiInstructionsUpdateUrl ? (
+                                <div className="flex justify-end">
+                                    {/* Stays focusable while it saves (aria-disabled): a disabled button would
+                                        drop the keyboard focus that pressed it to <body>. */}
+                                    <button
+                                        type="submit"
+                                        aria-disabled={form.processing || undefined}
+                                        className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 aria-disabled:cursor-not-allowed aria-disabled:opacity-60 ${PRIMARY_COLOURS}`}
+                                    >
+                                        {form.processing ? 'Lagrer...' : 'Lagre endring'}
+                                    </button>
+                                </div>
+                            ) : null}
                         </form>
                     </div>
                 </section>
