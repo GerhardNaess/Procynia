@@ -365,7 +365,12 @@ class NoticeController extends Controller
 
     private function renderNoticeIndexPage(Request $request, array $props, int $status = HttpResponse::HTTP_OK): HttpResponse
     {
-        return Inertia::render('App/Notices/Index', $props)
+        $user = $request->user();
+
+        return Inertia::render('App/Notices/Index', array_merge($props, [
+            // «Lagre» and «Ny privat forespørsel» open a case; a reader is not offered them (P4).
+            'can_save_notices' => $user instanceof User && $this->savedNoticeAccess->mayCreateCase($user),
+        ]))
             ->toResponse($request)
             ->setStatusCode($status);
     }
@@ -566,6 +571,12 @@ class NoticeController extends Controller
         }
 
         $isNewRecord = ! $record->exists;
+
+        // A reader never opens a case by saving (P4). «Lagre» has no personal bookmark behind it: it
+        // creates a case in the customer's work list, which is case work.
+        if ($isNewRecord && ! $this->savedNoticeAccess->mayCreateCase($user)) {
+            return redirect()->back()->with('error', __('procynia.notices.save_reader_cannot_create'));
+        }
 
         // Saving a notice that is already a case never opens the case to the person (A44). It used
         // to grant them contributor access when they could not see it, so that «Lagre» always did

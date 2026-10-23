@@ -110,6 +110,40 @@ class TenderSaveExistingCaseTest extends TestCase
         $this->assertTrue(app(SavedNoticeAccessService::class)->mayWork($world['bystander'], $case));
     }
 
+    /**
+     * P4: «Lagre» creates a case — there is no personal bookmark behind it — so the reader role
+     * neither creates one from a notice nor registers a private request, and is not offered to.
+     */
+    public function test_a_reader_never_creates_a_case_and_is_not_offered_to(): void
+    {
+        $world = $this->world();
+        $before = SavedNotice::query()->count();
+
+        $this->save($world['bidViewer'], 'NY-'.Str::upper(Str::random(6)), 'Ny anskaffelse')
+            ->assertRedirect()
+            ->assertSessionHas('error', __('procynia.notices.save_reader_cannot_create'));
+
+        $this->actingAs($world['bidViewer'])
+            ->from('/app/notices?mode=saved')
+            ->post('/app/notices/save', [
+                'source_type' => SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+                'title' => 'Privat forespørsel',
+                'buyer_name' => 'Kunden',
+                'summary' => 'Kort.',
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('error', __('procynia.notices.save_reader_cannot_create'));
+
+        $this->assertSame($before, SavedNotice::query()->count());
+        $this->assertSame(0, SavedNoticeUserAccess::query()->where('user_id', $world['bidViewer']->id)->count());
+
+        foreach ([[$world['bidViewer'], false], [$world['bystander'], true], [$world['owner'], true]] as [$person, $offered]) {
+            $this->actingAs($person)->get('/app/notices?mode=saved')
+                ->assertOk()
+                ->assertViewHas('page', fn (array $page): bool => data_get($page, 'props.can_save_notices') === $offered);
+        }
+    }
+
     /** Another customer saving the same notice gets a case of its own; the first is untouched. */
     public function test_another_customer_never_reaches_the_case(): void
     {

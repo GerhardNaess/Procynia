@@ -682,6 +682,8 @@ export default function NoticeIndex({
     tab = '',
     worklist = {},
     watchAlerts = {},
+    // «Lagre» and a private request open a case; a reader is not offered them (P4).
+    can_save_notices: canSaveNotices = false,
 }) {
     const { locale, translations, flash = {} } = usePage().props;
     const a11y = translations?.a11y ?? {};
@@ -1616,7 +1618,7 @@ export default function NoticeIndex({
                                             key={notice.id}
                                             notice={notice}
                                             locale={locale}
-                                            canSaveToWorklist
+                                            canSaveToWorklist={canSaveNotices}
                                             saveButtonLabel={translations.frontend.save_button}
                                             texts={noticesCardText}
                                             deleteAction={{
@@ -1938,7 +1940,7 @@ export default function NoticeIndex({
                             </section>
                         ) : null}
 
-                        {isSavedMode ? (
+                        {isSavedMode && canSaveNotices ? (
                             <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                                 <div className="space-y-4">
                                     <div className="flex items-start justify-between gap-4">
@@ -2230,7 +2232,7 @@ export default function NoticeIndex({
                                                     key={notice.id}
                                                     notice={notice}
                                                     locale={locale}
-                                                    canSaveToWorklist
+                                                    canSaveToWorklist={canSaveNotices}
                                                     saveButtonLabel={translations.frontend.save_button}
                                                     texts={noticesCardText}
                                                     actions={(titleId) => (
@@ -2527,7 +2529,7 @@ export default function NoticeIndex({
                                                                 Rediger frister
                                                             </button>
                                                         ) : null}
-                                                        {isLiveMode ? (
+                                                        {isLiveMode && canSaveNotices ? (
                                                             <button
                                                                 type="button"
                                                                 onClick={() => saveNotice(notice)}

@@ -155,6 +155,18 @@ class SavedNoticeAccessService
     }
 
     /**
+     * May this person open a new case — «Lagre» on a notice, or a private request (P4)? Everyone in
+     * the customer frontend except the reader role: a reader reads the cases they are given, and is
+     * given more through the case's own access controls, never by saving.
+     */
+    public function mayCreateCase(User $actor): bool
+    {
+        return $actor->canAccessCustomerFrontend()
+            && $actor->customer_id !== null
+            && $actor->resolvedBidRole() !== User::BID_ROLE_VIEWER;
+    }
+
+    /**
      * May this person do case work on this case (A41)? Uploading tender documents, adding, editing
      * and deleting requirements, generating and editing answers, assessments, the answer basis,
      * responsibility and tasks. Seeing a case is not enough: a reader (the bid role «viewer», or a
