@@ -19,6 +19,7 @@ use App\Services\Ai\Wiki\RequirementWikiAlignmentAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerRevisionAiClient;
 use App\Services\Ai\Wiki\RequirementWikiResearchAiClient;
+use App\Services\SavedNoticeAccessService;
 use App\Services\Security\ActorChannel;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
@@ -328,6 +329,37 @@ class TenderRequirementDecisionTest extends TestCase
             ])
             ->assertOk();
         $this->assertSame('Redigert av bidragsyter.', SavedNoticeAiRequirementWikiAnswer::query()->where('saved_notice_ai_requirement_id', $world['requirement']->id)->value('answer_text'));
+    }
+
+    /**
+     * A45: «Kommersiell eier» starts with no matrix rights, as every row of the matrix does for it.
+     * As the case's commercial owner they keep working on the case (and its status), and decide
+     * requirements once a System Owner ticks the role in the row — nothing is granted on deploy.
+     */
+    public function test_a_commercial_owner_of_the_case_works_on_it_and_decides_only_when_granted(): void
+    {
+        $world = $this->world();
+        $commercial = User::factory()->create([
+            'name' => 'Kommersiell',
+            'email' => 'kommersiell.'.Str::lower(Str::random(6)).'@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_COMMERCIAL_OWNER,
+            'customer_id' => $world['customer']->id,
+            'is_active' => true,
+        ]);
+        $world['notice']->forceFill(['opportunity_owner_user_id' => $commercial->id])->save();
+        $url = route('app.ai.requirements.review-status.update', ['savedNotice' => $world['notice']->id, 'requirement' => $world['requirement']->id]);
+
+        $this->assertTrue(app(SavedNoticeAccessService::class)->mayWork($commercial, $world['notice']->fresh()));
+        $this->actingAs($commercial)->patch($url, ['review_status' => 'confirmed'])->assertForbidden();
+        $this->assertSame(SavedNoticeAiRequirement::APPROVAL_STATUS_DRAFT, $world['requirement']->fresh()->approval_status);
+
+        $world['customer']->forceFill(['permission_settings' => array_merge($world['customer']->permission_settings ?? [], [
+            Customer::PERMISSION_DECIDE_BID_REQUIREMENTS => ['system_owner', 'bid_manager', 'contributor', User::BID_ROLE_COMMERCIAL_OWNER],
+        ])])->save();
+
+        $this->actingAs($commercial->fresh())->patch($url, ['review_status' => 'confirmed'])->assertRedirect();
+        $this->assertSame($commercial->id, (int) $world['requirement']->fresh()->approved_by_user_id);
     }
 
     private function assertRefused(array $world, User $actor, string $refusal, string $who): void
