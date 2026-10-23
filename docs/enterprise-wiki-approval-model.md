@@ -335,6 +335,30 @@ kontroll.
 **ÅPENT** Forholdet til dagens `rejected`-status, som i dag krever «Gjenåpne» tilbake til `draft`
 (jf. 2.7). Se 11.
 
+### Gjennomført i fase 0 for eksternt API — F1-regelen (2026-10-22/23)
+
+**FAKTA** Regelen er besluttet (B5) og implementert i
+[`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) steg 3, F1c og F1d:
+
+1. **En side som ligger til godkjenning, kan ikke redigeres.** «Rediger» og påstandsreparasjon er
+   deaktivert med begrunnelse, og tjenestene nekter med 409 (F1a). Testen er
+   `WikiEditLockedDuringReviewTest`.
+2. **For å endre noe trekker sideeieren siden tilbake** («Trekk tilbake»), eller kontrolløren sender
+   den tilbake. Tilbaketrekkingen registreres med aktør og tidspunkt, ugyldiggjør tildelingen, og
+   publisert versjon er uendret (`EnterpriseWikiPageWithdrawalTest`).
+3. **Bare tildelt kontrollør avgjør en versjon i review** (O6). En generell godkjenner kan ikke
+   avgjøre en versjon uten tildeling. Det gjelder også tekstendringer via påstandsbeslutninger (F1c,
+   `WikiClaimTextDecisionDuringReviewTest`).
+4. **Enhver manuell eller reparert versjon av en publisert side blir utkast** og kan sendes til
+   godkjenning (F1b, `afterManualEdit()`). En tekstendrende påstandsbeslutning på publisert versjon
+   lager en ny arbeidsversjon, og den publiserte versjonen er uendret (F1d,
+   `WikiClaimTextDecisionOnPublishedVersionTest`).
+5. **Godkjenning, publisering, påstandsbeslutninger, dokumenteiers beslutning og manuell redigering
+   er menneskeforbeholdt.** De går gjennom `EnterpriseWikiPageReviewService`,
+   `EnterpriseWikiClaimDecisionService` og `EnterpriseWikiDocumentOwnerApprovalService`, som kaller
+   `HumanDecisionGuard`. En integrasjon eller en forespørsel via API-et nektes, også i delegert modus.
+   `HumanDecisionContractTest` håndhever det.
+
 ---
 
 ## 6. BESLUTNING: Versjonering — kritisk invariant

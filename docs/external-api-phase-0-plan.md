@@ -43,7 +43,8 @@
 - A36 er gjennomført og godkjent 2026-10-23, og A37 og A38 er besluttet (§2j). Leverandøroppfølging er ferdig i fase 0.
 - Mål og KPI (steg 15) er gjennomført og godkjent 2026-10-23 (§2k). A39 og A40 er besluttet og gjennomført, og E2E-feilene i `app-navigation` er rettet (§2k). Mål og KPI er ferdig i fase 0.
 - Anbud (steg 16 og 17) er gjennomført og godkjent som hovedleveranse 2026-10-23 (§2l). A41–A45 er godkjent. P1–P5 er avklart, migrering 000008 er verifisert og rettet, og steg 18 er gjennomført samme dag (§2l, «Avklaring av P1–P5»). P2–P5 og steg 18 er godkjent, og P6 (A) og P7 (utsatt) er besluttet.
-- Steg 19 (`b14397a5`) og steg 20 (`134f51c3`) er gjennomført 2026-10-23, sammen med A2 (`8543c35d`), aktør ved lukking av aksjoner (`f08f84dc`), dokumenteiers avvisning i tjenesten (`64b4920f`) og kundeseparasjon i tre tjenester (`978649d2`, `45b61a83`, `f2f6870c`), se §2m. Det venter på vurdering. API-implementering startes ikke før det.
+- Steg 19 (`b14397a5`) og steg 20 (`134f51c3`) er gjennomført 2026-10-23, sammen med A2 (`8543c35d`), aktør ved lukking av aksjoner (`f08f84dc`), dokumenteiers avvisning i tjenesten (`64b4920f`) og kundeseparasjon i tre tjenester (`978649d2`, `45b61a83`, `f2f6870c`), se §2m. Steg 19–20 og sikkerhetsrettingene er godkjent 2026-10-23.
+- Steg 21 (sluttdokumentasjon) og steg 22 (merge-gate, K14) er gjennomført 2026-10-23, se §2n. Hele PHP-suiten: 8569 tester, 0 feilet, 3 hoppet over (Redis, fra før). K1–K14 er oppfylt. Fase 0 er ferdig, med restpunktene og sperrene i §2n. API-implementering startes ikke før det er godkjent.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -2178,7 +2179,7 @@ Gjennomgangstjenesten i Wiki nektet allerede, og det har nå en test.
 - **A10:** feilformatet i API-laget (fase 1).
 - **A23:** Kvalitets AI-forslag (`interpret`, `integrate`, `propose`) og «Spør Wiki» kontrollerer fortsatt tilgangen bare i kontrolleren. Det er ikke menneskelige beslutninger, men AI-kostnad og lesetilgang. Operasjonene bør ikke åpnes i API-et før tjenestene tar `User` og kontrollerer selv (§2g).
 - **A46:** se over.
-- **Steg 21–22:** dokumentasjon av at fase 0 er ferdig, og merge-gate med full PHP-suite. Ikke kjørt.
+- **Steg 21–22:** se §2n.
 
 #### Tester og kjøringer
 
@@ -2210,6 +2211,105 @@ Gjennomgangstjenesten i Wiki nektet allerede, og det har nå en test.
 - Lukking av en aksjon lagrer hvem som lukket, men det vises ikke (P7).
 - Alle arbeidsflyter for personer er uendret. Opplasting, «Start», «Dokumenteier», «Prøv igjen», dokumenteiers avvisning og påstandsbeslutninger gir samme resultat og samme meldinger.
 - En integrasjon eller en person fra en annen kunde nektes nå også når tjenestene kalles direkte.
+
+### 2n. Steg 21–22: sluttstatus og merge-gate (2026-10-23)
+
+Steg 19–20 og sikkerhetsrettingene i §2m er godkjent 2026-10-23.
+
+#### Modulene
+
+Alle ni moduler er gjennomgått. Hver beslutning går gjennom en tjeneste med vakt og egen tilgangsregel, og kundeseparasjonen er testet på tjenestenivå (§2m).
+
+| Modul | Steg | Se |
+|---|---|---|
+| Wiki | 1–8, A2, A4, F1a–F1d | §2, §2a, §2b, §2m |
+| Risiko | 9 | §2c |
+| Avvik og forbedringer | 10 | §2d |
+| Ledelsens gjennomgang | 11 | §2e |
+| Kvalitet | 12, A19–A22, A27–A29 | §2f, §2g, §2h |
+| Etterlevelse og revisjon | 13, A31–A35 | §2i |
+| Leverandøroppfølging | 14, A36–A38 | §2j |
+| Mål og KPI | 15, A39–A40 | §2k |
+| Anbud | 16–18, A41–A45, P1–P7 | §2l, §2m |
+
+I tillegg er tilgangsadministrasjonen (steg 18, F4) og beslutningskolonnene i databasen (steg 19) felles for alle modulene.
+
+#### Akseptansekriteriene (§7)
+
+| Krav | Status | Tester |
+|---|---|---|
+| K1 – vakt og tilgangsregel i tjenesten før skriving | Oppfylt | `HumanDecisionContractTest` (99 metoder, 40 beslutninger, nektet før første `INSERT`/`UPDATE`/`DELETE`), `HumanDecisionGuardTest` og tjenestetestene per modul i §2m |
+| K2 – ingen kontroller skriver en beslutningskolonne | Oppfylt | `HumanDecisionContractTest::test_no_controller_writes_a_decision_column` |
+| K3 – ingen valgfri aktør | Oppfylt. Unntaket er den todelte signaturen til `applyManualMixedBlockEdit`, som nekter når ingen aktør er oppgitt. Systemstiene (`startForDocument`, `attempt`) tar ingen beslutning. | `HumanDecisionContractTest::test_no_decision_method_takes_an_optional_actor`, `test_no_background_path_calls_a_decision_method` |
+| K4 – integrasjon og API-kanal nektes, også med System Owner-rolle og i delegert modus | Oppfylt | `HumanDecisionContractTest` (198 kall), `HumanDecisionGuardTest`, `HumanOnlyPermissionTest`, `TenderRequirementDecisionTest::test_the_api_channel_is_refused_even_for_a_person_who_holds_the_decision` |
+| K5 – databasen nekter integrasjonsaktører | Oppfylt for 44 kolonner i 36 tabeller | `HumanDecisionActorTriggerTest`. Sletting av kunden med beslutninger er lagt til i steg 22 (§6.1 punkt 5). |
+| K6 – F1a: ingen ny versjon under godkjenning, bare tildelt kontrollør avgjør, eieren kan trekke tilbake | Oppfylt | `WikiEditLockedDuringReviewTest`, `EnterpriseWikiPageWithdrawalTest`, `EnterpriseWikiReviewAssignmentTest`, `EnterpriseWikiPageReviewServiceAuthorityTest`, `WikiClaimTextDecisionDuringReviewTest` |
+| K7 – F1b: manuell eller reparert versjon av en publisert side blir utkast | Oppfylt | `EnterpriseWikiClaimContentRepairServiceTest::test_manual_mixed_block_edit_returns_a_published_page_to_draft_with_a_route_into_review`, `WikiPublishIsExplicitTest`, `WikiClaimTextDecisionOnPublishedVersionTest` (F1d) |
+| K8 – F3a: sletting av Wiki-side krever `wiki.delete` og eierskap | Oppfylt | `QualityItemTest::test_a_page_owner_without_wiki_delete_cannot_remove_produced_pages_through_quality`, `EnterpriseWikiPageDeletionTest`, `QualityWikiDeletionAtomicityTest` |
+| K9 – B3: risiko med historikk slettes aldri, kundesletting virker | Oppfylt | `RiskHistoryProtectionTest` (tjeneste, HTTP, SQL og kunde) |
+| K10 – B4: krav-godkjenning krever `decide_bid_requirements` og `canManage`, aktøren lagres | Oppfylt | `TenderRequirementDecisionTest` |
+| K11 – F4: tilgangsendringer gir en rad med aktør | Oppfylt | `AdministrativeChangeAuditTrailTest`, `CustomerAccessChangeTrailTest`, `TenderCaseAccessTrailTest` |
+| K12 – `wiki.knowledge.handoff` skilt fra `wiki.source.manage` | Oppfylt | `WikiKnowledgeHandoffPermissionMigrationTest`, `WikiKnowledgeHandoffTest`, `HumanOnlyPermissionTest` |
+| K13 – ingen endret oppførsel for personer utover K6–K12 | Oppfylt, med de godkjente produktbeslutningene (B10, B11, A34–A45, P2–P6) | Regresjonstestene i §6.3 er med i hele PHP-suiten. Se K14. |
+| K14 – merge-gate | Oppfylt (se under) | Hele PHP-suiten: 8566 bestått, 0 feilet, 3 hoppet over (Redis). JS 2130/2130. E2E 247/247 |
+
+#### Steg 22 – merge-gaten (K14)
+
+Kjørt 2026-10-23 på `b3ca3868` (koden er lik `f2f6870c`, pluss testen for kundesletting i K5).
+
+**PHP, hele suiten:**
+- Kommando: `docker exec procynia-app php -d memory_limit=-1 vendor/bin/phpunit` (`tests/Unit` og `tests/Feature`, PHP 8.4.23, PHPUnit 12.5.14, test-databasen migrert til og med 000014).
+- **8569 tester, 55 606 assertions: 8566 bestått, 0 feilet, 0 feil (errors), 3 hoppet over.** Ingen advarsler eller deprecations. Tid 41:03, toppminne 583 MB.
+- **De tre som er hoppet over** er alle i `RedisRuntimeContractTest`: `test_cache_and_queue_coexist_on_database_zero_without_colliding`, `test_a_real_job_pushed_to_redis_can_be_popped_back` og `test_session_can_be_driven_by_redis`. Årsak: «NOAUTH Authentication required». Testen kobler til den lokale Redis-en uten passord, mens Redis krever passord siden sikkerhetsherdingen (`d08fec2a`, 2026-08-30). Testene ville også skrevet til utviklingsstakkens Redis DB 0. Forholdet fantes før fase 0 og berøres ikke av den. Redis er dermed **ikke verifisert** i denne kjøringen.
+- **Første forsøk ble avbrutt og teller ikke.** `php artisan test` stoppet på `memory_limit=512M` etter 6888 beståtte tester og 0 feil (fatal error i `WikiRunDismissalTest`, som består alene med 15 av 15). `artisan test` sender ikke `-d memory_limit` videre til PHPUnit-prosessen. Det er samme forhold som i `docs/security/dependency-audit-2026-10.md`, og kjøringen over bruker samme kommando som den.
+
+**JS:** `npm run test:unit` i `node:22`: 2130 av 2130 bestått, kjørt på nytt 2026-10-23.
+
+**E2E:** Ikke kjørt på nytt. Kjøringen i §2m (46 filer, 247 av 247 bestått, uten skip og uten ustabile tester, i det isolerte miljøet med database fra migreringskjeden) ble gjort 2026-10-23 kl. 17:22, etter siste kodecommit `f2f6870c`. Etter den er bare dokumentasjon og én PHP-test endret. Ingen fil under `resources/`, `tests/e2e/` eller `tests/js/` er endret i steg 19–22. Kjøringen dekker Wiki (alle 21 spesifikasjoner), Anbud-AI og beslutningsreisene i alle modulene. Planen krever «relevante E2E-tester». De øvrige 73 av 119 spesifikasjonene ble kjørt i stegene for sine moduler (§2c–§2l).
+
+**K14 er oppfylt:** hele PHP-suiten er grønn uten feil. De tre som er hoppet over, har en kjent årsak fra før fase 0 og er rapportert som ikke verifisert.
+
+#### Ikke verifisert
+
+- **Ekte AI-kall.** Wiki-kjøring, anbudssvar, vurdering, uttrekk, Kvalitets AI-forslag og «Spør Wiki» er bare testet med falske AI-klienter. Ingen kjøring mot OpenAI er gjort i fase 0.
+- **Wiki-kjøring med køarbeidere.** Arbeiderne (`queue-*`) er ikke startet på nytt med den nye koden og har ikke kjørt en ekte Wiki-kjøring. Det må gjøres før koden brukes som bevis på en ekte kjøring.
+- **Redis mot den lokale stakken.** Tre tester i `RedisRuntimeContractTest` hoppes over (se K14).
+- **Produksjonsdata.** Datakontrollen i steg 19 er gjort på utviklingsdatabasen. Migreringene 000005–000014 er ikke kjørt i Azure.
+
+#### Sperrer for API-et
+
+Disse operasjonene skal **ikke** eksponeres i API fase 1, verken i applikasjonsmodus eller i delegert modus, før kravet er oppfylt:
+
+| Id | Operasjon | Krav før eksponering |
+|---|---|---|
+| A23 | Kvalitets AI-forslag (`interpret`, `integrate`, `propose`) og «Spør Wiki» (`EnterpriseWikiQuestionAnswerService::ask`) | Tjenesten tar `User` og kontrollerer selv tilgang, kunde og synlige statuser før det påløper AI-kostnad (§2g, anbefaling 1 og 3). En test per operasjon viser at ingen AI-kall går ut for en person uten tilgang eller fra en annen kunde. |
+| A46 | «Flytt til historikk» med utfall (vunnet, tapt, No-Go) | Skrivingen flyttes fra `NoticeController::archiveSavedNotice` til en tjeneste, og det besluttes om utfallet er en menneskelig beslutning. Er det det, får det en `HumanDecision` og står i `HumanDecisionContractTest`. |
+
+**Avgrensning for API fase 1:**
+- Første API-versjon er kontrollert lesetilgang. Lesing går gjennom de samme tilgangstjenestene som webgrensesnittet.
+- Ingen menneskelig beslutning kan utføres av en integrasjon. Det gjelder også delegert autentisering, der en klient handler på vegne av en innlogget person (B2). Det håndheves av vakten, kontrakttesten og databasetriggerne, ikke av API-rutene alene.
+- Ingen API-rute for godkjenning, publisering, faglig vurdering, aksept eller sletting (`external-api-architecture.md` §7.2 punkt 7).
+
+#### Tiltak i API fase 1
+
+- **A10 / A1:** API-laget oversetter `HumanDecisionRefused` og `AuthorizationException` (403), `RiskHistoryProtected` og andre 409-unntak, `ValidationException` (422) og Wikis `HttpException` til ett felles feilformat. Feilmeldingen skal ikke røpe modul, post eller person (B10).
+- **A9:** API-et går via tjenestene, ikke via webkontrollerne. En integrasjon nektes i kundefrontenden (403).
+- `role = integration` som brukbar kontotype, `User::scopeHumans()`, varselsperre og lisenstelling (§3).
+- **F3b:** opplasting i Kvalitet som starter avstemming i Wiki (§2g, punkt 5).
+
+#### Andre restpunkter (blokkerer ikke lesebasert API)
+
+| Id | Restpunkt |
+|---|---|
+| A5 | Endepunktene for dokumenteiers godkjenning og avvisning har ingen kaller i grensesnittet. De er herdet, og fjerning er et eget spørsmål. |
+| A16 | Tillegg i Ledelsens gjennomgang bruker samme nøkkel som ferdigstilling. Godtatt. |
+| A20 | Hendelsesloggen i Kvalitet har bare evidenshendelser. Status, eier, gjennomgang og sletting er anbefalt, ikke bygget (§2h). |
+| A37, A38 | Leverandørprofil og sletting av ubrukt dokumentasjon. Beholdt (§2j). Profilen må vurderes før et skrive-API. |
+| A45 | Kommersiell eier har ikke `decide_bid_requirements` som standard. Beholdt konvensjon. |
+| A47 | `canHandleClaim()` i dokumenteiertjenesten har ingen kundesjekk. Brukes bare til visning innen egen kunde. Beslutningen går gjennom `canHandle()`. |
+| P7 | Skjermbilder for tilgangs- og svarhistorikk er utsatt. Historikken lagres. |
+| Tender-AI | Det finnes ingen egen nøkkel for å starte AI-arbeid på en sak. Tjenestene krever `mayWork()` (A41). En egen nøkkel bør besluttes før et skrive-API for Anbud. |
+| KTF-4, KTF-5 | Mulig ustabilitet i E2E, under observasjon. Ikke sett i det isolerte miljøet. |
 
 ## 3. Avgrensning
 
@@ -2441,8 +2541,8 @@ Hver linje er én commit. Hver commit kjører sine målrettede tester før den l
 | 18 | `feat(security): audit trail for access changes` | **F4**: `customer_access_changes`. `AdministrativeChangeAuditTrailTest` skrives om til «sporet skrives». **Gjort** (`ef81bb0d`), og saksnivået i tillegg (`59c50a2c`), se §2l. | – |
 | 19 | `feat(security): reject integration actors in decision columns` | Triggerne i §4.8 og datakontrollen. **Gjort** (`b14397a5`), 44 kolonner, se §2m | 9–17 |
 | 20 | `test(security): HumanDecisionContractTest` | §6.1. **Gjort** (`134f51c3`), se §2m | 1–19 |
-| 21 | `docs: phase 0 complete` | Status i `external-api-architecture.md` §7/§14, `docs/operations/security.md`, `enterprise-wiki-approval-model.md` (F1-regelen) | 20 |
-| 22 | – | Merge-gate: full PHP-suite og relevante E2E-tester. Jeg spør før kjøring. | 21 |
+| 21 | `docs: phase 0 complete` | Status i `external-api-architecture.md` §7/§14, `docs/operations/security.md`, `enterprise-wiki-approval-model.md` (F1-regelen). **Gjort**, se §2n | 20 |
+| 22 | – | Merge-gate: full PHP-suite og relevante E2E-tester. **Kjørt** 2026-10-23 etter uttrykkelig instruks, se §2n | 21 |
 
 Steg 3, 4 og 8 kan tas først fordi de retter bekreftede feil. Steg 9–17 er uavhengige av hverandre og kan tas i valgfri rekkefølge. Anbefalt rekkefølge følger risiko.
 

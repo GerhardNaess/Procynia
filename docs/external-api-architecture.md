@@ -1,6 +1,6 @@
 # Eksternt Procynia-API – arkitektur og implementeringsplan
 
-**Status:** Forslag til arkitekturbeslutning. Ingenting i dette dokumentet er implementert. Produktbeslutningene for fase 0 er tatt 2026-10-22 (§7.3). Implementeringsplanen står i [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md).
+**Status:** Forslag til arkitekturbeslutning. Fase 0 (herding, ingen API) er gjennomført 2026-10-23 (§7.4, §14). Selve API-et, fase 1 og senere, er ikke implementert. Produktbeslutningene for fase 0 er tatt 2026-10-22 (§7.3). Implementeringsplanen og sluttstatusen står i [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §2n.
 **Dato:** 2026-10-22
 **Første konsument:** Siggjo (Advanias AI- og utviklingsmiljø: dashboards i PostgreSQL/Claude, agenter i Microsoft Foundry).
 **Mål:** Et generelt, tilgangsstyrt API som også kan brukes av andre integrasjoner.
@@ -327,6 +327,20 @@ Funn fra kartleggingen er verifisert med isolerte tester:
 
 Detaljer, tester og rettingsrekkefølge står i [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §2.
 
+### 7.4 Status etter fase 0 (2026-10-23)
+
+Tabellen i §7.1 beskriver utgangspunktet. Etter fase 0 gjelder:
+
+- **[FINNES]** `HumanDecision`, `HumanDecisionGuard` og `ActorChannel`. Vakten nekter null-aktør, inaktiv aktør, `role = integration` og enhver forespørsel med API-kanal, også i delegert modus.
+- **[FINNES]** Alle beslutningene i §7.1, i alle ni moduler, går gjennom en tjenestemetode som tar `User $actor`, kaller vakten og sin egen tilgangsregel før skriving, og kontrollerer at personen tilhører kunden. `HumanDecisionContractTest` fører registeret (99 metoder, 40 beslutninger) og kontrollerer at ingen kontroller skriver en beslutningskolonne, og at ingen jobb, kommando eller lytter kaller en beslutningsmetode.
+- **[FINNES]** `humanOnlyPermissions()` trekkes fra for integrasjoner i `CustomerPermissionService` og i områdetilgangen (Risiko, Avvik, Mål og KPI).
+- **[FINNES]** Triggeren `human_decision_actor` nekter integrasjonsaktører i 44 beslutningskolonner i 36 tabeller. Historikktabellene er beskyttet mot endring og sletting.
+- **[FINNES]** Revisjonsspor for tilgangsendringer (`customer_access_changes`), statusendringer i Anbud og dokumenteiers beslutninger.
+- **[MÅ ENDRES] før eksponering i API-et:**
+  - **A23:** Kvalitets AI-forslag og «Spør Wiki» kontrollerer tilgang bare i kontrolleren.
+  - **A46:** «Flytt til historikk» med utfall skrives i kontrolleren og er ikke en `HumanDecision`.
+- **[MÅ UTVIKLES] i fase 1:** felles feilformat for domeneunntakene (A10).
+
 ---
 
 ## 8. Første lese-API (punkt 6)
@@ -349,6 +363,8 @@ Detaljer, tester og rettingsrekkefølge står i [`external-api-phase-0-plan.md`]
 - Webruter legges til av webkontrolleren. API-svar inneholder stabile id-er i stedet for `url`.
 
 ### 8.3 Holdt utenfor v1
+
+**Besluttet 2026-10-23:** Første API-versjon er kontrollert lesetilgang. Ingen menneskelig beslutning kan utføres av en integrasjon, heller ikke ved delegert autentisering. Funksjonene i A23 (Kvalitets AI-forslag og «Spør Wiki») og A46 («Flytt til historikk» med utfall) eksponeres ikke før kravene i [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §2n er oppfylt.
 
 | Område | Begrunnelse |
 |---|---|
@@ -601,6 +617,8 @@ Hver fase avsluttes med målrettede tester. Full testsuite kjøres bare som mile
 
 ### Fase 0 – Beslutninger og herding (ingen API)
 
+**Status 2026-10-23:** Herdingen i punkt 3 er gjennomført, med `HumanDecisionContractTest`. Arkitekturbeslutningene i punkt 1 utenom listen over menneskeforbeholdte rettigheter, og personvernet i punkt 2, er fortsatt åpne (§15). Sluttstatus, restpunkter og sperrer: [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §2n.
+
 Detaljert plan, med rekkefølge, commits og akseptansekriterier: [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md). Punkt 1 «liste over menneskeforbeholdte rettigheter» er besluttet (§7.3).
 
 1. Arkitekturbeslutninger:
@@ -625,6 +643,8 @@ Detaljert plan, med rekkefølge, commits og akseptansekriterier: [`external-api-
    Tester: `HumanDecisionContractTest` og eksisterende modultester.
 
 ### Fase 1 – Identitet og API-ramme
+
+Forutsetning: A23 og A46 holdes utenfor til kravene i fase 0-planen §2n er oppfylt. A10 (feilformat) bygges her.
 
 1. `role = integration`, `User::scopeHumans()` med strukturell test, og menneske-sperren (§4.3, §4.4).
 2. `api_clients` og `api_client_customer_grants`. Filament for interne administratorer og **Kundemiljø → Integrasjoner** for System Owner.

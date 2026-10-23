@@ -12,6 +12,7 @@ Sist verifisert mot kode: commit `9b3730a`, august 2026.
 F-01 (innlogging) lukket og verifisert august 2026 — se §1.1, §1.2 og §9.1.
 F-02 (Stripe webhook) lukket og verifisert august 2026 — se §6.1.
 F-03 (Filament panelnivå-gate) lukket og verifisert august 2026 — se §2.1.
+Menneskeforbeholdte beslutninger i domenelaget (fase 0 for eksternt API) gjennomført oktober 2026 — se §2.2.
 
 ---
 
@@ -139,6 +140,8 @@ påstå HTTPS eller overstyre host, og at en trusted proxy fortsatt kan rapporte
 | Saksynlighet per bruker | **Implementert** | `SavedNoticeAccessService::applyVisibility()` |
 | Laravel Policies / Gates | **Mangler** | Ingen `app/Policies/`; autorisasjon er 106 `abort_unless()`-kall i controllere — se audit F-04 |
 | Filament-panelet gated på panelnivå | **Implementert** | `User::canAccessPanel()` krever aktiv bruker med administrativ rolle — se §2.1 |
+| Menneskeforbeholdte beslutninger håndheves i tjenestene | **Implementert** | `HumanDecisionGuard` og `HumanDecisionContractTest` — se §2.2 |
+| Integrasjonsaktører nektes i beslutningskolonnene | **Implementert** | Trigger `human_decision_actor`, `HumanDecisionActorTriggerTest` — se §2.2 |
 
 **Ansvar:** utviklingsteamet.
 **Verifisering:** alle 79 filer under `app/Filament/` ble gjennomgått i august 2026 — samtlige
@@ -211,6 +214,28 @@ lagene er enige i stedet for å motsi hverandre.
 **Verifiseres ved:** `tests/Feature/Filament/AdminPanelAccessGateTest.php` (17 tester) og
 `tests/Feature/Filament/CustomerAdminNavigationTest.php` (som også beviser at kundeadministratoren
 bruker kundeflaten i stedet).
+
+### 2.2 Menneskeforbeholdte beslutninger (fase 0 for eksternt API)
+
+**Status:** Implementert oktober 2026 på `feature/external-api-foundation`. Detaljer, beslutninger
+og restpunkter: [`docs/external-api-phase-0-plan.md`](../external-api-phase-0-plan.md) §2n.
+
+- Godkjenning, publisering, faglige vurderinger, aksept, ferdigstilling og sletting i alle ni moduler
+  går gjennom en tjenestemetode som tar `User $actor`, kaller `HumanDecisionGuard::assert()` og sin
+  egen tilgangsregel før skriving, og kontrollerer at personen tilhører kunden. Kontrollerens sjekk er
+  ikke lenger eneste lag.
+- Vakten nekter null-aktør, inaktiv aktør, `role = integration` og enhver forespørsel via API-kanalen,
+  også i delegert modus.
+- `CustomerPermissionCatalog::humanOnlyPermissions()` trekkes fra for integrasjoner, uansett roller.
+- Databasen nekter integrasjonsaktører i 44 beslutningskolonner (trigger `human_decision_actor`).
+  Historikktabellene for beslutninger er beskyttet mot endring og sletting med triggere.
+- `HumanDecisionContractTest` fører registeret over beslutningsmetodene og feiler hvis en ny metode
+  når vakten uten å stå i registeret, hvis en kontroller skriver en beslutningskolonne, eller hvis en
+  jobb, kommando eller lytter kaller en beslutningsmetode.
+
+**Ikke dekket ennå (sperret for API-et):** A23 (Kvalitets AI-forslag og «Spør Wiki» kontrollerer
+tilgang bare i kontrolleren) og A46 («Flytt til historikk» med utfall skrives i kontrolleren).
+Ingen API finnes; integrasjonskontoer kan ikke brukes ennå.
 
 ---
 
@@ -521,8 +546,8 @@ håndterer den formen — bærer URL-en credentialen i userinfo, advarer den i s
 | Sensitive data holdes ute av logg | **Implementert** | Ingen dokumenttekst, prompter eller nøkler i `Log::`-kall |
 | Driftshendelser logges | **Implementert** | Backup, kø-heartbeats, AI-feil |
 | Innloggingshendelser logges | **Implementert** | `authentication_succeeded`, `authentication_failed`, `authentication_throttled` — se §9.1 |
-| Revisjonsspor for administrative handlinger | **Delvis** | Enkelte handlinger logges; ingen samlet audit trail |
-| Revisjonsspor for sletting og godkjenning | **Delvis** | Wiki-godkjenning har sporbarhet; ikke generelt |
+| Revisjonsspor for administrative handlinger | **Delvis** | Tilgangsendringer (roller, QA, Wiki-godkjenner, kunderoller, rettigheter, Tilganger og tilgang per sak) i `customer_access_changes`. Andre administrative handlinger har ingen samlet audit trail |
+| Revisjonsspor for sletting og godkjenning | **Delvis** | Beslutninger lagrer aktør i alle moduler, og historikk med beslutninger slettes ikke (§2.2). Sletting av poster uten historikk logges ikke generelt |
 | Loggretensjon og tilgangskontroll | **Må verifiseres i produksjon** | — |
 
 ### 9.1 Sikkerhetshendelser fra innlogging
