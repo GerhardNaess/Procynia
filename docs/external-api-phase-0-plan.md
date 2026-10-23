@@ -24,6 +24,7 @@
   - sletting, koblinger og evidens i Kvalitet: A19/A28, A29, A20 (del) og A27 (`41a7fb78`, `b34dec1a`, `770eb2f0`), se §2h
   - A32 (`3ff1b8a0`) og A31 (`5d9c0d03`), se §2i
   - steg 13, Etterlevelse og revisjon (`3b66c55d`, `5228b3e3`, `7ccb97f3`), se §2i
+  - A34 (`db5699e1`) og A35 (`4ecae0ce`), se §2i
 - Wiki-delen av fase 0 og Risiko (steg 9) er gjennomført og godkjent 2026-10-22.
 - Avvik og forbedringer (steg 10) er gjennomført og godkjent 2026-10-22.
 - Ledelsens gjennomgang (steg 11) er gjennomført og godkjent 2026-10-22.
@@ -31,7 +32,8 @@
 - Oppfølgingen av A19–A23 (§2g) er gjennomført og godkjent 2026-10-22.
 - Reglene for sletting, koblinger og evidens i Kvalitet (§2h) er gjennomført og godkjent 2026-10-22.
 - A31 (behold, kontrollert) og A32 (versjonskontroll påkrevd) er gjennomført 2026-10-22, se §2i.
-- Etterlevelse og revisjon (steg 13) er gjennomført 2026-10-22 og venter på vurdering. Leverandøroppfølging startes ikke før det.
+- Etterlevelse og revisjon (steg 13) er gjennomført og godkjent 2026-10-22.
+- A34 og A35 er gjennomført 2026-10-23 og venter på vurdering (§2i). Leverandøroppfølging startes ikke før det.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -1147,15 +1149,97 @@ Et krav med historikk, med plass i et scope eller med funn kan ikke slettes, hel
     - Feilen var et tidsavbrudd i axe-analysen i nettleseren (`a11y-grc-compliance`, «Kravregister and Etterlevelsesvurdering»), ikke et svar fra serveren. Kjøringen tok 5,2 timer i stedet for rundt én, og maskinen gikk mest sannsynlig i dvale underveis.
     - Én av de fire som ble hoppet over, kjørte ikke fordi filen kjører i serie. Sporet ligger i `test-results/run-2026-10-22T21-41-20-469Z/`.
   - `a11y-grc-compliance` kjørt på nytt for seg to ganger, med `caffeinate`: 3 av 3 bestått begge gangene.
-  - **Resultat: 75 bestått, 0 feilet, 3 hoppet over.**
+  - **Resultat: 74 bestått, 0 feilet, 3 hoppet over, til sammen 77.**
+  - **Rettelse (2026-10-23):** Rapporten sa først «75 bestått». Én test i `a11y-grc-compliance` var da talt to ganger: den besto i første kjøring og igjen i den nye kjøringen. Riktig opptelling, per unik test:
+    - første kjøring: 72 bestått, 1 tidsavbrudd, 4 hoppet over (3 AI-tester og 1 som ikke kjørte fordi filen kjører i serie);
+    - den nye kjøringen gjorde de 2 som ikke hadde bestått, grønne;
+    - 72 + 2 = 74 bestått, pluss 3 hoppet over = 77.
   - **De 3 som hoppes over, er ikke bestått og ikke verifisert.** Alle trenger AI-tolkning, som E2E-miljøet med vilje ikke har: A11Y-013 i `a11y-grc-quality`, `quality-flow-clarify-sticks` og `quality-flow-describe-without-flow`.
 
-#### Nye funn som krever beslutning
+#### Nye funn som krevde beslutning (A34 og A35 er besluttet og gjennomført, se under)
 
 | # | Funn | Anbefaling |
 |---|---|---|
 | A34 | **Etter «Gjenåpne» kan en fullført revisjon endres uten spor.** Konklusjonen kan skrives om, og funn som ikke er overlevert, og kontrollhandlinger kan endres eller slettes. Gjenåpningen registreres med begrunnelse, men ikke hva som ble endret. Den forrige konklusjonen overskrives når revisjonen fullføres på nytt. | Behold «Gjenåpne» som rettemekanisme, men bevar automatisk det som var levert: <br>– lagre konklusjonen på statusendringen ved «Fullfør», slik at hver fullføring står i historikken; <br>– et funn som var med i en fullført revisjon, slettes ikke etter gjenåpning, men kan rettes. <br>Ingen nye statuser eller skjermbilder. Krever en liten migrering. |
 | A35 | **Relevans («Ikke relevant», og kontrollvalg i vedlegg A) er en del av erklæringen om anvendelse, men behandles som ordinær redigering.** Den krever bare `compliance.edit`, som ikke er menneskeforbeholdt. Det er ingen historikk: bare siste valg, av hvem og når, står på kravet. Et krav som settes til «Ikke relevant», faller ut av vurderinger og av automatisk utvalg til revisjoner. | Behandle «Ikke relevant» som en formell beslutning: vakten og en eksisterende nøkkel (`compliance.assess`), med uforanderlig historikk over valgene, etter samme mønster som statusendringer. Alternativ: behold som i dag og løs det med føringen for agenter nedenfor. |
+
+#### A34 og A35 – beslutninger og gjennomføring (2026-10-23)
+
+**Beslutning (2026-10-23):** A34 og A35 lukkes med en enkel, avgrenset løsning. Sikkerhet og historikk håndteres i bakgrunnen. Ingen nye skjermbilder, godkjenninger eller versjonssystem.
+
+| Commit | Innhold |
+|---|---|
+| `db5699e1` | A34: konklusjonen fra hver fullføring bevares. Funn fra en fullført revisjon slettes aldri. Retting av slike funn spores. |
+| `4ecae0ce` | A35: Relevans og kontrollvalg er en menneskelig beslutning, og hvert valg bevares i historikken. |
+
+**Kartlegging av historikktabellene:**
+
+| Behov | Eksisterende mekanisme | Valg |
+|---|---|---|
+| Konklusjonen ved hver fullføring | `compliance_audit_status_changes`, uforanderlig, én rad per «Fullfør» | **Gjenbrukt:** ny kolonne `conclusion` på raden. Triggeren dekker den. |
+| Funn fra en fullført revisjon | `compliance_audit_findings`. Bare overleverte funn var fryst. | **Ny trigger** på samme tabell. |
+| Tidligere verdier ved retting av funn | Ingen | **Ny tabell** `compliance_audit_finding_changes`, bare nye rader, etter samme mønster som de andre historikktabellene |
+| Relevansvalg | Bare siste valg på kravet (`applicability_set_by`/`_at`) | **Ny tabell** `compliance_requirement_applicability_changes`, etter samme mønster som `compliance_requirement_status_changes` |
+
+**A34 – revisjonshistorikk:**
+- **Konklusjon:** «Fullfør» skriver konklusjonen på sin egen statusendring. Den kan verken endres eller slettes. Revisjonen har fortsatt bare den gjeldende konklusjonen i feltet, slik den alltid har hatt.
+- **Gjenåpnet revisjon:** redigeres som før (tittel, konklusjon, scope, kontrollhandlinger og funn).
+- **Funn som var med i en fullført revisjon**, det vil si registrert senest da revisjonen ble fullført:
+  - kan ikke slettes, verken i tjenesten eller i databasen;
+  - kan rettes som før;
+  - hver retting som endrer noe, skriver de tidligere verdiene (type, tittel, beskrivelse og koblinger), aktør og tidspunkt.
+- **Funn registrert etter gjenåpningen:** arbeides med som før, uten historikk, og kan slettes.
+- **Tilgang:** retting er revisjonsarbeid. Vakten og `compliance.audit` i revisjonens kunde gjelder som før (steg 13).
+- **Ikke med (bevisst avgrenset):** kontrollhandlinger og revisjonsfeltene ellers (tittel, formål, datoer) får ingen egen historikk.
+
+**A35 – Relevans og kontrollvalg:**
+- Ny `HumanDecision::COMPLIANCE_APPLICABILITY`. `ComplianceApplicabilityService::set()` kaller vakten først:
+  - ingen integrasjon og ingen API-kall, heller ikke i delegert modus;
+  - deretter `compliance.edit` i kravets kunde, med modulen.
+- **Nøkkelen er uendret** (`compliance.edit`), så hvem som kan bestemme, og skjermbildet, er som før. Beslutningen er menneskeforbeholdt selv om nøkkelen ikke er det, på samme måte som `QUALITY_FLOW_ADOPT`. `HumanDecisionGuardTest` tillater disse to.
+- **Historikk:** hvert valg som endrer relevans eller begrunnelse, skrives med fra, til, begrunnelse, aktør og tidspunkt, i samme transaksjon. Startpunktet fra biblioteket ved aktivering er ikke en beslutning og gir ingen rad.
+- **Sletting:** et krav med relevanshistorikk slettes ikke (`isDeletable()`, og triggeren nekter kaskaden). Det settes som utgått.
+
+**Endringer i brukeropplevelsen:**
+- **Den eneste synlige endringen:** På et funn som var med i en fullført revisjon, tilbys ikke «Slett» lenger etter at revisjonen er gjenåpnet. «Rediger» står som før. Et forsøk på å slette likevel får meldingen «Funnet var med i en fullført revisjon og kan ikke slettes. Du kan rette det.»
+- Ellers er alt uendret: skjemaer, knapper, meldinger og hvem som kan gjøre hva. Historikken lagres i bakgrunnen og vises ikke i et nytt skjermbilde.
+
+**Migreringer:**
+- `2026_10_23_000001_keep_compliance_audit_history` (A34):
+  - ny kolonne `conclusion` med tilbakefylling;
+  - triggeren for statusendringer er utvidet;
+  - ny trigger `compliance_audit_findings_keep_completed`;
+  - ny tabell `compliance_audit_finding_changes` med trigger.
+- `2026_10_23_000002_keep_compliance_relevance_history` (A35): ny tabell `compliance_requirement_applicability_changes` med trigger.
+- **Tilbakefylling:** Den siste fullføringen av revisjoner som er fullført nå, får revisjonens konklusjon. En fullført revisjon kan ikke redigeres, så det er konklusjonen den ble fullført med. Tidligere fullføringer av gjenåpnede revisjoner ble aldri lagret og står tomme.
+- **Utviklingsdatabasen:** 1 revisjon, ingen fullført og ingen funn. Ingen rader endret.
+- **Kjørt** på utviklings-, test- og E2E-databasen. Begge migreringene er rullet tilbake og migrert på nytt i testdatabasen.
+- E2E-fiksturen slår av de nye triggerne i sin egen transaksjon når den rydder.
+
+**Tester:**
+- `ComplianceAuditHistoryTest` (5):
+  - hver konklusjon bevares, og den gjenåpnede revisjonen redigeres som før;
+  - et funn fra en fullført revisjon kan ikke slettes (side, HTTP, tjeneste og SQL), men kan rettes, med historikk;
+  - en lagring uten endring gir ingen rad, og historikken kan ikke endres eller slettes;
+  - et funn registrert etter gjenåpning arbeides med som før;
+  - integrasjon, API-kanal, en annen kunde og en leser nektes, og ingenting skrives;
+  - kundesletting virker.
+- `ComplianceRelevanceDecisionTest` (5):
+  - hvert relevansvalg og kontrollvalg (ISO 9001 og vedlegg A i ISO/IEC 27001) bevares med aktør og tidspunkt, og samme valg på nytt gir ingen rad;
+  - integrasjon og API-kanal nektes;
+  - en leser, en annen kundes redigerer og System Owner, og en kunde uten modul nektes;
+  - historikken kan ikke endres eller slettes, og et krav med historikk slettes ikke;
+  - kundesletting virker.
+- **Mutasjonssjekket, alle fanges:**
+  - A34: konklusjonen på statusendringen, sletteregelen, at historikk skrives bare ved endring og bare for funn fra en fullført revisjon, `can_delete` og tidsregelen;
+  - A35: vakten, tilgangsregelen, at historikk skrives bare ved endring, og `isDeletable()`;
+  - databasen: hver av de fire triggerne slått av, og konklusjonskolonnen fjernet fra triggerfunksjonen.
+
+**Kjøringer (2026-10-23):**
+- **PHP:** alle testfiler for Etterlevelse og revisjon, filene som berører modulen fra andre moduler, og `tests/Unit/Services/Security`: 393 av 393 bestått.
+- **JS:** 2130 av 2130 bestått. Frontendbygget og Pint er rene.
+- **E2E i det isolerte miljøet:** alle spesifikasjoner for Etterlevelse og revisjon, `a11y-grc-compliance`, `knowledge-handoff`, `my-tasks-governance` og `management-review` (16 filer, 26 tester). **26 bestått, 0 feilet, 0 hoppet over.** Telt fra Playwrights JSON-rapport, med `caffeinate`.
+- **AI-tester som ikke er kjørt:** A11Y-013 i `a11y-grc-quality`, `quality-flow-clarify-sticks` og `quality-flow-describe-without-flow`. De er uendret siden steg 13, fordi A34 og A35 ikke berører Kvalitet, og hoppes over i miljøet uten AI. De er ikke verifisert.
 
 **Lav, ikke rettet:** Endring av scope leser revisjonens status uten lås. En endring som kommer samtidig med «Fullfør», kan legge til eller fjerne et krav i scope rett etter fullføringen. Risikoen er liten, og det gir ikke tap av historikk.
 
@@ -1165,7 +1249,7 @@ Et krav med historikk, med plass i et scope eller med funn kan ikke slettes, hel
 - Gjenstår før fase 1:
   - A10 (feilformat);
   - steg 19 (aktørtriggere for `compliance_assessments.assessed_by_user_id` og `compliance_audit_status_changes.changed_by_user_id`);
-  - A34 og A35 (beslutning).
+  - A34 og A35 er gjennomført (2026-10-23).
 - **Føring (anbefalt, som for de andre modulene):**
   - En AI-agent får ikke `compliance.edit` som standard.
   - Forslag til krav og vurderinger kan senere komme gjennom avgrensede API-operasjoner. De blir registrert først når en person tar dem i bruk.
