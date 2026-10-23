@@ -27,8 +27,8 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
  * A reopening clears closed_* (closing_note included) because they describe a closing that no
  * longer stands; the closing itself, note and all, stays in its history row.
  *
- * Authorization (objective.edit in the objective's area) is the caller's. This only guards the
- * transition itself.
+ * Closing and reopening are register work on objective.edit (not human-only), checked here on the
+ * objective as it stands under the lock: the key in its area, the actor's customer, the module.
  *
  * Slett mål is a person's decision (phase 0 step 15): HumanDecisionGuard, then objective.delete in
  * the objective's area (ObjectiveAccessService), then the history rule — an objective whose KPIs
@@ -51,6 +51,8 @@ class ObjectiveLifecycleService
 
         return DB::transaction(function () use ($objective, $actor, $outcome, $note): Objective {
             $locked = $this->lock($objective);
+
+            $this->access->authorize($actor, CustomerPermissionCatalog::OBJECTIVE_EDIT, $locked);
 
             if (! $locked->isActive()) {
                 throw ValidationException::withMessages([
@@ -94,6 +96,8 @@ class ObjectiveLifecycleService
 
         return DB::transaction(function () use ($objective, $actor, $reason): Objective {
             $locked = $this->lock($objective);
+
+            $this->access->authorize($actor, CustomerPermissionCatalog::OBJECTIVE_EDIT, $locked);
 
             if ($locked->isActive()) {
                 throw ValidationException::withMessages([

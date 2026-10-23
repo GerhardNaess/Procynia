@@ -5,8 +5,11 @@ namespace App\Services\Objectives;
 use App\Models\Kpi;
 use App\Models\KpiActivity;
 use App\Models\KpiProcess;
+use App\Models\Objective;
 use App\Models\User;
 use App\Services\Quality\QualityProcessContextReader;
+use App\Support\CustomerPermissionCatalog;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -25,6 +28,10 @@ use Illuminate\Validation\ValidationException;
  * read access (QualityProcessContextReader::canRead), which objective.* never implies. Without it
  * the page says nothing about context at all — not even that there is some.
  *
+ * syncProcess() checks both itself, for every entry point (phase 0 step 15): objective.edit on the
+ * objective as it stands under the lock (ObjectiveAccessService: key, customer, module), Kvalitet
+ * read, and the objective and KPI active. Register work — not a human decision.
+ *
  * Kvalitet never calls into this service. Links to a step that leaves the flow are removed by
  * QualityActivityLinkCleanup; a removed process takes its links along in the database.
  */
@@ -32,6 +39,7 @@ class KpiQualityContextService
 {
     public function __construct(
         private readonly QualityProcessContextReader $quality,
+        private readonly ObjectiveAccessService $access,
     ) {}
 
     public function canReadQuality(User $user): bool
@@ -76,6 +84,31 @@ class KpiQualityContextService
      * @param  list<string>  $activityKeys
      */
     public function syncProcess(User $user, Kpi $kpi, int $processId, bool $wholeProcess, array $activityKeys): void
+    {
+        DB::transaction(function () use ($user, $kpi, $processId, $wholeProcess, $activityKeys): void {
+            $objective = Objective::query()->whereKey($kpi->objective_id)->sharedLock()->firstOrFail();
+            $locked = Kpi::query()->whereKey($kpi->id)->lockForUpdate()->firstOrFail();
+
+            $this->access->authorize($user, CustomerPermissionCatalog::OBJECTIVE_EDIT, $objective);
+
+            if (! $this->canReadQuality($user)) {
+                throw new AuthorizationException('Linking a KPI to Kvalitet takes Kvalitet read access.');
+            }
+
+            if (! $objective->isActive() || ! $locked->isActive()) {
+                throw ValidationException::withMessages([
+                    'quality_process_id' => __($objective->isActive()
+                        ? 'procynia.objectives.kpi.validation.reopen_before_edit'
+                        : 'procynia.objectives.kpi.validation.objective_closed'),
+                ]);
+            }
+
+            $this->sync($user, $locked, $processId, $wholeProcess, $activityKeys);
+        });
+    }
+
+    /** @param list<string> $activityKeys */
+    private function sync(User $user, Kpi $kpi, int $processId, bool $wholeProcess, array $activityKeys): void
     {
         $customerId = (int) $kpi->customer_id;
         $process = $this->quality->findProcess($customerId, $processId);

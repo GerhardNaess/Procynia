@@ -14,6 +14,7 @@ use App\Services\Objectives\KpiQualityContextService;
 use App\Services\Objectives\ObjectiveAccessService;
 use App\Services\Objectives\ObjectiveAttentionService;
 use App\Services\Objectives\ObjectiveLifecycleService;
+use App\Services\Objectives\ObjectiveRegistration;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use App\Support\Objectives\KpiPresenter;
@@ -22,7 +23,6 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -44,6 +44,7 @@ class ObjectiveController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly ObjectiveAccessService $access,
         private readonly ObjectiveLifecycleService $lifecycle,
+        private readonly ObjectiveRegistration $registration,
         private readonly KpiPresenter $kpiPresenter,
         private readonly KpiMeasurementResolver $measurementResolver,
         private readonly KpiQualityContextService $qualityContext,
@@ -196,24 +197,9 @@ class ObjectiveController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $user = $this->authorizedUser();
-        $validated = $this->validated($request);
-        $areaId = (int) $validated['business_area_id'];
 
-        // The area is the scope the new objective will live in, so the user must be allowed to
-        // edit in *that* area — not merely hold objective.edit somewhere.
-        $this->authorizeArea($user, $areaId);
-        $this->guardOwner($user, (int) $validated['owner_user_id'], $areaId);
-
-        $objective = Objective::query()->create([
-            'customer_id' => (int) $user->customer_id,
-            'business_area_id' => $areaId,
-            'title' => trim($validated['title']),
-            'description' => $this->normalizedText($validated['description'] ?? null),
-            'owner_user_id' => (int) $validated['owner_user_id'],
-            'target_date' => $validated['target_date'] ?? null,
-            'created_by' => $user->id,
-            'updated_by' => $user->id,
-        ]);
+        // The area, the owner and the module are the service's to check, for every entry point.
+        $objective = $this->registration->create($user, $this->validated($request));
 
         return redirect()
             ->route('app.objectives.show', ['objectiveId' => $objective->id])
@@ -232,31 +218,9 @@ class ObjectiveController extends Controller
             return back()->with('error', __('procynia.objectives.validation.reopen_before_edit'));
         }
 
-        $validated = $this->validated($request);
-        $targetAreaId = (int) $validated['business_area_id'];
-
-        // Moving an objective changes who can see it, so it takes edit authority on both sides:
-        // the old area above, the new one here.
-        if ($targetAreaId !== (int) $objective->business_area_id) {
-            $this->authorizeArea($user, $targetAreaId);
-        }
-
-        // Against the area the objective will be in, so a move cannot keep an owner who would no
-        // longer be able to see it.
-        $this->guardOwner($user, (int) $validated['owner_user_id'], $targetAreaId);
-
-        if ($targetAreaId !== (int) $objective->business_area_id) {
-            $this->guardKpiOwners($objective, $targetAreaId);
-        }
-
-        $objective->fill([
-            'business_area_id' => $targetAreaId,
-            'title' => trim($validated['title']),
-            'description' => $this->normalizedText($validated['description'] ?? null),
-            'owner_user_id' => (int) $validated['owner_user_id'],
-            'target_date' => $validated['target_date'] ?? null,
-            'updated_by' => $user->id,
-        ])->save();
+        // A move takes edit authority in the new area too, and owners who can see it there:
+        // ObjectiveRegistration checks both again under the row lock.
+        $objective = $this->registration->update($user, $objective, $this->validated($request));
 
         // After a move the user may no longer see the objective; the overview is the only safe
         // place to land in that case.
@@ -338,58 +302,6 @@ class ObjectiveController extends Controller
     }
 
     /**
-     * A 422 rather than a 403 or 404: the area id came from a form, and whether it names an area of
-     * another tenant, an area outside the user's scope or nothing at all, the answer is the same.
-     */
-    private function authorizeArea(User $user, int $areaId): void
-    {
-        if (! $this->access->canInArea($user, CustomerPermissionCatalog::OBJECTIVE_EDIT, (int) $user->customer_id, $areaId)) {
-            throw ValidationException::withMessages([
-                'business_area_id' => __('procynia.objectives.validation.area_not_allowed'),
-            ]);
-        }
-    }
-
-    /**
-     * The owner must be an active person in the same customer who can read objectives in the
-     * given area. An owner who cannot open the objective they own is not an owner.
-     */
-    private function guardOwner(User $user, int $ownerId, int $areaId): void
-    {
-        $owner = User::query()
-            ->where('customer_id', (int) $user->customer_id)
-            ->where('is_active', true)
-            ->find($ownerId);
-
-        if ($owner === null
-            || ! $this->access->canInArea($owner, CustomerPermissionCatalog::OBJECTIVE_VIEW, (int) $user->customer_id, $areaId)) {
-            throw ValidationException::withMessages([
-                'owner_user_id' => __('procynia.objectives.validation.owner_not_allowed'),
-            ]);
-        }
-    }
-
-    /**
-     * A KPI takes its fagområde from its objective, so moving the objective moves its KPIs. Their
-     * own owners must be able to read objectives in the new area too, or the move is refused —
-     * the same rule as for the objective's owner, never a silent loss of access.
-     */
-    private function guardKpiOwners(Objective $objective, int $areaId): void
-    {
-        $owners = User::query()
-            ->whereIn('id', $objective->kpis()->whereNotNull('owner_user_id')->select('owner_user_id'))
-            ->get();
-
-        foreach ($owners as $owner) {
-            if (! $this->access->canInArea($owner, CustomerPermissionCatalog::OBJECTIVE_VIEW, (int) $objective->customer_id, $areaId)) {
-                throw ValidationException::withMessages([
-                    'business_area_id' => __('procynia.objectives.validation.kpi_owner_not_allowed'),
-                ]);
-            }
-        }
-    }
-
-    /**
      * The same fields for Nytt mål and Rediger. Status is not among them: an objective is created
      * active and leaves that state only by being closed.
      *
@@ -457,7 +369,7 @@ class ObjectiveController extends Controller
     /**
      * People who could own an objective, each with the areas — among those offered to the acting
      * user — in which they can read objectives. The page narrows the list to the chosen area; the
-     * server checks the same again in guardOwner(). Areas the acting user cannot reach are never
+     * server checks the same again in ObjectiveRegistration. Areas the acting user cannot reach are never
      * named here.
      *
      * @param  Collection<int, BusinessArea>  $offeredAreas
@@ -486,12 +398,5 @@ class ObjectiveController extends Controller
             ->filter(fn (array $option): bool => $option['area_ids'] !== [])
             ->values()
             ->all();
-    }
-
-    private function normalizedText(?string $value): ?string
-    {
-        $text = trim((string) $value);
-
-        return $text !== '' ? $text : null;
     }
 }

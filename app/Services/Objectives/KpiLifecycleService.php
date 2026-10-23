@@ -23,7 +23,9 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
  * measurements exist, whether a period's measurement is missing depends on whether the KPI was
  * active then — which only the history can tell after a reopening has overwritten the status.
  *
- * Authorization (objective.edit in the objective's area, objective active) is the caller's.
+ * Retiring and reopening are register work on objective.edit (not human-only), checked here: the
+ * key in the objective's area as it stands now, the actor's customer, the module — and the objective
+ * active, since a closed objective's KPIs are left as they were until it is reopened.
  *
  * Slett KPI is a person's decision (phase 0 step 15): HumanDecisionGuard, then objective.delete in
  * the objective's area (ObjectiveAccessService), then the history rule — a KPI with a measurement,
@@ -41,7 +43,7 @@ class KpiLifecycleService
         $note = $this->normalized($note);
 
         return DB::transaction(function () use ($kpi, $actor, $note): Kpi {
-            $locked = $this->lock($kpi);
+            $locked = $this->lockChangeable($kpi, $actor, 'note');
 
             if (! $locked->isActive()) {
                 throw ValidationException::withMessages([
@@ -66,7 +68,7 @@ class KpiLifecycleService
         }
 
         return DB::transaction(function () use ($kpi, $actor, $reason): Kpi {
-            $locked = $this->lock($kpi);
+            $locked = $this->lockChangeable($kpi, $actor, 'reason');
 
             if ($locked->isActive()) {
                 throw ValidationException::withMessages([
@@ -116,6 +118,23 @@ class KpiLifecycleService
             'status' => $toStatus,
             'updated_by' => (int) $actor->id,
         ])->save();
+    }
+
+    /** The KPI, locked, when the actor may change it (objective.edit) and its objective is active. */
+    private function lockChangeable(Kpi $kpi, User $actor, string $errorKey): Kpi
+    {
+        $objective = Objective::query()->whereKey($kpi->objective_id)->sharedLock()->firstOrFail();
+        $locked = $this->lock($kpi);
+
+        $this->access->authorize($actor, CustomerPermissionCatalog::OBJECTIVE_EDIT, $objective);
+
+        if (! $objective->isActive()) {
+            throw ValidationException::withMessages([
+                $errorKey => __('procynia.objectives.kpi.validation.objective_closed'),
+            ]);
+        }
+
+        return $locked;
     }
 
     private function lock(Kpi $kpi): Kpi

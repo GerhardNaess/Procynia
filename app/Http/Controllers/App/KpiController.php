@@ -10,12 +10,12 @@ use App\Models\User;
 use App\Services\Objectives\KpiGrowth;
 use App\Services\Objectives\KpiLifecycleService;
 use App\Services\Objectives\KpiQualityContextService;
+use App\Services\Objectives\KpiRegistration;
 use App\Services\Objectives\KpiTarget;
 use App\Services\Objectives\KpiUnitRules;
 use App\Services\Objectives\ObjectiveAccessService;
 use App\Support\CalendarDate;
 use App\Support\CustomerContext;
-use App\Support\CustomerPermissionCatalog;
 use App\Support\Objectives\KpiPresenter;
 use App\Support\Objectives\ObjectiveValidationMessages;
 use Brick\Math\BigDecimal;
@@ -53,6 +53,7 @@ class KpiController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly ObjectiveAccessService $access,
         private readonly KpiLifecycleService $lifecycle,
+        private readonly KpiRegistration $registration,
         private readonly KpiPresenter $presenter,
         private readonly KpiQualityContextService $qualityContext,
     ) {}
@@ -118,14 +119,7 @@ class KpiController extends Controller
             return back()->with('error', __('procynia.objectives.kpi.validation.objective_closed'));
         }
 
-        $attributes = $this->validated($request, $objective);
-
-        $kpi = Kpi::query()->create($attributes + [
-            'customer_id' => (int) $objective->customer_id,
-            'objective_id' => (int) $objective->id,
-            'created_by' => $user->id,
-            'updated_by' => $user->id,
-        ]);
+        $kpi = $this->registration->create($user, $objective, $this->validated($request, $objective));
 
         return redirect()
             ->route('app.objectives.kpis.show', ['objectiveId' => $objective->id, 'kpiId' => $kpi->id])
@@ -149,9 +143,9 @@ class KpiController extends Controller
         }
 
         $attributes = $this->validated($request, $objective, $kpi);
-        $this->guardUnitDefinition($kpi, $attributes);
+        $this->registration->guardUnitDefinition($kpi, $attributes);
 
-        $kpi->fill($attributes + ['updated_by' => $user->id])->save();
+        $this->registration->update($user, $kpi, $attributes);
 
         return back()->with('success', __('procynia.objectives.kpi.flash.updated'));
     }
@@ -337,7 +331,7 @@ class KpiController extends Controller
 
         $ownerId = isset($validated['owner_user_id']) ? (int) $validated['owner_user_id'] : null;
 
-        if ($ownerId !== null && ! $this->ownerAllowed($ownerId, $objective)) {
+        if ($ownerId !== null && ! $this->registration->ownerAllowed($ownerId, $objective)) {
             $errors['owner_user_id'] = __('procynia.objectives.kpi.validation.owner_not_allowed');
         }
 
@@ -437,44 +431,6 @@ class KpiController extends Controller
         }
 
         return $result;
-    }
-
-    /**
-     * Once a measurement exists, what its numbers mean — unit, unit label, currency — is fixed, or
-     * the history would change meaning. Prosentandel and prosentvis endring may still be swapped:
-     * both are written in per cent. The target and tolerance stay editable: each measurement
-     * keeps a snapshot of the ones it was registered against. The model refuses the same.
-     *
-     * @param  array<string, mixed>  $attributes
-     */
-    private function guardUnitDefinition(Kpi $kpi, array $attributes): void
-    {
-        $changed = array_filter(
-            Kpi::UNIT_DEFINITION,
-            fn (string $field): bool => ($attributes[$field] ?? null) !== $kpi->getAttribute($field),
-        );
-
-        if ($changed !== [] && $kpi->unitDefinitionChanges($attributes) && $kpi->hasMeasurementHistory()) {
-            throw ValidationException::withMessages(array_fill_keys(
-                array_values($changed),
-                __('procynia.objectives.kpi.validation.unit_locked'),
-            ));
-        }
-    }
-
-    /**
-     * A KPI owner is an active person of the objective's customer who can read objectives in its
-     * area. An owner who cannot open the KPI they own is not an owner.
-     */
-    private function ownerAllowed(int $ownerId, Objective $objective): bool
-    {
-        $owner = User::query()
-            ->where('customer_id', (int) $objective->customer_id)
-            ->where('is_active', true)
-            ->find($ownerId);
-
-        return $owner !== null
-            && $this->access->canInArea($owner, CustomerPermissionCatalog::OBJECTIVE_VIEW, (int) $objective->customer_id, (int) $objective->business_area_id);
     }
 
     private function normalizedText(?string $value): ?string
