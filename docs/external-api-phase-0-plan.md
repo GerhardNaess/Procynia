@@ -22,12 +22,16 @@
   - steg 12, Kvalitet (`f958fe57`, `686dba14`, `60fd0d16`), se §2f
   - oppfølging av A19–A23 og JS-grunnlaget (`ef1e0ee6`, `67e3cf2b`, `37f84480`, `7ca3b7a5`, `03428309`), se §2g
   - sletting, koblinger og evidens i Kvalitet: A19/A28, A29, A20 (del) og A27 (`41a7fb78`, `b34dec1a`, `770eb2f0`), se §2h
+  - A32 (`3ff1b8a0`) og A31 (`5d9c0d03`), se §2i
+  - steg 13, Etterlevelse og revisjon (`3b66c55d`, `5228b3e3`, `7ccb97f3`), se §2i
 - Wiki-delen av fase 0 og Risiko (steg 9) er gjennomført og godkjent 2026-10-22.
 - Avvik og forbedringer (steg 10) er gjennomført og godkjent 2026-10-22.
 - Ledelsens gjennomgang (steg 11) er gjennomført og godkjent 2026-10-22.
 - Kvalitet (steg 12) er gjennomført og godkjent 2026-10-22.
 - Oppfølgingen av A19–A23 (§2g) er gjennomført og godkjent 2026-10-22.
-- Reglene for sletting, koblinger og evidens i Kvalitet (§2h) er gjennomført 2026-10-22 og venter på vurdering. Etterlevelse og revisjon startes ikke før det.
+- Reglene for sletting, koblinger og evidens i Kvalitet (§2h) er gjennomført og godkjent 2026-10-22.
+- A31 (behold, kontrollert) og A32 (versjonskontroll påkrevd) er gjennomført 2026-10-22, se §2i.
+- Etterlevelse og revisjon (steg 13) er gjennomført 2026-10-22 og venter på vurdering. Leverandøroppfølging startes ikke før det.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -1003,9 +1007,169 @@ Uendret: dokumentert i §2g for senere arbeid.
 
 | # | Funn | Vurdering |
 |---|---|---|
-| A31 | Når et steg fjernes fra flyten, eller flyten slettes eller forkastes, fjernes aktivitetskoblingene fra Risiko, KPI og Avvik til det steget (`QualityActivityLinkCleanup`). Det er en eksisterende, bevisst regel (en kobling til en aktivitet som ikke finnes, peker ikke på noe), men den går ikke via sletteregelen i B10. | **Ikke endret.** Kvalitet-redigering ville blitt sperret av skjulte koblinger hvis regelen ble utvidet til steg. Bør besluttes: behold, eller behold koblingen med «aktiviteten finnes ikke lenger» (slik plasseringer av kontroller allerede gjør). |
-| A32 | `base_hash` er valgfri ved manuell lagring (A27). | Påkrevd før integrasjoner kan skrive flyt. |
+| A31 | Når et steg fjernes fra flyten, eller flyten slettes eller forkastes, fjernes aktivitetskoblingene fra Risiko, KPI og Avvik til det steget (`QualityActivityLinkCleanup`). Det er en eksisterende, bevisst regel (en kobling til en aktivitet som ikke finnes, peker ikke på noe), men den går ikke via sletteregelen i B10. | **Besluttet 2026-10-22: behold.** Forutsetningene er kontrollert og testet (§2i, `5d9c0d03`). |
+| A32 | `base_hash` er valgfri ved manuell lagring (A27). | **Rettet** (§2i, `3ff1b8a0`): påkrevd for all lagring av flyt. |
 | A33 | Evidens kan ikke redigeres (tittel eller beskrivelse). En feilregistrering rettes med «Fjern» og ny registrering. | Godtatt. Ingen begrunnelsesfelt (forenkling). |
+
+### 2i. Etterlevelse og revisjon (steg 13) – kartlegging og gjennomføring (2026-10-22)
+
+**Beslutninger før steget (2026-10-22):**
+- **A31 – koblinger ved fjerning av prosess-steg:** Dagens oppførsel beholdes. Forutsetningene er kontrollert og holder (se under).
+- **A32 – versjonskontroll:** Versjonskontroll er obligatorisk for alle operasjoner som endrer prosessflyten, også gjennom fremtidige API-er. Den var avgrenset og er gjennomført (`3ff1b8a0`).
+
+#### A31 – kontroll av forutsetningene (`5d9c0d03`)
+
+| Forutsetning | Resultat |
+|---|---|
+| Risikoen, KPI-en og avvikssaken slettes ikke | Holder. `QualityActivityLinkCleanup` sletter bare radene i `risk_activities`, `kpi_activities` og `improvement_case_activities`. |
+| Godkjente prosessversjoner bevares | Holder. Opprydningen leser bare arbeidsversjonen. `quality_process_revisions` røres ikke, og den godkjente versjonen inneholder fortsatt steget. |
+| Nødvendig beslutningshistorikk bevares | Holder. Ingen historikktabell peker på koblingsradene: risikovurderinger, aksepter, KPI-målinger og statusendringer i Avvik står uendret. |
+
+- **Test:** `QualityCrossModuleLinkTest::test_removing_a_step_keeps_the_records_their_history_and_the_approved_version`. Testen bruker en godkjent prosess, en risiko med vurdering og aksept, en KPI med måling og en sak med statusendring. Etter at steget er fjernet, er bare koblingene borte.
+- De eksisterende testene i Risiko, KPI og Avvik (`…QualityContext…Test`) dekket allerede at posten står.
+- **Merknad, ikke endret:** Når et steg fjernes bare fra arbeidsversjonen, forsvinner koblingen med en gang, selv om den godkjente versjonen fortsatt har steget. Forkastes arbeidsversjonen etterpå, kommer steget tilbake, men koblingen gjør det ikke. Det er dagens regel, og den er beholdt.
+
+#### A32 – versjonskontroll på all lagring av flyt (`3ff1b8a0`)
+
+- **Kartlegging:** `QualityProcessBlueprintService::store()` er den eneste som skriver en endret flyt. Den kalles fra tre steder:
+  - manuell lagring (`updateBlueprint`);
+  - «Bruk denne prosessflyten» (`adoptFlowProposal`);
+  - «Godta endringer» (`acceptFlowChange`).
+- Godkjenning og «Forkast arbeidsversjon» endrer ikke innholdet i flyten. De låser og leser arbeidsversjonen.
+- **Endring:**
+  - `basedOn` er en påkrevd parameter uten `null` i `store()`. Det finnes dermed ingen måte å kalle tjenesten uten versjon på.
+  - `base_hash` er påkrevd på endepunktet for manuell lagring.
+  - AI-forslag krevde det allerede (A22).
+- **Brukerne merker ingenting:** Siden sendte allerede versjonen ved alle fire manuelle lagringer. Redigering vises bare når det finnes en flyt.
+- **Tester:**
+  - `QualityFlowProposalVersionTest::test_every_flow_write_without_a_version_is_refused`: en lagring uten versjon nektes med 422 på begge endepunktene, og tjenesten kan ikke kalles uten.
+  - Testfiksturene leser versjonen gjennom `Tests\Support\QualityFlowVersion`.
+  - Mutasjonssjekket: et endepunkt som faller tilbake til «siste lagring vinner», fanges.
+- Dette lukker «Gjenstår» i A27 og funn A32.
+
+#### Kartlegging før steg 13
+
+- Modulen er kundevid, uten fagområder. Nøklene er `compliance.view`/`edit`/`assess`/`audit`/`delete`.
+- System Owner har nøklene bare gjennom en egen rolle (`explicitGrantDomains()`).
+- `ComplianceAccessService` bruker `CustomerPermissionService::has()`. Integrasjoner får derfor ingen menneskeforbeholdte nøkler (ingen A6-luke).
+
+| Handling | Rettighet | Kontrollert i | Merknad |
+|---|---|---|---|
+| Vurder etterlevelse | `compliance.assess` (menneskeforbeholdt) | **Bare kontrolleren** | Tjenesten låste kravet og skrev en uforanderlig vurdering. |
+| Start, Fullfør, Avbryt, Gjenåpne revisjon | `compliance.audit` (menneskeforbeholdt) | **Bare kontrolleren** | Tjenesten låste revisjonen og skrev historikk. |
+| Ny revisjon, Rediger revisjon | `compliance.audit` | **Bare kontrolleren**, som også skrev | Feltene som kan redigeres, ble lest uten lås. |
+| Scope, kontrollhandlinger, revisjonsfunn, «Følg opp i Avvik» | `compliance.audit` | Nøkkelen i tjenesten, **ikke kunden eller modulen** | Funn og kontrollhandling ble låst bare på id, ikke som del av revisjonen. |
+| Slett krav, revisjon, kilde | `compliance.delete` (menneskeforbeholdt) | **Bare kontrolleren**, som også slettet | |
+| Krav, kilder, Sett som utgått/Gjenåpne, Relevans, «Aktiver for virksomheten» | `compliance.edit` | **Bare kontrolleren** (krav og kilder ble skrevet der) | |
+| Kvalitet-koblinger | `compliance.edit` og lesetilgang til Kvalitet | Nøkkelen i tjenesten, ikke kunden eller modulen | |
+| Overfør revisjon til Wiki | `compliance.audit` og `wiki.knowledge.handoff` | Wiki-delen i tjenesten. Revisjonsdelen sjekket bare nøkkelen. | |
+
+**Historikk før steget:** Dette var allerede beskyttet i databasen. Alt nekter UPDATE og DELETE så lenge kunden finnes:
+- vurderinger (`compliance_assessments`);
+- statusendringer for krav og revisjoner;
+- funn som er overlevert til Avvik.
+
+Et krav med historikk, med plass i et scope eller med funn kan ikke slettes, heller ikke i SQL (triggere og `NO ACTION`). Det samme gjelder en revisjon med historikk. Funn A13 (manglende DELETE-trigger) finnes ikke her.
+
+#### Gjennomført
+
+| Commit | Innhold |
+|---|---|
+| `3b66c55d` | Vurdering, revisjonens livsløp og alt revisjonsarbeid går gjennom vakten (`COMPLIANCE_ASSESS`, `COMPLIANCE_AUDIT`). Sletting går gjennom `COMPLIANCE_DELETE`. Deretter kreves nøkkelen i postens egen kunde, med modulen. Sletting er flyttet fra kontrollerne til tjenestene, og `isDeletable()` leses under radlås. Nye tjenester: `ComplianceAuditService` og `ComplianceSourceService`. Funn og kontrollhandlinger nås bare som del av revisjonen de sendes inn med. |
+| `5228b3e3` | Ordinære skrivinger sjekker `compliance.edit` i tjenesten: krav (ny `ComplianceRequirementService`), kilder, relevans, aktivering og Kvalitet-koblinger. |
+| `7ccb97f3` | «Overfør til Wiki» fra en revisjon krever `compliance.audit` i revisjonens kunde, med modulen. |
+
+#### Sikkerhetsregler
+
+1. **Formelle beslutninger tas av personer.** Det gjelder etterlevelsesvurdering, revisjonens livsløp, planlegging og gjennomføring av revisjonen (scope, kontrollhandlinger og funn), overlevering av funn til Avvik og all sletting.
+   - Vakten nekter integrasjoner, inaktive personer og API-kanalen, også i delegert modus.
+   - Deretter kreves riktig nøkkel.
+2. **Kundeseparasjon og modul gjelder i tjenesten.** Hver skriving krever:
+   - `compliance.view` og nøkkelen;
+   - aktørens egen kunde, som må være postens kunde;
+   - at kunden har modulen.
+
+   En annen kundes person og System Owner nektes, også med en rolle som har alle nøkler. En kunde uten modulen nektes.
+3. **System Owner uten rolle har ingen beslutninger.** Det er uendret, og nå testet i tjenesten.
+4. **Funn og kontrollhandlinger følger revisjonen.** En post som tilhører en annen revisjon, også i samme kunde, nås ikke (404). Ingenting skrives.
+5. **Det som har vært brukt, beholder historikken.** Tjenestene leser slettereglene på nytt under lås:
+   - et vurdert krav, et krav i scope og et krav med funn slettes ikke;
+   - en revisjon som er startet, slettes ikke;
+   - en kilde i bruk slettes ikke.
+
+   Databasen nekter det samme.
+6. **Oppfølging gjennom Avvik er uendret og strammet inn:**
+   - Overleveringen krever `compliance.audit` i revisjonens kunde.
+   - Avvik sjekker sin halvdel, `improvement.edit` i valgt fagområde, i `ImprovementCaseCreator`.
+   - Funnet låses som del av revisjonen, og et overlevert funn er fryst (trigger).
+7. **Ordinært registerarbeid** (`compliance.edit`) er ikke menneskeforbeholdt. En integrasjon som har nøkkelen, kan gjøre det (testet). Se føringen nedenfor.
+8. **Brukerne merker ingen endring.** Kontrollerne sjekker fortsatt først, så statuskoder og meldinger er uendret. Ingen nye statuser, skjermbilder eller felt.
+
+#### A17 – kaskaderekkefølge ved sletting (kontrollert, ikke endret)
+
+- **Kundesletting virker:**
+  - Revisjoner med kontrollhandlinger, scope og funn er kontrollert direkte i SQL, både i den nymigrerte E2E-databasen og i testdatabasen, i en transaksjon som ble rullet tilbake.
+  - Ny test: `ComplianceHumanDecisionTest::test_deleting_the_customer_takes_audits_with_checks_and_findings_along`.
+- **Sletting av én revisjon med kontrollhandlinger feiler på fremmednøkkelen, men det er ikke en feil i praksis:**
+  - Kontrollhandlinger kan bare registreres mens revisjonen pågår.
+  - En revisjon som har vært startet, har historikk og kan uansett ikke slettes, verken i appen eller i databasen.
+- **Ingen migrering.**
+
+#### Tester
+
+- `ComplianceHumanDecisionTest` (11):
+  - en person med nøklene tar alle beslutningene, og historikken bærer navnet deres;
+  - 19 beslutninger kalles direkte på tjenestene, og disse nektes uten at noe skrives: integrasjon (som heller ikke får nøklene), API-kanal (delegert), inaktiv person, leser, redigerer, hver nøkkel for seg, nøklene uten `compliance.view`, en annen kundes person og System Owner, System Owner uten rolle og en kunde uten modulen;
+  - funn og kontrollhandling via en annen revisjon;
+  - det som har historikk, slettes ikke;
+  - kundesletting (A17).
+- `ComplianceServiceAuthorizationTest` (6):
+  - redigerer og integrasjon med `compliance.edit` kan gjøre registerarbeid;
+  - 12 skrivinger nektes for leser, for en annen kundes redigerer og System Owner og for en kunde uten modul, og ingenting skrives;
+  - en kilde fra en annen kunde kan ikke brukes;
+  - teksten i et bibliotekskrav endres ikke;
+  - et utgått krav endres ikke før det er gjenåpnet;
+  - overføring til Wiki.
+- To fiksturer brukte aktører uten nøkkelen de nå trenger. De er rettet: vurdering gjøres av en med `compliance.assess`, og «Sett som utgått» av en redigerer.
+- **Mutasjonssjekket, 30 mutanter, alle fanges:**
+  - vakten og tilgangsregelen i hver tjeneste;
+  - kunde-, modul- og visningskontrollen i `may()`;
+  - at funn og kontrollhandlinger må tilhøre revisjonen;
+  - `isDeletable()` under lås;
+  - bibliotekfeltene, kildens kunde og regelen for utgått krav.
+
+#### Tester og kjøringer (2026-10-22)
+
+- **PHP:** alle testfiler for Etterlevelse og revisjon og alle testfiler som berører modulen fra andre moduler, i alt 370 av 370 bestått. Kvalitet-filene som berører flyten (A32, 21 filer): 329 av 329. Kunnskapsoverføring (`--filter` KnowledgeHandoff/WikiKnowledge): 49 av 49.
+- **JS:** 2130 av 2130 bestått i 103 filer. Frontendbygget er rent. Pint er rent på berørte filer.
+- **E2E i det isolerte miljøet:** alle spesifikasjoner for Etterlevelse og revisjon og Kvalitet, `a11y-grc-compliance`, `a11y-grc-quality`, `a11y-grc-improvements`, `knowledge-handoff`, `my-tasks-governance` og `management-review` (38 filer, 77 tester). Telt fra Playwrights JSON-rapport.
+  - Første kjøring: **72 bestått, 1 feilet, 4 hoppet over.**
+    - Feilen var et tidsavbrudd i axe-analysen i nettleseren (`a11y-grc-compliance`, «Kravregister and Etterlevelsesvurdering»), ikke et svar fra serveren. Kjøringen tok 5,2 timer i stedet for rundt én, og maskinen gikk mest sannsynlig i dvale underveis.
+    - Én av de fire som ble hoppet over, kjørte ikke fordi filen kjører i serie. Sporet ligger i `test-results/run-2026-10-22T21-41-20-469Z/`.
+  - `a11y-grc-compliance` kjørt på nytt for seg to ganger, med `caffeinate`: 3 av 3 bestått begge gangene.
+  - **Resultat: 75 bestått, 0 feilet, 3 hoppet over.**
+  - **De 3 som hoppes over, er ikke bestått og ikke verifisert.** Alle trenger AI-tolkning, som E2E-miljøet med vilje ikke har: A11Y-013 i `a11y-grc-quality`, `quality-flow-clarify-sticks` og `quality-flow-describe-without-flow`.
+
+#### Nye funn som krever beslutning
+
+| # | Funn | Anbefaling |
+|---|---|---|
+| A34 | **Etter «Gjenåpne» kan en fullført revisjon endres uten spor.** Konklusjonen kan skrives om, og funn som ikke er overlevert, og kontrollhandlinger kan endres eller slettes. Gjenåpningen registreres med begrunnelse, men ikke hva som ble endret. Den forrige konklusjonen overskrives når revisjonen fullføres på nytt. | Behold «Gjenåpne» som rettemekanisme, men bevar automatisk det som var levert: <br>– lagre konklusjonen på statusendringen ved «Fullfør», slik at hver fullføring står i historikken; <br>– et funn som var med i en fullført revisjon, slettes ikke etter gjenåpning, men kan rettes. <br>Ingen nye statuser eller skjermbilder. Krever en liten migrering. |
+| A35 | **Relevans («Ikke relevant», og kontrollvalg i vedlegg A) er en del av erklæringen om anvendelse, men behandles som ordinær redigering.** Den krever bare `compliance.edit`, som ikke er menneskeforbeholdt. Det er ingen historikk: bare siste valg, av hvem og når, står på kravet. Et krav som settes til «Ikke relevant», faller ut av vurderinger og av automatisk utvalg til revisjoner. | Behandle «Ikke relevant» som en formell beslutning: vakten og en eksisterende nøkkel (`compliance.assess`), med uforanderlig historikk over valgene, etter samme mønster som statusendringer. Alternativ: behold som i dag og løs det med føringen for agenter nedenfor. |
+
+**Lav, ikke rettet:** Endring av scope leser revisjonens status uten lås. En endring som kommer samtidig med «Fullfør», kan legge til eller fjerne et krav i scope rett etter fullføringen. Risikoen er liten, og det gir ikke tap av historikk.
+
+**Klar for senere API-integrasjon**
+
+- Ja. Lesing, beslutninger og registerarbeid ligger i domenet med samme regler for enhver inngang.
+- Gjenstår før fase 1:
+  - A10 (feilformat);
+  - steg 19 (aktørtriggere for `compliance_assessments.assessed_by_user_id` og `compliance_audit_status_changes.changed_by_user_id`);
+  - A34 og A35 (beslutning).
+- **Føring (anbefalt, som for de andre modulene):**
+  - En AI-agent får ikke `compliance.edit` som standard.
+  - Forslag til krav og vurderinger kan senere komme gjennom avgrensede API-operasjoner. De blir registrert først når en person tar dem i bruk.
+  - Vurdering, revisjon og sletting forblir menneskeforbeholdt.
 
 ## 3. Avgrensning
 
@@ -1229,7 +1393,7 @@ Hver linje er én commit. Hver commit kjører sine målrettede tester før den l
 | 10 | `refactor(improvements): guard close, cancel, reopen, verify and delete` | **Gjort** som fire commits (§2d) | 1 |
 | 11 | `refactor(management-review): guard finalize, amendment and delete` | **Gjort** som tre commits (§2e) | 1 |
 | 12 | `refactor(quality): require an actor and guard flow approval and adoption` | Null-aktører og `QUALITY_FLOW_ADOPT` | 1 |
-| 13 | `refactor(compliance): guard assessment, audit lifecycle and delete` | | 1 |
+| 13 | `refactor(compliance): guard assessment, audit lifecycle and delete` | **Gjort** som tre commits (§2i) | 1 |
 | 14 | `refactor(suppliers): guard assessment and delete; guard assure services` | | 1 |
 | 15 | `refactor(objectives): guard measurements and delete` | | 1 |
 | 16 | `feat(tender): require an explicit permission to decide requirements` | **B4**, `RequirementEditorService` uten null-aktør, rettighet i Tilganger, grensesnitt | 1 |
