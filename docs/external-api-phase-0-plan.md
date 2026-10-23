@@ -42,7 +42,7 @@
 - Leverandøroppfølging (steg 14) er gjennomført og godkjent 2026-10-23 (§2j).
 - A36 er gjennomført og godkjent 2026-10-23, og A37 og A38 er besluttet (§2j). Leverandøroppfølging er ferdig i fase 0.
 - Mål og KPI (steg 15) er gjennomført og godkjent 2026-10-23 (§2k). A39 og A40 er besluttet og gjennomført, og E2E-feilene i `app-navigation` er rettet (§2k). Mål og KPI er ferdig i fase 0.
-- Anbud (steg 16 og 17) er gjennomført og godkjent som hovedleveranse 2026-10-23 (§2l). A41–A45 og E2E-feilene er fulgt opp samme dag. Det venter på vurdering, med produktbeslutningene P1–P5. Felles sikkerhetskontroll (steg 18–20) og API-implementering startes ikke før det.
+- Anbud (steg 16 og 17) er gjennomført og godkjent som hovedleveranse 2026-10-23 (§2l). A41–A45 er godkjent. P1–P5 er avklart, migrering 000008 er verifisert og rettet, og steg 18 er gjennomført samme dag (§2l, «Avklaring av P1–P5»). Det venter på vurdering, med de åpne beslutningene P6 og P7. Steg 19–20 og API-implementering startes ikke før det.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -1768,7 +1768,7 @@ En leverandør med historikk kan ikke slettes, heller ikke i SQL (sammensatt fre
 
 - Beslutningene (kravbeslutninger og anbudsstatus) ligger i domenet med samme regler for enhver inngang, og er menneskeforbeholdt.
 - Anbud holdes fortsatt utenfor API v1 (arkitektur §8.3). A41 og A44 er avklart i oppfølgingen. Avdelingsomfanget gjenstår.
-- Gjenstår i fase 0: steg 18–20, inkludert aktørtriggerne for `saved_notice_ai_requirements.approved_by_user_id` og `rejected_by_user_id`.
+- Gjenstår i fase 0: steg 19–20, inkludert aktørtriggerne for `saved_notice_ai_requirements.approved_by_user_id` og `rejected_by_user_id`. Steg 18 er gjennomført (se «Avklaring av P1–P5»).
 - **Føring for agenter (anbefalt):**
   - En agent kan foreslå kravtekst, svarutkast og vurderinger gjennom avgrensede operasjoner, alltid som utkast.
   - Kravbeslutninger og statusendringer forblir menneskeforbeholdt.
@@ -1850,10 +1850,10 @@ Steg 16 og 17 er godkjent som hovedleveranse. Denne runden lukker eller avklarer
 | # | Tema | Valgt nå | Alternativ |
 |---|---|---|---|
 | P1 | Sletting av krav (A42) | Bare krav som har vært godkjent, vernes. Avviste uttrekk kan slettes. | Verne også avviste krav. Det ville stoppe oppryddingen etter feiluttrekk, og tre eksisterende tester måtte skrives om. |
-| P2 | Sletting av sak (A42) | Registrert historikk og AI-forbruk verner saken. En eldre sak med status, men uten registrerte rader, kan fortsatt slettes av den som lagret den. | Bruke `bid_status ≠ discovered` som tegn på beslutning. Det ville også låse eldre saker uten historikkrader. |
+| P2 | Sletting av sak (A42) | Registrert historikk og AI-forbruk verner saken. En eldre sak med status, men uten registrerte rader, kan fortsatt slettes av den som lagret den. | Bruke `bid_status ≠ discovered` som tegn på beslutning. Det ville også låse eldre saker uten historikkrader. **Avklart i neste runde (`6b9b5f86`): status, innsending og registrert utfall verner saken.** |
 | P3 | AI-forbruk (A42) | En sak med AI-forbruk slettes ikke, og kreditten gis ikke tilbake. | Tillate sletting med `saved_notice_id` nullet på forbruksraden. Det krever endret telling i `AiQuotaStatusService`, som teller unike sak-id-er. |
-| P4 | Leserrollen i egen sak (A41) | `viewer` som har lagret en sak, leser den. | Se den som lagret saken som bidragsyter. Det er et spørsmål om `viewer` skal kunne lagre saker i det hele tatt. |
-| P5 | Svarhistorikk og kildeversjon (A43.3) | Anbefaling nedenfor, ikke bygget. | – |
+| P4 | Leserrollen i egen sak (A41) | `viewer` som har lagret en sak, leser den. | Se den som lagret saken som bidragsyter. Det er et spørsmål om `viewer` skal kunne lagre saker i det hele tatt. **Avklart i neste runde (`65a3a75e`): `viewer` oppretter ikke saker.** |
+| P5 | Svarhistorikk og kildeversjon (A43.3) | Anbefaling nedenfor, ikke bygget. **Avklart og bygget i neste runde (`68e56d7d`).** | – |
 
 **A43.3 – anbefaling basert på dagens datamodell.**
 - **Aktør:** finnes nå for begge handlinger. `generated_by_user_id` viser hvem som genererte, og `edited_by_user_id`/`edited_at` hvem som sist redigerte (denne runden). Ingenting mer trengs for «hvem».
@@ -1914,6 +1914,145 @@ Steg 16 og 17 er godkjent som hovedleveranse. Denne runden lukker eller avklarer
 - **«Slett»** vises ikke på godkjente krav eller på saker med beslutninger eller AI-forbruk. «Slett alle» sier hvor mange krav som ble beholdt.
 - **Svarpanelet** spør i panelet før et manuelt redigert svar erstattes, og viser «Redigert av …».
 - Ingen nye skjermbilder, statuser, dialoger eller godkjenningssteg.
+
+#### Avklaring av P1–P5, migrering 000008 og steg 18 (2026-10-23)
+
+A41–A45 er godkjent. P1 og P3 er godkjent som valgt. Denne runden avklarer P2, P4 og P5, verifiserer migrering 000008 og gjennomfører steg 18.
+
+| Commit | Innhold |
+|---|---|
+| `65a3a75e` | **P4.** Anbudsrollen `viewer` oppretter aldri en sak ved å lagre. |
+| `6b9b5f86` | **P2.** Eldre saker som raden viser er behandlet, kan ikke slettes. Migrering `2026_10_23_000009`. |
+| `68e56d7d` | **P5.** Svar og vurderinger bindes til eksakt Wiki-versjon, og hver generering og redigering bevares. Migrering `2026_10_23_000010`. |
+| `cb3be907` | **000008.** Tilbakefyllingen dikter ikke opp aktør eller tidspunkt. |
+| `ef81bb0d` | **Steg 18 (F4).** Revisjonsspor for tilgangsendringer. Migrering `2026_10_23_000011`. |
+| `59c50a2c` | **Steg 18, saksnivå.** Tilgang per sak, eier og Bid Manager og arkivering lagrer aktør. Migrering `2026_10_23_000012`. |
+| `ac236ee0` | **E2E.** `table-row-actions-in-view` får lesegrunnlag for Wiki. |
+| `685f9c1d` | Test for kildeversjon i vurderinger. Kode som ikke kunne nås, er fjernet. |
+
+**P1 og P3** er beholdt uendret. Avviste AI-uttrekk som aldri har vært godkjent, kan slettes. En sak med AI-forbruk slettes ikke, og kvotetellingen er ikke endret.
+
+**P2 – eldre saker.**
+- **Hva dataene kan bære:** `bid_status` skrives bare ved opprettelse (alltid `discovered`) og av `transitionBidStatus`, som bare kalles fra personstyrte overganger.
+  - En annen status enn «Oppdaget» betyr derfor at en person har behandlet saken, også før statushistorikken fantes.
+  - `bid_submissions` er registrerte innsendinger.
+  - `history_type` won/lost/no_go er et utfall valgt ved flytting til historikk.
+  - «Avbrutt» (`aborted`) teller ikke, fordi migrering `2026_04_06_000001` også satte den på gamle rader uten at noen valgte den.
+- **Regelen:** en sak med noe av dette slettes ikke. `SavedNotice::isDeletable()` og triggeren har samme regel. Ingen statusrad og ingen aktør skrives eller konstrueres.
+- **Tester:** eldre sak med status uten historikkrader, med registrert innsending, og med hvert utfall. «Avbrutt» alene kan fortsatt slettes.
+
+**P4 – leserrollen.**
+- **Hva «Lagre» betyr:** det finnes ingen personlig bokmerke- eller listefunksjon. «Lagre» oppretter en sak i kundens arbeidsliste (`saved_notices`), og «Ny privat forespørsel» gjør det samme.
+- **Nå:** `viewer` oppretter ikke saker (`SavedNoticeAccessService::mayCreateCase`). Siden tilbyr ikke «Lagre» eller skjemaet for privat forespørsel (`can_save_notices`).
+- At en leser ikke kan endre eksisterende saker eller få tilgang gjennom lagring, ble innført i A44.
+- Lesere får tilgang gjennom sakens tilgangsstyring som før.
+
+**P5 – sporbarhet i anbudssvar.**
+- **Verifisert i datamodellen før endring:**
+  - Research leser sidens tekst fra versjonen katalogen lastet (`RequirementWikiCatalogBuilder`, bare publiserte versjoner).
+  - Påstandene som siteres, ble derimot hentet med et nytt oppslag på `published_version_id`. En publisering mellom de to oppslagene kunne gi tekst fra én versjon og påstander fra en annen.
+  - Versjonen kunne derfor ikke bare utledes fra påstandene i ettertid.
+  - Det er heller ikke bevist at en publisert versjons tekst aldri endres på plass, fordi flere tjenester skriver `content_markdown`.
+- **Versjonsbinding:**
+  - Katalogen bærer versjonen den leste: id, nummer og sha256 av teksten.
+  - Research henter påstandene fra den samme versjonen.
+  - Hver kilde i svaret og vurderingen lagrer `enterprise_wiki_page_version_id`, `version_number` og `version_content_sha256`. Fingeravtrykket gjør at referansen kan kontrolleres mot versjonsraden og ikke må tas på tillit.
+  - Eldre kilder uten versjon vises som før og fylles aldri ut i ettertid.
+- **Svarhistorikk:**
+  - Ny tabell `saved_notice_ai_requirement_wiki_answer_revisions`, der rader bare legges til.
+  - Én rad per lagret generering og per redigering, med hendelse, tekst, dekning, kilder med versjoner, aktør og tidspunkt. Raden skrives i samme transaksjon.
+  - Triggeren nekter endring, bortsett fra nulling av en slettet person, og sletting, bortsett fra sammen med kravet eller saken.
+  - Ingen tilbakefylling, ingen ny skjerm og ingen ferdigstilling.
+- **Tester:**
+  - versjon ved generering;
+  - en senere publisering endrer ikke referansen eller historikken;
+  - en upublisert arbeidsversjon siteres aldri;
+  - tekst og påstander fra samme versjon ved samtidig publisering;
+  - flere kilder;
+  - eldre svar uten versjon;
+  - kundeseparasjon;
+  - vurderinger;
+  - historikkreglene.
+
+**Migrering 000008 – verifisert og rettet.**
+- **Funn:** testen med et faktisk redigert svar viste at tilbakefyllingen satte `edited_at` til radens `updated_at`. Det er ikke redigeringstidspunktet, fordi også markering av et svar som utdatert skriver raden. Tidspunktet var altså diktet opp.
+- **Rettet:** 000008 var ikke pushet. Den er rullet tilbake og kjørt på nytt lokalt i `procynia_test`, utviklingsdatabasen og `procynia_e2e`.
+  - Den legger nå til `is_hand_edited` som faktumet som beskytter svaret.
+  - Tilbakefyllingen setter bare det. `edited_by_user_id` og `edited_at` blir tomme for redigeringer fra før de ble registrert.
+  - Siden viser «Redigert manuelt» når navnet er ukjent.
+- **Test (`RequirementWikiAnswerEditBackfillTest`):** et svar genereres gjennom den ekte tjenesten og redigeres slik den gamle koden gjorde. Migreringens `down()`/`up()` kjøres i testens transaksjon. Svaret blir merket, ingenting annet fylles ut, og urørte svar, svar med bare endret mellomrom og svar uten spor står urørt. Det merkede svaret er deretter beskyttet.
+
+**Steg 18 – tilgang og sporbarhet.**
+- **F4, slik planen beskriver:**
+  - Ny tabell `customer_access_changes` (rader legges bare til; trigger, ingen fremmednøkkel på `subject_id`).
+  - Skrives fra:
+    - `UserController`: opprett, endre og aktiver/deaktiver. Gjelder system- og anbudsrolle, QA, Wiki-godkjenner, aktiv, Bid Manager-omfang og avdelinger, tilknytning og kunderoller.
+    - `CustomerRoleController`: opprett, endre og slett. Gjelder rettigheter, fagområder, aktiv og navn, og ved sletting hvem som hadde rollen.
+    - `CustomerEnvironmentController::updatePermissions`: raden i matrisen som ble satt.
+  - Bare tilgangsrelevante felt lagres, aldri e-post, passord eller navn. En skriving som ikke endrer tilgang, gir ingen rad.
+  - `AdministrativeChangeAuditTrailTest` er skrevet om til «sporet skrives».
+- **Saksnivå:**
+  1. **Eier og Bid Manager på arkiverte saker.** Begge gir tilgang til saken gjennom involvering. På en aktiv sak er endringen ordinært saksarbeid (`canManage`), og det er tilsiktet og uendret. På en sak i historikk avgjør nå den som administrerer sakens tilgang (`canManageContributorAccess`). Det er samme regel som for å gi tilgang. Siden viser valget bare for dem.
+  2. **«Se alle saker» og tilgang per sak.** Se P6 nedenfor. Ikke endret.
+  3. **Aktør:**
+     - Tildeling og tilbaketrekking av tilgang per sak og bytte av eier eller Bid Manager skrives til `customer_access_changes` med `subject_type = saved_notice`.
+     - Tildelingen gjenbruker raden, så det den hadde før, bevares i sporet.
+     - «Flytt til historikk» setter `saved_notices.archived_by_user_id`, og gjenåpning av en No-Go nuller den.
+     - Saker arkivert før dette har ukjent arkivar.
+- **Tilsiktet eller hull:**
+  - **Tilsiktet:** System Owners administrasjon, «Se alle saker» som kundens eget valg, og eierbytte på aktive saker som saksarbeid.
+  - **Hull, nå lukket:** eierbytte på arkiverte saker for alle som kunne arbeide i saken, og tilgangsendringer uten aktør.
+- **Gjenstår, ikke med i steg 18:** lukking av handlinger (`saved_notice_info_items`) lagrer fortsatt ingen aktør.
+- **Ingen synlig trail:** sporet vises ikke i grensesnittet ennå.
+
+#### Åpne beslutninger etter steg 18
+
+| # | Tema | Beskrivelse | Anbefaling |
+|---|---|---|---|
+| P6 | «Se alle saker» og lesertilgang per sak | Med standarden for «Se alle saker» (System Owner, Bid Manager, bidragsyter) arbeider en bidragsyter med selskapstilknytning i alle saker. En lesertilgang per sak gitt til en slik person begrenser derfor ingenting. Tilgangspanelet tilbyr den likevel. Dette er ikke et hull, fordi «Se alle saker» er kundens administrative valg, men panelet kan gi et feil inntrykk. | **A (anbefalt):** behold regelen, og la panelet vise at personen allerede arbeider i alle saker gjennom «Se alle saker». Det er en ren visningsendring. **B:** la lesertilgang per sak begrense en person med «Se alle saker». Det er en ny regel og en produktbeslutning. **C:** kunder som vil styre per sak, snevrer inn «Se alle saker». Det er dagens mulighet. Ikke implementert. |
+| P7 | Visning av sporene | Tilgangssporet og svarhistorikken lagres, men vises ikke. | Vurder en enkel lesevisning når det er behov, for eksempel for revisjon. Ikke bygget. |
+
+#### Tester og kjøringer (avklaringen og steg 18)
+
+- **Nye testfiler:**
+  - `TenderAnswerSourceVersionTest` (8).
+  - `RequirementWikiAnswerEditBackfillTest` (1).
+  - `CustomerAccessChangeTrailTest` (5).
+  - `TenderCaseAccessTrailTest` (5).
+- **Utvidet:**
+  - `TenderSaveExistingCaseTest` (P4).
+  - `TenderDeletionProtectionTest` (P2, tre tester).
+  - `TenderAnswerTraceTest` (eldre redigering uten navn).
+- **Skrevet om:** `AdministrativeChangeAuditTrailTest`, fra karakterisering av hullet til «sporet skrives», som planen sier.
+- **PHP:** alle 184 testfilene som berører saker, AI-kjeden, Wiki-svar og Wiki-research, Spør Wiki, Go/No-go, varsler, Mine oppgaver, brukere, roller, Tilganger og AI-forbruk, pluss `tests/Unit/Services/Ai` og `tests/Feature/Security`: **3088 av 3088 bestått.**
+- **JS:** 2130 av 2130 bestått.
+- **E2E i det isolerte miljøet** (bygget på nytt, migrert): 18 filer og 119 tester. Det er filene fra forrige runde pluss `table-row-actions-in-view`, `risk-access`, `risk-journey` og `a11y-grc-risk`, som bruker brukere og roller i grensesnittet.
+  - **Første kjøring:** 118 bestått, 1 feilet. `table-row-actions-in-view` (bidragsytertesten) fant ikke tabellen over Wiki-sider. E2E-brukeren mangler `wiki.view` i det isolerte miljøet, som i `breadcrumbs` og `wiki-navigation`. Filen var ikke med i forrige utvalg, og feilen skyldes ikke endringene i denne runden.
+  - **Rettet i `ac236ee0`:** filen kjørt på nytt, **8 av 8 bestått**. Med siste kjøring per test består alle 119.
+- **Ingen tester feiler eller hoppes over** i utvalgene over.
+- **Mutasjonssjekket:**
+  - 33 kodemutanter: P4 (3), P2 (4), P5 (7), 000008 (2), F4 (8) og saksnivået (9).
+  - 10 databasemutanter: triggerne i 000009, 000010 og 000011, med tilbakerulling og ny migrering per mutant.
+  - **Alle fanges.**
+  - Én regel manglet først egen test: kildeversjonen i vurderinger. Den er lagt til (`685f9c1d`).
+
+**Migreringer:**
+- `2026_10_23_000008_record_who_edited_requirement_wiki_answers`: rettet før push. Den legger til `is_hand_edited`, `edited_by_user_id` og `edited_at`, og tilbakefyllingen setter bare `is_hand_edited`.
+- `2026_10_23_000009_keep_legacy_tender_cases_with_recorded_work`: erstatter bare triggerfunksjonen. `down()` setter tilbake versjonen fra 000007.
+- `2026_10_23_000010_create_requirement_wiki_answer_revisions`: ny tabell med trigger.
+- `2026_10_23_000011_create_customer_access_changes`: ny tabell med trigger.
+- `2026_10_23_000012_record_case_access_changes_and_archiving_actor`: `archived_by_user_id` og `saved_notice` som emne i tilgangssporet.
+- Alle er reverserbare. `down()` er kjørt for hver databasemutant.
+- Kjørt på `procynia_test`, utviklingsdatabasen og `procynia_e2e`.
+  - I `procynia_e2e` lå den gamle 000008 allerede. Tilbakerullingen feilet, fordi den nye `down()` forventer den nye kolonnen. Migreringen kjøres i transaksjon, så ingenting ble endret.
+  - Skjemaet ble deretter rettet med samme regel som den nye 000008: kolonnen lagt til, ingen tidspunkter fylt inn. Ingen rader var berørt.
+
+**Endringer i brukeropplevelsen:**
+- **Lesere** (`viewer`) ser ikke «Lagre» eller skjemaet for privat forespørsel. Et forsøk via URL gir en melding.
+- **Eldre saker** med status, registrert innsending eller registrert utfall har ikke «Slett».
+- **Svarpanelet** viser «Redigert manuelt» når den som redigerte ikke er kjent.
+- **På en sak i historikk** ser bare den som administrerer sakens tilgang, valgene for kommersiell eier og Bid Manager.
+- Ingen nye skjermbilder, statuser, dialoger eller godkjenningssteg. Sporene lagres, men vises ikke.
 
 ## 3. Avgrensning
 
@@ -2142,7 +2281,7 @@ Hver linje er én commit. Hver commit kjører sine målrettede tester før den l
 | 15 | `refactor(objectives): guard measurements and delete` | **Gjort** som fire commits (§2k) | 1 |
 | 16 | `feat(tender): require an explicit permission to decide requirements` | **B4**, `RequirementEditorService` uten null-aktør, rettighet i Tilganger, grensesnitt. **Gjort** (§2l) | 1 |
 | 17 | `feat(tender): record who changes a bid status` | `SavedNoticeStatusService` og `saved_notice_status_changes`. **Gjort** (§2l) | 1 |
-| 18 | `feat(security): audit trail for access changes` | **F4**: `customer_access_changes`. `AdministrativeChangeAuditTrailTest` skrives om til «sporet skrives». | – |
+| 18 | `feat(security): audit trail for access changes` | **F4**: `customer_access_changes`. `AdministrativeChangeAuditTrailTest` skrives om til «sporet skrives». **Gjort** (`ef81bb0d`), og saksnivået i tillegg (`59c50a2c`), se §2l. | – |
 | 19 | `feat(security): reject integration actors in decision columns` | Triggerne i §4.8 og datakontrollen | 9–17 |
 | 20 | `test(security): HumanDecisionContractTest` | §6.1 | 1–19 |
 | 21 | `docs: phase 0 complete` | Status i `external-api-architecture.md` §7/§14, `docs/operations/security.md`, `enterprise-wiki-approval-model.md` (F1-regelen) | 20 |
