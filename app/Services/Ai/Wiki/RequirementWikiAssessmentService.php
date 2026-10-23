@@ -196,6 +196,10 @@ class RequirementWikiAssessmentService
         return array_values(array_map(
             static fn (array $page): array => [
                 'enterprise_wiki_page_id' => $page['page_id'],
+                // The exact published version the assessment read (P5), as for answers.
+                'enterprise_wiki_page_version_id' => $page['version_id'] ?? null,
+                'version_number' => $page['version_number'] ?? null,
+                'version_content_sha256' => $page['version_content_sha256'] ?? null,
                 'page_title' => $page['title'],
                 'page_slug' => $page['slug'],
                 'page_type' => $page['page_type'],

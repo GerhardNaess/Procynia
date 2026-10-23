@@ -130,6 +130,12 @@ class RequirementWikiCatalogBuilder
                     'page_type' => $page->page_type,
                     'scope' => (string) $page->scope,
                     'slug' => $page->slug,
+                    // The exact version this entry's text comes from (P5): an answer cites what it
+                    // read, not whatever the page's pointer says later. The fingerprint lets that
+                    // reference be checked against the version row, rather than assumed.
+                    'version_id' => (int) $version->id,
+                    'version_number' => (int) $version->version_number,
+                    'version_content_sha256' => hash('sha256', $contentMarkdown),
                     'content_markdown' => $contentMarkdown,
                     // Figures live only in content_blocks_json — content_markdown carries their
                     // caption and citation but never the image itself. Carried alongside the text

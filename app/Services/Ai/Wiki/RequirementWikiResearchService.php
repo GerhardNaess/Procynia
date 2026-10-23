@@ -223,13 +223,18 @@ class RequirementWikiResearchService
                 $contextSize += $contentLength;
                 $readPageIds[] = $pageId;
                 $roundReadPageIds[] = $pageId;
-                $claimsByOrigin = $this->supportingClaimsByOrigin($pageId, $activeQueryTokens);
+                // Claims from the version whose text was just read, never a second lookup of the
+                // page's pointer, which a publication in between could move (P5).
+                $claimsByOrigin = $this->supportingClaimsByOrigin($pageId, isset($catalogEntry['version_id']) ? (int) $catalogEntry['version_id'] : null, $activeQueryTokens);
 
                 $readPages[] = [
                     'page_id' => $pageId,
                     'title' => $catalogEntry['title'],
                     'page_type' => $catalogEntry['page_type'],
                     'slug' => $catalogEntry['slug'],
+                    'version_id' => $catalogEntry['version_id'] ?? null,
+                    'version_number' => $catalogEntry['version_number'] ?? null,
+                    'version_content_sha256' => $catalogEntry['version_content_sha256'] ?? null,
                     'selection_type' => $candidate['selection_type'] ?? 'direct_search',
                     'discovered_from_page_id' => $candidate['discovered_from_page_id'] ?? null,
                     'discovered_from_title' => $candidate['discovered_from_title'] ?? null,
@@ -367,7 +372,7 @@ class RequirementWikiResearchService
      * @param  list<string>  $queryTokens
      * @return array{all: list<int>, source_based: list<int>, best_practice: list<int>}
      */
-    private function supportingClaimsByOrigin(int $pageId, array $queryTokens): array
+    private function supportingClaimsByOrigin(int $pageId, ?int $readVersionId, array $queryTokens): array
     {
         $empty = ['all' => [], 'source_based' => [], 'best_practice' => []];
 
@@ -375,10 +380,12 @@ class RequirementWikiResearchService
             return $empty;
         }
 
-        // Claims are read from the PUBLISHED version. One attached to the working version has not
-        // been published, and citing it would ground an answer in content nobody approved. No
-        // published version means no evidence — never a fallback to the newest one.
-        $publishedVersionId = EnterpriseWikiPage::query()->whereKey($pageId)->value('published_version_id');
+        // Claims are read from the PUBLISHED version — the one the catalog read the page's text
+        // from (published-only grounding). One attached to the working version has not been
+        // published, and citing it would ground an answer in content nobody approved. No published
+        // version means no evidence — never a fallback to the newest one.
+        $publishedVersionId = $readVersionId
+            ?? EnterpriseWikiPage::query()->whereKey($pageId)->value('published_version_id');
 
         if ($publishedVersionId === null) {
             return $empty;

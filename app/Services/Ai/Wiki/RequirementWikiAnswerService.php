@@ -8,6 +8,7 @@ use App\Models\EnterpriseWikiClaim;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementWikiAnswer;
+use App\Models\SavedNoticeAiRequirementWikiAnswerRevision;
 use App\Models\User;
 use App\Services\SavedNoticeAccessService;
 use App\Support\Ai\AiCallContextScope;
@@ -233,6 +234,8 @@ class RequirementWikiAnswerService
                 'edited_by_user_id' => $actor->id,
                 'edited_at' => now(),
             ])->save();
+
+            $this->recordRevision($wikiAnswer, SavedNoticeAiRequirementWikiAnswerRevision::EVENT_EDITED, (int) $actor->id);
 
             return $wikiAnswer->refresh();
         });
@@ -813,6 +816,11 @@ class RequirementWikiAnswerService
         return array_values(array_map(
             static fn (array $page): array => [
                 'enterprise_wiki_page_id' => $page['page_id'],
+                // The exact published version the answer was produced from (P5). Null only for a
+                // research context from before versions were carried; never filled in afterwards.
+                'enterprise_wiki_page_version_id' => $page['version_id'] ?? null,
+                'version_number' => $page['version_number'] ?? null,
+                'version_content_sha256' => $page['version_content_sha256'] ?? null,
                 'page_title' => $page['title'],
                 'page_slug' => $page['slug'],
                 'page_type' => $page['page_type'],
@@ -851,7 +859,7 @@ class RequirementWikiAnswerService
                 throw new RequirementWikiAnswerEditedException((int) $requirement->id);
             }
 
-            return SavedNoticeAiRequirementWikiAnswer::query()->updateOrCreate(
+            $wikiAnswer = SavedNoticeAiRequirementWikiAnswer::query()->updateOrCreate(
                 ['saved_notice_ai_requirement_id' => $requirement->id],
                 array_merge($attributes, [
                     'generated_by_user_id' => $userId,
@@ -861,6 +869,28 @@ class RequirementWikiAnswerService
                     'edited_at' => null,
                 ]),
             );
+
+            $this->recordRevision($wikiAnswer, SavedNoticeAiRequirementWikiAnswerRevision::EVENT_GENERATED, $userId);
+
+            return $wikiAnswer;
         });
+    }
+
+    /**
+     * One append-only row for the answer as just stored (P5): its text, the sources it stands on
+     * with their exact Wiki versions, who and when. Called inside the transaction that stored it.
+     */
+    private function recordRevision(SavedNoticeAiRequirementWikiAnswer $wikiAnswer, string $event, ?int $actorUserId): void
+    {
+        SavedNoticeAiRequirementWikiAnswerRevision::query()->create([
+            'saved_notice_ai_requirement_id' => $wikiAnswer->saved_notice_ai_requirement_id,
+            'saved_notice_id' => SavedNoticeAiRequirement::query()->whereKey($wikiAnswer->saved_notice_ai_requirement_id)->value('saved_notice_id'),
+            'event' => $event,
+            'answer_text' => (string) $wikiAnswer->answer_text,
+            'coverage_status' => $wikiAnswer->coverage_status,
+            'sources' => is_array($wikiAnswer->sources) ? $wikiAnswer->sources : [],
+            'actor_user_id' => $actorUserId,
+            'created_at' => now(),
+        ]);
     }
 }
