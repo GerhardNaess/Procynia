@@ -1,5 +1,20 @@
 import { test, expect } from '@playwright/test';
 import { loginAs, USER } from './helpers/auth.js';
+import { tinker } from './helpers/risk.js';
+
+/*
+ * The E2E user reads Wiki through a role. E2ETestSeeder creates no roles, so the spec gives it the
+ * reading baseline for the run and takes it away again (NavigationE2EFixture, as app-navigation).
+ */
+const BASELINE_SUFFIX = Math.random().toString(36).slice(2, 8).padEnd(6, '0').toUpperCase();
+
+test.beforeAll(async () => {
+    await tinker(`\\Tests\\Support\\NavigationE2EFixture::baseline('${BASELINE_SUFFIX}');`);
+});
+
+test.afterAll(async () => {
+    await tinker(`\\Tests\\Support\\NavigationE2EFixture::cleanup('${BASELINE_SUFFIX}');`);
+});
 
 test.beforeEach(async ({ page }) => {
     await loginAs(page, USER.email, USER.password);

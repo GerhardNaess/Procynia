@@ -103,10 +103,10 @@ MARKDOWN;
 
     public static function cleanup(int $customerId): void
     {
-        // Cascades take the requirement and its Wiki answer with the case.
-        SavedNotice::query()
+        // Cascades take the requirement and its Wiki answer with the case. The requirement is
+        // approved, which A42 keeps from an ordinary delete.
+        TenderTestDataPurge::delete(SavedNotice::query()
             ->where('customer_id', $customerId)
-            ->where('external_id', self::EXTERNAL_ID)
-            ->delete();
+            ->where('external_id', self::EXTERNAL_ID));
     }
 }

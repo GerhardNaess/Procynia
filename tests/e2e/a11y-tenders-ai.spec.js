@@ -17,6 +17,7 @@ import { tinker } from './helpers/risk.js';
 const FIXTURE = '\\Tests\\Support\\A11yTenderAiE2EFixture';
 const CUSTOMER_ID = 2;
 const APPROVED_REQUIREMENT_TEXT = 'E2E a11y: beskriv leveransemodellen.';
+const DRAFT_REQUIREMENT_TEXT = 'E2E a11y: oppgi responstid for support.';
 const GENERATE_URL = /\/app\/ai\/\d+\/requirements\/\d+\/wiki-answer$/;
 
 let goNoGoCaseId = null;
@@ -31,6 +32,9 @@ async function setDocumentStatus(status) {
 
 /** The approved requirement's card. */
 const approvedCard = (page) => page.locator('article').filter({ has: page.getByRole('button', { name: APPROVED_REQUIREMENT_TEXT }) });
+
+/** The undecided requirement's card: the one an extracted requirement may still be deleted from. */
+const draftCard = (page) => page.locator('article').filter({ has: page.getByRole('button', { name: DRAFT_REQUIREMENT_TEXT }) });
 
 test.describe.serial('WCAG Fase 4 — tenders and the AI workspace', () => {
     test.beforeAll(async () => {
@@ -248,8 +252,11 @@ test.describe.serial('WCAG Fase 4 — tenders and the AI workspace', () => {
         await page.getByRole('button', { name: 'Skjul skjema' }).click();
         await expect(page.locator('#manual-requirement-text')).toHaveCount(0);
 
+        // An approved requirement is kept (A42): it offers no «Slett», only the undecided one does.
+        await expect(approvedCard(page).getByTestId('requirement-delete-button')).toHaveCount(0);
+
         // Delete asks first: focus goes to the question, and Avbryt brings it back to «Slett».
-        const card = approvedCard(page);
+        const card = draftCard(page);
         const remove = card.getByTestId('requirement-delete-button');
         await remove.focus();
         await page.keyboard.press('Enter');

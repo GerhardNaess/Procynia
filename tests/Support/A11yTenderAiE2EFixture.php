@@ -115,10 +115,10 @@ class A11yTenderAiE2EFixture
 
     public static function cleanup(int $customerId): void
     {
-        SavedNotice::query()
+        // The AI case holds an approved requirement, which A42 keeps from an ordinary delete.
+        TenderTestDataPurge::delete(SavedNotice::query()
             ->where('customer_id', $customerId)
-            ->whereIn('external_id', [self::GO_NO_GO_EXTERNAL_ID, self::AI_EXTERNAL_ID])
-            ->delete();
+            ->whereIn('external_id', [self::GO_NO_GO_EXTERNAL_ID, self::AI_EXTERNAL_ID]));
     }
 
     private static function createCase(int $customerId, ?User $owner, string $externalId, string $title, string $bidStatus): SavedNotice
