@@ -94,6 +94,27 @@ class EnterpriseWikiPageReviewServiceAuthorityTest extends TestCase
         $this->assertUnchanged($case);
     }
 
+    /**
+     * Customer separation in the service itself: a System Owner of another customer — with every
+     * Wiki permission there — takes none of these decisions on this customer's page (§2m).
+     */
+    public function test_a_system_owner_of_another_customer_is_refused_by_the_service(): void
+    {
+        $case = $this->page(EnterpriseWikiPage::STATUS_PENDING_REVIEW);
+        $stranger = $this->user($this->page(EnterpriseWikiPage::STATUS_DRAFT)['customer'], User::BID_ROLE_SYSTEM_OWNER, isWikiApprover: true, isQa: true);
+
+        foreach ($this->decisions($case, $stranger) as $name => $decide) {
+            try {
+                $decide();
+                $this->fail("{$name} must refuse a person of another customer");
+            } catch (HttpException|AuthorizationException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+
+        $this->assertUnchanged($case);
+    }
+
     /** @param array<string, mixed> $case @return array<string, callable(): mixed> */
     private function decisions(array $case, User $actor): array
     {

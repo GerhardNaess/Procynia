@@ -61,6 +61,13 @@ class EnterpriseWikiClaimDecisionService
             return false;
         }
 
+        // The page's customer, and the claim on this page. The rules below answer within a customer
+        // — a System Owner or a QA passes them in their own Wiki — so the boundary is drawn here,
+        // not left to the caller having looked the page up in the right Wiki (§2m).
+        if ((int) $user->customer_id !== (int) $page->customer_id || (int) $claim->enterprise_wiki_page_id !== (int) $page->id) {
+            return false;
+        }
+
         if (! $this->permissions->has($user, CustomerPermissionCatalog::WIKI_REVIEW)) {
             return false;
         }

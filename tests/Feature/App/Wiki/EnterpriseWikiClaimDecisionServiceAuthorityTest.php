@@ -64,8 +64,42 @@ class EnterpriseWikiClaimDecisionServiceAuthorityTest extends TestCase
         $this->assertEveryDecisionRefused($case, $editor, HttpException::class);
     }
 
-    /** @param array<string, mixed> $case @param class-string<\Throwable> $refusal */
-    private function assertEveryDecisionRefused(array $case, User $actor, string $refusal): void
+    /**
+     * Customer separation in the service itself (§2m): a System Owner and a QA of another customer
+     * decide none of this customer's claims, whatever they may do in their own Wiki.
+     */
+    public function test_a_person_of_another_customer_is_refused_by_the_service(): void
+    {
+        $case = $this->page();
+        $other = $this->page();
+
+        foreach ([
+            'system owner' => $this->user($other['customer'], User::BID_ROLE_SYSTEM_OWNER),
+            'QA' => $other['qa'],
+        ] as $who => $stranger) {
+            $this->assertEveryDecisionRefused($case, $stranger, HttpException::class, 403);
+        }
+    }
+
+    /** A claim is decided only on its own page: a claim of another page is not this page's to decide. */
+    public function test_a_claim_of_another_page_is_refused(): void
+    {
+        $case = $this->page();
+        $otherPage = EnterpriseWikiPage::query()->create([
+            'customer_id' => $case['customer']->id,
+            'slug' => 'annen-'.Str::lower(Str::random(6)),
+            'title' => 'Annen side',
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+
+        $this->assertEveryDecisionRefused(['page' => $otherPage] + $case, $case['qa'], HttpException::class, 403);
+    }
+
+    /** @param array<string, mixed> $case @param class-string<\Throwable> $refusal @param int|null $status the HTTP status the refusal must carry */
+    private function assertEveryDecisionRefused(array $case, User $actor, string $refusal, ?int $status = null): void
     {
         $service = app(EnterpriseWikiClaimDecisionService::class);
 
@@ -81,6 +115,10 @@ class EnterpriseWikiClaimDecisionServiceAuthorityTest extends TestCase
                 $this->fail("{$name} must be refused");
             } catch (\Throwable $e) {
                 $this->assertInstanceOf($refusal, $e, $name);
+
+                if ($status !== null) {
+                    $this->assertSame($status, $e->getStatusCode(), $name);
+                }
             }
         }
 
