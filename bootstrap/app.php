@@ -4,6 +4,7 @@ use App\Http\Middleware\AddSecurityHeaders;
 use App\Http\Middleware\Api\AuthenticateApiClient;
 use App\Http\Middleware\Api\ForceJsonResponse;
 use App\Http\Middleware\Api\LogApiRequest;
+use App\Http\Middleware\Api\ResolveApiCustomerGrant;
 use App\Http\Middleware\EnsureCustomerFrontendAccess;
 use App\Http\Middleware\EnsureHealthToken;
 use App\Http\Middleware\EnsureModuleIsEnabled;
@@ -41,6 +42,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'customer.module' => EnsureModuleIsEnabled::class,
             'api.log' => LogApiRequest::class,
             'api.client' => AuthenticateApiClient::class,
+            'api.customer' => ResolveApiCustomerGrant::class,
         ]);
 
         $middleware->api(prepend: [
