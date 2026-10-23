@@ -8,6 +8,7 @@ use App\Models\CustomerRole;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Objectives\ObjectiveAccessService;
 use App\Services\Permissions\BusinessAreaGrants;
 use App\Services\Risk\RiskAccessService;
@@ -282,6 +283,9 @@ class ObjectiveAccessServiceTest extends TestCase
             'nationality_id' => $nationality->id,
             'is_active' => true,
         ]);
+
+        // Mål og KPI is in the customer's package: the services check the module too (phase 0 step 15).
+        app(ModuleEntitlementService::class)->activatePackage($customer, 'governance');
 
         $owner = User::query()->create([
             'name' => 'System Owner',

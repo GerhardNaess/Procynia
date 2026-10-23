@@ -318,7 +318,7 @@ class ObjectiveController extends Controller
             return back()->with('error', __('procynia.objectives.validation.not_deletable'));
         }
 
-        $objective->delete();
+        $this->lifecycle->delete($user, $objective);
 
         return redirect()->route('app.objectives.index')->with('success', __('procynia.objectives.flash.deleted'));
     }

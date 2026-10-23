@@ -4,9 +4,14 @@ namespace App\Services\Objectives;
 
 use App\Models\Kpi;
 use App\Models\KpiStatusChange;
+use App\Models\Objective;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 /**
  * Avslutt KPI and Gjenåpne — the only way a KPI's status changes. The same arrangement as
@@ -19,9 +24,18 @@ use Illuminate\Validation\ValidationException;
  * active then — which only the history can tell after a reopening has overwritten the status.
  *
  * Authorization (objective.edit in the objective's area, objective active) is the caller's.
+ *
+ * Slett KPI is a person's decision (phase 0 step 15): HumanDecisionGuard, then objective.delete in
+ * the objective's area (ObjectiveAccessService), then the history rule — a KPI with a measurement,
+ * withdrawn or not, is retired, never deleted (Kpi::isDeletable()) — under the locks.
  */
 class KpiLifecycleService
 {
+    public function __construct(
+        private readonly HumanDecisionGuard $guard,
+        private readonly ObjectiveAccessService $access,
+    ) {}
+
     public function retire(Kpi $kpi, User $actor, ?string $note): Kpi
     {
         $note = $this->normalized($note);
@@ -63,6 +77,26 @@ class KpiLifecycleService
             $this->record($locked, $actor, Kpi::STATUS_ACTIVE, $reason);
 
             return $locked;
+        });
+    }
+
+    /** Deletes a KPI registered by mistake. A 409 once it has a measurement; it is retired instead. */
+    public function delete(User $actor, Kpi $kpi): void
+    {
+        $actor = $this->guard->assert($actor, HumanDecision::OBJECTIVE_DELETE);
+
+        DB::transaction(function () use ($actor, $kpi): void {
+            // The objective first (shared), then the KPI: the order KpiMeasurementService takes them in.
+            $objective = Objective::query()->whereKey($kpi->objective_id)->sharedLock()->firstOrFail();
+            $locked = $this->lock($kpi);
+
+            $this->access->authorize($actor, CustomerPermissionCatalog::OBJECTIVE_DELETE, $objective);
+
+            if (! $locked->isDeletable()) {
+                throw new ConflictHttpException(__('procynia.objectives.kpi.validation.not_deletable'));
+            }
+
+            $locked->delete();
         });
     }
 

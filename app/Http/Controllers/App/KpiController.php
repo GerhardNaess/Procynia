@@ -206,7 +206,7 @@ class KpiController extends Controller
             return back()->with('error', __('procynia.objectives.kpi.validation.not_deletable'));
         }
 
-        $kpi->delete();
+        $this->lifecycle->delete($user, $kpi);
 
         return redirect()
             ->route('app.objectives.show', ['objectiveId' => $objectiveId])

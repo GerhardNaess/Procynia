@@ -5,9 +5,13 @@ namespace App\Services\Objectives;
 use App\Models\Objective;
 use App\Models\ObjectiveStatusChange;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
+use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 /**
  * Lukk mål and Gjenåpne — the only way an objective's status changes.
@@ -25,9 +29,18 @@ use InvalidArgumentException;
  *
  * Authorization (objective.edit in the objective's area) is the caller's. This only guards the
  * transition itself.
+ *
+ * Slett mål is a person's decision (phase 0 step 15): HumanDecisionGuard, then objective.delete in
+ * the objective's area (ObjectiveAccessService), then the history rule — an objective whose KPIs
+ * have a measurement is closed, never deleted (Objective::isDeletable()) — all under the row lock.
  */
 class ObjectiveLifecycleService
 {
+    public function __construct(
+        private readonly HumanDecisionGuard $guard,
+        private readonly ObjectiveAccessService $access,
+    ) {}
+
     public function close(Objective $objective, User $actor, string $outcome, ?string $note): Objective
     {
         if (! in_array($outcome, Objective::CLOSED_STATUSES, true)) {
@@ -109,6 +122,27 @@ class ObjectiveLifecycleService
             ])->save();
 
             return $locked;
+        });
+    }
+
+    /**
+     * Deletes an objective registered by mistake, its KPIs with it. A 409 when it carries
+     * measurement history; it is closed instead.
+     */
+    public function delete(User $actor, Objective $objective): void
+    {
+        $actor = $this->guard->assert($actor, HumanDecision::OBJECTIVE_DELETE);
+
+        DB::transaction(function () use ($actor, $objective): void {
+            $locked = $this->lock($objective);
+
+            $this->access->authorize($actor, CustomerPermissionCatalog::OBJECTIVE_DELETE, $locked);
+
+            if (! $locked->isDeletable()) {
+                throw new ConflictHttpException(__('procynia.objectives.validation.not_deletable'));
+            }
+
+            $locked->delete();
         });
     }
 

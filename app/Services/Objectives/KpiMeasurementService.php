@@ -6,6 +6,9 @@ use App\Models\Kpi;
 use App\Models\KpiMeasurement;
 use App\Models\Objective;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
@@ -30,13 +33,20 @@ use InvalidArgumentException;
  *
  * Both need the KPI and its objective active, checked again with the KPI row locked, so two people
  * registering the same period at once are serialized and the second one is seen as a correction.
- * Access (objective.measure in the objective's area) is the caller's.
+ *
+ * Both are a person's decision (phase 0 step 15, decision B7): a measurement is a registered value
+ * that decides the KPI's status and what needs attention, not a draft. HumanDecisionGuard refuses an
+ * integration and any request through the API; then objective.measure in the objective's area, in
+ * the actor's own customer, with the module (ObjectiveAccessService), judged on the objective as it
+ * stands under the lock. The controller checks the same first, so its answers are unchanged.
  */
 class KpiMeasurementService
 {
     public function __construct(
         private readonly KpiPeriods $periods,
         private readonly KpiMeasurementResolver $resolver,
+        private readonly HumanDecisionGuard $guard,
+        private readonly ObjectiveAccessService $access,
     ) {}
 
     /**
@@ -86,10 +96,11 @@ class KpiMeasurementService
      */
     public function record(Kpi $kpi, User $actor, KpiPeriod $period, string $value, ?string $comment): KpiMeasurement
     {
+        $actor = $this->guard->assert($actor, HumanDecision::OBJECTIVE_MEASURE);
         $comment = $this->normalized($comment);
 
         return DB::transaction(function () use ($kpi, $actor, $period, $value, $comment): KpiMeasurement {
-            $locked = $this->lockMeasurable($kpi, 'value');
+            $locked = $this->lockMeasurable($kpi, $actor, 'value');
 
             $previous = $locked->measurements()
                 ->where('period_start', $period->start->format('Y-m-d'))
@@ -126,6 +137,7 @@ class KpiMeasurementService
      */
     public function withdraw(KpiMeasurement $measurement, User $actor, ?string $reason): KpiMeasurement
     {
+        $actor = $this->guard->assert($actor, HumanDecision::OBJECTIVE_MEASURE);
         $reason = $this->normalized($reason);
 
         if ($reason === null) {
@@ -135,7 +147,7 @@ class KpiMeasurementService
         }
 
         return DB::transaction(function () use ($measurement, $actor, $reason): KpiMeasurement {
-            $this->lockMeasurable($measurement->kpi, 'reason');
+            $this->lockMeasurable($measurement->kpi, $actor, 'reason');
             $locked = KpiMeasurement::query()->whereKey($measurement->id)->lockForUpdate()->firstOrFail();
 
             if ($locked->isWithdrawn()) {
@@ -150,13 +162,19 @@ class KpiMeasurementService
         });
     }
 
-    /** The KPI, locked, when it and its objective still take measurements. */
-    private function lockMeasurable(Kpi $kpi, string $errorKey): Kpi
+    /**
+     * The KPI, locked, when the actor may measure it — objective.measure on its objective as it
+     * stands now — and it and its objective still take measurements.
+     */
+    private function lockMeasurable(Kpi $kpi, User $actor, string $errorKey): Kpi
     {
+        // The objective first (shared, so closing or deleting it waits), then the KPI.
+        $objective = Objective::query()->whereKey($kpi->objective_id)->sharedLock()->firstOrFail();
         $locked = Kpi::query()->whereKey($kpi->id)->lockForUpdate()->firstOrFail();
-        $objectiveActive = Objective::query()->whereKey($locked->objective_id)->value('status') === Objective::STATUS_ACTIVE;
 
-        if (! $objectiveActive || ! $locked->isActive()) {
+        $this->access->authorize($actor, CustomerPermissionCatalog::OBJECTIVE_MEASURE, $objective);
+
+        if (! $objective->isActive() || ! $locked->isActive()) {
             throw ValidationException::withMessages([
                 $errorKey => __('procynia.objectives.measurement.validation.not_measurable'),
             ]);

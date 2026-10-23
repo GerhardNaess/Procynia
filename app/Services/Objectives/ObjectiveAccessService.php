@@ -6,9 +6,11 @@ use App\Models\BusinessArea;
 use App\Models\Kpi;
 use App\Models\Objective;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Permissions\BusinessAreaGrants;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerPermissionCatalog;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 
@@ -33,12 +35,19 @@ use Illuminate\Database\Eloquent\Collection;
  *
  * Every read of objectives on a user's behalf starts from visibleObjectives(). An objective outside
  * the user's areas is absent — not listed, not counted, not searchable and 404 by URL.
+ *
+ * THE SERVICES ASK HERE TOO (phase 0 step 15). Every write in Mål og KPI is checked by its service
+ * with can*() or authorize(), not only by the controller: the key in the objective's fagområde, the
+ * actor's own customer, and the customer holding the `objectives` module. The module is checked in
+ * canInArea(), so every can*() carries it; the route guard already refuses the module's pages, and
+ * pages of other modules that read objectives check the entitlement themselves.
  */
 class ObjectiveAccessService
 {
     public function __construct(
         private readonly CustomerPermissionService $permissions,
         private readonly BusinessAreaGrants $grants,
+        private readonly ModuleEntitlementService $entitlements,
     ) {}
 
     /**
@@ -151,6 +160,17 @@ class ObjectiveAccessService
         return $this->canInArea($user, $permissionKey, (int) $objective->customer_id, (int) $objective->business_area_id);
     }
 
+    /**
+     * The rule, as a refusal (403), for a service about to write. Judged on the objective as the
+     * caller passes it — a service passes the row it has just locked.
+     */
+    public function authorize(User $user, string $permissionKey, Objective $objective): void
+    {
+        if (! $this->can($user, $permissionKey, $objective)) {
+            throw new AuthorizationException("This user may not [{$permissionKey}] this objective.");
+        }
+    }
+
     public function canView(User $user, Objective $objective): bool
     {
         return $this->can($user, CustomerPermissionCatalog::OBJECTIVE_VIEW, $objective);
@@ -187,13 +207,15 @@ class ObjectiveAccessService
     }
 
     /**
-     * Whether the user may do the given thing in this area of this customer. The tenant check is
-     * part of the answer, not left to the caller.
+     * Whether the user may do the given thing in this area of this customer. The tenant check and
+     * the module are part of the answer, not left to the caller.
      */
     public function canInArea(User $user, string $permissionKey, int $customerId, int $areaId): bool
     {
         return $this->canOpenModule($user)
             && (int) $user->customer_id === $customerId
+            && $user->customer !== null
+            && $this->entitlements->hasModule($user->customer, 'objectives')
             && in_array($areaId, $this->areaIdsFor($user, $permissionKey), true);
     }
 
