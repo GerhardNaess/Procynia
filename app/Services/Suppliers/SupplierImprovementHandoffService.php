@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Services\Improvements\ImprovementCaseAccessService;
 use App\Services\Improvements\ImprovementCaseCreator;
 use App\Services\Modules\ModuleEntitlementService;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -98,7 +99,7 @@ class SupplierImprovementHandoffService
 
         // From Leverandørkontroll (a control or an aktsomhetsvurdering): supplier.assure. From the
         // supplier or a leverandørvurdering: supplier.edit (v1).
-        abort_unless($fromControl || $fromDueDiligence ? $this->suppliers->canAssure($user) : $this->suppliers->canEdit($user), 403);
+        $this->suppliers->authorize($user, $fromControl || $fromDueDiligence ? CustomerPermissionCatalog::SUPPLIER_ASSURE : CustomerPermissionCatalog::SUPPLIER_EDIT, (int) $supplier->customer_id);
 
         // At most one provenance (the database checks it too).
         if ((int) $fromControl + (int) $fromDueDiligence + (int) $given('supplier_assessment_id') > 1) {
@@ -154,7 +155,7 @@ class SupplierImprovementHandoffService
     /** Koble til eksisterende sak: one the person can read, not already listed on the supplier. */
     public function link(User $user, Supplier $supplier, int $caseId): void
     {
-        abort_unless($this->suppliers->canEdit($user), 403);
+        $this->suppliers->authorize($user, CustomerPermissionCatalog::SUPPLIER_EDIT, (int) $supplier->customer_id);
 
         // A 422 rather than a 404: the id came from a form, and whether it names a case the person
         // cannot read or nothing at all, the answer is the same.
@@ -187,7 +188,7 @@ class SupplierImprovementHandoffService
      */
     public function unlink(User $user, Supplier $supplier, int $linkId): void
     {
-        abort_unless($this->suppliers->canEdit($user), 403);
+        $this->suppliers->authorize($user, CustomerPermissionCatalog::SUPPLIER_EDIT, (int) $supplier->customer_id);
 
         $link = $supplier->improvementCaseLinks()->whereKey($linkId)->first();
 
@@ -318,7 +319,7 @@ class SupplierImprovementHandoffService
     /** The supplier row, locked; refused for an ended supplier, which is read-only. */
     private function lockOpen(Supplier $supplier, string $errorField): Supplier
     {
-        $locked = Supplier::query()->whereKey($supplier->id)->lockForUpdate()->firstOrFail();
+        $locked = Supplier::query()->whereKey($supplier->id)->where('customer_id', (int) $supplier->customer_id)->lockForUpdate()->firstOrFail();
 
         if ($locked->isEnded()) {
             throw ValidationException::withMessages([$errorField => __('procynia.supplier_management.validation.reopen_before_edit')]);

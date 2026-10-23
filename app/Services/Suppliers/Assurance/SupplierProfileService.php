@@ -7,9 +7,9 @@ use App\Models\SupplierProfile;
 use App\Models\SupplierProfileChange;
 use App\Models\User;
 use App\Services\Suppliers\SupplierAccessService;
+use App\Support\CustomerPermissionCatalog;
 use App\Support\Suppliers\SupplierValidationMessages;
 use Closure;
-use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -23,7 +23,8 @@ use Illuminate\Validation\ValidationException;
  * transaction, with the supplier row locked:
  *
  *  - the supplier is looked up again through SupplierAccessService::visibleSuppliers() — another
- *    customer's supplier is not found (404) — and the actor must hold supplier.edit. supplier.assure
+ *    customer's supplier is not found (404) — and the actor must hold supplier.edit, in the supplier's
+ *    own customer, with the module (checked before the transaction). supplier.assure
  *    does not change the profile: the person who controls a supplier cannot remove a requirement by
  *    changing the facts it is applied by;
  *  - an ended supplier is refused;
@@ -133,15 +134,12 @@ class SupplierProfileService
     /** @param  array<string, mixed>  $answers  as answers() returns them */
     public function save(Supplier $supplier, User $actor, array $answers, ?string $reason): SupplierProfileChange
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_EDIT, (int) $supplier->customer_id);
         $reason = trim((string) $reason);
         $reason = $reason !== '' ? $reason : null;
 
         return DB::transaction(function () use ($supplier, $actor, $answers, $reason): SupplierProfileChange {
             $locked = $this->access->visibleSuppliers($actor)->whereKey($supplier->id)->lockForUpdate()->firstOrFail();
-
-            if (! $this->access->canEdit($actor)) {
-                throw new AuthorizationException;
-            }
 
             if ($locked->isEnded()) {
                 throw ValidationException::withMessages(['profile' => __('procynia.supplier_management.validation.reopen_before_edit')]);

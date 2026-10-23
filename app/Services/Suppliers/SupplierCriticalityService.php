@@ -5,6 +5,7 @@ namespace App\Services\Suppliers;
 use App\Models\Supplier;
 use App\Models\SupplierCriticalityChange;
 use App\Models\User;
+use App\Support\CustomerPermissionCatalog;
 use App\Support\Suppliers\SupplierValidationMessages;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -23,10 +24,13 @@ use Illuminate\Validation\ValidationException;
  * inside the lock: an ended supplier is refused, and so is a change that changes nothing — a double
  * submit writes one row.
  *
- * Authorization is the caller's (supplier.edit through SupplierAccessService).
+ * supplier.edit is required in the supplier's own customer, with the module
+ * (SupplierAccessService::authorize()); the controller checks the same before it calls.
  */
 class SupplierCriticalityService
 {
+    public function __construct(private readonly SupplierAccessService $access) {}
+
     /**
      * The classification fields, for registering a supplier and for changing its criticality.
      *
@@ -94,6 +98,8 @@ class SupplierCriticalityService
      */
     public function change(Supplier $supplier, User $actor, array $classification, ?string $reason): SupplierCriticalityChange
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_EDIT, (int) $supplier->customer_id);
+
         $reason = trim((string) $reason);
 
         if ($reason === '') {
@@ -101,7 +107,7 @@ class SupplierCriticalityService
         }
 
         return DB::transaction(function () use ($supplier, $actor, $classification, $reason): SupplierCriticalityChange {
-            $locked = Supplier::query()->whereKey($supplier->id)->lockForUpdate()->firstOrFail();
+            $locked = Supplier::query()->whereKey($supplier->id)->where('customer_id', (int) $actor->customer_id)->lockForUpdate()->firstOrFail();
 
             if ($locked->isEnded()) {
                 throw ValidationException::withMessages(['criticality' => __('procynia.supplier_management.validation.reopen_before_edit')]);

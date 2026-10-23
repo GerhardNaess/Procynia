@@ -38,8 +38,8 @@ use Illuminate\Validation\ValidationException;
  * integration and the API channel first, then supplier.delete is required in the supplier's own
  * customer, with the module (SupplierAccessService::authorize()).
  *
- * Authorization of the transitions is the caller's (supplier.edit through SupplierAccessService).
- * This only guards the transition itself.
+ * The transitions are register work: supplier.edit in the supplier's own customer, with the module
+ * (SupplierAccessService::authorize()). The controller checks the same before it calls.
  */
 class SupplierLifecycleService
 {
@@ -118,8 +118,10 @@ class SupplierLifecycleService
     /** @param  list<string>  $from */
     private function transition(Supplier $supplier, User $actor, array $from, string $to, ?string $reason): Supplier
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_EDIT, (int) $supplier->customer_id);
+
         return DB::transaction(function () use ($supplier, $actor, $from, $to, $reason): Supplier {
-            $locked = Supplier::query()->whereKey($supplier->id)->lockForUpdate()->firstOrFail();
+            $locked = Supplier::query()->whereKey($supplier->id)->where('customer_id', (int) $actor->customer_id)->lockForUpdate()->firstOrFail();
 
             if (! in_array($locked->status, $from, true)) {
                 throw ValidationException::withMessages([

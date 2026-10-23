@@ -98,7 +98,7 @@ class SupplierRiskService
         // From an aktsomhetsvurdering (supplier-assurance-v2-plan §11.2, §13.2): supplier.assure, the
         // person who assessed it. From the supplier itself: supplier.edit (v1). risk.create is
         // RiskCreator's either way.
-        abort_unless($fromDueDiligence ? $this->suppliers->canAssure($user) : $this->suppliers->canEdit($user), 403);
+        $this->suppliers->authorize($user, $fromDueDiligence ? CustomerPermissionCatalog::SUPPLIER_ASSURE : CustomerPermissionCatalog::SUPPLIER_EDIT, (int) $supplier->customer_id);
 
         if (! $this->canReadRisks($user)) {
             throw ValidationException::withMessages(['business_area_id' => __('procynia.risk.validation.area_not_allowed')]);
@@ -145,7 +145,7 @@ class SupplierRiskService
     /** Koble til eksisterende risiko: one the person can edit in Risiko, not already listed here. */
     public function link(User $user, Supplier $supplier, int $riskId): void
     {
-        abort_unless($this->suppliers->canEdit($user), 403);
+        $this->suppliers->authorize($user, CustomerPermissionCatalog::SUPPLIER_EDIT, (int) $supplier->customer_id);
 
         $risk = $this->editableRisk($user, $riskId);
 
@@ -179,7 +179,7 @@ class SupplierRiskService
      */
     public function unlink(User $user, Supplier $supplier, int $linkId): void
     {
-        abort_unless($this->suppliers->canEdit($user), 403);
+        $this->suppliers->authorize($user, CustomerPermissionCatalog::SUPPLIER_EDIT, (int) $supplier->customer_id);
 
         $link = $supplier->riskLinks()->whereKey($linkId)->first();
         $risk = $link !== null && $this->canReadRisks($user) ? $this->risks->findVisible($user, (int) $link->risk_id) : null;
@@ -334,7 +334,7 @@ class SupplierRiskService
     /** The supplier row, locked; refused for an ended supplier, which is read-only. */
     private function lockOpen(Supplier $supplier, string $errorField): Supplier
     {
-        $locked = Supplier::query()->whereKey($supplier->id)->lockForUpdate()->firstOrFail();
+        $locked = Supplier::query()->whereKey($supplier->id)->where('customer_id', (int) $supplier->customer_id)->lockForUpdate()->firstOrFail();
 
         if ($locked->isEnded()) {
             throw ValidationException::withMessages([$errorField => __('procynia.supplier_management.validation.reopen_before_edit')]);

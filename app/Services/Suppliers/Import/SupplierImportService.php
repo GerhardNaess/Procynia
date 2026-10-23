@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\Suppliers\Assurance\SupplierProfileService;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Services\Suppliers\SupplierRegistration;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -61,6 +62,8 @@ class SupplierImportService
     /** @throws SupplierImportFileException */
     public function upload(User $actor, UploadedFile $file): SupplierImport
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_EDIT, (int) $actor->customer_id);
+
         $read = $this->reader->read((string) $file->getRealPath(), $file->getClientOriginalName());
 
         return DB::transaction(function () use ($actor, $file, $read): SupplierImport {
@@ -115,9 +118,7 @@ class SupplierImportService
                 return $import;
             }
 
-            if (! $this->access->canEdit($actor)) {
-                throw new AuthorizationException;
-            }
+            $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_EDIT, (int) $actor->customer_id);
 
             // One import per customer at a time, until this transaction ends.
             DB::select('SELECT pg_advisory_xact_lock(?, ?)', [crc32('supplier-import'), (int) $actor->customer_id]);

@@ -40,11 +40,16 @@ use Illuminate\Validation\ValidationException;
  * (supplier-assurance-v2-plan §10.4): checked here inside the lock, and refused by the database's
  * NO ACTION reference too. Correcting it is still allowed; the control keeps its snapshot.
  *
- * Authorization is the caller's (supplier.edit or supplier.assure through SupplierAccessService).
+ * Every write checks supplier.edit or supplier.assure in the supplier's own customer, with the module
+ * (SupplierAccessService::authorizeDocumentation()), before a file is stored; the controller checks
+ * the same before it calls.
  */
 class SupplierDocumentService
 {
-    public function __construct(private readonly PrivateFileStore $files) {}
+    public function __construct(
+        private readonly PrivateFileStore $files,
+        private readonly SupplierAccessService $access,
+    ) {}
 
     /** @return array<string, list<mixed>> */
     public static function rules(): array
@@ -78,6 +83,8 @@ class SupplierDocumentService
     /** @param  array<string, mixed>  $validated */
     public function create(Supplier $supplier, User $actor, array $validated, ?UploadedFile $file = null): SupplierDocument
     {
+        $this->access->authorizeDocumentation($actor, (int) $supplier->customer_id);
+
         return $this->withNewFile($supplier, $file, fn (?StoredPrivateFile $stored): SupplierDocument => $this->whileOpen($supplier, function (Supplier $locked) use ($actor, $validated, $stored): SupplierDocument {
             $document = new SupplierDocument($this->fields($validated) + [
                 'customer_id' => (int) $locked->customer_id,
@@ -94,6 +101,8 @@ class SupplierDocumentService
     /** @param  array<string, mixed>  $validated */
     public function update(SupplierDocument $document, User $actor, array $validated): SupplierDocument
     {
+        $this->access->authorizeDocumentation($actor, (int) $document->customer_id);
+
         return $this->whileOpen($document->supplier, function () use ($document, $actor, $validated): SupplierDocument {
             $document->fill($this->fields($validated) + ['updated_by' => $actor->id])->save();
 
@@ -109,6 +118,8 @@ class SupplierDocumentService
      */
     public function renew(SupplierDocument $document, User $actor, array $validated, ?UploadedFile $file = null): SupplierDocument
     {
+        $this->access->authorizeDocumentation($actor, (int) $document->customer_id);
+
         return $this->withNewFile($document->supplier, $file, fn (?StoredPrivateFile $stored): SupplierDocument => $this->whileOpen($document->supplier, function (Supplier $locked) use ($document, $actor, $validated, $stored): SupplierDocument {
             $old = SupplierDocument::query()
                 ->whereKey($document->id)
@@ -142,6 +153,8 @@ class SupplierDocumentService
      */
     public function attachFile(SupplierDocument $document, User $actor, UploadedFile $file): SupplierDocument
     {
+        $this->access->authorizeDocumentation($actor, (int) $document->customer_id);
+
         return $this->withNewFile($document->supplier, $file, fn (?StoredPrivateFile $stored): SupplierDocument => $this->whileOpen($document->supplier, function (Supplier $locked) use ($document, $actor, $stored): SupplierDocument {
             $row = $this->lockedFileRow($document, $locked);
             $previous = $row->file_path;
@@ -159,6 +172,8 @@ class SupplierDocumentService
     /** «Fjern fil»: the row stays, without a file. Refused for a row a control rests on. */
     public function removeFile(SupplierDocument $document, User $actor): SupplierDocument
     {
+        $this->access->authorizeDocumentation($actor, (int) $document->customer_id);
+
         return $this->whileOpen($document->supplier, function (Supplier $locked) use ($document, $actor): SupplierDocument {
             $row = $this->lockedFileRow($document, $locked);
 
@@ -178,9 +193,14 @@ class SupplierDocumentService
      * Removes a row registered by mistake. A row it replaced points back to nothing and is current
      * again. Never a row a control rests on, nor one renewing it.
      */
-    public function delete(SupplierDocument $document): void
+    public function delete(SupplierDocument $document, User $actor): void
     {
-        $this->whileOpen($document->supplier, function () use ($document): void {
+        $this->access->authorizeDocumentation($actor, (int) $document->customer_id);
+
+        $this->whileOpen($document->supplier, function (Supplier $locked) use ($document): void {
+            // Read again inside the supplier lock, which every control takes too.
+            $document = SupplierDocument::query()->whereKey($document->id)->where('supplier_id', $locked->id)->lockForUpdate()->firstOrFail();
+
             if (! $document->isDeletable()) {
                 throw ValidationException::withMessages(['title' => __('procynia.supplier_management.validation.document_used_in_control')]);
             }
@@ -262,7 +282,7 @@ class SupplierDocumentService
     private function whileOpen(Supplier $supplier, callable $write): mixed
     {
         return DB::transaction(function () use ($supplier, $write): mixed {
-            $locked = Supplier::query()->whereKey($supplier->id)->lockForUpdate()->firstOrFail();
+            $locked = Supplier::query()->whereKey($supplier->id)->where('customer_id', (int) $supplier->customer_id)->lockForUpdate()->firstOrFail();
 
             if ($locked->isEnded()) {
                 throw ValidationException::withMessages(['title' => __('procynia.supplier_management.validation.reopen_before_edit')]);

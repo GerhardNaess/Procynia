@@ -455,7 +455,7 @@ class SupplierManagementController extends Controller
         $previousOwnerId = $supplier->owner_user_id !== null ? (int) $supplier->owner_user_id : null;
 
         $this->guardOrganizationNumberRace(fn () => DB::transaction(function () use ($supplier, $fields, $user, $previousOwnerId): void {
-            $supplier->fill($fields + ['updated_by' => $user->id])->save();
+            $supplier = $this->registration->update($user, $supplier, $fields);
             $this->notifications->ownerAssigned($supplier, $previousOwnerId, $user);
         }));
 

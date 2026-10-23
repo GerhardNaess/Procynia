@@ -4,9 +4,11 @@ namespace App\Services\Suppliers;
 
 use App\Models\Supplier;
 use App\Models\User;
+use App\Support\CustomerPermissionCatalog;
 use DomainException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Registering a supplier: the master data rules and the write, shared by «Registrer leverandør» and
@@ -18,11 +20,15 @@ use Illuminate\Validation\Rule;
  * registered with are its own, never a change (plan §5 A, §4.2); after that, status moves only
  * through SupplierLifecycleService and criticality only through SupplierCriticalityService.
  *
- * Authorization and notifications are the caller's: «Registrer leverandør» tells the new intern
- * ansvarlig, the import does not (docs/supplier-management-v1-plan.md, «Excel-import av leverandører»).
+ * Both writes check supplier.edit in the actor's own customer, with the module
+ * (SupplierAccessService::authorize()), whatever the entry point. Notifications are the caller's:
+ * «Registrer leverandør» tells the new intern ansvarlig, the import does not
+ * (docs/supplier-management-v1-plan.md, «Excel-import av leverandører»).
  */
 class SupplierRegistration
 {
+    public function __construct(private readonly SupplierAccessService $access) {}
+
     /**
      * The master data of a supplier, for registering and editing. The owner arrives as an id here;
      * the import resolves it from the file first.
@@ -72,6 +78,8 @@ class SupplierRegistration
      */
     public function register(User $actor, array $fields, string $initialStatus, ?array $classification): Supplier
     {
+        $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_EDIT, (int) $actor->customer_id);
+
         if (! in_array($initialStatus, Supplier::INITIAL_STATUSES, true)) {
             throw new DomainException("A supplier is not registered as [{$initialStatus}].");
         }
@@ -88,5 +96,27 @@ class SupplierRegistration
         $supplier->save();
 
         return $supplier;
+    }
+
+    /**
+     * Rediger: the master data of a supplier that is not ended. The caller has validated the fields
+     * and the owner and runs this in its transaction; the supplier row is locked and its status read
+     * again inside the lock.
+     *
+     * @param  array<string, mixed>  $fields  the master data, as masterDataRules() describes it
+     */
+    public function update(User $actor, Supplier $supplier, array $fields): Supplier
+    {
+        $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_EDIT, (int) $supplier->customer_id);
+
+        $locked = Supplier::query()->whereKey($supplier->id)->where('customer_id', (int) $actor->customer_id)->lockForUpdate()->firstOrFail();
+
+        if ($locked->isEnded()) {
+            throw ValidationException::withMessages(['name' => __('procynia.supplier_management.validation.reopen_before_edit')]);
+        }
+
+        $locked->fill($fields + ['updated_by' => $actor->id])->save();
+
+        return $locked;
     }
 }

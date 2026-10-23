@@ -138,14 +138,14 @@ class SupplierDocumentController extends Controller
 
     public function destroy(int $supplierId, int $documentId): RedirectResponse
     {
-        [, $supplier] = $this->editableSupplier($supplierId);
+        [$user, $supplier] = $this->editableSupplier($supplierId);
         $document = $this->documentOf($supplier, $documentId);
 
         if ($supplier->isEnded()) {
             return $this->endedRefusal();
         }
 
-        $this->documents->delete($document);
+        $this->documents->delete($document, $user);
 
         return back()->with('success', __('procynia.supplier_management.flash.document_deleted'));
     }

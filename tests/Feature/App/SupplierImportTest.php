@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Models\UserNotification;
 use App\Services\Suppliers\Import\SupplierImportColumns;
 use App\Services\Suppliers\Import\SupplierImportReader;
+use App\Services\Suppliers\SupplierAccessService;
 use App\Services\Suppliers\SupplierRegistration;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -496,7 +497,7 @@ class SupplierImportTest extends TestCase
         $editor = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_EDIT]);
         // The database refuses the organisation number, as its unique index does when someone registers
         // it by hand between the analysis and the write: that row is rejected, the rest is imported.
-        $this->app->bind(SupplierRegistration::class, fn () => new class extends SupplierRegistration
+        $this->app->bind(SupplierRegistration::class, fn () => new class(app(SupplierAccessService::class)) extends SupplierRegistration
         {
             public function register(User $actor, array $fields, string $initialStatus, ?array $classification): Supplier
             {
@@ -524,7 +525,7 @@ class SupplierImportTest extends TestCase
     {
         ['customer' => $customer] = $this->context('grc');
         $editor = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_EDIT]);
-        $this->app->bind(SupplierRegistration::class, fn () => new class extends SupplierRegistration
+        $this->app->bind(SupplierRegistration::class, fn () => new class(app(SupplierAccessService::class)) extends SupplierRegistration
         {
             public function register(User $actor, array $fields, string $initialStatus, ?array $classification): Supplier
             {
