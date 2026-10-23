@@ -98,6 +98,7 @@ class SavedNoticeNoGoDecisionService
                 'bid_closure_note' => null,
                 'bid_closed_at' => null,
                 'archived_at' => null,
+                'archived_by_user_id' => null,
                 'history_type' => null,
             ])->save();
 

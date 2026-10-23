@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\CustomerAccessChange;
 use App\Models\GoNoGoAssessment;
 use App\Models\GoNoGoAssessmentCriterion;
 use App\Models\Notice;
@@ -32,6 +33,7 @@ use App\Services\OpportunitySources\OpportunitySourceSearchResult;
 use App\Services\OpportunitySources\OpportunityStatus;
 use App\Services\SavedNoticeAccessService;
 use App\Services\SavedNoticeStatusService;
+use App\Services\Security\CustomerAccessChangeRecorder;
 use App\Support\CustomerContext;
 use App\Support\LocalizedNumber;
 use Carbon\CarbonInterface;
@@ -40,6 +42,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -793,7 +796,10 @@ class NoticeController extends Controller
 
         abort_unless($this->savedNoticeAccess->canArchive($user, $record), 403);
 
-        $record->archiveWithHistoryType((string) $validated['history_type'])->save();
+        // Who moved it to history (step 18).
+        $record->archiveWithHistoryType((string) $validated['history_type'])
+            ->forceFill(['archived_by_user_id' => $user->id])
+            ->save();
 
         return redirect()
             ->back()
@@ -1233,9 +1239,22 @@ class NoticeController extends Controller
             ->whereNull('revoked_at')
             ->firstOrFail();
 
-        $accessRecord->forceFill([
-            'revoked_at' => now(),
-        ])->save();
+        DB::transaction(function () use ($accessRecord, $record, $user): void {
+            $accessRecord->forceFill([
+                'revoked_at' => now(),
+            ])->save();
+
+            // Who took the access away (step 18); the row itself keeps only when.
+            app(CustomerAccessChangeRecorder::class)->record(
+                (int) $record->customer_id,
+                $user,
+                CustomerAccessChange::SUBJECT_SAVED_NOTICE,
+                (int) $record->id,
+                CustomerAccessChangeRecorder::CASE_ACCESS_REVOKED,
+                ['user_id' => (int) $accessRecord->user_id, 'access_role' => $accessRecord->access_role],
+                null,
+            );
+        });
 
         return redirect()
             ->route('app.notices.saved.show', ['savedNotice' => $record->id])
@@ -1376,6 +1395,7 @@ class NoticeController extends Controller
         $record = $this->customerSavedNoticeManageableQuery($user)
             ->whereKey($savedNotice->id)
             ->firstOrFail();
+        $this->authorizeAssignmentChange($user, $record);
 
         // A NEW commercial owner has to hold the role. Re-saving the person already on the case
         // does not: cases were assigned before the role existed, and refusing to save an unrelated
@@ -1402,11 +1422,7 @@ class NoticeController extends Controller
             ],
         ]);
 
-        $record->fill([
-            'opportunity_owner_user_id' => isset($validated['opportunity_owner_user_id']) && $validated['opportunity_owner_user_id'] !== null
-                ? (int) $validated['opportunity_owner_user_id']
-                : null,
-        ])->save();
+        $this->changeAssignment($user, $record, 'opportunity_owner_user_id', CustomerAccessChangeRecorder::CASE_OPPORTUNITY_OWNER_CHANGED, $validated['opportunity_owner_user_id'] ?? null);
 
         return redirect()
             ->route('app.notices.saved.show', ['savedNotice' => $record->id])
@@ -1439,12 +1455,9 @@ class NoticeController extends Controller
         $record = $this->customerSavedNoticeManageableQuery($user)
             ->whereKey($savedNotice->id)
             ->firstOrFail();
+        $this->authorizeAssignmentChange($user, $record);
 
-        $record->fill([
-            'bid_manager_user_id' => isset($validated['bid_manager_user_id']) && $validated['bid_manager_user_id'] !== null
-                ? (int) $validated['bid_manager_user_id']
-                : null,
-        ])->save();
+        $this->changeAssignment($user, $record, 'bid_manager_user_id', CustomerAccessChangeRecorder::CASE_BID_MANAGER_CHANGED, $validated['bid_manager_user_id'] ?? null);
 
         return redirect()
             ->route('app.notices.saved.show', ['savedNotice' => $record->id])
@@ -2030,6 +2043,8 @@ class NoticeController extends Controller
     ): array {
         $nextDeadline = $this->nextRelevantSavedNoticeDeadline($notice);
         $isMutableCase = $notice->archived_at === null && $canManageCase;
+        // Owner and Bid Manager on a case in history: only who administers its access (step 18).
+        $canChangeAssignments = $canManageCase && ($notice->archived_at === null || $canManageContributorAccess);
         $canCreateSubmission = $isMutableCase && $notice->canCreateSubmission();
         $statusActions = $isMutableCase ? $notice->availableBidStatusActions() : [];
         $documentsPayload = $this->savedNoticeDocumentsPayload($notice);
@@ -2244,19 +2259,19 @@ class NoticeController extends Controller
                     ? route('app.notices.saved.reopen-after-no-go', ['savedNotice' => $notice->id])
                     : null,
                 'closure_reasons' => SavedNotice::bidClosureReasonOptions(),
-                'update_opportunity_owner_url' => $canManageCase
+                'update_opportunity_owner_url' => $canChangeAssignments
                     ? route('app.notices.saved.opportunity-owner.update', ['savedNotice' => $notice->id])
                     : null,
-                'opportunity_owner_options' => $canManageCase
+                'opportunity_owner_options' => $canChangeAssignments
                     ? $this->customerOpportunityOwnerOptions(
                         (int) $notice->customer_id,
                         $notice->opportunity_owner_user_id !== null ? (int) $notice->opportunity_owner_user_id : null,
                     )
                     : [],
-                'update_bid_manager_url' => $canManageCase
+                'update_bid_manager_url' => $canChangeAssignments
                     ? route('app.notices.saved.bid-manager.update', ['savedNotice' => $notice->id])
                     : null,
-                'bid_manager_options' => $canManageCase
+                'bid_manager_options' => $canChangeAssignments
                     ? $this->customerBidManagerOptions((int) $notice->customer_id)
                     : [],
                 'case_access' => [
@@ -2418,9 +2433,18 @@ class NoticeController extends Controller
 
     private function grantSavedNoticeAccess(SavedNotice $notice, User $grantedBy, User $user, string $accessRole): void
     {
+        DB::transaction(fn () => $this->writeSavedNoticeAccess($notice, $grantedBy, $user, $accessRole));
+    }
+
+    private function writeSavedNoticeAccess(SavedNotice $notice, User $grantedBy, User $user, string $accessRole): void
+    {
         $access = $notice->userAccesses()->firstOrNew([
             'user_id' => $user->id,
         ]);
+        // The row is reused for a new grant, so what it held before goes to the trail (step 18).
+        $before = $access->exists && $access->revoked_at === null
+            ? ['user_id' => (int) $user->id, 'access_role' => $access->access_role]
+            : null;
 
         $shouldRefreshGrantTimestamp = $access->exists && $access->revoked_at !== null;
 
@@ -2438,6 +2462,50 @@ class NoticeController extends Controller
         }
 
         $access->save();
+
+        app(CustomerAccessChangeRecorder::class)->record(
+            (int) $notice->customer_id,
+            $grantedBy,
+            CustomerAccessChange::SUBJECT_SAVED_NOTICE,
+            (int) $notice->id,
+            CustomerAccessChangeRecorder::CASE_ACCESS_GRANTED,
+            $before,
+            ['user_id' => (int) $user->id, 'access_role' => $accessRole],
+        );
+    }
+
+    /**
+     * Commercial owner and Bid Manager decide who can open and work on a case. On an active case
+     * that is ordinary case work (canManage, unchanged). A case in history is closed: there it is
+     * left to whoever administers access to the case (canManageContributorAccess — System Owner,
+     * a Bid Manager over it, or the case's own owner or Bid Manager), as granting access is (step 18).
+     */
+    private function authorizeAssignmentChange(User $actor, SavedNotice $record): void
+    {
+        abort_if(
+            $record->archived_at !== null && ! $this->savedNoticeAccess->canManageContributorAccess($actor, $record),
+            403,
+        );
+    }
+
+    private function changeAssignment(User $actor, SavedNotice $record, string $column, string $changeType, mixed $userId): void
+    {
+        $next = $userId !== null ? (int) $userId : null;
+
+        DB::transaction(function () use ($actor, $record, $column, $changeType, $next): void {
+            $before = $record->{$column} !== null ? (int) $record->{$column} : null;
+            $record->fill([$column => $next])->save();
+
+            app(CustomerAccessChangeRecorder::class)->record(
+                (int) $record->customer_id,
+                $actor,
+                CustomerAccessChange::SUBJECT_SAVED_NOTICE,
+                (int) $record->id,
+                $changeType,
+                [$column => $before],
+                [$column => $next],
+            );
+        });
     }
 
     private function caseAccessRoleOptions(): array

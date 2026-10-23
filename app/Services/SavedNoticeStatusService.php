@@ -65,11 +65,17 @@ class SavedNoticeStatusService
             }
 
             $fromStatus = $locked->bid_status;
+            $wasArchived = $locked->archived_at !== null;
 
             if ($toStatus === SavedNotice::BID_STATUS_NO_GO) {
                 $locked = $this->noGoDecisions->closeAsNoGo($locked, $actor, (string) $closureReason, $closureNote);
             } else {
                 $locked->transitionBidStatus($toStatus, $closureReason, $closureNote)->save();
+            }
+
+            // A transition that moves the case to history names who did it, as «Flytt til historikk» does.
+            if (! $wasArchived && $locked->archived_at !== null) {
+                $locked->forceFill(['archived_by_user_id' => $actor->id])->save();
             }
 
             $this->record($locked, $fromStatus, $actor, $locked->bid_closure_reason, $locked->bid_closure_note);

@@ -31,6 +31,14 @@ class CustomerAccessChangeRecorder
 
     public const PERMISSION_SETTINGS_CHANGED = 'permission_settings_changed';
 
+    public const CASE_ACCESS_GRANTED = 'case_access_granted';
+
+    public const CASE_ACCESS_REVOKED = 'case_access_revoked';
+
+    public const CASE_OPPORTUNITY_OWNER_CHANGED = 'case_opportunity_owner_changed';
+
+    public const CASE_BID_MANAGER_CHANGED = 'case_bid_manager_changed';
+
     /** @return array<string, mixed> */
     public function userSnapshot(User $user): array
     {

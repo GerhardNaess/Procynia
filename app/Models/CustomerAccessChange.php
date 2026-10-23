@@ -19,6 +19,9 @@ class CustomerAccessChange extends Model
 
     public const SUBJECT_PERMISSION_SETTINGS = 'permission_settings';
 
+    /** Who can open and work on one tender case: per-case access, commercial owner, Bid Manager. */
+    public const SUBJECT_SAVED_NOTICE = 'saved_notice';
+
     public const UPDATED_AT = null;
 
     protected $fillable = [
