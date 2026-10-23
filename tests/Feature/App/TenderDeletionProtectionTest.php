@@ -232,6 +232,60 @@ class TenderDeletionProtectionTest extends TestCase
         $this->assertCaseKept($world, 'procynia.notices.delete_kept_history');
     }
 
+    /**
+     * P2: a case from before status changes were recorded has no history rows. What the case row
+     * itself shows a person did keeps it: a status other than «Oppdaget», a registered submission,
+     * or an outcome recorded in history. Nothing is reconstructed — no status change row and no
+     * actor is written.
+     */
+    public function test_a_legacy_case_with_a_status_but_no_history_rows_is_kept(): void
+    {
+        $world = $this->world();
+        DB::table('saved_notices')->where('id', $world['notice']->id)->update(['bid_status' => SavedNotice::BID_STATUS_IN_PROGRESS]);
+
+        $this->assertCaseKept($world, 'procynia.notices.delete_kept_history');
+        $this->assertSame(0, DB::table('saved_notice_status_changes')->where('saved_notice_id', $world['notice']->id)->count());
+    }
+
+    public function test_a_legacy_case_with_a_registered_submission_is_kept(): void
+    {
+        $world = $this->world();
+        DB::table('bid_submissions')->insert([
+            'saved_notice_id' => $world['notice']->id,
+            'sequence_number' => 1,
+            'label' => 'Innsending 1',
+            'submitted_at' => now()->subYear(),
+            'created_at' => now()->subYear(),
+            'updated_at' => now()->subYear(),
+        ]);
+
+        $this->assertCaseKept($world, 'procynia.notices.delete_kept_history');
+    }
+
+    /** An outcome recorded on the way to history keeps the case; «Avbrutt» alone does not. */
+    public function test_a_case_moved_to_history_keeps_by_its_recorded_outcome_only(): void
+    {
+        foreach ([SavedNotice::HISTORY_TYPE_WON => false, SavedNotice::HISTORY_TYPE_LOST => false, SavedNotice::HISTORY_TYPE_NO_GO => false, SavedNotice::HISTORY_TYPE_ABORTED => true] as $outcome => $deletable) {
+            $world = $this->world();
+            $world['notice']->forceFill(['archived_at' => now(), 'history_type' => $outcome])->save();
+
+            $this->assertSame($deletable, $world['notice']->fresh()->isDeletable(), $outcome);
+
+            if ($deletable) {
+                $this->actingAs($world['owner'])
+                    ->delete(route('app.notices.history.destroy', ['savedNotice' => $world['notice']->id]))
+                    ->assertRedirect()
+                    ->assertSessionHas('success');
+                $this->assertNull($world['notice']->fresh(), $outcome);
+            } else {
+                $this->actingAs($world['owner'])
+                    ->delete(route('app.notices.history.destroy', ['savedNotice' => $world['notice']->id]))
+                    ->assertSessionHas('error', __('procynia.notices.history_delete_kept'));
+                $this->assertDatabaseRefuses(fn () => DB::table('saved_notices')->where('id', $world['notice']->id)->delete(), "a case kept as {$outcome}");
+            }
+        }
+    }
+
     private function assertCaseKept(array $world, string $message): void
     {
         $this->actingAs($world['owner'])

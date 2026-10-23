@@ -453,6 +453,13 @@ class SavedNotice extends Model
      *  - a requirement that has been approved;
      *  - AI usage counted against the customer (customer_ai_case_usages), which must stay traceable
      *    to its case.
+     * A case from before status changes were recorded has no such rows, so what the case itself
+     * shows a person did counts too (P2), and nothing is reconstructed:
+     *  - a bid status other than «Oppdaget» — only a person's transition sets one
+     *    (transitionBidStatus); a new case always starts as discovered;
+     *  - a registered submission (bid_submissions);
+     *  - an outcome recorded when it was moved to history: won, lost or No-Go. «Avbrutt» is left
+     *    out: the 2026_04_06 migration also set it on old rows, without a person choosing it.
      * Saving, editing, adding and rejecting requirements leave no such history.
      */
     public function isDeletable(): bool
@@ -473,7 +480,10 @@ class SavedNotice extends Model
     {
         return $query->addSelect(DB::raw(<<<'SQL'
             (
-                EXISTS (SELECT 1 FROM saved_notice_status_changes c WHERE c.saved_notice_id = saved_notices.id)
+                COALESCE(saved_notices.bid_status, 'discovered') <> 'discovered'
+                OR saved_notices.history_type IN ('won', 'lost', 'no_go')
+                OR EXISTS (SELECT 1 FROM bid_submissions b WHERE b.saved_notice_id = saved_notices.id)
+                OR EXISTS (SELECT 1 FROM saved_notice_status_changes c WHERE c.saved_notice_id = saved_notices.id)
                 OR EXISTS (SELECT 1 FROM saved_notice_no_go_decisions d WHERE d.saved_notice_id = saved_notices.id)
                 OR EXISTS (SELECT 1 FROM saved_notice_ai_requirements r WHERE r.saved_notice_id = saved_notices.id
                     AND (r.approval_status = 'approved' OR r.approved_at IS NOT NULL))
