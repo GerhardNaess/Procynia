@@ -157,6 +157,31 @@ class EnterpriseWikiDocumentOwnerDecisionHistoryTest extends TestCase
         $this->assertSame(1, $approval->decisions()->count());
     }
 
+    /**
+     * The service itself returns the version on a new refusal, so no caller of decide() can record
+     * a refusal and leave the page waiting in review on nobody (phase 0 step 20, §2m).
+     */
+    public function test_a_refusal_through_the_service_alone_returns_the_version_to_its_owner(): void
+    {
+        ['approval' => $approval, 'owner' => $owner, 'page' => $page] = $this->requirement();
+
+        app(EnterpriseWikiDocumentOwnerApprovalService::class)->decide($approval, $owner, Approval::APPROVAL_STATUS_REJECTED, 'Kilden er gjengitt feil.');
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_REJECTED, $page->fresh()->status);
+        $event = EnterpriseWikiPageReviewEvent::query()->where('enterprise_wiki_page_id', $page->id)->sole();
+        $this->assertSame(EnterpriseWikiPageReviewEvent::EVENT_TYPE_CHANGES_REQUESTED, $event->event_type);
+        $this->assertSame(EnterpriseWikiPageReviewEvent::ACTOR_ROLE_DOCUMENT_OWNER, $event->actor_role);
+        $this->assertSame($owner->id, (int) $event->actor_user_id);
+        $this->assertSame('Kilden er gjengitt feil.', $event->reason);
+        $this->assertSame((int) $approval->enterprise_wiki_page_version_id, (int) $event->enterprise_wiki_page_version_id);
+
+        // An approval returns nothing.
+        ['approval' => $other, 'owner' => $otherOwner, 'page' => $otherPage] = $this->requirement();
+        app(EnterpriseWikiDocumentOwnerApprovalService::class)->decide($other, $otherOwner, Approval::APPROVAL_STATUS_APPROVED);
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $otherPage->fresh()->status);
+        $this->assertSame(0, EnterpriseWikiPageReviewEvent::query()->where('enterprise_wiki_page_id', $otherPage->id)->count());
+    }
+
     private function assertRefused(callable $statement): void
     {
         DB::beginTransaction();

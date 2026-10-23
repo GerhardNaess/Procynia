@@ -13,13 +13,11 @@ use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
-use App\Services\EnterpriseWiki\EnterpriseWikiReviewNotificationService;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class WikiDocumentOwnerApprovalController extends Controller
 {
@@ -28,7 +26,6 @@ class WikiDocumentOwnerApprovalController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiDocumentOwnerApprovalService $approvalService,
-        private readonly EnterpriseWikiReviewNotificationService $reviewNotifications,
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
         private readonly CustomerPermissionService $customerPermissions,
     ) {}
@@ -41,43 +38,6 @@ class WikiDocumentOwnerApprovalController extends Controller
     public function reject(Request $request, string $slug, EnterpriseWikiPageVersionDocumentOwnerApproval $approval): RedirectResponse
     {
         return $this->decide($request, $slug, $approval, EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED);
-    }
-
-    /**
-     * A document owner's refusal sends the version back rather than parking it in review.
-     *
-     * Leaving the page in pending_review would be misleading: it is not waiting for anyone, it is
-     * waiting for the page owner to answer an objection. published_version_id is untouched, so
-     * whatever was already approved keeps serving.
-     *
-     * Other owners' pending requirements are deliberately left as they are. They belong to this
-     * version, and if it is resubmitted unchanged they still stand; if the owner edits, the edit
-     * produces a new version and the requirement set is derived again from scratch.
-     */
-    private function returnVersionToOwner(
-        EnterpriseWikiPage $page,
-        EnterpriseWikiPageVersionDocumentOwnerApproval $approval,
-        User $actor,
-        string $reason,
-    ): void {
-        DB::transaction(function () use ($page, $approval, $actor, $reason): void {
-            $event = EnterpriseWikiPageReviewEvent::query()->create([
-                'enterprise_wiki_page_id' => $page->id,
-                'enterprise_wiki_page_version_id' => $approval->enterprise_wiki_page_version_id,
-                'actor_user_id' => $actor->id,
-                'actor_role' => EnterpriseWikiPageReviewEvent::ACTOR_ROLE_DOCUMENT_OWNER,
-                'event_type' => EnterpriseWikiPageReviewEvent::EVENT_TYPE_CHANGES_REQUESTED,
-                'reason' => $reason,
-            ]);
-
-            $locked = EnterpriseWikiPage::query()->whereKey($page->id)->lockForUpdate()->first();
-
-            if ($locked !== null && $locked->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
-                $locked->forceFill(['status' => EnterpriseWikiPage::STATUS_REJECTED])->save();
-            }
-
-            $this->reviewNotifications->changesRequested($locked ?? $page, $event);
-        });
     }
 
     private function decide(
@@ -114,19 +74,10 @@ class WikiDocumentOwnerApprovalController extends Controller
 
         $comment = isset($validated['comment']) ? trim($validated['comment']) : null;
 
-        $previousStatus = (string) $approval->approval_status;
-
+        // A new refusal also returns the version to its owner, inside decide() (B9).
         $this->approvalService->decide($approval, $user, $decision, $comment);
 
         $version = EnterpriseWikiPageVersion::query()->find($approval->enterprise_wiki_page_version_id);
-
-        // A refusal still returns the version to its owner: that is a real objection somebody has
-        // to act on. An approval tells nobody anything, because it unblocks nothing — the page was
-        // never waiting on it.
-        // Only a NEW refusal sends the version back; the same refusal again is not news (B9).
-        if ($isRejection && $previousStatus !== EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED) {
-            $this->returnVersionToOwner($page, $approval, $user, (string) $comment);
-        }
 
         $runId = $approval->enterprise_wiki_ingest_run_id
             ?? EnterpriseWikiIngestRunPage::query()

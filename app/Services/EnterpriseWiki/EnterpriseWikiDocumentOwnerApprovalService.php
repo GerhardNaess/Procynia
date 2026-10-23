@@ -8,6 +8,7 @@ use App\Models\EnterpriseWikiDocumentOwnerDecision;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageReviewEvent;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\EnterpriseWikiSourceReference;
@@ -367,9 +368,55 @@ class EnterpriseWikiDocumentOwnerApprovalService
                 'overridden_by_user_id' => $isOverride ? $actor->id : null,
                 'overridden_at' => $isOverride ? $now : null,
             ])->save();
+
+            // A new refusal is a real objection the page owner has to act on, so it returns the
+            // version to them here, in the same transaction — not in whichever caller took the
+            // decision, where a second way in would leave the page waiting on nobody.
+            if ($decision === EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED) {
+                $this->returnVersionToOwner($locked, $actor, (string) $comment);
+            }
         });
 
         return $approval->fresh(['pageVersion.page', 'documentOwner', 'decidedBy', 'overriddenBy']);
+    }
+
+    /**
+     * A document owner's refusal sends the version back rather than parking it in review.
+     *
+     * Leaving the page in pending_review would be misleading: it is not waiting for anyone, it is
+     * waiting for the page owner to answer an objection. published_version_id is untouched, so
+     * whatever was already approved keeps serving.
+     *
+     * Other owners' pending requirements are deliberately left as they are. They belong to this
+     * version, and if it is resubmitted unchanged they still stand; if the owner edits, the edit
+     * produces a new version and the requirement set is derived again from scratch.
+     */
+    private function returnVersionToOwner(
+        EnterpriseWikiPageVersionDocumentOwnerApproval $approval,
+        User $actor,
+        string $reason,
+    ): void {
+        $event = EnterpriseWikiPageReviewEvent::query()->create([
+            'enterprise_wiki_page_id' => $approval->enterprise_wiki_page_id,
+            'enterprise_wiki_page_version_id' => $approval->enterprise_wiki_page_version_id,
+            'actor_user_id' => $actor->id,
+            'actor_role' => EnterpriseWikiPageReviewEvent::ACTOR_ROLE_DOCUMENT_OWNER,
+            'event_type' => EnterpriseWikiPageReviewEvent::EVENT_TYPE_CHANGES_REQUESTED,
+            'reason' => $reason,
+        ]);
+
+        $page = EnterpriseWikiPage::query()->whereKey($approval->enterprise_wiki_page_id)->lockForUpdate()->first();
+
+        if ($page === null) {
+            return;
+        }
+
+        if ($page->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            $page->forceFill(['status' => EnterpriseWikiPage::STATUS_REJECTED])->save();
+        }
+
+        // Resolved here: the notification service reads this one for document owners.
+        app(EnterpriseWikiReviewNotificationService::class)->changesRequested($page, $event);
     }
 
     public function canDecide(EnterpriseWikiPageVersionDocumentOwnerApproval $approval, User $actor): bool
