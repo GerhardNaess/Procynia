@@ -14,7 +14,9 @@ namespace App\Support;
  * rest on ownership (a document owner vouching for their own source) or on the tender role matrix
  * rather than the catalogue; those return null. A decision can be human-only even when its key is
  * not — adopting an AI-proposed process flow needs only quality.edit, but accepting a machine's
- * proposal is exactly the step a machine must not take for itself.
+ * proposal is exactly the step a machine must not take for itself; deciding that a requirement or
+ * an Annex A control does not apply (Relevans, Kontrollvalg) needs only compliance.edit, as the
+ * register work around it does, but it is the organisation's own statement of applicability.
  *
  * See docs/external-api-phase-0-plan.md §4.3–§4.4.
  */
@@ -56,6 +58,8 @@ enum HumanDecision: string
     case IMPROVEMENT_DELETE = 'improvement.delete';
 
     case COMPLIANCE_ASSESS = 'compliance.assess';
+    /** Relevans and Kontrollvalg on a library requirement — what the erklæring om anvendelse says. */
+    case COMPLIANCE_APPLICABILITY = 'compliance.applicability';
     case COMPLIANCE_AUDIT = 'compliance.audit';
     case COMPLIANCE_DELETE = 'compliance.delete';
 
@@ -99,6 +103,7 @@ enum HumanDecision: string
             self::IMPROVEMENT_CLOSE => CustomerPermissionCatalog::IMPROVEMENT_CLOSE,
             self::IMPROVEMENT_DELETE => CustomerPermissionCatalog::IMPROVEMENT_DELETE,
             self::COMPLIANCE_ASSESS => CustomerPermissionCatalog::COMPLIANCE_ASSESS,
+            self::COMPLIANCE_APPLICABILITY => CustomerPermissionCatalog::COMPLIANCE_EDIT,
             self::COMPLIANCE_AUDIT => CustomerPermissionCatalog::COMPLIANCE_AUDIT,
             self::COMPLIANCE_DELETE => CustomerPermissionCatalog::COMPLIANCE_DELETE,
             self::SUPPLIER_ASSESS => CustomerPermissionCatalog::SUPPLIER_ASSESS,

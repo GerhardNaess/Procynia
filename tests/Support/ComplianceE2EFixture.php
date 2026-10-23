@@ -908,6 +908,7 @@ class ComplianceE2EFixture
             DB::statement('ALTER TABLE compliance_audit_findings DISABLE TRIGGER compliance_audit_findings_handed_off_immutable');
             DB::statement('ALTER TABLE compliance_audit_findings DISABLE TRIGGER compliance_audit_findings_keep_completed');
             DB::statement('ALTER TABLE compliance_audit_finding_changes DISABLE TRIGGER compliance_audit_finding_changes_immutable');
+            DB::statement('ALTER TABLE compliance_requirement_applicability_changes DISABLE TRIGGER compliance_requirement_applicability_changes_immutable');
 
             // The run's audits first: their history, scope and findings go with them through the
             // cascade, and a requirement in an audit's scope could not be deleted otherwise.
@@ -939,6 +940,7 @@ class ComplianceE2EFixture
             DB::statement('ALTER TABLE compliance_audit_findings ENABLE TRIGGER compliance_audit_findings_handed_off_immutable');
             DB::statement('ALTER TABLE compliance_audit_findings ENABLE TRIGGER compliance_audit_findings_keep_completed');
             DB::statement('ALTER TABLE compliance_audit_finding_changes ENABLE TRIGGER compliance_audit_finding_changes_immutable');
+            DB::statement('ALTER TABLE compliance_requirement_applicability_changes ENABLE TRIGGER compliance_requirement_applicability_changes_immutable');
 
             // The run's Kvalitet items; details, evidence and any remaining links cascade. A control with
             // evidence is retired rather than deleted in Procynia (A19), so through the test-only purge.

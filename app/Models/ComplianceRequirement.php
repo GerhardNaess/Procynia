@@ -153,6 +153,7 @@ class ComplianceRequirement extends Model
     {
         return $this->isActive()
             && ! $this->statusChanges()->exists()
+            && ! $this->applicabilityChanges()->exists()
             && ! $this->assessments()->exists()
             && ! ComplianceAuditRequirement::query()->where('requirement_id', $this->id)->exists()
             && ! ComplianceAuditFinding::query()->where('requirement_id', $this->id)->exists();
@@ -192,6 +193,12 @@ class ComplianceRequirement extends Model
     }
 
     /** Newest first. */
+    /** Relevans and Kontrollvalg as they were decided (A35); nothing edits them. */
+    public function applicabilityChanges(): HasMany
+    {
+        return $this->hasMany(ComplianceRequirementApplicabilityChange::class, 'requirement_id')->orderBy('changed_at')->orderBy('id');
+    }
+
     public function statusChanges(): HasMany
     {
         return $this->hasMany(ComplianceRequirementStatusChange::class, 'requirement_id')
