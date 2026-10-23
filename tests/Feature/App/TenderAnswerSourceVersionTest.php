@@ -8,6 +8,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiRequirement;
+use App\Models\SavedNoticeAiRequirementAssessment;
 use App\Models\SavedNoticeAiRequirementWikiAnswer;
 use App\Models\SavedNoticeAiRequirementWikiAnswerRevision;
 use App\Models\User;
@@ -16,6 +17,8 @@ use App\Services\Ai\Wiki\RequirementWikiAlignmentAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerRevisionAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerService;
+use App\Services\Ai\Wiki\RequirementWikiAssessmentAiClient;
+use App\Services\Ai\Wiki\RequirementWikiAssessmentService;
 use App\Services\Ai\Wiki\RequirementWikiResearchAiClient;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -216,6 +219,34 @@ class TenderAnswerSourceVersionTest extends TestCase
 
         $this->assertSame($legacySources, SavedNoticeAiRequirementWikiAnswer::query()->where('saved_notice_ai_requirement_id', $world['requirement']->id)->sole()->sources);
         $this->assertSame(0, SavedNoticeAiRequirementWikiAnswerRevision::query()->count());
+    }
+
+    /** An assessment names the exact published version it read, as an answer does. */
+    public function test_an_assessment_names_the_version_it_read(): void
+    {
+        $world = $this->world();
+        $page = $this->publishedPage($world['customer'], 'Beredskapsplan', 'Beredskapsplan for driftstjenesten testes årlig.');
+        $this->fakeAi([$page->id]);
+        $this->mock(RequirementWikiAssessmentAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('assessRequirement')
+            ->andReturn([
+                'coverage_status' => SavedNoticeAiRequirementAssessment::COVERAGE_STATUS_COVERED,
+                'has_possible_conflict' => false,
+                'risk_level' => SavedNoticeAiRequirementAssessment::RISK_LEVEL_LOW,
+                'requirement_summary' => 'Beredskap.',
+                'coverage_rationale' => 'Dekket.',
+                'missing_information' => '',
+                'recommended_next_step' => 'Ingen.',
+            ]));
+
+        $assessment = app(RequirementWikiAssessmentService::class)
+            ->assessRequirement($world['requirement'], (int) $world['customer']->id, 'no', $world['owner']);
+
+        $source = $assessment->wiki_sources_snapshot[0];
+        $version = EnterpriseWikiPageVersion::query()->findOrFail($page->published_version_id);
+        $this->assertSame($version->id, $source['enterprise_wiki_page_version_id']);
+        $this->assertSame((int) $version->version_number, $source['version_number']);
+        $this->assertSame(hash('sha256', (string) $version->content_markdown), $source['version_content_sha256']);
     }
 
     /** Each stored generation and hand-edit is a row of its own, kept by the database. */
