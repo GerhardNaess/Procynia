@@ -72,6 +72,8 @@ class SavedNoticeAiRequirementWikiAnswer extends Model
         'model',
         'generated_by_user_id',
         'generated_at',
+        'edited_by_user_id',
+        'edited_at',
     ];
 
     protected function casts(): array
@@ -85,6 +87,7 @@ class SavedNoticeAiRequirementWikiAnswer extends Model
             'stale_at' => 'datetime',
             'stale_context' => 'array',
             'generated_at' => 'datetime',
+            'edited_at' => 'datetime',
         ];
     }
 
@@ -96,6 +99,18 @@ class SavedNoticeAiRequirementWikiAnswer extends Model
     public function generatedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'generated_by_user_id');
+    }
+
+    /** Who last edited the answer by hand (A43); null when the person is gone or unknown. */
+    public function editedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'edited_by_user_id');
+    }
+
+    /** The text is a person's hand-edit, which a new generation does not replace without consent. */
+    public function isEdited(): bool
+    {
+        return $this->edited_at !== null;
     }
 
     public function isStale(): bool

@@ -3,6 +3,7 @@
 namespace App\Services\Ai\Wiki;
 
 use App\Data\Ai\AiCallContext;
+use App\Exceptions\RequirementWikiAnswerEditedException;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiRequirement;
@@ -113,11 +114,20 @@ class RequirementWikiAnswerService
         User $actor,
         ?string $caseInstructions = null,
         ?string $requirementUserPrompt = null,
+        bool $replaceEdited = false,
     ): SavedNoticeAiRequirementWikiAnswer {
         // Generating an answer is case work and spends AI capacity (A41): asked before research or
         // any AI call, on the case as it stands now.
         $this->access->authorizeWork($actor, SavedNotice::query()->findOrFail($requirement->saved_notice_id));
         $userId = (int) $actor->id;
+
+        // A hand-edited answer is replaced only when the person asks for it (A43) — said before any
+        // AI call, so refusing costs nothing. What was seen here is checked again under lock.
+        $editedAtSeen = $requirement->wikiAnswer()->value('edited_at');
+
+        if ($editedAtSeen !== null && ! $replaceEdited) {
+            throw new RequirementWikiAnswerEditedException((int) $requirement->id);
+        }
 
         return $this->contextScope->within(new AiCallContext(
             customerId: $customerId,
@@ -128,7 +138,7 @@ class RequirementWikiAnswerService
             resourceId: $requirement->id,
             savedNoticeId: $requirement->saved_notice_id,
             commercialCredit: true,
-        ), function () use ($requirement, $customerId, $languageCode, $userId, $caseInstructions, $requirementUserPrompt): SavedNoticeAiRequirementWikiAnswer {
+        ), function () use ($requirement, $customerId, $languageCode, $userId, $caseInstructions, $requirementUserPrompt, $editedAtSeen): SavedNoticeAiRequirementWikiAnswer {
             $context = $this->researchService->research($requirement, $customerId, $languageCode);
 
             $claimTextsByPageId = $this->claimTextsByPageIdAndOrigin($context['pages']);
@@ -185,7 +195,7 @@ class RequirementWikiAnswerService
                 'stale_at' => null,
                 'stale_reason' => null,
                 'stale_context' => null,
-            ], $userId);
+            ], $userId, $editedAtSeen);
         });
     }
 
@@ -216,8 +226,13 @@ class RequirementWikiAnswerService
             throw new RuntimeException('Cannot edit a Wiki answer that has not been generated yet.');
         }
 
-        return DB::transaction(function () use ($wikiAnswer, $normalizedText): SavedNoticeAiRequirementWikiAnswer {
-            $wikiAnswer->forceFill(['answer_text' => $normalizedText])->save();
+        return DB::transaction(function () use ($wikiAnswer, $normalizedText, $actor): SavedNoticeAiRequirementWikiAnswer {
+            // Who edited it, and that it is now a person's text a generation does not replace unasked (A43).
+            $wikiAnswer->forceFill([
+                'answer_text' => $normalizedText,
+                'edited_by_user_id' => $actor->id,
+                'edited_at' => now(),
+            ])->save();
 
             return $wikiAnswer->refresh();
         });
@@ -822,14 +837,28 @@ class RequirementWikiAnswerService
             : 'Wiki-forskningen fant ingen sider som kunne dokumentere dette kravet. Svaret bygger på faglig beste praksis.';
     }
 
-    private function persist(SavedNoticeAiRequirement $requirement, array $attributes, ?int $userId): SavedNoticeAiRequirementWikiAnswer
+    private function persist(SavedNoticeAiRequirement $requirement, array $attributes, ?int $userId, mixed $editedAtSeen = null): SavedNoticeAiRequirementWikiAnswer
     {
-        return DB::transaction(function () use ($requirement, $attributes, $userId): SavedNoticeAiRequirementWikiAnswer {
+        return DB::transaction(function () use ($requirement, $attributes, $userId, $editedAtSeen): SavedNoticeAiRequirementWikiAnswer {
+            $current = SavedNoticeAiRequirementWikiAnswer::query()
+                ->where('saved_notice_ai_requirement_id', $requirement->id)
+                ->lockForUpdate()
+                ->first();
+
+            // Edited by hand while this generation ran: the person's text stays (A43).
+            if ($current !== null && $current->getRawOriginal('edited_at') !== null
+                && (string) $current->getRawOriginal('edited_at') !== (string) $editedAtSeen) {
+                throw new RequirementWikiAnswerEditedException((int) $requirement->id);
+            }
+
             return SavedNoticeAiRequirementWikiAnswer::query()->updateOrCreate(
                 ['saved_notice_ai_requirement_id' => $requirement->id],
                 array_merge($attributes, [
                     'generated_by_user_id' => $userId,
                     'generated_at' => now(),
+                    // A new AI text replaces the hand-edit, so it is no longer one.
+                    'edited_by_user_id' => null,
+                    'edited_at' => null,
                 ]),
             );
         });

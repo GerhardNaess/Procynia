@@ -1176,6 +1176,9 @@ export default function AiShow({
     const [wikiAnswerError, setWikiAnswerError] = useState(null);
     const [answerDraftPromptsByRequirementId, setAnswerDraftPromptsByRequirementId] = useState({});
     const [promptEditorOpenRequirementId, setPromptEditorOpenRequirementId] = useState(null);
+    // A hand-edited answer is replaced only when the person says so (A43): the requirement whose
+    // «replace or keep» choice is showing in the answer panel.
+    const [confirmReplaceEditedRequirementId, setConfirmReplaceEditedRequirementId] = useState(null);
     const [showAdvancedAI, setShowAdvancedAI] = useState(false);
     const [showManualRequirementForm, setShowManualRequirementForm] = useState(false);
     const [caseDocumentsCollapsed, setCaseDocumentsCollapsed] = useState(true);
@@ -1945,7 +1948,7 @@ export default function AiShow({
     // (AI-to-Wiki consolidation). Generates/regenerates requirement.wiki_answer — the operative,
     // editable answer — using only approved Wiki content plus the customer's shared ai_instructions and this
     // requirement's own one-off prompt.
-    const requestWikiAnswerGeneration = async (requirement) => {
+    const requestWikiAnswerGeneration = async (requirement, { replaceEdited = false } = {}) => {
         if (!canUseAiOffer) {
             setWikiAnswerError({ requirementId: requirement?.id ?? null, message: tai.ai_access_unavailable_message });
             return;
@@ -1964,6 +1967,14 @@ export default function AiShow({
 
         setActiveRequirementId(requirementKey);
         setWikiAnswerError(null);
+
+        // The answer is a person's text: ask in the panel before a new draft replaces it.
+        if (requirement.wiki_answer?.edited_at && !replaceEdited) {
+            setConfirmReplaceEditedRequirementId(requirement.id);
+            return;
+        }
+
+        setConfirmReplaceEditedRequirementId(null);
         // A regenerated answer replaces the text under the editor, so the editor must not stay open
         // over it holding a hand-edit of the previous answer.
         setWikiAnswerEditingRequirementId(null);
@@ -1975,6 +1986,7 @@ export default function AiShow({
         try {
             const response = await window.axios.post(requirement.wiki_answer_generate_url, {
                 user_answer_prompt: userAnswerPrompt,
+                ...(replaceEdited ? { replace_edited: true } : {}),
             }, { timeout: 120000 });
             const wikiAnswer = response?.data?.wiki_answer ?? null;
 
@@ -1990,6 +2002,12 @@ export default function AiShow({
             });
             announce(a11y.ai_answer_ready ?? 'Svarutkastet er klart.');
         } catch (error) {
+            // Edited by hand meanwhile (another tab, a colleague): the same choice, not an error.
+            if (error?.response?.status === 409 && error?.response?.data?.edited) {
+                setConfirmReplaceEditedRequirementId(requirement.id);
+                return;
+            }
+
             const failure = requestFailure(error, tai.wiki_answer_error_default);
 
             // A refused instruction is said under the instruction, where it is corrected.
@@ -3787,6 +3805,36 @@ export default function AiShow({
                                                 {wikiAnswerError.message}
                                             </div>
                                         ) : null}
+
+                                        {confirmReplaceEditedRequirementId === activeRequirement.id ? (
+                                            <div
+                                                data-testid="wiki-answer-replace-edited"
+                                                role="group"
+                                                aria-labelledby="wiki-answer-replace-edited-title"
+                                                className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base leading-6 text-amber-900"
+                                            >
+                                                <div id="wiki-answer-replace-edited-title" className="font-semibold">
+                                                    {tai.wiki_answer_replace_edited_title ?? 'Svaret er redigert manuelt'}
+                                                </div>
+                                                <p>{tai.wiki_answer_replace_edited_description ?? 'Et nytt svarutkast erstatter teksten slik den er redigert. Vil du lage et nytt utkast likevel?'}</p>
+                                                <div className="flex flex-wrap gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { void requestWikiAnswerGeneration(activeRequirement, { replaceEdited: true }); }}
+                                                        className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-base font-semibold transition ${PRIMARY_COLOURS}`}
+                                                    >
+                                                        {tai.wiki_answer_replace_edited_confirm ?? 'Erstatt med nytt utkast'}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setConfirmReplaceEditedRequirementId(null)}
+                                                        className="inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+                                                    >
+                                                        {tai.wiki_answer_replace_edited_keep ?? 'Behold redigert svar'}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ) : null}
                                     </div>
 
                                     {!activeRequirementWikiAnswer?.coverage_status ? (
@@ -3813,6 +3861,13 @@ export default function AiShow({
                                                                     hour: '2-digit',
                                                                     minute: '2-digit',
                                                                 }).format(new Date(activeRequirementWikiAnswer.generated_at))}
+                                                            </div>
+                                                        ) : null}
+                                                        {activeRequirementWikiAnswer.edited_at ? (
+                                                            <div data-testid="wiki-answer-edited-by" className="mt-1 text-base text-slate-600">
+                                                                {activeRequirementWikiAnswer.edited_by
+                                                                    ? formatLocalizedTemplate(tai.wiki_answer_edited_by ?? 'Redigert av :name', { name: activeRequirementWikiAnswer.edited_by })
+                                                                    : (tai.wiki_answer_edited_unknown ?? 'Redigert manuelt')}
                                                             </div>
                                                         ) : null}
                                                     </div>

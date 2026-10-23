@@ -8,6 +8,7 @@ use App\Data\Ai\Requirements\RequirementEditData;
 use App\Data\Ai\Requirements\RequirementViewData;
 use App\Exceptions\Ai\AiCostControlException;
 use App\Exceptions\Ai\XlsxRequirementImportException;
+use App\Exceptions\RequirementWikiAnswerEditedException;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\RequirementExtractionCall;
@@ -767,7 +768,12 @@ class AiController extends Controller
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
 
+        // Only the case's current requirements, never a rejected one (A43): an answer to a requirement
+        // that was rejected or replaced is not an ordinary answer in the bid.
         $requirements = $record->aiRequirements()
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_PUBLISHED)
+            ->where('approval_status', '!=', SavedNoticeAiRequirement::APPROVAL_STATUS_REJECTED)
+            ->where('review_status', '!=', SavedNoticeAiRequirement::REVIEW_STATUS_REJECTED)
             ->whereHas('wikiAnswer', function ($query): void {
                 $query->whereNotNull('answer_text')->where('answer_text', '!=', '');
             })
@@ -1139,6 +1145,8 @@ class AiController extends Controller
 
         $validated = $request->validate([
             'user_answer_prompt' => ['nullable', 'string', 'max:5000'],
+            // Said by the person when they choose to replace a hand-edited answer (A43).
+            'replace_edited' => ['sometimes', 'boolean'],
         ]);
         $userAnswerPrompt = $this->normalizeOptionalPromptText($validated['user_answer_prompt'] ?? null);
 
@@ -1162,7 +1170,15 @@ class AiController extends Controller
                 $request->user(),
                 $this->customerAiInstructions($record),
                 $userAnswerPrompt,
+                (bool) ($validated['replace_edited'] ?? false),
             );
+        } catch (RequirementWikiAnswerEditedException) {
+            // Not a failure: the answer is a person's text, and the page asks before replacing it.
+            return response()->json([
+                'requirement_id' => $ownedRequirement->id,
+                'edited' => true,
+                'error' => __('procynia.ai.wiki_answer_edited_conflict'),
+            ], 409);
         } catch (AiCostControlException $exception) {
             // A cost-control block is not a technical failure and must not be reported as one: the
             // customer can act on it, but only if they are told which of the four reasons applies.
@@ -1853,6 +1869,8 @@ class AiController extends Controller
                 'has_source_based_support' => null,
                 'engine_version' => null,
                 'generated_at' => null,
+                'edited_at' => null,
+                'edited_by' => null,
                 'is_stale' => null,
                 'stale_at' => null,
                 'stale_reason' => null,
@@ -1987,6 +2005,10 @@ class AiController extends Controller
                 : null,
             'engine_version' => $wikiAnswer->engine_version,
             'generated_at' => optional($wikiAnswer->generated_at)?->toIso8601String(),
+            // A person's hand-edit (A43): who and when, and the page asks before a generation
+            // replaces it.
+            'edited_at' => optional($wikiAnswer->edited_at)?->toIso8601String(),
+            'edited_by' => $wikiAnswer->edited_at !== null ? $wikiAnswer->editedBy?->name : null,
             'is_stale' => $wikiAnswer->isStale(),
             'stale_at' => optional($wikiAnswer->stale_at)?->toIso8601String(),
             'stale_reason' => $wikiAnswer->stale_reason,
