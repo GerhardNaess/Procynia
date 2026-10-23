@@ -4,7 +4,9 @@ namespace App\Services\Ai\Wiki;
 
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiPage;
+use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiRequirement;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
@@ -65,6 +67,8 @@ class RequirementWikiResearchService
      */
     public function research(SavedNoticeAiRequirement $requirement, int $customerId, string $languageCode): array
     {
+        $this->assertRequirementBelongsToCustomer($requirement, $customerId);
+
         $researchInput = trim(($requirement->requirement_identifier ?? '').' '.$requirement->requirement_text);
         // A bid answer presents Wiki content as the customer's documented fact, so it reads only
         // published versions. That is now the retrieval rule itself rather than something this
@@ -464,5 +468,23 @@ class RequirementWikiResearchService
             'stop_reason' => $context['limits']['stop_reason'],
             'context_chars' => $context['limits']['context_size'],
         ]);
+    }
+
+    /**
+     * The customer id is the one boundary every Wiki read in this flow is filtered by, and it arrives
+     * as a parameter. Each caller passes the owning case's own customer today; this makes it a rule
+     * rather than a convention, so no future entry (a job, a command, an API) can research one
+     * customer's requirement in another customer's Wiki. Read from the database, never from a
+     * relation the caller may have set.
+     */
+    private function assertRequirementBelongsToCustomer(SavedNoticeAiRequirement $requirement, int $customerId): void
+    {
+        $owningCustomerId = SavedNotice::query()
+            ->whereKey($requirement->saved_notice_id)
+            ->value('customer_id');
+
+        if ($owningCustomerId === null || (int) $owningCustomerId !== $customerId) {
+            throw new AuthorizationException('The requirement does not belong to this customer.');
+        }
     }
 }
