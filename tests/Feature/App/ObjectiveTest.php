@@ -862,7 +862,7 @@ class ObjectiveTest extends TestCase
         $this->assertSame(0, ObjectiveStatusChange::query()->where('objective_id', $objective->id)->count());
     }
 
-    public function test_deleting_an_objective_takes_its_history_along(): void
+    public function test_a_closed_objective_is_kept_with_its_history(): void
     {
         ['customer' => $customer] = $this->context();
         $hr = $this->area($customer, 'HR');
@@ -870,13 +870,14 @@ class ObjectiveTest extends TestCase
         $objective = $this->objective($customer, $hr, 'Feilregistrert', $user);
         $this->actingAs($user)->post("/app/objectives/{$objective->id}/close", ['status' => Objective::STATUS_CANCELLED]);
 
+        // A closing is a decision with history (A39, A40): «Slett mål» is not offered and is refused.
         $props = $this->actingAs($user)->get("/app/objectives/{$objective->id}")->assertOk()->viewData('page')['props'];
-        $this->assertTrue($props['permissions']['can_delete']);
+        $this->assertFalse($props['permissions']['can_delete']);
 
-        $this->actingAs($user)->delete("/app/objectives/{$objective->id}")->assertRedirect('/app/objectives');
+        $this->actingAs($user)->delete("/app/objectives/{$objective->id}")->assertSessionHas('error', 'Målet kan ikke slettes.');
 
-        $this->assertNull($objective->fresh());
-        $this->assertSame(0, ObjectiveStatusChange::query()->where('objective_id', $objective->id)->count());
+        $this->assertNotNull($objective->fresh());
+        $this->assertSame(1, ObjectiveStatusChange::query()->where('objective_id', $objective->id)->count());
     }
 
     // ---------------------------------------------------------------------

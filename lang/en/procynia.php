@@ -6682,7 +6682,7 @@ return [
                             ['title' => 'Close objective', 'text' => 'When the objective is done, close it as Achieved, Not achieved or Cancelled. The outcome and comment are kept in the history. The KPIs under a closed objective take no new measurements.'],
                             ['title' => 'Reopen', 'text' => 'A closed objective can be reopened with a reason. The earlier closing stays in the history.'],
                             ['title' => 'History', 'text' => 'Shows every closing and reopening with the date, who did it and the comment. The history cannot be changed.'],
-                            ['title' => 'Delete', 'text' => 'Deleting is only for objectives registered by mistake. An objective that is done is closed instead, so its history is kept.'],
+                            ['title' => 'Delete', 'text' => 'Deleting is only for objectives registered by mistake. An objective that is done is closed instead, so its history is kept. An objective that has been closed, or that has KPIs with measurements or that have been retired, cannot be deleted.'],
                         ],
                     ],
                 ],
@@ -6731,7 +6731,7 @@ return [
                             ['title' => 'Measurement frequency and reporting deadline', 'text' => 'The measurement frequency says how often the KPI is to be measured. The reporting deadline is the number of days after a period ends before its measurement counts as missing. Without a fixed frequency, measurements are recorded when needed.'],
                             ['title' => 'Measurements become history', 'text' => 'A recorded measurement is never edited. The target that applied is stored with the value.'],
                             ['title' => 'Withdraw', 'text' => 'Use «Withdraw» when a measurement should not have been recorded. It stays as «Withdrawn» and no longer counts. Nothing is deleted.'],
-                            ['title' => 'Delete', 'text' => '«Delete KPI» at the bottom of the page is only for KPIs registered by mistake that have no measurements. Otherwise you retire the KPI.'],
+                            ['title' => 'Delete', 'text' => '«Delete KPI» at the bottom of the page is only for KPIs registered by mistake that have no measurements and have never been retired. Otherwise you retire the KPI.'],
                         ],
                     ],
                     [

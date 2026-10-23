@@ -6686,7 +6686,7 @@ return [
                             ['title' => 'Lukk mål', 'text' => 'Når målet er ferdig, lukker du det som Oppnådd, Ikke oppnådd eller Avbrutt. Utfallet og kommentaren lagres i historikken. KPI-ene under et lukket mål tar ikke imot nye målinger.'],
                             ['title' => 'Gjenåpne', 'text' => 'Et lukket mål kan gjenåpnes med en begrunnelse. Den tidligere lukkingen blir stående i historikken.'],
                             ['title' => 'Historikk', 'text' => 'Viser hver lukking og gjenåpning med dato, hvem som gjorde det og kommentaren. Historikken kan ikke endres.'],
-                            ['title' => 'Slette', 'text' => 'Sletting er bare for mål som er registrert ved en feil. Et mål som er ferdig, lukkes i stedet, slik at historikken blir bevart.'],
+                            ['title' => 'Slette', 'text' => 'Sletting er bare for mål som er registrert ved en feil. Et mål som er ferdig, lukkes i stedet, slik at historikken blir bevart. Et mål som har vært lukket, eller som har KPI-er med målinger eller som har vært avsluttet, kan ikke slettes.'],
                         ],
                     ],
                 ],
@@ -6735,7 +6735,7 @@ return [
                             ['title' => 'Målefrekvens og innrapporteringsfrist', 'text' => 'Målefrekvensen sier hvor ofte KPI-en skal måles. Innrapporteringsfristen er antall dager etter at en periode er slutt før målingen regnes som manglende. Uten fast frekvens registreres målinger ved behov.'],
                             ['title' => 'Målinger blir historikk', 'text' => 'En registrert måling redigeres aldri. Målverdien som gjaldt, lagres sammen med verdien.'],
                             ['title' => 'Trekk tilbake', 'text' => 'Bruk «Trekk tilbake» når en måling ikke skulle vært registrert. Den blir stående som «Tilbaketrukket» og teller ikke lenger. Ingenting slettes.'],
-                            ['title' => 'Slette', 'text' => '«Slett KPI» nederst på siden er bare for KPI-er som er registrert ved en feil og ikke har målinger. Ellers avslutter du KPI-en.'],
+                            ['title' => 'Slette', 'text' => '«Slett KPI» nederst på siden er bare for KPI-er som er registrert ved en feil, ikke har målinger og aldri har vært avsluttet. Ellers avslutter du KPI-en.'],
                         ],
                     ],
                     [

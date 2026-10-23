@@ -154,8 +154,8 @@ class Kpi extends Model
 
         // The database refuses the same (kpis_keep_measurement_history), also for SQL past the model.
         static::deleting(function (self $kpi): void {
-            if ($kpi->hasMeasurementHistory()) {
-                throw new LogicException('A KPI with measurements is history and cannot be deleted. Retire it instead.');
+            if (! $kpi->isDeletable()) {
+                throw new LogicException('A KPI with measurements or a status change is history and cannot be deleted. Retire it instead.');
             }
         });
     }
@@ -167,12 +167,16 @@ class Kpi extends Model
 
     /**
      * Whether the KPI may be deleted at all, before any permission is considered. Deleting is for a
-     * KPI registered by mistake: once any measurement exists — a withdrawn one included, it is still
-     * history — the KPI is retired instead.
+     * KPI registered by mistake. Once it carries history it is retired instead, never deleted (A40):
+     *  - a measurement, a withdrawn one included — it is still history;
+     *  - a status change: it has been retired (and perhaps reopened) — a decision (A39).
+     * Creating and editing a KPI leaves no such history; an unused KPI is deleted as before. The
+     * database refuses the same (kpis_keep_measurement_history).
      */
     public function isDeletable(): bool
     {
-        return ! $this->hasMeasurementHistory();
+        return ! $this->hasMeasurementHistory()
+            && ! ($this->exists && KpiStatusChange::query()->where('kpi_id', $this->id)->exists());
     }
 
     /**

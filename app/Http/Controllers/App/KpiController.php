@@ -36,7 +36,7 @@ use Inertia\Response;
  *  - read: objective.view in the objective's area
  *  - create, change, retire, reopen: objective.edit there, while the objective is active
  *  - delete: objective.delete there, for a KPI registered by mistake (Kpi::isDeletable()): never
- *    once it has a measurement, withdrawn or not — then it is retired
+ *    once it has a measurement, withdrawn or not, or has been retired — then it is retired or kept
  *  - measurements: KpiMeasurementController, with objective.measure
  *  - process/activity links: KpiContextController, with objective.edit and Kvalitet read
  *
@@ -99,7 +99,8 @@ class KpiController extends Controller
                 'can_edit' => $canEdit && $kpi->isActive(),
                 'can_retire' => $canEdit && $kpi->isActive(),
                 'can_reopen' => $canEdit && ! $kpi->isActive(),
-                'can_delete' => $this->access->canDelete($user, $objective) && $measurements->isEmpty(),
+                // Only while it carries no history: no measurement and no status change (A40).
+                'can_delete' => $this->access->canDelete($user, $objective) && $kpi->isDeletable(),
                 'can_measure' => $canMeasure,
                 'can_link_context' => $canLinkContext,
             ],

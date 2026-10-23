@@ -343,28 +343,36 @@ class KpiTest extends TestCase
         $this->assertSame((int) $user->id, (int) $kpi->updated_by);
     }
 
-    public function test_delete_takes_objective_delete_and_takes_the_history_along(): void
+    public function test_delete_takes_objective_delete_and_a_retired_kpi_is_kept(): void
     {
         ['customer' => $customer] = $this->context();
         $hr = $this->area($customer, 'HR');
         $objective = $this->objective($customer, $hr, 'Mål');
         $kpi = $this->kpi($objective);
+        $unused = $this->kpi($objective);
         $editor = $this->editor($customer, $hr);
         $deleter = $this->editor($customer, $hr, [CustomerPermissionCatalog::OBJECTIVE_DELETE]);
 
+        // Deleting takes objective.delete; editing does not give it.
+        $props = $this->actingAs($editor)->get($this->kpiUrl($unused))->viewData('page')['props'];
+        $this->assertFalse($props['permissions']['can_delete']);
+        $this->actingAs($editor)->delete($this->kpiUrl($unused))->assertForbidden();
+
+        // Retiring is a decision with history (A39, A40): the KPI is kept, and so is its history.
         $this->actingAs($editor)->post($this->kpiUrl($kpi).'/retire', ['note' => 'Feilregistrert'])->assertRedirect();
         $this->assertSame(1, KpiStatusChange::query()->where('kpi_id', $kpi->id)->count());
 
-        $props = $this->actingAs($editor)->get($this->kpiUrl($kpi))->viewData('page')['props'];
-        $this->assertFalse($props['permissions']['can_delete']);
-        $this->actingAs($editor)->delete($this->kpiUrl($kpi))->assertForbidden();
-
         $props = $this->actingAs($deleter)->get($this->kpiUrl($kpi))->viewData('page')['props'];
-        $this->assertTrue($props['permissions']['can_delete']);
-        $this->actingAs($deleter)->delete($this->kpiUrl($kpi))->assertRedirect("/app/objectives/{$objective->id}");
+        $this->assertFalse($props['permissions']['can_delete']);
+        $this->actingAs($deleter)->delete($this->kpiUrl($kpi))->assertSessionHas('error', 'KPI-en kan ikke slettes. Avslutt den i stedet.');
+        $this->assertNotNull(Kpi::query()->find($kpi->id));
+        $this->assertSame(1, KpiStatusChange::query()->where('kpi_id', $kpi->id)->count());
 
-        $this->assertNull(Kpi::query()->find($kpi->id));
-        $this->assertSame(0, KpiStatusChange::query()->where('kpi_id', $kpi->id)->count());
+        // An unused KPI — registered by mistake — is deleted as before.
+        $props = $this->actingAs($deleter)->get($this->kpiUrl($unused))->viewData('page')['props'];
+        $this->assertTrue($props['permissions']['can_delete']);
+        $this->actingAs($deleter)->delete($this->kpiUrl($unused))->assertRedirect("/app/objectives/{$objective->id}");
+        $this->assertNull(Kpi::query()->find($unused->id));
     }
 
     public function test_deleting_the_objective_takes_its_kpis_along(): void

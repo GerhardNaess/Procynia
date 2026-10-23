@@ -11,11 +11,11 @@ use Illuminate\Support\Facades\DB;
  * Test-only: removes objectives or KPIs an E2E run created, measurements included. Not autoloaded
  * in production (autoload-dev only).
  *
- * A KPI with measurements is never deleted in Procynia, and nor is an objective whose KPIs have
- * them; a PostgreSQL trigger refuses it unless the customer itself is being deleted
- * (kpis_keep_measurement_history). E2E runs in the shared E2E customer still have to clean up after
- * themselves, so this helper switches that trigger off for its own transaction, deletes, and
- * switches it on again — a table owner's explicit DDL step, the same one RiskTestDataPurge and
+ * A KPI with measurements or a status change is never deleted in Procynia, nor an objective that
+ * has been closed or whose KPIs carry such history; PostgreSQL triggers refuse it unless the customer
+ * itself is being deleted (kpis_keep_measurement_history, objectives_keep_decision_history). E2E runs
+ * in the shared E2E customer still have to clean up after themselves, so this helper switches those
+ * triggers off for its own transaction, deletes, and switches them on again — a table owner's explicit DDL step, the same one RiskTestDataPurge and
  * ImprovementTestDataPurge take. Measurements and status history go by cascade; their own triggers
  * allow that once the KPI or objective is gone. Nothing under app/ may do this.
  */
@@ -28,6 +28,7 @@ final class ObjectiveTestDataPurge
             $pgsql = DB::getDriverName() === 'pgsql';
 
             if ($pgsql) {
+                DB::statement('ALTER TABLE objectives DISABLE TRIGGER objectives_keep_decision_history');
                 DB::statement('ALTER TABLE kpis DISABLE TRIGGER kpis_keep_measurement_history');
             }
 
@@ -37,6 +38,7 @@ final class ObjectiveTestDataPurge
 
             if ($pgsql) {
                 DB::statement('ALTER TABLE kpis ENABLE TRIGGER kpis_keep_measurement_history');
+                DB::statement('ALTER TABLE objectives ENABLE TRIGGER objectives_keep_decision_history');
             }
         });
     }

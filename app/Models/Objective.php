@@ -77,10 +77,10 @@ class Objective extends Model
             }
         });
 
-        // Its KPIs' measurements are history; the database refuses the same through kpis_keep_measurement_history.
+        // Its closings and its KPIs' history are kept; the database refuses the same (objectives_keep_decision_history).
         static::deleting(function (self $objective): void {
             if (! $objective->isDeletable()) {
-                throw new LogicException('An objective whose KPIs have measurements is history and cannot be deleted. Close it instead.');
+                throw new LogicException('An objective with a closing, or KPIs with measurements or status changes, is history and cannot be deleted. Close it instead.');
             }
         });
     }
@@ -92,14 +92,23 @@ class Objective extends Model
 
     /**
      * Whether the objective may be deleted at all, before any permission is considered. Deleting is
-     * for an objective registered by mistake. KPIs alone do not stop it; once any of its KPIs has a
-     * measurement — withdrawn or not — the objective carries history and is closed instead.
+     * for an objective registered by mistake. KPIs alone do not stop it. It carries history, and is
+     * closed instead, once (A40):
+     *  - it has a status change — it has been closed as Nådd, Ikke nådd or Avbrutt, even if reopened;
+     *  - any of its KPIs has a measurement, withdrawn or not, or a status change.
+     * Creating and editing leave no such history; an unused objective is deleted as before.
      */
     public function isDeletable(): bool
     {
-        return ! $this->exists || ! KpiMeasurement::query()
-            ->whereIn('kpi_id', Kpi::query()->where('objective_id', $this->id)->select('id'))
-            ->exists();
+        if (! $this->exists) {
+            return true;
+        }
+
+        $kpiIds = Kpi::query()->where('objective_id', $this->id)->select('id');
+
+        return ! ObjectiveStatusChange::query()->where('objective_id', $this->id)->exists()
+            && ! KpiMeasurement::query()->whereIn('kpi_id', $kpiIds)->exists()
+            && ! KpiStatusChange::query()->whereIn('kpi_id', $kpiIds)->exists();
     }
 
     public function customer(): BelongsTo
