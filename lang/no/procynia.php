@@ -1785,6 +1785,8 @@ return [
         'cpv_show_codes' => 'Vis koder',
         'cpv_hide_codes' => 'Skjul koder',
         'save_already_in_history' => 'Denne kunngjøringen ligger allerede som en sak i Historikk. Saker i Historikk kan ikke flyttes tilbake til den aktive arbeidslisten.',
+        'save_existing_case_no_access' => 'Denne kunngjøringen er allerede en sak i virksomheten, og du har ikke tilgang til den. Be Bid Manager eller mulighetseier for saken om tilgang.',
+        'save_existing_case_read_only' => 'Denne kunngjøringen er allerede en sak. Du har lesetilgang og kan åpne den i arbeidslisten.',
         'in_history_label' => 'I historikk',
         'archive_dialog_title' => 'Flytt saken til historikk?',
         'archive_dialog_description' => 'Saken fjernes fra den aktive arbeidslisten og kan ikke flyttes tilbake. Du kan fortsatt åpne og lese saken i Historikk.',

@@ -1781,6 +1781,8 @@ return [
         'cpv_show_codes' => 'Show codes',
         'cpv_hide_codes' => 'Hide codes',
         'save_already_in_history' => 'This notice is already a case in History. Cases in History cannot be moved back to the active work list.',
+        'save_existing_case_no_access' => 'This notice is already a case in your organisation, and you do not have access to it. Ask the case\'s Bid Manager or opportunity owner for access.',
+        'save_existing_case_read_only' => 'This notice is already a case. You have read access and can open it from the work list.',
         'in_history_label' => 'In history',
         'archive_dialog_title' => 'Move the case to history?',
         'archive_dialog_description' => 'The case is removed from the active work list and cannot be moved back. You can still open and read the case in History.',

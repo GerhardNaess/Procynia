@@ -566,14 +566,23 @@ class NoticeController extends Controller
         }
 
         $isNewRecord = ! $record->exists;
-        $hadCaseAccess = ! $record->exists || $this->savedNoticeAccess->canView($user, $record);
+
+        // Saving a notice that is already a case never opens the case to the person (A44). It used
+        // to grant them contributor access when they could not see it, so that «Lagre» always did
+        // something; that let anyone in the customer join any case by pressing it, and let a reader
+        // overwrite it. Joining a case is what the case's own access controls are for. Creating a
+        // case is unchanged; changing one takes the right to work on it.
+        if (! $isNewRecord && ! $this->savedNoticeAccess->mayWork($user, $record)) {
+            return $this->savedNoticeAccess->canView($user, $record)
+                ? redirect()->back()->with('success', __('procynia.notices.save_existing_case_read_only'))
+                : redirect()->back()->with('error', __('procynia.notices.save_existing_case_no_access'));
+        }
 
         // Saving the other register's record of a procurement the customer is already working on
         // reaches the case that exists and leaves its contents alone. Overwriting them would swap
         // the title, the summary and the link for another register's version of the same tender —
         // TED's title for a Norwegian notice is its own translation — which nobody asked for and
-        // which would read as data loss. Everything after this still runs: the person pressed save
-        // and gets the same access to the case they would have got by saving it first.
+        // which would read as data loss.
         $record->fill($isOwnRecord ? [
             'source_type' => $sourceType,
             'title' => $validated['title'],
@@ -602,10 +611,6 @@ class NoticeController extends Controller
         }
 
         $record->save();
-
-        if (! $hadCaseAccess) {
-            $this->grantSavedNoticeAccess($record, $user, $user, SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR);
-        }
 
         return redirect()
             ->back()
