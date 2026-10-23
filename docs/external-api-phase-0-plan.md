@@ -42,7 +42,7 @@
 - Leverandøroppfølging (steg 14) er gjennomført og godkjent 2026-10-23 (§2j).
 - A36 er gjennomført og godkjent 2026-10-23, og A37 og A38 er besluttet (§2j). Leverandøroppfølging er ferdig i fase 0.
 - Mål og KPI (steg 15) er gjennomført og godkjent 2026-10-23 (§2k). A39 og A40 er besluttet og gjennomført, og E2E-feilene i `app-navigation` er rettet (§2k). Mål og KPI er ferdig i fase 0.
-- Anbud (steg 16 og 17) er gjennomført 2026-10-23 (§2l). Det venter på vurdering, med åpne produktbeslutninger A41–A45. Felles sikkerhetskontroll (steg 18–20) og API-implementering startes ikke før det.
+- Anbud (steg 16 og 17) er gjennomført og godkjent som hovedleveranse 2026-10-23 (§2l). A41–A45 og E2E-feilene er fulgt opp samme dag. Det venter på vurdering, med produktbeslutningene P1–P5. Felles sikkerhetskontroll (steg 18–20) og API-implementering startes ikke før det.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -1750,11 +1750,11 @@ En leverandør med historikk kan ikke slettes, heller ikke i SQL (sammensatt fre
 
 | # | Funn | Anbefaling |
 |---|---|---|
-| A41 | **Saksarbeid i AI-arbeidsflaten krever bare synlighet.** En leser (lesertilgang per sak, eller anbudsrollen `viewer`) kan laste opp og slette anbudsdokumenter, legge til, redigere og slette krav, generere og redigere Wiki-svar, endre svargrunnlag, ansvarlig og arbeidsstatus, og kjøre vurdering. Det koster AI-kapasitet. Det samme gjelder «Ny oppgave» i saken. | Krev `canManage` for alle skrivinger i `AiController` og for oppgaver, slik Go/No-go-vurderingen allerede gjør. Lesere leser og eksporterer. Det endrer hva lesere kan i dag, så det er en produktbeslutning. AI-funksjonene påvirkes ikke for dem som jobber i saken. |
-| A42 | **Sletting tar beslutningshistorikk med seg.** «Slett» på et krav, også et godkjent, sletter revisjonene, Wiki-svaret og vurderingen. Sletting av en sak tar med No-Go-beslutninger, statushistorikk, kravrevisjoner og AI-forbruksloggen (`customer_ai_case_usages`). Triggerne hindrer bare sletting av historikken alene. | Som B3 og A40: et godkjent krav slettes ikke (avvis det i stedet), og en sak med beslutningshistorikk slettes ikke (arkiver den). AI-forbruksloggen bør aldri følge saken. Synlig endring. |
-| A43 | **Svarutkast har ingen historikk og ingen ferdigstilling.** Redigering av Wiki-svaret lagrer verken forrige tekst eller hvem som redigerte. Ny generering overskriver svar, kilder og spor. Kildene peker på siden, ikke på den publiserte versjonen som ble lest. Eksporten tar med svar på avviste og erstattede krav. | Lagre redigering med aktør og forrige tekst (append-only), lagre `published_version_id` i kildene, og eksporter bare godkjente krav. Om svar skal kunne «ferdigstilles» som egen beslutning, er et produktspørsmål. Det er ikke innført. |
-| A44 | **Saksnivåreglene er ujevne.** <br>– «Lagre» på en kunngjøring som allerede er en sak, gir lagreren bidragsytertilgang til saken uten synlighetssjekk. Det er bevisst etter kommentaren i koden, men gjelder også lesere. <br>– `canComment` og `canArchive` ser bort fra lesertilgang per sak. <br>– Med standard «Se alle saker» behandler en bidragsyter med selskapstilknytning alle saker, så lesertilgang per sak begrenser ikke. <br>– Eier og Bid Manager kan endres på arkiverte saker. <br>– Arkivering, tilbaketrekking av tilgang, lukking av oppgaver og eierbytte lagrer ingen aktør. | Avklar lesertilgang per sak og selvtildeling ved lagring. Lagre aktør for arkivering og tilgangsendringer (hører naturlig til F4 / steg 18). |
-| A45 | **«Kommersiell eier» og den nye rettigheten.** Matrisen gir hovedrollen ingen rettigheter som standard (`CommercialOwnerRoleTest`). En kommersiell eier som er mulighetseier i en sak, kunne godkjenne krav før B4, men kan det ikke nå før en System Owner krysser av. | Behold konvensjonen (anbefalt). Alternativt tas rollen med i standarden for denne raden. |
+| A41 | **Saksarbeid i AI-arbeidsflaten krever bare synlighet.** En leser (lesertilgang per sak, eller anbudsrollen `viewer`) kan laste opp og slette anbudsdokumenter, legge til, redigere og slette krav, generere og redigere Wiki-svar, endre svargrunnlag, ansvarlig og arbeidsstatus, og kjøre vurdering. Det koster AI-kapasitet. Det samme gjelder «Ny oppgave» i saken. | Krev `canManage` for alle skrivinger i `AiController` og for oppgaver, slik Go/No-go-vurderingen allerede gjør. Lesere leser og eksporterer. Det endrer hva lesere kan i dag, så det er en produktbeslutning. AI-funksjonene påvirkes ikke for dem som jobber i saken. **Gjennomført i oppfølgingen (`95d8a7e4`).** |
+| A42 | **Sletting tar beslutningshistorikk med seg.** «Slett» på et krav, også et godkjent, sletter revisjonene, Wiki-svaret og vurderingen. Sletting av en sak tar med No-Go-beslutninger, statushistorikk, kravrevisjoner og AI-forbruksloggen (`customer_ai_case_usages`). Triggerne hindrer bare sletting av historikken alene. | Som B3 og A40: et godkjent krav slettes ikke (avvis det i stedet), og en sak med beslutningshistorikk slettes ikke (arkiver den). AI-forbruksloggen bør aldri følge saken. Synlig endring. **Gjennomført i oppfølgingen (`218d19c1`), se P1–P3.** |
+| A43 | **Svarutkast har ingen historikk og ingen ferdigstilling.** Redigering av Wiki-svaret lagrer verken forrige tekst eller hvem som redigerte. Ny generering overskriver svar, kilder og spor. Kildene peker på siden, ikke på den publiserte versjonen som ble lest. Eksporten tar med svar på avviste og erstattede krav. | Lagre redigering med aktør og forrige tekst (append-only), lagre `published_version_id` i kildene, og eksporter bare godkjente krav. Om svar skal kunne «ferdigstilles» som egen beslutning, er et produktspørsmål. Det er ikke innført. **Del 1 og 2 gjennomført (`b335acf5`). Del 3 er en anbefaling (P5).** |
+| A44 | **Saksnivåreglene er ujevne.** <br>– «Lagre» på en kunngjøring som allerede er en sak, gir lagreren bidragsytertilgang til saken uten synlighetssjekk. Det er bevisst etter kommentaren i koden, men gjelder også lesere. <br>– `canComment` og `canArchive` ser bort fra lesertilgang per sak. <br>– Med standard «Se alle saker» behandler en bidragsyter med selskapstilknytning alle saker, så lesertilgang per sak begrenser ikke. <br>– Eier og Bid Manager kan endres på arkiverte saker. <br>– Arkivering, tilbaketrekking av tilgang, lukking av oppgaver og eierbytte lagrer ingen aktør. | Avklar lesertilgang per sak og selvtildeling ved lagring. Lagre aktør for arkivering og tilgangsendringer (hører naturlig til F4 / steg 18). **Selvtildeling fjernet (`32822d03`). Lesertilgang per sak skriver ikke lenger (A41). Eier og Bid Manager på arkiverte saker, «Se alle saker» og aktør for arkivering og tilgangsendringer gjenstår til steg 18.** |
+| A45 | **«Kommersiell eier» og den nye rettigheten.** Matrisen gir hovedrollen ingen rettigheter som standard (`CommercialOwnerRoleTest`). En kommersiell eier som er mulighetseier i en sak, kunne godkjenne krav før B4, men kan det ikke nå før en System Owner krysser av. | Behold konvensjonen (anbefalt). Alternativt tas rollen med i standarden for denne raden. **Undersøkt og låst med test (`06a08ec3`). Konvensjonen beholdes.** |
 
 **Lav, ikke rettet:**
 - Figurer i Wiki-svar slås opp i sidens arbeidsversjon, ikke den publiserte (`RequirementWikiAnswerFigureResolver`). Det gjelder bare visning, innenfor kunden. Eksporten tar ikke med figurer.
@@ -1767,11 +1767,153 @@ En leverandør med historikk kan ikke slettes, heller ikke i SQL (sammensatt fre
 **Klar for senere API-integrasjon**
 
 - Beslutningene (kravbeslutninger og anbudsstatus) ligger i domenet med samme regler for enhver inngang, og er menneskeforbeholdt.
-- Anbud holdes fortsatt utenfor API v1 (arkitektur §8.3). A41, A44 og avdelingsomfanget bør avklares først.
+- Anbud holdes fortsatt utenfor API v1 (arkitektur §8.3). A41 og A44 er avklart i oppfølgingen. Avdelingsomfanget gjenstår.
 - Gjenstår i fase 0: steg 18–20, inkludert aktørtriggerne for `saved_notice_ai_requirements.approved_by_user_id` og `rejected_by_user_id`.
 - **Føring for agenter (anbefalt):**
   - En agent kan foreslå kravtekst, svarutkast og vurderinger gjennom avgrensede operasjoner, alltid som utkast.
   - Kravbeslutninger og statusendringer forblir menneskeforbeholdt.
+
+#### Oppfølging: A41–A45 og E2E-feilene (2026-10-23)
+
+Steg 16 og 17 er godkjent som hovedleveranse. Denne runden lukker eller avklarer A41–A45 og de fem E2E-tilfellene.
+
+| Commit | Innhold |
+|---|---|
+| `95d8a7e4` | **A41.** Saksarbeid krever rett til å arbeide i saken. |
+| `32822d03` | **A44.** «Lagre» gir aldri tilgang til en eksisterende sak. |
+| `a05342fd` | **E2E.** De tre spesifikasjonene eier egne data. |
+| `218d19c1` | **A42.** En sak med beslutninger og et godkjent krav slettes ikke. Migrering `2026_10_23_000007`. |
+| `b335acf5` | **A43, del 1 og 2.** Eksporten tar bare med gjeldende krav. Et manuelt redigert svar overskrives ikke uten at personen ber om det. Migrering `2026_10_23_000008`. |
+| `06a08ec3` | **A45.** Test som låser hva «Kommersiell eier» har etter B4. Ingen kodeendring. |
+| `09614af0` | Testene fra mutasjonssjekken. |
+| `762b147f` | **E2E.** Opprydding i Anbud-fiksturene etter A42, og lesegrunnlag i `wiki-navigation`. |
+
+**A41 – lesetilgang gir ikke skrivetilgang.**
+- Ny regel `SavedNoticeAccessService::mayWork()`: `canManage`, aldri anbudsrollen `viewer`, aktiv sak, egen kunde og Anbud-modulen. Den bygger på den eksisterende modellen. `mayDecide()` (B4) bygger nå på den.
+- `viewer` utelukkes eksplisitt, slik kommentarer og arkivering allerede gjorde. Grunnen er at `canManage` regner med den som lagret saken, også når rollen er `viewer`.
+- **Kontrolleren:** alle skrivinger i `AiController` går via `workableAiSavedNotice()`. En sak personen ikke ser gir 404 som før, en sak personen bare leser gir 403. En strukturtest krever dette for hver rute under `app.ai.*` som ikke er GET.
+- **Tjenestene:** tjenestene sjekker igjen (`authorizeWork`) og tar en `User`. Det gjelder `RequirementEditorService` (opprette og redigere), `RequirementAnswerBasisService` (alle fire), `RequirementWikiAnswerService::generate()`/`updateAnswerText()` og `RequirementWikiAssessmentService::assessRequirement()`. Svar og vurdering nektes før research og før noe AI-kall. Lesere bruker derfor ikke AI-kapasitet.
+- **Rett i kontrolleren:** opplasting og sletting av anbudsdokumenter, ansvarlig, arbeidsstatus og AI-instruksen har ingen egen tjeneste. De ligger bak samme hjelper, og strukturtesten dekker dem.
+- **Saksiden:** «Ny handling» krever `canAddInfoItem()`. Kommentarer og arkivering krever `canManage` i stedet for synlighet, så lesertilgang per sak skriver ikke lenger.
+- **Brukeropplevelsen:** lesere får ikke skrive-URL-er, og siden får `can_work`. AI-siden, instrukssiden og «Ny handling» skjuler det som ville gitt 403. Lesere leser og eksporterer som før.
+- Den som arbeider i saken analyserer krav, bruker Wiki, redigerer og genererer svar som før (testet med falske AI-klienter).
+
+**A44 – lagring gir aldri tilgang.**
+- **Hvorfor den gamle oppførselen var bevisst:** selvtildelingen kom i `26adb2fa` (2026-04-02), da synlighet per sak ble innført. Én kunngjøring er én sak per kunde. En kollega som trykket «Lagre» på en sak de ikke så, fikk «Anskaffelsen ble lagret» uten å se noe. Tildelingen skulle få knappen til å gjøre noe. Ingen test låste den.
+- **Nå:**
+  - Ny sak opprettes som før.
+  - En eksisterende sak endres bare av den som kan arbeide i den (`mayWork`).
+  - Den som bare leser saken, får beskjed om at den finnes, og ingenting skrives.
+  - Den som ikke ser saken, får beskjed om å be Bid Manager eller mulighetseier om tilgang. Ingenting skrives.
+- Legitim tildeling går som før gjennom sakens tilgangsstyring (`canManageContributorAccess`, testet).
+- **Testet:** direkte kall, kundeseparasjon (en annen kunde får sin egen sak), leser per sak, `viewer`, kollega uten tilgang, bidragsyter i saken og ny sak.
+
+**A42 – sletting.**
+- **Krav:** et krav som noen gang har vært godkjent, slettes aldri. Det gjelder `approval_status`, `approved_at` eller en «approve»-revisjon. Utveien er å avvise kravet, og det finnes allerede.
+- Et AI-uttrukket krav som bare er avvist eller ikke avgjort, slettes som før. Det er dagens opprydding etter et støyende uttrekk («Avvis alle» + «Slett alle»), og eksisterende tester låser den. «Slett alle» lar godkjente krav stå og sier hvor mange som ble beholdt.
+- **Sak:** en sak slettes ikke når den har noe av dette:
+  - en registrert statusendring, også No-Go;
+  - en No-Go-beslutning, også eldre uten statusrad;
+  - et krav som har vært godkjent;
+  - AI-forbruk (`customer_ai_case_usages`).
+- Utveien er «Flytt til historikk». En sak i historikk med slik historikk blir liggende der. Listen viser ikke «Slett» for slike saker (`is_deletable`).
+- **AI-forbruket:** forbruksraden slettes ikke lenger med saken. Før ga sletting av en sak kreditten tilbake i perioden. Raden kan fortsatt spores til saken. Fremmednøkkelen er ikke endret, fordi saken nå ikke kan slettes mens raden finnes.
+- **Håndheving:** `SavedNotice::isDeletable()` og `SavedNoticeAiRequirement::isDeletable()` har regelen, og modellkroker nekter sletting. Migrering `2026_10_23_000007` legger til BEFORE DELETE-triggere med samme regel. Unntaket er når saken (for krav) eller kunden slettes.
+- Sletting av krav er flyttet til `RequirementEditorService` (`deleteCandidate`, `deleteAllCandidates`), bak A41-regelen.
+- Ingen nye statuser, dialoger eller godkjenningssteg.
+
+**A43 – svar.**
+1. **Eksporten** tar bare med kravene som gjelder nå (`published`) og ikke er avvist. Uavgjorte krav tas med som før. Svar på avviste og erstattede krav kommer ikke med. En sak der alle svarene gjelder avviste krav, har ingenting å eksportere (422).
+2. **Redigerte svar:**
+   - Nye kolonner `edited_by_user_id` og `edited_at`. Redigering lagrer hvem og når.
+   - En ny generering nekter å erstatte et redigert svar uten `replace_edited` (409). Det skjer før research og AI-kall, så det koster ingenting. Det sjekkes også under radlås, hvis noen redigerte mens genereringen pågikk.
+   - Svarpanelet viser da «Erstatt med nytt utkast» eller «Behold redigert svar» i panelet, ikke som dialog, og viser «Redigert av …».
+   - Et svar ingen har redigert, genereres som før, uten spørsmål.
+   - **Eksisterende rader:** et svar der teksten avviker fra seksjonene motoren lagde, merkes som redigert av ukjent person. I utviklingsdatabasen fantes ett svar, og det var ikke redigert. Tilbakefyllingen er ikke testet på en rad som faktisk var redigert.
+3. **Anbefaling for aktør, svarhistorikk og eksakt kildeversjon.** Ikke bygget. Se «Produktbeslutninger».
+
+**A45 – «Kommersiell eier».**
+- **Før B4:** en kommersiell eier som var mulighetseier i saken (`opportunity_owner_user_id`), kunne godkjenne og avvise krav, fordi synlighet var nok. Ellers ser rollen bare saker den selv har lagret eller fått tilgang til, fordi standarden for «Se alle saker» ikke gir den noe.
+- **Etter B4 og A41:**
+  - De arbeider fortsatt i egne saker (`mayWork`) og endrer anbudsstatus (steg 17), også Go/No-Go.
+  - De mister bare kravbeslutningene, til en System Owner krysser av rollen i «Godkjenne og avvise krav i anbud».
+  - Godkjenn og Avvis vises ikke for dem, så ingen knapp fører til 403.
+- **Anbefaling (uendret):** behold konvensjonen om at rollen starter uten rettigheter i alle rader (`CommercialOwnerRoleTest`). Testen `test_a_commercial_owner_of_the_case_works_on_it_and_decides_only_when_granted` låser begge halvdelene.
+
+**E2E – de tre feilene og to hoppede testene.** Alle skyldtes data som bare fantes i utviklingsdatabasen. Ingen produksjonsrettighet eller forventning er endret.
+- `ai-answer-markdown-table` brukte kunde 4 og en utviklingsbruker. Spesifikasjonen legger nå data i E2E-kunden (`e2e-test-customer`) og leser som dens System Owner. De to testene som ble hoppet over etter `beforeAll`, kjører igjen.
+- `breadcrumbs` («Anbud, Wiki and Hjem»): testen gir E2E-brukeren lesegrunnlaget (`wiki.view`) for kjøringen og tar det bort igjen (`NavigationE2EFixture`, som `app-navigation`).
+- `roles-on-user-edit` krysset av roller som bare fantes i utviklingsdatabasen, på den delte E2E-brukeren, og lot dem stå. Den nye `RolesOnUserEditE2EFixture` lager to roller og én person og fjerner nøyaktig dem.
+
+#### Produktbeslutninger å bekrefte
+
+| # | Tema | Valgt nå | Alternativ |
+|---|---|---|---|
+| P1 | Sletting av krav (A42) | Bare krav som har vært godkjent, vernes. Avviste uttrekk kan slettes. | Verne også avviste krav. Det ville stoppe oppryddingen etter feiluttrekk, og tre eksisterende tester måtte skrives om. |
+| P2 | Sletting av sak (A42) | Registrert historikk og AI-forbruk verner saken. En eldre sak med status, men uten registrerte rader, kan fortsatt slettes av den som lagret den. | Bruke `bid_status ≠ discovered` som tegn på beslutning. Det ville også låse eldre saker uten historikkrader. |
+| P3 | AI-forbruk (A42) | En sak med AI-forbruk slettes ikke, og kreditten gis ikke tilbake. | Tillate sletting med `saved_notice_id` nullet på forbruksraden. Det krever endret telling i `AiQuotaStatusService`, som teller unike sak-id-er. |
+| P4 | Leserrollen i egen sak (A41) | `viewer` som har lagret en sak, leser den. | Se den som lagret saken som bidragsyter. Det er et spørsmål om `viewer` skal kunne lagre saker i det hele tatt. |
+| P5 | Svarhistorikk og kildeversjon (A43.3) | Anbefaling nedenfor, ikke bygget. | – |
+
+**A43.3 – anbefaling basert på dagens datamodell.**
+- **Aktør:** finnes nå for begge handlinger. `generated_by_user_id` viser hvem som genererte, og `edited_by_user_id`/`edited_at` hvem som sist redigerte (denne runden). Ingenting mer trengs for «hvem».
+- **Eksakt kildeversjon:** research leser allerede `published_version_id` for hver side (`supportingClaimsByOrigin`), og påstandene som siteres (`supporting_claim_ids`) tilhører den publiserte versjonen. Kildeversjonen kan derfor rekonstrueres i dag via påstandene. Den er bare ikke lagret direkte.
+  - **Anbefaling:** legg `published_version_id` og versjonsnummer til hver kilde i `sources`, når research setter dem sammen.
+  - Det er en ren tilføyelse i `RequirementWikiResearchService` og `sourcesPayload()`. Ingen ny tabell, ingen endret visning, og ingen produktbeslutning er nødvendig.
+  - **Begrensning:** sletter man en Wiki-side, forsvinner versjonene (`EnterpriseWikiPageDeletionService`). Kildereferansen peker da på noe som ikke finnes. Det gjelder også i dag.
+- **Svarhistorikk:** følg mønsteret fra `saved_notice_ai_requirement_revisions`.
+  - Én tilføyende tabell, for eksempel `saved_notice_ai_requirement_wiki_answer_revisions`, med en rad per generering og per redigering: hendelse, tekst, kilder, aktør og tidspunkt.
+  - Raden skrives i `persist()` og `updateAnswerText()` i samme transaksjon, og en trigger nekter endring og sletting.
+  - Omfang: én migrering, to skrivepunkter og tester. Ingen visning i første omgang.
+  - **Produktspørsmål:** skal historikken vises, og skal et svar kunne «ferdigstilles» som egen beslutning? Ferdigstilling er ikke innført.
+- **Rekkefølge:** kildeversjonen først (liten og uten beslutning), så svarhistorikken når P5 er avklart. Ingen av delene er bygget i denne runden.
+
+#### Tester og kjøringer (oppfølgingen)
+
+- **Nye testfiler:**
+  - `TenderCaseWorkAccessTest` (8): lesere nektes alle 19 skrivinger med 403, uten at noe skrives og uten AI-kall. Utenforstående og andre kunder får 404. Lesere leser og eksporterer. Sidene tilbyr bare det personen kan. En bidragsyter i saken gjør alt arbeidet, også generering og vurdering. Tjenestene nekter leser, `viewer`, kollega, annen kunde, integrasjon, arkivert sak og kunde uten Anbud. Strukturtest for skriverutene.
+  - `TenderSaveExistingCaseTest` (6).
+  - `TenderDeletionProtectionTest` (11).
+  - `TenderAnswerTraceTest` (7).
+- **Endrede tester:**
+  - **Tjenestesignaturer:** `RequirementWikiAnswerServiceTest`, `RequirementWikiAnswerFigureGenerationTest` og `RequirementWikiResearchCustomerBoundaryTest` gir tjenestene en aktør (`caseWorker()`). Grensetesten bruker eierkundens System Owner, slik at det fortsatt er kundegrensen i research som nekter. Ingen forventning er endret.
+  - `RequirementDeletionTest`: standardkravet i fiksturen er nå et uavgjort uttrekk, ikke et godkjent krav. Testene handler om sletting av uttrekk. Det godkjente tilfellet testes i `TenderDeletionProtectionTest`.
+  - `TenderHistoryProtectionTest`: to tester er skrevet om fra «historikken følger saken ved sletting» til den nye regelen. Krav og sak med beslutninger nektes av modell og SQL, og kunden tar alt med seg. En sak uten beslutninger tar fortsatt kravene og revisjonene med seg.
+  - `TenderRequirementDecisionTest`: én ny test (A45).
+- **Mutasjonssjekket:**
+  - 42 kodemutanter og 9 databasemutanter (triggere, med tilbakerulling og ny migrering per mutant).
+  - Fire mutanter overlevde først: godkjent-så-avvist krav, eldre godkjent krav uten revisjon, eldre No-Go uten statusrad, og triggeren for krav uten radgodkjenning. Testene fanger dem nå (`09614af0`).
+  - **To ekvivalente:**
+    - Samme kunde i `mayWork`: `canManage` avgrenser alltid til aktørens kunde.
+    - Sjekken i `deleteCandidate`: modellkroken nekter det samme. Begge beholdes som forsvar i dybden.
+
+- **PHP:** alle 133 testfilene som berører saker, AI-kjeden, Wiki-svar, Go/No-go, varsler, Mine oppgaver, Tilganger-matrisen og AI-forbruk, pluss `tests/Unit/Services/Ai`: **2262 av 2262 bestått.**
+- **JS:** 2130 av 2130 bestått.
+- **E2E i det isolerte miljøet** (bygget på nytt): de 13 filene fra steg 16–17 pluss `wiki-navigation`, 108 tester. Telt fra Playwrights JSON-rapport, med `caffeinate`.
+  - **Første kjøring:** 88 bestått, 11 feilet, 9 kjørte ikke. Årsakene:
+    - `a11y-tenders-ai` trykket «Slett» på det godkjente kravet. A42 fjerner den knappen, så endringen er tilsiktet.
+    - Fiksturene til `a11y-tenders-ai` og `ai-answer-markdown-table` lager godkjente krav, og triggeren fra A42 stoppet oppryddingen. Det ga følgefeil i `validation-feedback` (fiksturen rydder før den legger inn data).
+    - `wiki-navigation`: E2E-brukeren mangler `wiki.view`, samme forutsetning som i `breadcrumbs`. Feilen skyldes ikke denne runden.
+  - **Rettet i `762b147f`:**
+    - Ny `TenderTestDataPurge` slår av de to triggerne i egen transaksjon, som `RiskTestDataPurge`.
+    - Slettetesten bruker nå det uavgjorte kravet, og det godkjente kortet sjekkes for at det ikke tilbyr «Slett».
+    - `wiki-navigation` får lesegrunnlaget for kjøringen.
+  - **Etter rettingen:** de fire filene kjørt på nytt, **27 av 27 bestått**. Med siste kjøring per test består alle 108.
+- **Ingen tester feiler eller hoppes over** i utvalgene over.
+- **AI-avhengige tester:** som i steg 16–17 brukes falske OpenAI-klienter. De beviser tilgang, lagring og at ingen AI-kall gjøres ved nektelse, men ikke svarkvaliteten. Ingen test med ekte AI er kjørt.
+
+**Migreringer i oppfølgingen:**
+- `2026_10_23_000007_keep_tender_cases_and_approved_requirements`: to BEFORE DELETE-triggere. Ingen rader endres.
+- `2026_10_23_000008_record_who_edited_requirement_wiki_answers`: to kolonner og tilbakefylling av `edited_at` for svar som avviker fra motorens tekst.
+- Begge er reverserbare. `down()` er kjørt for hver databasemutant.
+- Kjørt på `procynia_test`, utviklingsdatabasen og `procynia_e2e`.
+
+**Endringer i brukeropplevelsen (oppfølgingen):**
+- **Lesere** (anbudsrollen `viewer` eller lesertilgang per sak) ser ikke lenger skriveknapper i AI-arbeidsflaten, på instrukssiden eller «Ny handling». De kan heller ikke kommentere eller arkivere med lesertilgang per sak.
+- **«Lagre» på en eksisterende sak** gir en melding i stedet for stille tilgang.
+- **«Slett»** vises ikke på godkjente krav eller på saker med beslutninger eller AI-forbruk. «Slett alle» sier hvor mange krav som ble beholdt.
+- **Svarpanelet** spør i panelet før et manuelt redigert svar erstattes, og viser «Redigert av …».
+- Ingen nye skjermbilder, statuser, dialoger eller godkjenningssteg.
 
 ## 3. Avgrensning
 
