@@ -59,7 +59,7 @@ class ObjectiveAccessService
      */
     public function areaIdsFor(User $user, string $permissionKey): array
     {
-        if ($user->customer_id === null || ! $this->isObjectivePermission($permissionKey)) {
+        if ($user->customer_id === null || ! $this->isObjectivePermission($permissionKey) || $this->withheldFromIntegration($user, $permissionKey)) {
             return [];
         }
 
@@ -73,7 +73,7 @@ class ObjectiveAccessService
      */
     public function reachesAllAreas(User $user, string $permissionKey): bool
     {
-        if (! $this->canOpenModule($user) || ! $this->isObjectivePermission($permissionKey)) {
+        if (! $this->canOpenModule($user) || ! $this->isObjectivePermission($permissionKey) || $this->withheldFromIntegration($user, $permissionKey)) {
             return false;
         }
 
@@ -206,6 +206,16 @@ class ObjectiveAccessService
     public function viewerAreaIdsByUser(int $customerId): array
     {
         return $this->grants->areaIdsByUser($customerId, CustomerPermissionCatalog::OBJECTIVE_VIEW);
+    }
+
+    /**
+     * An integration identity never holds a human-only key (objective.measure, objective.delete),
+     * whatever its roles grant — the rule CustomerPermissionService::has() applies, applied here too,
+     * because the (permission, area) pairs are read from the roles directly (BusinessAreaGrants).
+     */
+    private function withheldFromIntegration(User $user, string $permissionKey): bool
+    {
+        return $user->isIntegration() && CustomerPermissionCatalog::isHumanOnly($permissionKey);
     }
 
     private function isObjectivePermission(string $permissionKey): bool
