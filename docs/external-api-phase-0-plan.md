@@ -28,6 +28,7 @@
   - steg 14, Leverandøroppfølging (`9e757eca`, `1ffb9586`, `87c3131e`, E2E-retting `5e887aaf`), se §2j
   - A36, kritikalitet og livsløp (`334380d8`), se §2j
   - steg 15, Mål og KPI (`3a6131f5`, `27405c7a`, `f3072ba1`, `2d9aee4a`), se §2k
+  - A39 (`b02a9be3`), A40 (`fb7a131e`, E2E `befe835d`) og forutsetningen i `app-navigation` (`80ace998`), se §2k
 - Wiki-delen av fase 0 og Risiko (steg 9) er gjennomført og godkjent 2026-10-22.
 - Avvik og forbedringer (steg 10) er gjennomført og godkjent 2026-10-22.
 - Ledelsens gjennomgang (steg 11) er gjennomført og godkjent 2026-10-22.
@@ -39,7 +40,7 @@
 - A34 og A35 er gjennomført og godkjent 2026-10-23 (§2i). Etterlevelse og revisjon er ferdig i fase 0.
 - Leverandøroppfølging (steg 14) er gjennomført og godkjent 2026-10-23 (§2j).
 - A36 er gjennomført og godkjent 2026-10-23, og A37 og A38 er besluttet (§2j). Leverandøroppfølging er ferdig i fase 0.
-- Mål og KPI (steg 15) er gjennomført 2026-10-23 (§2k). A39 og A40 venter på beslutning. Anbud startes ikke før resultatet er vurdert.
+- Mål og KPI (steg 15) er gjennomført og godkjent 2026-10-23 (§2k). A39 og A40 er besluttet og gjennomført, og E2E-feilene i `app-navigation` er rettet (§2k). Det venter på vurdering. Anbud startes ikke før det.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -1516,7 +1517,7 @@ En leverandør med historikk kan ikke slettes, heller ikke i SQL (sammensatt fre
 - **E2E i det isolerte miljøet:** alle spesifikasjoner for Mål og KPI (9 filer), `my-tasks-governance`, `package-change`, `permission-sections` og `app-navigation` (13 filer, 48 tester), i én kjøring. Telt fra Playwrights JSON-rapport, med `caffeinate`.
   - **32 bestått, 16 feilet, 0 hoppet over.** Alle spesifikasjonene for Mål og KPI og de tre andre består.
   - **Alle 16 feilene er i `app-navigation`, og de skyldes ikke steget.** Feilen gjentar seg når filen kjøres alene (17 bestått, 16 feilet). Testene forventer at den delte brukeren `e2e.user` ser Wiki og Styring. I det isolerte miljøet har brukeren ingen roller, fordi `E2ETestSeeder` bevisst ikke lager roller. Dermed er `wiki.view`, `quality.view`, `risk.view` og `objective.view` alle `false` (kontrollert i E2E-appen). Menyen avhenger av `CustomerPermissionService`, som steget ikke endrer. Diffen fra `334380d8` berører bare filer i Mål og KPI.
-  - **Ikke verifisert mot grunnlinjen med en egen kjøring.** Spesifikasjonen er ikke kjørt i det isolerte miljøet i noe tidligere steg. Den bør få en forutsetning (en rolle for `e2e.user`, som de andre spesifikasjonene lager selv) og føres som kjent testfeil til det er gjort. Ikke rettet her, fordi det ligger utenfor Mål og KPI.
+  - Årsaken er undersøkt og rettet etter vurderingen, se «A39, A40 og E2E-feilene» under.
 
 **Migreringer:** én, `2026_10_23_000003_keep_objective_and_kpi_history`. Den legger bare til triggere og endrer ingen rader (utviklingsdatabasen: 2 mål, 1 KPI, 0 målinger). Den er reverserbar (`down()` er kjørt for hver av de 16 historikkmutantene). Kjørt på `procynia_test` og utviklingsdatabasen. E2E-databasen migreres av `scripts/e2e-env.sh up`.
 
@@ -1524,12 +1525,90 @@ En leverandør med historikk kan ikke slettes, heller ikke i SQL (sammensatt fre
 - En måling som registreres i samme øyeblikk som målet lukkes eller slettes, venter på den andre handlingen, i stedet for å bli lagret under et lukket mål.
 - En ny KPI eller en endring som lagres i samme øyeblikk som målet lukkes, avvises med den eksisterende meldingen om at målet er lukket.
 
-#### Funn som krever beslutning
+#### Funn som krevde beslutning (A39 og A40 er besluttet og gjennomført, se under)
 
 | # | Funn | Anbefaling |
 |---|---|---|
 | A39 | **«Lukk mål» er registerarbeid (`objective.edit`), ikke menneskeforbeholdt.** Utfallet (Nådd, Ikke nådd, Avbrutt) er virksomhetens konklusjon om måloppnåelse. Det vises i Ledelsens gjennomgåelse og overføres til Wiki. «Avslutt KPI» avgjør at KPI-en ikke lenger skal måles, og fjerner den fra oppmerksomhet og Mine oppgaver. En integrasjon med `objective.edit` kan i dag gjøre begge deler og gjenåpne. Historikken er fullstendig (aktør, tidspunkt, utfall, begrunnelse). | Behandle «Lukk mål», «Gjenåpne», «Avslutt KPI» og «Gjenåpne KPI» som menneskelige beslutninger, etter samme mønster som A36: én ny verdi, `HumanDecision::OBJECTIVE_LIFECYCLE`, på `objective.edit`. Ingen endring i skjermbilder og ingen migrering. Alternativ: behold som i dag og løs det med føringen for agenter nedenfor. |
 | A40 | **Et mål eller en KPI uten målinger kan slettes med statushistorikken sin.** Et mål som er lukket som «Nådd», med begrunnelse, kan slettes så lenge ingen KPI har målinger. Statusendringene følger med i kaskaden. Regelen er «registrert ved en feil», og den gjelder bare målinger. I Avvik (A13) og Risiko (B3) hindrer også statushistorikk sletting. | Lav–middels. Enkleste konsekvente løsning: et mål eller en KPI med statusendring slettes ikke (`isDeletable()`, og triggerne utvidet). Det er en synlig endring: «Slett» forsvinner etter første lukking. Alternativ: behold dagens regel. |
+
+#### A39, A40 og E2E-feilene – beslutninger og gjennomføring (2026-10-23)
+
+**Beslutning (2026-10-23):**
+- **A39 – gjennomføres.** «Lukk mål» (Nådd, Ikke nådd, Avbrutt), «Avslutt KPI» og gjenåpning av begge er menneskelige beslutninger. Rettighetskravet og grensesnittet er uendret.
+- **A40 – gjennomføres, avgrenset.** Et mål eller en KPI med beskyttet måle- eller beslutningshistorikk slettes ikke permanent, heller ikke et mål som er lukket uten målinger. Et ubrukt mål eller en ubrukt KPI kan fortsatt slettes.
+- **E2E – undersøkes og rettes**, dersom det er en avgrenset feil i testoppsettet.
+
+| Commit | Innhold |
+|---|---|
+| `80ace998` | E2E: `app-navigation` gir selv `e2e.user` rollen spesifikasjonen er skrevet for. Bare testen er endret. |
+| `b02a9be3` | **A39.** `HumanDecision::OBJECTIVE_LIFECYCLE` på `objective.edit`, som `SUPPLIER_LIFECYCLE` (A36). `ObjectiveLifecycleService` (lukk, gjenåpne) og `KpiLifecycleService` (avslutt, gjenåpne) kaller vakten først, deretter `objective.edit` som før. `HumanDecisionGuardTest` tillater verdien. |
+| `fb7a131e` | **A40.** `Objective::isDeletable()` og `Kpi::isDeletable()` tar med statushistorikk. Ny migrering `2026_10_23_000004`. «Slett KPI» følger samme regel. Hjelpetekstene om sletting er oppdatert (no og en). `ObjectiveTestDataPurge` slår av begge triggerne. |
+| `befe835d` | E2E: `objectives` og `objective-kpis` følger A40. |
+
+**A39 – kontrollert at beslutningen ikke kan omgås:**
+- Registerarbeid skriver aldri status. `status` kan ikke masseoppdateres på `Objective` eller `Kpi`, og `KpiRegistration` skriver bare KPI-ens egne felt. En integrasjon som sender `status` til «Rediger», endrer ikke statusen (testet).
+- Et nytt mål eller en ny KPI starter alltid som aktiv. Å opprette er ikke en beslutning.
+- Det finnes ingen import, masseoppdatering, admin-ressurs, kommando eller jobb som endrer status i modulen. Wiki-overføring, Ledelsens gjennomgåelse, Mine oppgaver og varsler leser bare.
+
+**A40 – regelen:**
+- **Et mål slettes ikke** når det har en statusendring (lukket som Nådd, Ikke nådd eller Avbrutt, også om det er gjenåpnet), eller når en av KPI-ene har en måling eller en statusendring.
+- **En KPI slettes ikke** når den har en måling (også tilbaketrukket) eller en statusendring (avsluttet, også om den er gjenåpnet).
+- **Opprettelse og redigering er ikke beslutningshistorikk.** Et mål eller en KPI som bare er opprettet og redigert, kan slettes som før.
+- Regelen holdes i tjenesten (409), i modellen og i databasen:
+  - `kpis_keep_measurement_history` teller nå også statusendringer.
+  - `objectives_keep_decision_history` er ny og nekter sletting av et lukket mål.
+  - Kundens egen sletting tar fortsatt alt med seg.
+
+**E2E – årsak til de 16 feilene i `app-navigation`:**
+- **Ikke en regresjon.** Spesifikasjonen er skrevet for en `e2e.user` som kan lese Wiki og Kvalitet og ingenting annet under Styring («This user holds quality.view and none of the others»).
+- I utviklingsdatabasen hadde brukeren rollene «Kvalitetsleder» og «Wiki-redaktør». De ble tildelt 2026-10-03, og ingen seeder eller fikstur gir dem.
+- Det isolerte miljøet (`cef890b2`) har en ny database, og `E2ETestSeeder` lager bevisst ingen roller. Brukeren hadde derfor ingen rettigheter, og menyen viste verken Wiki eller Styring.
+- Menyen leser `CustomerPermissionService`, som ingen av stegene endret.
+- **Retting (bare testoppsett):** `NavigationE2EFixture::baseline()` gir `e2e.user` en rolle for kjøringen, med `wiki.view` og `quality.view` (`beforeAll`). `cleanup()` fjerner den (`afterAll`). Ingen produksjonskode og ingen forventning er endret.
+- En kunde fra den feilede kjøringen (GRC-pakkekunden «E2E Nav KTL5H1») ble ryddet med fiksturens egen opprydding.
+
+**Endringer i brukeropplevelsen:**
+- **A39:** ingen. Den som har `objective.edit`, lukker, avslutter og gjenåpner som før.
+- **A40, synlig:**
+  - «Slett mål» vises ikke for et mål som har vært lukket, og «Slett KPI» vises ikke for en KPI som har vært avsluttet, selv om de er gjenåpnet. Før gjaldt det bare målinger.
+  - Et forsøk via URL gir de eksisterende meldingene «Målet kan ikke slettes.» og «KPI-en kan ikke slettes. Avslutt den i stedet.».
+  - Hjelpetekstene om sletting på målsiden og KPI-siden sier dette (no og en).
+  - Ingen nye statuser, dialoger eller felt.
+
+**Tester:**
+- `ObjectiveLifecycleDecisionTest` (7):
+  - en person med `objective.edit` tar alle fire beslutningene, både gjennom tjenesten og siden, og historikken bærer navnet deres;
+  - de fire nektes, uten at noe skrives, for: integrasjon med nøkkelen, API-kanal (delegert), inaktiv person, leser, måler, sletter, redigering uten visning, et annet fagområde, System Owner uten rolle, en annen kundes redigerer og System Owner, og en kunde uten modul;
+  - registerarbeid endrer aldri status.
+- `ObjectiveHistoryProtectionTest` (10, tre nye eller omskrevne):
+  - ubrukt mål og ubrukt KPI slettes som før, også etter redigering;
+  - mål lukket med hvert utfall, og gjenåpnet, nektes av side, tjeneste, modell og SQL, uten at «Slett» tilbys;
+  - en avsluttet KPI, og en gjenåpnet, nektes på samme måte, og holder også målet sitt;
+  - oppryddingsveien fjerner et lukket mål.
+- `ObjectiveServiceAuthorizationTest`: integrasjonen gjør registerarbeidet uten livsløpet.
+- **Skrevet om fordi de låste den gamle regelen:**
+  - `KpiTest::test_delete_takes_objective_delete_and_a_retired_kpi_is_kept`;
+  - `ObjectiveTest::test_a_closed_objective_is_kept_with_its_history`;
+  - `objectives.spec.js` og `objective-kpis.spec.js`. Slettereisen kjøres nå på et mål og en KPI som er registrert ved en feil.
+
+  Kravet om `objective.delete` er fortsatt testet.
+- **Mutasjonssjekket, 15 mutanter:**
+  - A39 (8): vakten i hver av de fire handlingene, regelen i begge tjenestene, og `status` gjort masseoppdaterbar på `Objective`. Alle fanges, unntatt `status` i `KpiRegistration::FIELDS`. Den er ekvivalent, fordi `Kpi::$fillable` ignorerer feltet. Det ytterste laget, `Kpi::$fillable`, er testet.
+  - A40 (7): statusendringer i KPI-triggeren, måltriggeren, unntaket for kundens sletting, de tre delene av `isDeletable()` og regelen for «Slett KPI» på siden. Alle fanges. Migreringen ble rullet tilbake og kjørt på nytt for hver databasemutant.
+
+**Kjøringer (2026-10-23):**
+- **PHP:** samme 75 filer som for steg 15, pluss `ObjectiveLifecycleDecisionTest`: **1032 av 1032 bestått, ingen hoppet over.**
+- **JS:** 2130 av 2130 bestått.
+- **E2E i det isolerte miljøet:**
+  - `app-navigation` alene etter rettingen: **33 av 33 bestått.**
+  - Hele det berørte utvalget: alle spesifikasjoner for Mål og KPI, `my-tasks-governance`, `package-change`, `permission-sections` og `app-navigation` (13 filer). **48 bestått, 0 feilet, 0 hoppet over, til sammen 48.** Telt fra Playwrights JSON-rapport, med `caffeinate`.
+
+**Migreringer:** `2026_10_23_000004_keep_objective_and_kpi_decision_history`.
+- Den erstatter KPI-triggerens funksjon og legger til en trigger på mål.
+- Ingen rader endres. Utviklingsdatabasen har ingen statusendringer, så ingenting som finnes fra før, blir låst.
+- Den kan rulles tilbake: `down()` gjenoppretter regelen fra `000003`, og den er kjørt for hver databasemutant.
+- Kjørt på `procynia_test`, utviklingsdatabasen og `procynia_e2e`.
 
 **Lav, ikke rettet:**
 - Endringer i målverdi, toleranse, frekvens, eier og fagområde har ingen egen historikk. Bare siste verdi og `updated_by` lagres. Hver måling har likevel et øyeblikksbilde av målverdien den ble vurdert mot, så vurderingene i historikken står. Det er ordinært registerarbeid, som stamdata i Leverandøroppfølging.
@@ -1540,12 +1619,11 @@ En leverandør med historikk kan ikke slettes, heller ikke i SQL (sammensatt fre
 - Ja. Lesing, beslutninger og registerarbeid ligger i domenet med samme regler for enhver inngang.
 - Gjenstår før fase 1:
   - A10 (feilformat);
-  - steg 19 (aktørtrigger for `kpi_measurements.recorded_by_user_id`);
-  - A39.
+  - steg 19 (aktørtrigger for `kpi_measurements.recorded_by_user_id`).
 - **Føring (anbefalt, som for de andre modulene):**
   - En AI-agent får ikke `objective.edit` som standard.
   - Forslag til mål, KPI-er og målverdier kan senere komme gjennom avgrensede API-operasjoner. De blir registrert først når en person tar dem i bruk.
-  - Målinger (B7) og sletting forblir menneskeforbeholdt. Lukking og avslutning avhenger av A39.
+  - Målinger (B7), sletting, lukking og avslutning (A39) forblir menneskeforbeholdt.
 
 ## 3. Avgrensning
 
