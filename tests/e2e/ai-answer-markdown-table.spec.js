@@ -2,10 +2,11 @@ import { test, expect } from '@playwright/test';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { artisanCommand } from './helpers/environment.js';
+import { SYSTEM_OWNER, loginAs } from './helpers/auth.js';
+import { e2eWikiCustomerId } from './helpers/wiki.js';
 
 const execAsync = promisify(exec);
 const FIXTURE = '\\Tests\\Support\\WikiAnswerMarkdownTableE2EFixture';
-const CUSTOMER_ID = 4;
 const REQUIREMENT_TEXT = 'E2E: beskriv samhandlingsmodellen med tabell.';
 
 /**
@@ -16,20 +17,14 @@ const REQUIREMENT_TEXT = 'E2E: beskriv samhandlingsmodellen med tabell.';
  * The fixture seeds its own case, requirement and stored answer. An earlier version of this spec
  * opened a real generated answer instead, which meant it asserted whatever the answer engine had
  * last produced — once that answer changed, a working renderer started failing a rendering test.
- * Nothing here touches real customer content.
+ * Nothing here touches real customer content: the case lives in the E2E customer E2ETestSeeder
+ * creates and is read by its System Owner, never a development customer or user.
  */
 let caseUrl = null;
-
-async function loginAsDevDataUser(page) {
-    await page.goto('/login');
-    await page.fill('#email', 'alisan@advania.no');
-    await page.fill('#password', 'Opaque01');
-    await page.click('button[type="submit"]');
-    await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 });
-}
+let customerId = null;
 
 async function openSeededRequirement(page) {
-    await loginAsDevDataUser(page);
+    await loginAs(page, SYSTEM_OWNER.email, SYSTEM_OWNER.password);
     await page.goto(caseUrl);
     await page.getByText(REQUIREMENT_TEXT).first().click();
     await expect(page.getByTestId('wiki-answer-expert-draft')).toBeVisible();
@@ -37,8 +32,11 @@ async function openSeededRequirement(page) {
 
 test.describe.serial('Wiki answer Markdown rendering', () => {
     test.beforeAll(async () => {
+        customerId = await e2eWikiCustomerId();
+        expect(customerId, 'the E2E customer (e2e-test-customer) was not found').toBeGreaterThan(0);
+
         const { stdout } = await execAsync(
-            artisanCommand(`tinker --execute="echo ${FIXTURE}::seed(${CUSTOMER_ID});"`),
+            artisanCommand(`tinker --execute="echo ${FIXTURE}::seed(${customerId});"`),
             { cwd: new URL('../..', import.meta.url).pathname },
         );
 
@@ -49,7 +47,7 @@ test.describe.serial('Wiki answer Markdown rendering', () => {
 
     test.afterAll(async () => {
         await execAsync(
-            artisanCommand(`tinker --execute="${FIXTURE}::cleanup(${CUSTOMER_ID});"`),
+            artisanCommand(`tinker --execute="${FIXTURE}::cleanup(${customerId});"`),
             { cwd: new URL('../..', import.meta.url).pathname },
         );
     });

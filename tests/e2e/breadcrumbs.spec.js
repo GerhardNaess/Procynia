@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { loginAs, USER } from './helpers/auth.js';
 import { DESKTOP, PHONE, sidewaysOverflow, textBelow16px } from './helpers/readability.js';
+import { tinker } from './helpers/risk.js';
 import { cleanUpSupplierE2eData, SUPPLIER_E2E_PASSWORD, supplierE2eSuffix, supplierFixture } from './helpers/suppliers.js';
 
 const suffix = supplierE2eSuffix();
@@ -127,31 +128,45 @@ test('long names and phones', async ({ page }) => {
 
 /**
  * The shared customer: Anbud's three levels, Hjem without a trail, and Oppfølging on the rail for a
- * person who works in Anbud too.
+ * person who works in Anbud too. E2ETestSeeder gives the E2E user no roles, so the test hands it the
+ * reading baseline it is written against — Wiki among it — for the run, and takes it away again
+ * (NavigationE2EFixture, as in app-navigation).
  */
-test('Anbud, Wiki and Hjem in the shared customer', async ({ page }) => {
-    await loginAs(page, USER.email, USER.password);
-    await page.setViewportSize(DESKTOP);
+test.describe('in the shared customer', () => {
+    const baselineSuffix = Math.random().toString(36).slice(2, 8).padEnd(6, '0').toUpperCase();
 
-    await page.goto('/app/dashboard');
-    await expect(page.getByTestId('breadcrumbs')).toHaveCount(0);
-    await expect(railCurrent(page)).toHaveText('Hjem');
+    test.beforeAll(async () => {
+        await tinker(`\\Tests\\Support\\NavigationE2EFixture::baseline('${baselineSuffix}');`);
+    });
 
-    await page.goto('/app/notices?tab=alerts');
-    await expect(trail(page)).toHaveText(['Anbud', 'Kunngjøringer', 'Varsler']);
-    await expect(railCurrent(page)).toHaveText('Anbud');
-    await expect(headerCurrent(page)).toHaveText('Kunngjøringer');
+    test.afterAll(async () => {
+        await tinker(`\\Tests\\Support\\NavigationE2EFixture::cleanup('${baselineSuffix}');`);
+    });
 
-    await page.goto('/app/notices?mode=saved');
-    await expect(trail(page)).toHaveText(['Anbud', 'Saksliste', 'Lagrede kunngjøringer']);
+    test('Anbud, Wiki and Hjem in the shared customer', async ({ page }) => {
+        await loginAs(page, USER.email, USER.password);
+        await page.setViewportSize(DESKTOP);
 
-    await page.goto('/app/info-center');
-    await expect(railCurrent(page)).toHaveText('Oppfølging');
-    await expect(trail(page).first()).toHaveText('Oppfølging');
+        await page.goto('/app/dashboard');
+        await expect(page.getByTestId('breadcrumbs')).toHaveCount(0);
+        await expect(railCurrent(page)).toHaveText('Hjem');
 
-    await page.goto('/app/wiki?tab=sources');
-    await expect(trail(page)).toHaveText(['Wiki', 'Kildedokumenter']);
-    await expect(railCurrent(page)).toHaveText('Wiki');
+        await page.goto('/app/notices?tab=alerts');
+        await expect(trail(page)).toHaveText(['Anbud', 'Kunngjøringer', 'Varsler']);
+        await expect(railCurrent(page)).toHaveText('Anbud');
+        await expect(headerCurrent(page)).toHaveText('Kunngjøringer');
+
+        await page.goto('/app/notices?mode=saved');
+        await expect(trail(page)).toHaveText(['Anbud', 'Saksliste', 'Lagrede kunngjøringer']);
+
+        await page.goto('/app/info-center');
+        await expect(railCurrent(page)).toHaveText('Oppfølging');
+        await expect(trail(page).first()).toHaveText('Oppfølging');
+
+        await page.goto('/app/wiki?tab=sources');
+        await expect(trail(page)).toHaveText(['Wiki', 'Kildedokumenter']);
+        await expect(railCurrent(page)).toHaveText('Wiki');
+    });
 });
 
 /**
