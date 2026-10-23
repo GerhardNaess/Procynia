@@ -2559,7 +2559,8 @@ export default function NoticeIndex({
                                                                 {noticesText.moveToHistory}
                                                             </button>
                                                         ) : null}
-                                                        {isSavedMode ? (
+                                                        {/* A case with decisions or AI usage is kept (A42): no «Slett» to press. */}
+                                                        {isSavedMode && notice.is_deletable !== false ? (
                                                             <>
                                                             <button
                                                                 id={`notice-delete-${notice.saved_notice_id}`}
@@ -2583,7 +2584,7 @@ export default function NoticeIndex({
                                                             ) : null}
                                                             </>
                                                         ) : null}
-                                                        {isHistoryMode ? (
+                                                        {isHistoryMode && notice.is_deletable !== false ? (
                                                             <>
                                                             <button
                                                                 id={`notice-delete-${notice.saved_notice_id}`}

@@ -1985,6 +1985,8 @@ return [
         'delete_notice_confirm' => "Are you sure you want to delete this procurement?\n\nThis action cannot be undone.",
         'delete_history_confirm' => "Are you sure you want to delete this history notice?\n\nThis action cannot be undone.",
         'delete_permission_message' => 'Only the person who created the case can delete it (created by :name)',
+        'delete_kept_history' => 'This case has decisions or AI usage that must stay traceable, and cannot be deleted. Move it to history instead.',
+        'history_delete_kept' => 'This case has decisions or AI usage that must stay traceable, and stays in history.',
         'unknown_user' => 'unknown',
     ],
     'user' => [
@@ -2064,6 +2066,8 @@ return [
         'requirement_deleted' => 'The requirement was permanently deleted.',
         'requirements_deleted_all' => 'Permanently deleted :count extracted requirements.',
         'requirements_deleted_none' => 'There were no extracted requirements to delete.',
+        'requirement_delete_kept_approved' => 'This requirement has been approved and cannot be deleted. Reject it instead.',
+        'requirements_deleted_kept' => 'Permanently deleted :count extracted requirements. :kept that have been approved were kept.',
         'requirement_action_delete' => 'Delete',
         'requirement_delete_confirm_title' => 'Permanently delete this requirement?',
         'requirement_delete_confirm_message' => 'The requirement is deleted along with any answer draft, assessments and revision history. This cannot be undone. The source document is kept.',

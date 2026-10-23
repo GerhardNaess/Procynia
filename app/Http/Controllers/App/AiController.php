@@ -917,7 +917,12 @@ class AiController extends Controller
             ->where('source_type', SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE)
             ->firstOrFail();
 
-        DB::transaction(static fn () => $ownedRequirement->delete());
+        // One that has been approved is part of the bid's history (A42): rejecting it is the way out.
+        if (! $ownedRequirement->isDeletable()) {
+            return back()->with('error', __('procynia.ai.requirement_delete_kept_approved'));
+        }
+
+        $this->requirementEditorService->deleteCandidate($ownedRequirement, $request->user());
 
         Log::info('[PROCYNIA][REQUIREMENT_DELETE] Requirement deleted permanently.', [
             'saved_notice_id' => $record->id,
@@ -936,7 +941,8 @@ class AiController extends Controller
      *
      * "All" is defined by the server, never by whatever the client currently has filtered or
      * paginated into view: every ai_candidate requirement belonging to this case, rejected ones
-     * included. Manually added requirements are left alone.
+     * included. Manually added requirements are left alone, and so is every requirement that has
+     * been approved (A42) — the message says how many were kept.
      *
      * The uploaded document, its extraction run and any parsed workbook data are untouched, so a
      * case emptied by mistake can be rebuilt by running extraction again.
@@ -946,27 +952,20 @@ class AiController extends Controller
         $record = $this->workableAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
 
-        $deletedCount = DB::transaction(static function () use ($record): int {
-            $requirements = $record->aiRequirements()
-                ->where('source_type', SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE)
-                ->get();
-
-            foreach ($requirements as $requirement) {
-                $requirement->delete();
-            }
-
-            return $requirements->count();
-        });
+        ['deleted' => $deletedCount, 'kept' => $keptCount] = $this->requirementEditorService->deleteAllCandidates($record, $request->user());
 
         Log::info('[PROCYNIA][REQUIREMENT_DELETE] Extracted requirements deleted permanently.', [
             'saved_notice_id' => $record->id,
             'deleted_count' => $deletedCount,
+            'kept_approved_count' => $keptCount,
             'user_id' => $request->user()?->id,
         ]);
 
-        return back()->with('success', $deletedCount === 0
-            ? __('procynia.ai.requirements_deleted_none')
-            : __('procynia.ai.requirements_deleted_all', ['count' => $deletedCount]));
+        return back()->with('success', match (true) {
+            $keptCount > 0 => __('procynia.ai.requirements_deleted_kept', ['count' => $deletedCount, 'kept' => $keptCount]),
+            $deletedCount === 0 => __('procynia.ai.requirements_deleted_none'),
+            default => __('procynia.ai.requirements_deleted_all', ['count' => $deletedCount]),
+        });
     }
 
     /**
@@ -1756,9 +1755,9 @@ class AiController extends Controller
                     ->all(),
                 'answer_basis_selection_sync_url' => $route('app.ai.requirements.answer-basis.sync'),
                 'wiki_answer' => $this->aiRequirementWikiAnswerPayload($requirement->wikiAnswer),
-                // Only AI-extracted candidates are deletable; a manually added requirement is the
-                // user's own work and has no delete affordance.
-                'delete_url' => $requirement->source_type === SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE
+                // Only AI-extracted candidates that have never been approved are deletable (A42); a
+                // manually added requirement is the user's own work and has no delete affordance.
+                'delete_url' => $requirement->isDeletable()
                     ? $route('app.ai.requirements.destroy')
                     : null,
                 'wiki_answer_generate_url' => $route('app.ai.requirements.wiki-answer.generate'),

@@ -128,6 +128,7 @@ class TenderCaseWorkAccessTest extends TestCase
         $world = $this->world();
         $writeProps = ['requirements_store_url', 'requirements_delete_all_url', 'assessment_refresh_url', 'documents_upload_url', 'answer_basis_documents_upload_url', 'answer_basis_text_store_url'];
         $rowProps = ['edit_url', 'work_update_url', 'assigned_user_update_url', 'answer_basis_selection_sync_url', 'delete_url', 'wiki_answer_generate_url', 'wiki_answer_update_url'];
+        // The undecided candidate: the approved one is never deletable (A42), whoever looks.
 
         foreach ([
             'contributor on the case' => [$world['contributor'], true],
@@ -145,7 +146,7 @@ class TenderCaseWorkAccessTest extends TestCase
                         $this->assertSame($mayWork, data_get($page, "props.{$prop}") !== null, "{$who}: {$prop}");
                     }
 
-                    $row = collect(data_get($page, 'props.requirements'))->firstWhere('source_type', SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE);
+                    $row = collect(data_get($page, 'props.requirements'))->firstWhere('requirement_text', 'Uttrukket krav.');
 
                     foreach ($rowProps as $prop) {
                         $this->assertSame($mayWork, data_get($row, $prop) !== null, "{$who}: requirement {$prop}");

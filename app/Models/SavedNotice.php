@@ -2,11 +2,13 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
+use LogicException;
 
 class SavedNotice extends Model
 {
@@ -431,6 +433,55 @@ class SavedNotice extends Model
         return $this->hasMany(SavedNoticeNoGoDecision::class)
             ->orderByDesc('closed_at')
             ->orderByDesc('id');
+    }
+
+    protected static function booted(): void
+    {
+        // Its decisions are kept; the database refuses the same (saved_notices_keep_decision_history).
+        static::deleting(function (self $notice): void {
+            if (! $notice->isDeletable()) {
+                throw new LogicException('A case with decisions or AI usage is history and cannot be deleted. Move it to history instead.');
+            }
+        });
+    }
+
+    /**
+     * Whether the case may be deleted at all, before any permission is considered (A42). Deleting
+     * is for a case saved by mistake. It carries history, and is moved to history instead, once it
+     * has any of:
+     *  - a recorded bid status change, a No-Go among them;
+     *  - a requirement that has been approved;
+     *  - AI usage counted against the customer (customer_ai_case_usages), which must stay traceable
+     *    to its case.
+     * Saving, editing, adding and rejecting requirements leave no such history.
+     */
+    public function isDeletable(): bool
+    {
+        if (! $this->exists) {
+            return true;
+        }
+
+        if (array_key_exists('has_decision_history', $this->attributes)) {
+            return ! (bool) $this->attributes['has_decision_history'];
+        }
+
+        return ! (bool) static::query()->whereKey($this->getKey())->withDecisionHistoryFlag()->value('has_decision_history');
+    }
+
+    /** Adds has_decision_history to each row, so a list asks isDeletable() without a query per case. */
+    public function scopeWithDecisionHistoryFlag(Builder $query): Builder
+    {
+        return $query->addSelect(DB::raw(<<<'SQL'
+            (
+                EXISTS (SELECT 1 FROM saved_notice_status_changes c WHERE c.saved_notice_id = saved_notices.id)
+                OR EXISTS (SELECT 1 FROM saved_notice_no_go_decisions d WHERE d.saved_notice_id = saved_notices.id)
+                OR EXISTS (SELECT 1 FROM saved_notice_ai_requirements r WHERE r.saved_notice_id = saved_notices.id
+                    AND (r.approval_status = 'approved' OR r.approved_at IS NOT NULL))
+                OR EXISTS (SELECT 1 FROM saved_notice_ai_requirement_revisions v WHERE v.saved_notice_id = saved_notices.id
+                    AND v.change_type = 'approve')
+                OR EXISTS (SELECT 1 FROM customer_ai_case_usages u WHERE u.saved_notice_id = saved_notices.id)
+            ) AS has_decision_history
+            SQL));
     }
 
     /** Who changed the bid status, and when — written by SavedNoticeStatusService only. */

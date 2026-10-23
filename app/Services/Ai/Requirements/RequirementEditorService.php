@@ -37,6 +37,56 @@ class RequirementEditorService
     }
 
     /**
+     * Deletes one extracted candidate permanently (A41, A42): case work, on the requirement as it
+     * stands now. One that has been approved is kept — the model and the database refuse it too.
+     *
+     * @throws AuthorizationException
+     * @throws \LogicException when the requirement is not deletable
+     */
+    public function deleteCandidate(SavedNoticeAiRequirement $requirement, User $actor): void
+    {
+        DB::transaction(function () use ($requirement, $actor): void {
+            $this->access->authorizeWork($actor, SavedNotice::query()->sharedLock()->findOrFail($requirement->saved_notice_id));
+            $requirement = SavedNoticeAiRequirement::query()->lockForUpdate()->findOrFail($requirement->getKey());
+
+            if (! $requirement->isDeletable()) {
+                throw new \LogicException('Only an extracted requirement that has never been approved can be deleted.');
+            }
+
+            $requirement->delete();
+        });
+    }
+
+    /**
+     * Deletes every extracted candidate in the case that may be deleted, rejected ones included;
+     * one that has been approved is left in place and counted.
+     *
+     * @return array{deleted: int, kept: int}
+     *
+     * @throws AuthorizationException
+     */
+    public function deleteAllCandidates(SavedNotice $notice, User $actor): array
+    {
+        return DB::transaction(function () use ($notice, $actor): array {
+            $this->access->authorizeWork($actor, SavedNotice::query()->sharedLock()->findOrFail($notice->getKey()));
+
+            $candidates = SavedNoticeAiRequirement::query()
+                ->where('saved_notice_id', $notice->getKey())
+                ->where('source_type', SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE)
+                ->with('revisions')
+                ->lockForUpdate()
+                ->get();
+            [$deletable, $kept] = $candidates->partition(fn (SavedNoticeAiRequirement $requirement): bool => $requirement->isDeletable());
+
+            foreach ($deletable as $requirement) {
+                $requirement->delete();
+            }
+
+            return ['deleted' => $deletable->count(), 'kept' => $kept->count()];
+        });
+    }
+
+    /**
      * Purpose: Persist one AI-generated requirement candidate as a traceable aggregate row.
      * Inputs: The source AI document and chunk plus the extracted candidate data.
      * Returns: The persisted canonical requirement row.

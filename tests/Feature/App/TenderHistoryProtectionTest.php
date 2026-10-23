@@ -111,33 +111,57 @@ class TenderHistoryProtectionTest extends TestCase
     }
 
     /** The history goes with what it belongs to: deleting a requirement, a case or the customer still works. */
-    public function test_the_history_goes_with_its_requirement_its_case_and_its_customer(): void
+    /**
+     * A42: an approved requirement and a case with decisions are not deleted on their own either —
+     * by the model or by SQL. The customer's own deletion still takes everything along.
+     */
+    public function test_decided_history_is_deleted_only_with_its_customer(): void
     {
         $world = $this->decidedWorld();
 
-        $world['requirement']->delete();
-        $this->assertSame(0, DB::table('saved_notice_ai_requirement_revisions')->where('saved_notice_ai_requirement_id', $world['requirement']->id)->count());
+        $this->assertRefused(fn () => DB::table('saved_notice_ai_requirements')->where('id', $world['requirement']->id)->delete(), 'deleting an approved requirement');
+        $this->assertRefused(fn () => DB::table('saved_notices')->where('id', $world['noGo']->id)->delete(), 'deleting a No-Go case');
+        $this->assertRefused(fn () => DB::table('saved_notices')->where('id', $world['notice']->id)->delete(), 'deleting a case with status changes and an approved requirement');
 
-        $world['noGo']->delete();
-        $this->assertSame(0, DB::table('saved_notice_no_go_decisions')->where('saved_notice_id', $world['noGo']->id)->count());
-        $this->assertSame(0, DB::table('saved_notice_status_changes')->where('saved_notice_id', $world['noGo']->id)->count());
+        foreach ([$world['requirement'], $world['noGo'], $world['notice']] as $model) {
+            try {
+                $model->delete();
+                $this->fail($model::class.' with decisions was deleted');
+            } catch (\LogicException) {
+                // refused before the query is sent
+            }
+        }
 
         $customerId = $world['customer']->id;
         DB::table('customers')->where('id', $customerId)->delete();
         $this->assertSame(0, DB::table('saved_notices')->where('customer_id', $customerId)->count());
         $this->assertSame(0, DB::table('saved_notice_status_changes')->where('customer_id', $customerId)->count());
+        $this->assertSame(0, DB::table('saved_notice_ai_requirement_revisions')->where('saved_notice_id', $world['notice']->id)->count());
     }
 
-    /** Deleting a whole case takes its requirements and their revisions along in one statement. */
-    public function test_deleting_a_case_takes_its_requirements_and_their_revisions_along(): void
+    /**
+     * A case saved by mistake, whose requirements were only rejected or never decided, is still
+     * deleted in one statement, and takes its requirements and their revisions along.
+     */
+    public function test_a_case_without_decisions_takes_its_requirements_and_their_revisions_along(): void
     {
         $world = $this->decidedWorld();
-        $this->assertGreaterThan(0, DB::table('saved_notice_ai_requirement_revisions')->where('saved_notice_id', $world['notice']->id)->count());
+        $case = $this->notice($world['customer'], $world['owner']);
+        SavedNoticeUserAccess::query()->create([
+            'saved_notice_id' => $case->id,
+            'user_id' => $world['contributor']->id,
+            'granted_by_user_id' => $world['owner']->id,
+            'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR,
+        ]);
+        $rejected = $this->requirementIn($case);
+        app(RequirementEditorService::class)->rejectRequirement($rejected, $world['contributor']);
+        $this->assertGreaterThan(0, DB::table('saved_notice_ai_requirement_revisions')->where('saved_notice_id', $case->id)->count());
+        $this->assertTrue($case->fresh()->isDeletable());
 
-        DB::table('saved_notices')->where('id', $world['notice']->id)->delete();
+        DB::table('saved_notices')->where('id', $case->id)->delete();
 
-        $this->assertSame(0, DB::table('saved_notice_ai_requirement_revisions')->where('saved_notice_id', $world['notice']->id)->count());
-        $this->assertSame(0, DB::table('saved_notice_status_changes')->where('saved_notice_id', $world['notice']->id)->count());
+        $this->assertSame(0, DB::table('saved_notice_ai_requirements')->where('saved_notice_id', $case->id)->count());
+        $this->assertSame(0, DB::table('saved_notice_ai_requirement_revisions')->where('saved_notice_id', $case->id)->count());
     }
 
     private function assertRefused(callable $statement, string $what): void
@@ -203,7 +227,15 @@ class TenderHistoryProtectionTest extends TestCase
         $status->transition($contributor, $notice, SavedNotice::BID_STATUS_GO_NO_GO);
         $status->transition($contributor, $noGo, SavedNotice::BID_STATUS_NO_GO, SavedNotice::BID_CLOSURE_REASON_CAPACITY, 'Ingen kapasitet.');
 
-        $requirement = SavedNoticeAiRequirement::query()->create([
+        $requirement = $this->requirementIn($notice);
+        app(RequirementEditorService::class)->approveRequirement($requirement, $contributor);
+
+        return compact('customer', 'owner', 'contributor', 'other', 'notice', 'noGo', 'requirement');
+    }
+
+    private function requirementIn(SavedNotice $notice): SavedNoticeAiRequirement
+    {
+        return SavedNoticeAiRequirement::query()->create([
             'saved_notice_id' => $notice->id,
             'source_type' => SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE,
             'approval_status' => SavedNoticeAiRequirement::APPROVAL_STATUS_DRAFT,
@@ -216,9 +248,6 @@ class TenderHistoryProtectionTest extends TestCase
             'extraction_method' => SavedNoticeAiRequirement::EXTRACTION_METHOD_RULE_BASED,
             'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
         ]);
-        app(RequirementEditorService::class)->approveRequirement($requirement, $contributor);
-
-        return compact('customer', 'owner', 'contributor', 'other', 'notice', 'noGo', 'requirement');
     }
 
     private function notice(Customer $customer, User $savedBy): SavedNotice

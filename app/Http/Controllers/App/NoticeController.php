@@ -811,6 +811,13 @@ class NoticeController extends Controller
                 ->with('error', 'Du kan bare slette saker du selv har opprettet.');
         }
 
+        // A case with decisions or AI usage is moved to history, not deleted (A42).
+        if (! $record->isDeletable()) {
+            return redirect()
+                ->back()
+                ->with('error', __('procynia.notices.delete_kept_history'));
+        }
+
         $record->delete();
 
         return redirect()
@@ -838,6 +845,13 @@ class NoticeController extends Controller
             return redirect()
                 ->back()
                 ->with('error', 'Du kan bare slette saker du selv har opprettet.');
+        }
+
+        // A case with decisions or AI usage stays in history (A42).
+        if (! $record->isDeletable()) {
+            return redirect()
+                ->back()
+                ->with('error', __('procynia.notices.history_delete_kept'));
         }
 
         $record->delete();
@@ -1824,6 +1838,7 @@ class NoticeController extends Controller
                 'businessReviews:id,saved_notice_id,business_review_at',
             ])
             ->withCount('submissions')
+            ->withDecisionHistoryFlag()
             ->orderByDesc('updated_at')
             ->forPage($page, $perPage)
             ->get();
@@ -1905,6 +1920,8 @@ class NoticeController extends Controller
             'follow_up_offset_months' => $notice->follow_up_offset_months,
             'next_process_date_at' => optional($notice->next_process_date_at)?->toIso8601String(),
             'can_delete' => $notice->saved_by_user_id === $user->id,
+            // A case with decisions or AI usage is never deleted (A42); the page offers no «Slett».
+            'is_deletable' => $notice->isDeletable(),
             'actions' => [
                 'can_archive' => $canArchive,
                 'archive_url' => $canArchive

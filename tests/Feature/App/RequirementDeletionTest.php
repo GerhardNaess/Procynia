@@ -79,7 +79,9 @@ class RequirementDeletionTest extends TestCase
         return SavedNoticeAiRequirement::query()->create(array_merge([
             'saved_notice_id' => $savedNotice->id,
             'source_type' => SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE,
-            'approval_status' => SavedNoticeAiRequirement::APPROVAL_STATUS_APPROVED,
+            // An undecided extraction candidate: what «Slett» is for. One that has been approved is
+            // kept (A42, TenderDeletionProtectionTest).
+            'approval_status' => SavedNoticeAiRequirement::APPROVAL_STATUS_DRAFT,
             'publication_status' => SavedNoticeAiRequirement::PUBLICATION_STATUS_PUBLISHED,
             'requirement_identifier' => 'K-'.Str::upper(Str::random(4)),
             'requirement_text' => 'Leverandøren skal levere rapport.',

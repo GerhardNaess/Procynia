@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use LogicException;
 
 class SavedNoticeAiRequirement extends Model
 {
@@ -269,6 +270,48 @@ class SavedNoticeAiRequirement extends Model
         return $this->hasMany(SavedNoticeAiRequirementRevision::class, 'saved_notice_ai_requirement_id')
             ->orderBy('created_at')
             ->orderBy('id');
+    }
+
+    protected static function booted(): void
+    {
+        // An approved requirement is kept; the database refuses the same
+        // (saved_notice_ai_requirements_keep_approved). Staged and undecided rows are untouched.
+        static::deleting(function (self $requirement): void {
+            if ($requirement->hasBeenApproved()) {
+                throw new LogicException('A requirement that has been approved is part of the bid\'s history and cannot be deleted. Reject it instead.');
+            }
+        });
+    }
+
+    /**
+     * Has this requirement ever been approved (A42)? Approval takes it into the bid; who approved
+     * it and when is a decision that stays. A requirement only rejected, or never decided, was
+     * not — that is what «Slett» is for: a candidate that should never have been extracted.
+     */
+    public function hasBeenApproved(): bool
+    {
+        if ($this->approval_status === self::APPROVAL_STATUS_APPROVED || $this->approved_at !== null) {
+            return true;
+        }
+
+        if ($this->relationLoaded('revisions')) {
+            return $this->revisions->contains('change_type', SavedNoticeAiRequirementRevision::CHANGE_TYPE_APPROVE);
+        }
+
+        return $this->exists && SavedNoticeAiRequirementRevision::query()
+            ->where('saved_notice_ai_requirement_id', $this->id)
+            ->where('change_type', SavedNoticeAiRequirementRevision::CHANGE_TYPE_APPROVE)
+            ->exists();
+    }
+
+    /**
+     * May the requirement be deleted at all, before any permission is considered? Only an
+     * AI-extracted candidate (a manual one is the user's own work), and never one that has been
+     * approved — rejecting it takes it out of the bid instead.
+     */
+    public function isDeletable(): bool
+    {
+        return $this->source_type === self::SOURCE_TYPE_AI_CANDIDATE && ! $this->hasBeenApproved();
     }
 
     public function isApproved(): bool

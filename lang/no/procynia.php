@@ -1989,6 +1989,8 @@ return [
         'delete_notice_confirm' => "Er du sikker på at du vil slette denne anskaffelsen?\n\nDenne handlingen kan ikke angres.",
         'delete_history_confirm' => "Er du sikker på at du vil slette denne historikk-kunngjøringen?\n\nDenne handlingen kan ikke angres.",
         'delete_permission_message' => 'Kun den som opprettet saken kan slette den (opprettet av :name)',
+        'delete_kept_history' => 'Saken har beslutninger eller AI-bruk som skal kunne spores, og kan ikke slettes. Flytt den til historikk i stedet.',
+        'history_delete_kept' => 'Saken har beslutninger eller AI-bruk som skal kunne spores, og blir liggende i historikk.',
         'unknown_user' => 'ukjent',
     ],
     'user' => [
@@ -2068,6 +2070,8 @@ return [
         'requirement_deleted' => 'Kravet er slettet permanent.',
         'requirements_deleted_all' => 'Slettet :count ekstraherte krav permanent.',
         'requirements_deleted_none' => 'Det var ingen ekstraherte krav å slette.',
+        'requirement_delete_kept_approved' => 'Kravet har vært godkjent og kan ikke slettes. Avvis det i stedet.',
+        'requirements_deleted_kept' => 'Slettet :count ekstraherte krav permanent. :kept krav som har vært godkjent, ble beholdt.',
         'requirement_action_delete' => 'Slett',
         'requirement_delete_confirm_title' => 'Slette dette kravet permanent?',
         'requirement_delete_confirm_message' => 'Kravet slettes sammen med eventuelt svarutkast, vurderinger og endringshistorikk. Dette kan ikke angres. Kildedokumentet beholdes.',
