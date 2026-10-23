@@ -7,6 +7,13 @@ customer they belong to, what they may do, or whether their account is still act
 from Procynia's own tables on every login. No Entra group, app role or directory role is mapped to a
 Procynia role, and none ever should be without a separate, deliberate decision.
 
+**The external API (D4, 2026-10-23).** The "Procynia API" app registration has one app role,
+`Procynia.Read.All`. It is a ceiling, not a grant: it lets a client application call the read
+endpoints at all, and nothing more. It never assigns a Procynia role, permission or fagområde. What
+the application reads is decided by the customer's grant and the integration identity's Procynia
+roles (`docs/external-api-phase-1-decisions.md` §4). The signing keys are fetched by the same
+`EntraJwksProvider` sign-in uses.
+
 ## Flow
 
 ```

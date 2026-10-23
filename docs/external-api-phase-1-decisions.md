@@ -1,6 +1,6 @@
 # Eksternt API – beslutningsgrunnlag for fase 1
 
-**Status:** Til beslutning. Ingenting i dette dokumentet er implementert. API fase 1 startes ikke før beslutningene i §13 er godkjent.
+**Status:** Første leveranse er bygget 2026-10-23 (§15): autentisering, kundetildeling, feilformat, `GET /api/v1/me` og `GET /api/v1/risks`. D13 er fortsatt åpen, og administrasjonen av klienter og tildelinger er derfor ikke bygget. Øvrige endepunkter venter på vurdering.
 **Dato:** 2026-10-23
 **Gren:** `feature/external-api-foundation`
 **Bygger på:** [`external-api-architecture.md`](external-api-architecture.md) (særlig §4, §5, §8.3, §9 og §15), [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §2n, [`operations/entra-sso.md`](operations/entra-sso.md), [`operations/security.md`](operations/security.md) §9 og [`AGENTS.md`](../AGENTS.md).
@@ -394,3 +394,42 @@ Til orientering. Starter ikke før §13 er godkjent.
 3. **Pilot:** én testkunde, Siggjos managed identity i staging, V4 med ekte Entra.
 
 Full PHP-suite kjøres som milepæl ved slutten av fase 1 og fase 2, ikke underveis.
+
+---
+
+## 15. Gjennomføring av første leveranse (2026-10-23)
+
+Bygget på `feature/external-api-foundation` etter instruks 2026-10-23: applikasjonsautentisering via Entra, kundetildeling med integrasjonsidentitet, bare lesing, ingen menneskelige beslutninger, ingen AI, A23 og A46 utilgjengelige.
+
+### Hva som er bygget
+
+| Del | Innhold |
+|---|---|
+| Feilformat (A10) | `ApiErrorResponder` for alt under `/api`. Fast melding per kode, aldri unntakets egen tekst. `X-Request-Id` på alle svar. Webgrensesnittet er uendret. |
+| Autentisering (D2–D5) | `EntraAccessTokenValidator`: v2-token, bare RS256, issuer for tokenets tenant, godkjent audience, utløp, og paret (`azp`, `tid`) må være en aktivert rad i `api_clients`. Delegert token eller manglende app-rolle gir 403. En tenant uten klient avvises før nøkler hentes. `EntraJwksProvider` deles med innloggingen. |
+| Kanal (B2, D11) | Alt under `/api` er API-kanal, avgjort av stien før autentisering. `HumanDecisionGuard` nekter alle beslutninger der, og `AiCallContextPolicy` nekter alle AI-kall. |
+| Tildeling (D1, D6) | `api_client_customer_grants`: én aktiv tildeling per (klient, kunde), én integrasjonsidentitet per tildeling. `Procynia-Customer` velger blant aktive tildelinger. Tildeling som peker på en person eller en annen kundes identitet nektes. |
+| Logging (D10) | `[PROCYNIA][API] api_request` per forespørsel, `[PROCYNIA][AUTH] api_token_rejected` og `api_access_refused` med grunn, `api_throttled`. Aldri token, header, innhold eller spørreverdier. `last_used_at` på tildelingen, høyst én gang per minutt. |
+| Ratebegrensning | Per (klient, kunde), `API_RATE_LIMIT_PER_MINUTE` (standard 240). |
+| CORS | Stengt (`config/cors.php`). API-et kalles fra server til server. |
+| `GET /api/v1/me` | Klient, kunde, modus, identitet og Risiko: bestilt, lesbar, fagområder. |
+| `GET /api/v1/risks` | `RiskAccessService::visibleRisks()` for identiteten. Filtre `status`, `business_area_id`, markør og `limit` ≤ 200. Bare strukturerte felt (D8), med vurdering og periodisk gjennomgang fra `RiskAssessment::latestForRisks`, `RiskScoringPolicy` og `RiskReviewSchedule`. |
+| Kontrakt | `ApiRouteContractTest`: bare `GET`, hele mellomvarestakken i rekkefølge, bare tjente moduler (`risk`), ingen modellbinding, ingen referanse til tjenestene bak A23 og A46. |
+
+Konfigurasjon: `API_ENTRA_AUDIENCES` (tom = API-et er stengt), `API_ENTRA_READ_ROLE`, `API_RATE_LIMIT_PER_MINUTE`.
+
+Migreringer: `2026_10_23_000015_create_api_clients_table`, `2026_10_23_000016_create_api_client_customer_grants_table`.
+
+### Avvik fra beslutningsgrunnlaget
+
+- **Ingen `allowed_modes`, `max_scopes` eller `granted_scopes`.** Med bare applikasjonsmodus (D2) og én app-rolle (D3) er snittet i D4 trivielt. Kolonnene legges til når en andre rolle eller delegert modus kommer.
+- **Én liste, ikke detalj.** Første Risiko-leveranse er `GET /risks`. `GET /risks/{id}` er ikke bygget.
+- **Presentasjonen deles ikke med webgrensesnittet ennå.** `Api\Presenters\RiskPresenter` bruker de samme domeneklassene som registeret, men webkontrolleren er ikke endret, slik at brukeropplevelsen er uendret. Radene har ulikt innhold (webraden har fritekst og ruter).
+- **`azpacr` kontrolleres ikke.** D5 (ingen klienthemmeligheter) håndheves i Advanias registrering. Om tokenets `azpacr` skal kreves lik `2`, bør verifiseres mot et ekte token fra Siggjos managed identity først.
+
+### Åpent
+
+- **D13 – hvem som registrerer klienter og gir tildelinger.** Ingen vei oppretter `api_clients`, integrasjonsidentiteter eller tildelinger. Det betyr også at menneske-sperren i arkitektur §4.3 (eier- og kontrollørvalg, varsler, lisenstelling, «Brukere») ikke er bygget. Den må komme sammen med administrasjonen, før en integrasjonsidentitet kan opprettes i et ekte miljø. Integrasjonsidentiteten kan allerede ikke logge inn, ikke bruke kundefrontenden og ikke ta beslutninger (testet).
+- **Observasjon, innlogging:** `EntraOidcClient::validateIdToken` leser nøkler med `JWK::parseKeySet()` uten standardalgoritme, så en nøkkel uten `alg` avvises. API-et oppgir RS256 selv. Om Microsofts JWKS for innloggingen har `alg`, er ikke verifisert. Uendret oppførsel.
+- V1–V4 (§11) gjelder fortsatt.
+
