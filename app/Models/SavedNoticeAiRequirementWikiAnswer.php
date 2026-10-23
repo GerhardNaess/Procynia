@@ -72,6 +72,7 @@ class SavedNoticeAiRequirementWikiAnswer extends Model
         'model',
         'generated_by_user_id',
         'generated_at',
+        'is_hand_edited',
         'edited_by_user_id',
         'edited_at',
     ];
@@ -88,6 +89,7 @@ class SavedNoticeAiRequirementWikiAnswer extends Model
             'stale_context' => 'array',
             'generated_at' => 'datetime',
             'edited_at' => 'datetime',
+            'is_hand_edited' => 'boolean',
         ];
     }
 
@@ -107,10 +109,13 @@ class SavedNoticeAiRequirementWikiAnswer extends Model
         return $this->belongsTo(User::class, 'edited_by_user_id');
     }
 
-    /** The text is a person's hand-edit, which a new generation does not replace without consent. */
+    /**
+     * The text is a person's hand-edit, which a new generation does not replace without consent. Who
+     * and when may be unknown for an edit from before they were recorded.
+     */
     public function isEdited(): bool
     {
-        return $this->edited_at !== null;
+        return (bool) $this->is_hand_edited;
     }
 
     public function isStale(): bool

@@ -1869,6 +1869,7 @@ class AiController extends Controller
                 'has_source_based_support' => null,
                 'engine_version' => null,
                 'generated_at' => null,
+                'is_edited' => false,
                 'edited_at' => null,
                 'edited_by' => null,
                 'is_stale' => null,
@@ -2007,8 +2008,10 @@ class AiController extends Controller
             'generated_at' => optional($wikiAnswer->generated_at)?->toIso8601String(),
             // A person's hand-edit (A43): who and when, and the page asks before a generation
             // replaces it.
+            'is_edited' => $wikiAnswer->isEdited(),
+            // Null when the edit is older than the record of it: shown as «Redigert manuelt».
             'edited_at' => optional($wikiAnswer->edited_at)?->toIso8601String(),
-            'edited_by' => $wikiAnswer->edited_at !== null ? $wikiAnswer->editedBy?->name : null,
+            'edited_by' => $wikiAnswer->isEdited() ? $wikiAnswer->editedBy?->name : null,
             'is_stale' => $wikiAnswer->isStale(),
             'stale_at' => optional($wikiAnswer->stale_at)?->toIso8601String(),
             'stale_reason' => $wikiAnswer->stale_reason,

@@ -1969,7 +1969,7 @@ export default function AiShow({
         setWikiAnswerError(null);
 
         // The answer is a person's text: ask in the panel before a new draft replaces it.
-        if (requirement.wiki_answer?.edited_at && !replaceEdited) {
+        if (requirement.wiki_answer?.is_edited && !replaceEdited) {
             setConfirmReplaceEditedRequirementId(requirement.id);
             return;
         }
@@ -3863,7 +3863,7 @@ export default function AiShow({
                                                                 }).format(new Date(activeRequirementWikiAnswer.generated_at))}
                                                             </div>
                                                         ) : null}
-                                                        {activeRequirementWikiAnswer.edited_at ? (
+                                                        {activeRequirementWikiAnswer.is_edited ? (
                                                             <div data-testid="wiki-answer-edited-by" className="mt-1 text-base text-slate-600">
                                                                 {activeRequirementWikiAnswer.edited_by
                                                                     ? formatLocalizedTemplate(tai.wiki_answer_edited_by ?? 'Redigert av :name', { name: activeRequirementWikiAnswer.edited_by })

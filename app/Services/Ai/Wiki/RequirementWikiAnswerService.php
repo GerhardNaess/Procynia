@@ -124,9 +124,10 @@ class RequirementWikiAnswerService
 
         // A hand-edited answer is replaced only when the person asks for it (A43) — said before any
         // AI call, so refusing costs nothing. What was seen here is checked again under lock.
-        $editedAtSeen = $requirement->wikiAnswer()->value('edited_at');
+        $seen = $requirement->wikiAnswer()->first(['is_hand_edited', 'edited_at']);
+        $editedAtSeen = $seen?->getRawOriginal('edited_at');
 
-        if ($editedAtSeen !== null && ! $replaceEdited) {
+        if ($seen !== null && $seen->isEdited() && ! $replaceEdited) {
             throw new RequirementWikiAnswerEditedException((int) $requirement->id);
         }
 
@@ -231,6 +232,7 @@ class RequirementWikiAnswerService
             // Who edited it, and that it is now a person's text a generation does not replace unasked (A43).
             $wikiAnswer->forceFill([
                 'answer_text' => $normalizedText,
+                'is_hand_edited' => true,
                 'edited_by_user_id' => $actor->id,
                 'edited_at' => now(),
             ])->save();
@@ -865,6 +867,7 @@ class RequirementWikiAnswerService
                     'generated_by_user_id' => $userId,
                     'generated_at' => now(),
                     // A new AI text replaces the hand-edit, so it is no longer one.
+                    'is_hand_edited' => false,
                     'edited_by_user_id' => null,
                     'edited_at' => null,
                 ]),

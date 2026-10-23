@@ -93,6 +93,7 @@ class TenderAnswerTraceTest extends TestCase
             ->assertJsonPath('wiki_answer.edited_by', $world['contributor']->name);
 
         $answer = SavedNoticeAiRequirementWikiAnswer::query()->where('saved_notice_ai_requirement_id', $requirement->id)->sole();
+        $this->assertTrue($answer->is_hand_edited);
         $this->assertSame($world['contributor']->id, (int) $answer->edited_by_user_id);
         $this->assertNotNull($answer->edited_at);
     }
@@ -124,11 +125,38 @@ class TenderAnswerTraceTest extends TestCase
             ->postJson($this->url('app.ai.requirements.wiki-answer.generate', $world, $requirement), ['replace_edited' => true])
             ->assertOk()
             ->assertJsonPath('wiki_answer.text', 'Nytt AI-utkast.')
+            ->assertJsonPath('wiki_answer.is_edited', false)
             ->assertJsonPath('wiki_answer.edited_at', null);
 
         $answer = SavedNoticeAiRequirementWikiAnswer::query()->where('saved_notice_ai_requirement_id', $requirement->id)->sole();
         $this->assertNull($answer->edited_by_user_id);
         $this->assertSame($world['owner']->id, (int) $answer->generated_by_user_id);
+    }
+
+    /** Edited before editors were recorded (who and when unknown): protected all the same. */
+    public function test_an_edit_from_before_the_record_is_protected_and_shown_without_a_name(): void
+    {
+        $world = $this->world();
+        $requirement = $this->requirement($world['notice'], 'approved');
+        $this->answer($requirement, 'Gammel manuell tekst.');
+        SavedNoticeAiRequirementWikiAnswer::query()->where('saved_notice_ai_requirement_id', $requirement->id)->update(['is_hand_edited' => true]);
+        $this->expectNoAnswerAi();
+
+        $this->actingAs($world['owner'])
+            ->postJson($this->url('app.ai.requirements.wiki-answer.generate', $world, $requirement))
+            ->assertStatus(409);
+        $this->assertSame('Gammel manuell tekst.', $this->answerText($requirement));
+
+        $this->actingAs($world['owner'])
+            ->get(route('app.ai.show', ['savedNotice' => $world['notice']->id]))
+            ->assertViewHas('page', function (array $page) use ($requirement): bool {
+                $answer = collect(data_get($page, 'props.requirements'))->firstWhere('id', $requirement->id)['wiki_answer'];
+                $this->assertTrue($answer['is_edited']);
+                $this->assertNull($answer['edited_at']);
+                $this->assertNull($answer['edited_by']);
+
+                return true;
+            });
     }
 
     /** An answer nobody edited is regenerated as before, without a question. */
@@ -161,7 +189,7 @@ class TenderAnswerTraceTest extends TestCase
             ->andReturnUsing(function () use ($requirement, $world): array {
                 // A colleague saves a hand-edit while the model is still writing.
                 SavedNoticeAiRequirementWikiAnswer::query()->where('saved_notice_ai_requirement_id', $requirement->id)
-                    ->update(['answer_text' => 'Redigert underveis.', 'edited_by_user_id' => $world['contributor']->id, 'edited_at' => now()]);
+                    ->update(['answer_text' => 'Redigert underveis.', 'is_hand_edited' => true, 'edited_by_user_id' => $world['contributor']->id, 'edited_at' => now()]);
 
                 return ['answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Nytt AI-utkast.', 'used_page_ids' => []]]];
             }));
@@ -293,6 +321,7 @@ class TenderAnswerTraceTest extends TestCase
             'answer_text' => $text,
             'sources' => [],
             'generated_at' => now()->subHour(),
+            'is_hand_edited' => $edited !== null,
             'edited_by_user_id' => $edited?->id,
             'edited_at' => $edited !== null ? now()->subMinutes(5) : null,
         ]);
