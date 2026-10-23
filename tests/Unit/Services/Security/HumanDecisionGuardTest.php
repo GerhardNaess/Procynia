@@ -90,9 +90,10 @@ class HumanDecisionGuardTest extends TestCase
             $this->assertTrue(CustomerPermissionCatalog::exists($permission), $decision->value);
 
             // Adopting an AI-proposed flow rides on quality.edit, which drafting also needs, and
-            // Relevans on compliance.edit, which the register work around it needs (A35). The
-            // decision is still human-only; the key cannot be.
-            if (! in_array($decision, [HumanDecision::QUALITY_FLOW_ADOPT, HumanDecision::COMPLIANCE_APPLICABILITY], true)) {
+            // Relevans on compliance.edit, which the register work around it needs (A35), and a
+            // supplier's criticality and lifecycle on supplier.edit, which registering it needs (A36).
+            // The decision is still human-only; the key cannot be.
+            if (! in_array($decision, [HumanDecision::QUALITY_FLOW_ADOPT, HumanDecision::COMPLIANCE_APPLICABILITY, HumanDecision::SUPPLIER_CRITICALITY, HumanDecision::SUPPLIER_LIFECYCLE], true)) {
                 $this->assertTrue(CustomerPermissionCatalog::isHumanOnly($permission), $decision->value);
             }
         }

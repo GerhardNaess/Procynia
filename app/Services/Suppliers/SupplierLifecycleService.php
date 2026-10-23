@@ -38,8 +38,10 @@ use Illuminate\Validation\ValidationException;
  * integration and the API channel first, then supplier.delete is required in the supplier's own
  * customer, with the module (SupplierAccessService::authorize()).
  *
- * The transitions are register work: supplier.edit in the supplier's own customer, with the module
- * (SupplierAccessService::authorize()). The controller checks the same before it calls.
+ * The transitions are a person's decision too (HumanDecision::SUPPLIER_LIFECYCLE, A36): whether the
+ * business relies on the supplier. The guard first, delegated mode included; then supplier.edit — the
+ * key is unchanged — in the supplier's own customer, with the module. The controller checks the key
+ * before it calls.
  */
 class SupplierLifecycleService
 {
@@ -118,6 +120,7 @@ class SupplierLifecycleService
     /** @param  list<string>  $from */
     private function transition(Supplier $supplier, User $actor, array $from, string $to, ?string $reason): Supplier
     {
+        $actor = $this->guard->assert($actor, HumanDecision::SUPPLIER_LIFECYCLE);
         $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_EDIT, (int) $supplier->customer_id);
 
         return DB::transaction(function () use ($supplier, $actor, $from, $to, $reason): Supplier {

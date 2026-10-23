@@ -16,7 +16,10 @@ namespace App\Support;
  * not — adopting an AI-proposed process flow needs only quality.edit, but accepting a machine's
  * proposal is exactly the step a machine must not take for itself; deciding that a requirement or
  * an Annex A control does not apply (Relevans, Kontrollvalg) needs only compliance.edit, as the
- * register work around it does, but it is the organisation's own statement of applicability.
+ * register work around it does, but it is the organisation's own statement of applicability. How
+ * important a supplier is (Kritikalitet) and whether it is in use (Ta i bruk, Avslutt, Gjenåpne) need
+ * only supplier.edit, as registering it does, but they decide which control requirements apply and
+ * whether the business relies on the supplier (A36).
  *
  * See docs/external-api-phase-0-plan.md §4.3–§4.4.
  */
@@ -64,6 +67,10 @@ enum HumanDecision: string
     case COMPLIANCE_DELETE = 'compliance.delete';
 
     case SUPPLIER_ASSESS = 'supplier.assess';
+    /** Vurder / Endre kritikalitet, and a classification given at registration (A36). */
+    case SUPPLIER_CRITICALITY = 'supplier.criticality';
+    /** Ta i bruk, Avslutt and Gjenåpne, and registering a supplier as already in use (A36). */
+    case SUPPLIER_LIFECYCLE = 'supplier.lifecycle';
     case SUPPLIER_ASSURE = 'supplier.assure';
     case SUPPLIER_DELETE = 'supplier.delete';
 
@@ -107,6 +114,8 @@ enum HumanDecision: string
             self::COMPLIANCE_AUDIT => CustomerPermissionCatalog::COMPLIANCE_AUDIT,
             self::COMPLIANCE_DELETE => CustomerPermissionCatalog::COMPLIANCE_DELETE,
             self::SUPPLIER_ASSESS => CustomerPermissionCatalog::SUPPLIER_ASSESS,
+            self::SUPPLIER_CRITICALITY,
+            self::SUPPLIER_LIFECYCLE => CustomerPermissionCatalog::SUPPLIER_EDIT,
             self::SUPPLIER_ASSURE => CustomerPermissionCatalog::SUPPLIER_ASSURE,
             self::SUPPLIER_DELETE => CustomerPermissionCatalog::SUPPLIER_DELETE,
             self::MANAGEMENT_REVIEW_FINALIZE => CustomerPermissionCatalog::MANAGEMENT_REVIEW_FINALIZE,

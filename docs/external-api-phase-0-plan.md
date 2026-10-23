@@ -26,6 +26,7 @@
   - steg 13, Etterlevelse og revisjon (`3b66c55d`, `5228b3e3`, `7ccb97f3`), se §2i
   - A34 (`db5699e1`) og A35 (`4ecae0ce`), se §2i
   - steg 14, Leverandøroppfølging (`9e757eca`, `1ffb9586`, `87c3131e`, E2E-retting `5e887aaf`), se §2j
+  - A36, kritikalitet og livsløp (commit «criticality and lifecycle are a person's decision»), se §2j
 - Wiki-delen av fase 0 og Risiko (steg 9) er gjennomført og godkjent 2026-10-22.
 - Avvik og forbedringer (steg 10) er gjennomført og godkjent 2026-10-22.
 - Ledelsens gjennomgang (steg 11) er gjennomført og godkjent 2026-10-22.
@@ -35,7 +36,8 @@
 - A31 (behold, kontrollert) og A32 (versjonskontroll påkrevd) er gjennomført 2026-10-22, se §2i.
 - Etterlevelse og revisjon (steg 13) er gjennomført og godkjent 2026-10-22.
 - A34 og A35 er gjennomført og godkjent 2026-10-23 (§2i). Etterlevelse og revisjon er ferdig i fase 0.
-- Leverandøroppfølging (steg 14) er gjennomført 2026-10-23 og venter på vurdering (§2j). Mål og KPI startes ikke før det.
+- Leverandøroppfølging (steg 14) er gjennomført og godkjent 2026-10-23 (§2j).
+- A36 er gjennomført 2026-10-23, og A37 og A38 er besluttet (§2j). Det venter på vurdering. Mål og KPI startes ikke før det.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -1315,7 +1317,7 @@ En leverandør med historikk kan ikke slettes, heller ikke i SQL (sammensatt fre
    En annen kundes person og System Owner nektes, også med en rolle som har alle nøkler. En kunde uten modulen nektes. Låsene leser leverandøren i aktørens kunde.
 3. **System Owner uten rolle har ingen beslutninger.** Uendret, og nå testet i tjenesten.
 4. **Det som er besluttet, beholder historikken.** Uendret og testet: en leverandør med en vurdering slettes ikke (tjeneste og SQL), og vurderingen kan ikke endres eller slettes.
-5. **Ordinært registerarbeid** (`supplier.edit`) er ikke menneskeforbeholdt. En integrasjon som har nøkkelen, kan gjøre det (testet). Se A36 og A37.
+5. **Ordinært registerarbeid** (`supplier.edit`) er ikke menneskeforbeholdt. En integrasjon som har nøkkelen, kan gjøre det (testet). Kritikalitet og livsløp er unntatt etter A36. Se A36 og A37.
 6. **Overleveringer** til Avvik, Risiko og Wiki er ikke beslutninger og går ikke gjennom vakten. Den andre modulen sjekker sin halvdel, og resultatet behandles videre der av personer. Fra en kontroll eller aktsomhetsvurdering kreves `supplier.assure`, som en integrasjon aldri har.
 7. **Brukerne merker ingen endring.** Kontrollerne sjekker fortsatt først, så statuskoder og meldinger er uendret. Ingen nye statuser, skjermbilder, felt eller dialoger.
 
@@ -1352,7 +1354,7 @@ En leverandør med historikk kan ikke slettes, heller ikke i SQL (sammensatt fre
 
 **Endringer i brukeropplevelsen:** ingen. Skjemaer, knapper, meldinger, statuskoder og hvem som kan gjøre hva er som før. Den eneste forskjellen i oppførsel gjelder samtidige handlinger: lagres stamdata i samme øyeblikk som leverandøren avsluttes, avvises lagringen med den eksisterende meldingen «Leverandøren er avsluttet. Gjenåpne den før du endrer den.». Før ble den lagret på en avsluttet leverandør.
 
-#### Nye funn som krever beslutning
+#### Funn som krevde beslutning (A36 er gjennomført, A37 og A38 er besluttet, se under)
 
 | # | Funn | Anbefaling |
 |---|---|---|
@@ -1362,17 +1364,66 @@ En leverandør med historikk kan ikke slettes, heller ikke i SQL (sammensatt fre
 
 **Lav, ikke rettet:** Endringer i stamdata (blant annet intern ansvarlig) har ingen egen historikk. Bare siste verdi og `updated_by` lagres. Det er ordinært registerarbeid.
 
+#### A36–A38 – beslutninger og gjennomføring (2026-10-23)
+
+**Beslutning (2026-10-23):**
+- **A36 – gjennomføres.** Kritikalitet og livsløpshandlingene «Ta i bruk», «Avslutt» og «Gjenåpne» krever en autorisert person. Rettighetskravet er uendret.
+- **A37 – beholdes foreløpig.** Leverandørprofilen er fortsatt vanlig registerarbeid med `supplier.edit`.
+- **A38 – dagens løsning beholdes.** Ingen ny historikk og ingen migrering.
+
+**A36 – gjennomført** (commit `fix(suppliers): criticality and lifecycle are a person's decision (A36)`):
+- To nye beslutninger: `HumanDecision::SUPPLIER_CRITICALITY` og `SUPPLIER_LIFECYCLE`. Begge bygger på `supplier.edit`, på samme måte som `COMPLIANCE_APPLICABILITY` (A35). `HumanDecisionGuardTest` tillater disse to.
+- `SupplierCriticalityService::change()` og alle tre overgangene i `SupplierLifecycleService` kaller vakten først, deretter `supplier.edit` i leverandørens kunde, med modulen.
+- **Den indirekte veien er lukket.** «Registrer leverandør» og Excel-importen kan opprette en leverandør som allerede er «Aktiv», og med kritikalitet. Det er de samme beslutningene. `SupplierRegistration::register()` kaller derfor vakten for `SUPPLIER_LIFECYCLE` når startstatus er «Aktiv», og for `SUPPLIER_CRITICALITY` når kritikalitet er oppgitt.
+- En leverandør registrert «Under vurdering» og «Ikke vurdert» er fortsatt registerarbeid. En integrasjon med `supplier.edit` kan gjøre det.
+- Registreringsskjemaet sender alltid begge deler. For personer er alt som før.
+- **Kontrollert at A36 ikke kan omgås:**
+  - `status`, `criticality` og kritikalitetsfeltene kan ikke masseoppdateres (`Supplier::$fillable`). En stamdataendring som sender dem, endrer dem ikke (testet).
+  - Profilen skriver aldri status eller kritikalitet (testet).
+  - Importen ignorerer startstatus, kritikalitet og profil for eksisterende leverandører. Nye leverandører går gjennom `register()`.
+
+**A37 – beholdes foreløpig:**
+- Profilen er fakta om leverandøren og styrer hvilke kontrollkrav som gjelder automatisk. Hver lagring står i uforanderlig historikk med aktør.
+- Profilen kan ikke endre status eller kritikalitet. A36 kan derfor ikke omgås gjennom den (testet).
+- **Før et fremtidig skrive-API får skrive profilen,** må det vurderes hvordan profilendringer som påvirker kontrollkrav skal behandles. Mulighetene er forslag som en person tar i bruk, eller en egen beslutning. Ingen ny godkjenningsmekanisme nå.
+
+**A38 – dagens løsning beholdes:**
+- Dokumentasjon som ikke inngår i beskyttet kontroll- eller beslutningshistorikk, kan fortsatt slettes av den som har `supplier.edit` eller `supplier.assure`.
+- Dokumentasjon som en kontroll bygger på, og raden som fornyer den, er fortsatt beskyttet. Tjenesten leser regelen under lås, og databasen nekter med `NO ACTION`.
+- Ingen ny historikk og ingen migrering.
+
+**Endringer i brukeropplevelsen:** ingen. Skjermbilder, roller, statuser, arbeidsflyt og meldinger er uendret. Den som har `supplier.edit`, tar beslutningene som før.
+
+**Migreringer:** ingen.
+
+**Tester:**
+- `SupplierCriticalityLifecycleDecisionTest` (8):
+  - en person med `supplier.edit` tar alle beslutningene, og historikken bærer navnet deres;
+  - seks beslutninger nektes, og ingenting skrives: endre kritikalitet, ta i bruk, avslutt, gjenåpne, registrere som «Aktiv» og registrere med kritikalitet. Nektet er integrasjon med `supplier.edit`, API-kanal (delegert), inaktiv person, personer uten `supplier.edit` (leser, `assess`, `assure`, `delete`), nøkkelen uten `supplier.view`, System Owner uten rolle, en annen kundes redigerer og System Owner, og en kunde uten modul;
+  - registerarbeid endrer aldri status eller kritikalitet, verken stamdata (også når feltene sendes med) eller profil.
+- `SupplierServiceAuthorizationTest`: testen der en integrasjon gjør registerarbeid, gjelder nå registrering «Under vurdering», stamdata, profil og dokumentasjon. Før omfattet den også livsløp og kritikalitet.
+- To testdobler i `SupplierImportTest` sender vakten til `SupplierRegistration`.
+- **Mutasjonssjekket, 9 mutanter, alle fanges:**
+  - vakten og regelen i kritikalitet og i livsløpet;
+  - vakten ved registrering som «Aktiv» og med kritikalitet, og betingelsene for dem (feil status, betingelsen slått av);
+  - `status` og `criticality` gjort masseoppdaterbare.
+
+**Kjøringer (2026-10-23):**
+- **PHP:** samme filer som for steg 14, pluss den nye testfilen: 427 av 427 bestått, ingen hoppet over.
+- **JS:** 2130 av 2130 bestått. Ingen frontendendring. Pint er rent på berørte filer.
+- **E2E i det isolerte miljøet:** de samme 10 filene som for steg 14 (36 tester), i én kjøring. **36 bestått, 0 feilet, 0 hoppet over.** Telt fra Playwrights JSON-rapport, med `caffeinate`. `supplier-management` dekker livsløp og kritikalitet, og `supplier-import` dekker registrering med status og kritikalitet.
+
 **Klar for senere API-integrasjon**
 
 - Ja. Lesing, beslutninger og registerarbeid ligger i domenet med samme regler for enhver inngang.
 - Gjenstår før fase 1:
   - A10 (feilformat);
   - steg 19 (aktørtriggere for `supplier_assessments.assessed_by_user_id`, `supplier_requirement_evaluations.evaluated_by_user_id`, `supplier_requirement_overrides.created_by_user_id` og `supplier_due_diligence_assessments.assessed_by_user_id`);
-  - A36–A38 (beslutning).
+  - A37: hvordan profilendringer som påvirker kontrollkrav skal behandles, før et skrive-API får skrive profilen.
 - **Føring (anbefalt, som for de andre modulene):**
   - En AI-agent får ikke `supplier.edit` som standard.
   - Forslag til leverandører, profilsvar og dokumentasjon kan senere komme gjennom avgrensede API-operasjoner. De blir registrert først når en person tar dem i bruk.
-  - Vurdering, kontroll, aktsomhet, kontrollkrav og sletting forblir menneskeforbeholdt.
+  - Vurdering, kontroll, aktsomhet, kontrollkrav, kritikalitet, livsløp og sletting forblir menneskeforbeholdt.
 
 ## 3. Avgrensning
 

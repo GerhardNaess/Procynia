@@ -4,7 +4,9 @@ namespace App\Services\Suppliers;
 
 use App\Models\Supplier;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use DomainException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\Rule;
@@ -21,13 +23,19 @@ use Illuminate\Validation\ValidationException;
  * through SupplierLifecycleService and criticality only through SupplierCriticalityService.
  *
  * Both writes check supplier.edit in the actor's own customer, with the module
- * (SupplierAccessService::authorize()), whatever the entry point. Notifications are the caller's:
+ * (SupplierAccessService::authorize()), whatever the entry point. Registering a supplier as already in
+ * use (Aktiv), or with a criticality, takes the decisions Ta i bruk and Kritikalitet would otherwise
+ * take (A36), so it passes HumanDecisionGuard for each; a supplier registered Under vurdering and
+ * Ikke vurdert is register work only. The form always sends both, so nothing changes for a person. Notifications are the caller's:
  * «Registrer leverandør» tells the new intern ansvarlig, the import does not
  * (docs/supplier-management-v1-plan.md, «Excel-import av leverandører»).
  */
 class SupplierRegistration
 {
-    public function __construct(private readonly SupplierAccessService $access) {}
+    public function __construct(
+        private readonly SupplierAccessService $access,
+        private readonly HumanDecisionGuard $guard,
+    ) {}
 
     /**
      * The master data of a supplier, for registering and editing. The owner arrives as an id here;
@@ -78,6 +86,14 @@ class SupplierRegistration
      */
     public function register(User $actor, array $fields, string $initialStatus, ?array $classification): Supplier
     {
+        if ($initialStatus === Supplier::STATUS_ACTIVE) {
+            $actor = $this->guard->assert($actor, HumanDecision::SUPPLIER_LIFECYCLE);
+        }
+
+        if ($classification !== null) {
+            $actor = $this->guard->assert($actor, HumanDecision::SUPPLIER_CRITICALITY);
+        }
+
         $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_EDIT, (int) $actor->customer_id);
 
         if (! in_array($initialStatus, Supplier::INITIAL_STATUSES, true)) {

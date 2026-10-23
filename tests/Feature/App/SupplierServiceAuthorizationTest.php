@@ -60,7 +60,11 @@ class SupplierServiceAuthorizationTest extends TestCase
         parent::tearDown();
     }
 
-    /** supplier.edit is register work, not a decision: a person and an integration with the key both may. */
+    /**
+     * supplier.edit is register work, not a decision: a person and an integration with the key both
+     * may register a supplier Under vurdering and Ikke vurdert, correct its master data and keep its
+     * documentation. Criticality and the lifecycle are a person's (A36, SupplierCriticalityLifecycleDecisionTest).
+     */
     public function test_an_editor_and_an_integration_with_supplier_edit_keep_the_register(): void
     {
         foreach (['person' => false, 'integration' => true] as $who => $integration) {
@@ -76,13 +80,11 @@ class SupplierServiceAuthorizationTest extends TestCase
             $this->assertSame((int) $world['customer']->id, (int) $registered->customer_id, $who);
 
             DB::transaction(fn () => app(SupplierRegistration::class)->update($editor, $registered, $this->fields($editor, 'Nytt navn AS')));
-            app(SupplierLifecycleService::class)->activate($registered->fresh(), $editor);
-            app(SupplierCriticalityService::class)->change($registered->fresh(), $editor, SupplierCriticalityService::classification($this->classification()), 'Første vurdering.');
+            app(SupplierProfileService::class)->save($registered->fresh(), $editor, SupplierProfileService::answers(['uses_subcontractors' => 'yes']), null);
             $document = app(SupplierDocumentService::class)->create($registered->fresh(), $editor, ['document_type' => 'certificate', 'title' => 'Avtale']);
             app(SupplierDocumentService::class)->delete($document, $editor);
-            app(SupplierLifecycleService::class)->end($registered->fresh(), $editor, 'Avtalen er sagt opp.');
 
-            $this->assertSame(['Nytt navn AS', Supplier::STATUS_ENDED, 'standard'], [$registered->fresh()->name, $registered->fresh()->status, $registered->fresh()->criticality], $who);
+            $this->assertSame(['Nytt navn AS', Supplier::STATUS_ONBOARDING, null], [$registered->fresh()->name, $registered->fresh()->status, $registered->fresh()->criticality], $who);
             $this->assertSame(0, SupplierDocument::query()->where('supplier_id', $registered->id)->count(), $who);
         }
     }

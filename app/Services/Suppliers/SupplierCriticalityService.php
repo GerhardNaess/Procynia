@@ -5,7 +5,9 @@ namespace App\Services\Suppliers;
 use App\Models\Supplier;
 use App\Models\SupplierCriticalityChange;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use App\Support\Suppliers\SupplierValidationMessages;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -24,12 +26,18 @@ use Illuminate\Validation\ValidationException;
  * inside the lock: an ended supplier is refused, and so is a change that changes nothing — a double
  * submit writes one row.
  *
- * supplier.edit is required in the supplier's own customer, with the module
- * (SupplierAccessService::authorize()); the controller checks the same before it calls.
+ * A person's decision (HumanDecision::SUPPLIER_CRITICALITY, A36): the criticality decides which
+ * control requirements apply and when the supplier is reviewed again. The guard refuses an
+ * integration and the API channel first, delegated mode included; then supplier.edit — the key is
+ * unchanged — is required in the supplier's own customer, with the module
+ * (SupplierAccessService::authorize()). The controller checks the key before it calls.
  */
 class SupplierCriticalityService
 {
-    public function __construct(private readonly SupplierAccessService $access) {}
+    public function __construct(
+        private readonly SupplierAccessService $access,
+        private readonly HumanDecisionGuard $guard,
+    ) {}
 
     /**
      * The classification fields, for registering a supplier and for changing its criticality.
@@ -98,6 +106,7 @@ class SupplierCriticalityService
      */
     public function change(Supplier $supplier, User $actor, array $classification, ?string $reason): SupplierCriticalityChange
     {
+        $actor = $this->guard->assert($actor, HumanDecision::SUPPLIER_CRITICALITY);
         $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_EDIT, (int) $supplier->customer_id);
 
         $reason = trim((string) $reason);
