@@ -31,7 +31,7 @@ use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Services\OpportunitySources\OpportunitySourceSearchResult;
 use App\Services\OpportunitySources\OpportunityStatus;
 use App\Services\SavedNoticeAccessService;
-use App\Services\SavedNoticeNoGoDecisionService;
+use App\Services\SavedNoticeStatusService;
 use App\Support\CustomerContext;
 use App\Support\LocalizedNumber;
 use Carbon\CarbonInterface;
@@ -56,7 +56,6 @@ class NoticeController extends Controller
         private readonly OpportunitySourceRegistry $sources,
         private readonly DoffinNoticeDocumentService $documentService,
         private readonly SavedNoticeAccessService $savedNoticeAccess,
-        private readonly SavedNoticeNoGoDecisionService $savedNoticeNoGoDecisionService,
         private readonly GoNoGoDefaultTemplateService $goNoGoDefaultTemplateService,
         private readonly OpportunityRegistrar $opportunities,
         private readonly LiveSearchOpportunityLinker $opportunityLinks,
@@ -1239,7 +1238,7 @@ class NoticeController extends Controller
             ->with('success', 'Ny innsending ble registrert.');
     }
 
-    public function updateSavedNoticeStatus(Request $request, SavedNotice $savedNotice): RedirectResponse
+    public function updateSavedNoticeStatus(Request $request, SavedNotice $savedNotice, SavedNoticeStatusService $statusService): RedirectResponse
     {
         /** @var User $user */
         $user = $request->user();
@@ -1270,20 +1269,15 @@ class NoticeController extends Controller
             ->firstOrFail();
 
         try {
-            if ((string) $validated['status'] === SavedNotice::BID_STATUS_NO_GO) {
-                $this->savedNoticeNoGoDecisionService->closeAsNoGo(
-                    $record,
-                    $user,
-                    (string) ($validated['bid_closure_reason'] ?? ''),
-                    $validated['bid_closure_note'] ?? null,
-                );
-            } else {
-                $record->transitionBidStatus(
-                    (string) $validated['status'],
-                    $validated['bid_closure_reason'] ?? null,
-                    $validated['bid_closure_note'] ?? null,
-                )->save();
-            }
+            // The service applies the same rule again under lock, names the person, and writes the
+            // No-Go record when that is the decision.
+            $statusService->transition(
+                $user,
+                $record,
+                (string) $validated['status'],
+                $validated['bid_closure_reason'] ?? null,
+                $validated['bid_closure_note'] ?? null,
+            );
         } catch (\InvalidArgumentException $exception) {
             throw ValidationException::withMessages([
                 'status' => 'Statusendringen er ikke tillatt for denne saken.',
@@ -1295,7 +1289,7 @@ class NoticeController extends Controller
             ->with('success', 'Saksstatus ble oppdatert.');
     }
 
-    public function reopenSavedNoticeAfterNoGo(Request $request, SavedNotice $savedNotice): RedirectResponse
+    public function reopenSavedNoticeAfterNoGo(Request $request, SavedNotice $savedNotice, SavedNoticeStatusService $statusService): RedirectResponse
     {
         /** @var User $user */
         $user = $request->user();
@@ -1317,9 +1311,9 @@ class NoticeController extends Controller
         ]);
 
         try {
-            $record = $this->savedNoticeNoGoDecisionService->reopenAfterNoGo(
-                $record,
+            $record = $statusService->reopenAfterNoGo(
                 $user,
+                $record,
                 (string) $validated['reopen_reason'],
                 (bool) $validated['confirm_reopen'],
             );

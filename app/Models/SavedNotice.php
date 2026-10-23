@@ -433,6 +433,14 @@ class SavedNotice extends Model
             ->orderByDesc('id');
     }
 
+    /** Who changed the bid status, and when — written by SavedNoticeStatusService only. */
+    public function statusChanges(): HasMany
+    {
+        return $this->hasMany(SavedNoticeStatusChange::class)
+            ->orderBy('changed_at')
+            ->orderBy('id');
+    }
+
     public function aiDocuments(): HasMany
     {
         return $this->hasMany(SavedNoticeAiDocument::class)

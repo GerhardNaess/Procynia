@@ -14,7 +14,6 @@ use App\Services\OpportunitySources\LiveSearchOpportunityLinker;
 use App\Services\OpportunitySources\OpportunityRegistrar;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Services\SavedNoticeAccessService;
-use App\Services\SavedNoticeNoGoDecisionService;
 use App\Support\CustomerContext;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
@@ -448,7 +447,6 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             $documentService,
             new SavedNoticeAccessService,
-            new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
             app(OpportunityRegistrar::class),
             app(LiveSearchOpportunityLinker::class),
@@ -538,7 +536,6 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             $documentService,
             new SavedNoticeAccessService,
-            new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
             app(OpportunityRegistrar::class),
             app(LiveSearchOpportunityLinker::class),
@@ -608,7 +605,6 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             $documentService,
             new SavedNoticeAccessService,
-            new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
             app(OpportunityRegistrar::class),
             app(LiveSearchOpportunityLinker::class),
@@ -668,7 +664,6 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             $documentService,
             new SavedNoticeAccessService,
-            new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
             app(OpportunityRegistrar::class),
             app(LiveSearchOpportunityLinker::class),
@@ -760,7 +755,6 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             $documentService,
             new SavedNoticeAccessService,
-            new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
             app(OpportunityRegistrar::class),
             app(LiveSearchOpportunityLinker::class),
@@ -817,7 +811,6 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new OpportunitySourceRegistry([new DoffinSourceAdapter(Mockery::mock(DoffinLiveSearchService::class))]),
             Mockery::mock(DoffinNoticeDocumentService::class),
             new SavedNoticeAccessService,
-            new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
             app(OpportunityRegistrar::class),
             app(LiveSearchOpportunityLinker::class),
@@ -1059,7 +1052,6 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             Mockery::mock(DoffinNoticeDocumentService::class),
             new SavedNoticeAccessService,
-            new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
             app(OpportunityRegistrar::class),
             app(LiveSearchOpportunityLinker::class),
