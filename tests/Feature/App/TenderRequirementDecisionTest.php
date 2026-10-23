@@ -206,6 +206,34 @@ class TenderRequirementDecisionTest extends TestCase
         $this->assertRefused($world, $world['contributor'], HumanDecisionRefused::class, 'api channel');
     }
 
+    /**
+     * A decision is taken on the requirement as it stands, not on the copy the caller loaded: two
+     * people deciding at once never overwrite each other's name, and the history shows what was
+     * there before.
+     */
+    public function test_a_decision_is_taken_on_the_requirement_as_it_stands_now(): void
+    {
+        $world = $this->world();
+        $service = app(RequirementEditorService::class);
+        $staleCopy = SavedNoticeAiRequirement::query()->findOrFail($world['requirement']->id);
+
+        $service->approveRequirement($world['requirement'], $world['owner']);
+        $service->approveRequirement($staleCopy, $world['contributor']);
+
+        $this->assertSame($world['owner']->id, (int) $world['requirement']->fresh()->approved_by_user_id);
+        $this->assertSame(1, SavedNoticeAiRequirementRevision::query()
+            ->where('saved_notice_ai_requirement_id', $world['requirement']->id)
+            ->where('change_type', SavedNoticeAiRequirementRevision::CHANGE_TYPE_APPROVE)
+            ->count());
+
+        $service->rejectRequirement($staleCopy, $world['contributor']);
+        $reject = SavedNoticeAiRequirementRevision::query()
+            ->where('saved_notice_ai_requirement_id', $world['requirement']->id)
+            ->where('change_type', SavedNoticeAiRequirementRevision::CHANGE_TYPE_REJECT)
+            ->sole();
+        $this->assertSame(SavedNoticeAiRequirement::APPROVAL_STATUS_APPROVED, data_get($reject->before_snapshot, 'approval_status'));
+    }
+
     /** The QA column works for this row as for every other one. */
     public function test_the_matrix_row_can_be_narrowed_and_reached_through_qa(): void
     {

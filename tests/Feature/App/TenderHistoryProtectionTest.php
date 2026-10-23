@@ -128,6 +128,18 @@ class TenderHistoryProtectionTest extends TestCase
         $this->assertSame(0, DB::table('saved_notice_status_changes')->where('customer_id', $customerId)->count());
     }
 
+    /** Deleting a whole case takes its requirements and their revisions along in one statement. */
+    public function test_deleting_a_case_takes_its_requirements_and_their_revisions_along(): void
+    {
+        $world = $this->decidedWorld();
+        $this->assertGreaterThan(0, DB::table('saved_notice_ai_requirement_revisions')->where('saved_notice_id', $world['notice']->id)->count());
+
+        DB::table('saved_notices')->where('id', $world['notice']->id)->delete();
+
+        $this->assertSame(0, DB::table('saved_notice_ai_requirement_revisions')->where('saved_notice_id', $world['notice']->id)->count());
+        $this->assertSame(0, DB::table('saved_notice_status_changes')->where('saved_notice_id', $world['notice']->id)->count());
+    }
+
     private function assertRefused(callable $statement, string $what): void
     {
         DB::beginTransaction();
