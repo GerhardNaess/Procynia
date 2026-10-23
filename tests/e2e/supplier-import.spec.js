@@ -9,15 +9,17 @@ cleanUpSupplierE2eData(suffix);
 
 const expectReadable = (page, name) => expectReadableAt(page, 'supplier-import', name);
 
-// Inside the app's base path, so the spec (on the host) and the fixture (in the container) agree.
+// In the E2E app's storage, so the spec (on the host) and the fixture (in the container) agree: the
+// container's storage/ is the host's .e2e/storage (docs/testing/e2e-environment.md).
 const FOLDER = 'storage/app/e2e-supplier-import';
 const repoRoot = new URL('../../', import.meta.url).pathname;
+const hostPath = (path) => `${repoRoot}.e2e/${path}`;
 const templatePath = `${FOLDER}/mal-${suffix}.xlsx`;
 const filledPath = `${FOLDER}/leverandorer-${suffix}.xlsx`;
 
 test.afterAll(() => {
-    rmSync(`${repoRoot}${templatePath}`, { force: true });
-    rmSync(`${repoRoot}${filledPath}`, { force: true });
+    rmSync(hostPath(templatePath), { force: true });
+    rmSync(hostPath(filledPath), { force: true });
 });
 
 /**
@@ -51,10 +53,10 @@ test('suppliers are imported from the downloaded template after the rows are che
     await expectReadable(page, '01-upload');
 
     // Last ned mal → fyll inn leverandører.
-    mkdirSync(`${repoRoot}${FOLDER}`, { recursive: true });
+    mkdirSync(hostPath(FOLDER), { recursive: true });
     const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('import-template-download').click()]);
     expect(download.suggestedFilename()).toBe('leverandorer-importmal.xlsx');
-    await download.saveAs(`${repoRoot}${templatePath}`);
+    await download.saveAs(hostPath(templatePath));
 
     const rows = [
         {
@@ -73,7 +75,7 @@ test('suppliers are imported from the downloaded template after the rows are che
     expect(await supplierFixture(`fillImportTemplate('${templatePath}', '${filledPath}', '${rowsBase64}')`)).toEqual({ path: filledPath, rows: 5 });
 
     // Last opp.
-    await page.locator('#supplier-import-file').setInputFiles(`${repoRoot}${filledPath}`);
+    await page.locator('#supplier-import-file').setInputFiles(hostPath(filledPath));
     await page.getByRole('button', { name: 'Last opp og kontroller' }).click();
     await page.waitForURL(/\/app\/supplier-management\/import\/\d+$/);
     const importUrl = page.url();
