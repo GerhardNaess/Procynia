@@ -12,7 +12,8 @@ class SavedNoticeAccessService
 {
     public function canManageContributorAccess(User $actor, SavedNotice $notice): bool
     {
-        if (! $actor->canAccessCustomerFrontend() || $actor->customer_id === null) {
+        // The case's own customer: a System Owner administers access in their customer only.
+        if (! $actor->canAccessCustomerFrontend() || $actor->customer_id === null || (int) $actor->customer_id !== (int) $notice->customer_id) {
             return false;
         }
 

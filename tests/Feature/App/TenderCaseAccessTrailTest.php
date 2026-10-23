@@ -9,6 +9,7 @@ use App\Models\Nationality;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
+use App\Services\SavedNoticeAccessService;
 use App\Services\SavedNoticeStatusService;
 use App\Services\Security\CustomerAccessChangeRecorder as Recorder;
 use Illuminate\Support\Facades\DB;
@@ -181,6 +182,11 @@ class TenderCaseAccessTrailTest extends TestCase
 
         $this->assertNull($world['notice']->fresh()->bid_manager_user_id);
         $this->assertSame(0, $this->trailSize($world));
+
+        // And the rule itself, without the controller's lookup: a System Owner administers case
+        // access in their own customer only (§2m).
+        $this->assertTrue(app(SavedNoticeAccessService::class)->canManageContributorAccess($world['owner'], $world['notice']));
+        $this->assertFalse(app(SavedNoticeAccessService::class)->canManageContributorAccess($other['owner'], $world['notice']));
         $this->assertSame(0, CustomerAccessChange::query()->where('customer_id', $other['customer']->id)->where('subject_type', CustomerAccessChange::SUBJECT_SAVED_NOTICE)->count());
     }
 
