@@ -6067,6 +6067,7 @@ return [
                 'validation' => [
                     'audit_not_in_progress' => 'Findings can only be recorded, changed and deleted while the audit is in progress.',
                     'handed_off_locked' => 'The finding has been handed off to Deviations & improvements and cannot be changed or deleted.',
+                    'completed_kept' => 'The finding was part of a completed audit and cannot be deleted. You can correct it.',
                     'handoff_not_allowed' => 'Findings can only be followed up while the audit is in progress or completed.',
                     'already_handed_off' => 'The finding has already been handed off to Deviations & improvements.',
                     'requirement_not_allowed' => 'Choose a requirement from the list.',

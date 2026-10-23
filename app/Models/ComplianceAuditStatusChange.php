@@ -8,7 +8,8 @@ use LogicException;
 
 /**
  * One status change of an audit, as it was made — Start, Fullfør, Avbryt or Gjenåpne, with its
- * begrunnelse where one was given (always for Avbryt and Gjenåpne). Immutable: the database refuses
+ * begrunnelse where one was given (always for Avbryt and Gjenåpne) and, for Fullfør, the conclusion
+ * the audit was completed with (A34). Immutable: the database refuses
  * changes and deletes too (see the migration's trigger).
  *
  * Written only by ComplianceAuditLifecycleService, in the same transaction as the change to the
@@ -25,6 +26,7 @@ class ComplianceAuditStatusChange extends Model
         'from_status',
         'to_status',
         'reason',
+        'conclusion',
         'changed_by_user_id',
         'changed_at',
     ];

@@ -6071,6 +6071,7 @@ return [
                 'validation' => [
                     'audit_not_in_progress' => 'Funn kan bare registreres, endres og slettes mens revisjonen er under arbeid.',
                     'handed_off_locked' => 'Funnet er overført til Avvik og forbedringer og kan ikke endres eller slettes.',
+                    'completed_kept' => 'Funnet var med i en fullført revisjon og kan ikke slettes. Du kan rette det.',
                     'handoff_not_allowed' => 'Funn kan bare følges opp mens revisjonen er under arbeid eller fullført.',
                     'already_handed_off' => 'Funnet er allerede overført til Avvik og forbedringer.',
                     'requirement_not_allowed' => 'Velg et krav fra listen.',

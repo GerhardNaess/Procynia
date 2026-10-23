@@ -91,6 +91,9 @@ class ComplianceAuditLifecycleService
                 'from_status' => $locked->status,
                 'to_status' => $to,
                 'reason' => $reason,
+                // Fullfør keeps the conclusion it was given on its own immutable row (A34), so a
+                // reopened audit is edited as before and every conclusion it reached stays.
+                'conclusion' => $to === ComplianceAudit::STATUS_COMPLETED ? ($fields['conclusion'] ?? null) : null,
                 'changed_by_user_id' => (int) $actor->id,
                 'changed_at' => now(),
             ]);

@@ -5,8 +5,10 @@ namespace App\Services\Compliance;
 use App\Models\ComplianceAudit;
 use App\Models\ComplianceAuditCheck;
 use App\Models\ComplianceAuditFinding;
+use App\Models\ComplianceAuditFindingChange;
 use App\Models\ComplianceAuditProcess;
 use App\Models\ComplianceAuditRequirement;
+use App\Models\ComplianceAuditStatusChange;
 use App\Models\ComplianceRequirement;
 use App\Models\ComplianceSource;
 use App\Models\ImprovementCase;
@@ -29,7 +31,9 @@ use Illuminate\Validation\ValidationException;
  * LIFECYCLE. A finding is recorded, changed and deleted while the audit is in progress, and only
  * then: a planned audit has not found anything yet, a completed one is locked until it is reopened,
  * a cancelled one is read-only for good. A finding handed off to Avvik og forbedringer is frozen for
- * good, even after the audit is reopened (the database refuses it too). Each write locks the audit
+ * good, even after the audit is reopened (the database refuses it too). A finding that was there
+ * when the audit was completed is corrected after a reopening, never deleted, and each correction
+ * keeps the values before (A34). Each write locks the audit
  * row and checks its status again inside the lock, so it cannot slip past a lifecycle step running
  * at the same moment.
  *
@@ -88,9 +92,12 @@ class ComplianceAuditFindingService
         $customerId = (int) $audit->customer_id;
         $quality = $canReadQuality ? $this->qualityItems($customerId, $findings) : collect();
         $cases = $this->readableCases($user, $findings);
+        // The same rule as ComplianceAuditFinding::wasInCompletedAudit(), read once for the list.
+        $lastCompleted = ComplianceAuditStatusChange::query()->where('audit_id', $audit->id)->where('to_status', ComplianceAudit::STATUS_COMPLETED)->max('changed_at');
 
-        return $findings->map(function (ComplianceAuditFinding $finding) use ($canRecord, $canReadQuality, $canHandOff, $quality, $cases): array {
+        return $findings->map(function (ComplianceAuditFinding $finding) use ($canRecord, $canReadQuality, $canHandOff, $quality, $cases, $lastCompleted): array {
             $handedOff = $finding->isHandedOff();
+            $kept = $lastCompleted !== null && $finding->created_at->lte($lastCompleted);
             $case = $handedOff ? $cases->get((int) $finding->improvement_case_id) : null;
 
             $row = [
@@ -108,7 +115,7 @@ class ComplianceAuditFindingService
                 'case_link' => $case !== null ? ['url' => route('app.improvements.show', ['caseId' => $case->id]), 'title' => $case->title] : null,
                 'permissions' => [
                     'can_edit' => $canRecord && ! $handedOff,
-                    'can_delete' => $canRecord && ! $handedOff,
+                    'can_delete' => $canRecord && ! $handedOff && ! $kept,
                     'can_hand_off' => $canHandOff && ! $handedOff,
                 ],
             ];
@@ -202,8 +209,24 @@ class ComplianceAuditFindingService
         DB::transaction(function () use ($user, $audit, $finding, $fields): void {
             $this->lockOpenAudit($audit);
             $locked = $this->lockOpenFinding($audit, $finding);
+            $previous = $locked->only(ComplianceAuditFindingChange::TRACKED);
 
-            $locked->fill($fields + ['updated_by' => $user->id])->save();
+            $locked->fill($fields + ['updated_by' => $user->id]);
+
+            // A finding that was part of a completed audit is corrected, and the correction kept: the
+            // values before, who and when (A34). Nothing changes for the person correcting it.
+            if ($locked->isDirty(ComplianceAuditFindingChange::TRACKED) && $locked->wasInCompletedAudit()) {
+                ComplianceAuditFindingChange::query()->create([
+                    'customer_id' => (int) $locked->customer_id,
+                    'audit_id' => (int) $locked->audit_id,
+                    'finding_id' => (int) $locked->id,
+                    'previous' => $previous,
+                    'changed_by_user_id' => (int) $user->id,
+                    'changed_at' => now(),
+                ]);
+            }
+
+            $locked->save();
         });
     }
 
@@ -213,7 +236,15 @@ class ComplianceAuditFindingService
 
         DB::transaction(function () use ($audit, $finding): void {
             $this->lockOpenAudit($audit);
-            $this->lockOpenFinding($audit, $finding)->delete();
+            $locked = $this->lockOpenFinding($audit, $finding);
+
+            // What a completed audit found stays, also after it is reopened (A34). The database
+            // refuses it too.
+            if ($locked->wasInCompletedAudit()) {
+                throw ValidationException::withMessages(['finding' => __('procynia.compliance.audits.findings.validation.completed_kept')]);
+            }
+
+            $locked->delete();
         });
     }
 

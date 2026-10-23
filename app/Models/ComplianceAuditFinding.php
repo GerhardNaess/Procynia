@@ -75,6 +75,19 @@ class ComplianceAuditFinding extends Model
         });
     }
 
+    /**
+     * Whether the finding was there when its audit was completed — created at or before a Fullfør.
+     * Such a finding is corrected after a reopening, never deleted (A34); the database refuses it too.
+     */
+    public function wasInCompletedAudit(): bool
+    {
+        return ComplianceAuditStatusChange::query()
+            ->where('audit_id', $this->audit_id)
+            ->where('to_status', ComplianceAudit::STATUS_COMPLETED)
+            ->where('changed_at', '>=', $this->created_at)
+            ->exists();
+    }
+
     public function isHandedOff(): bool
     {
         return $this->improvement_case_id !== null;
