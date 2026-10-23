@@ -25,6 +25,7 @@
   - A32 (`3ff1b8a0`) og A31 (`5d9c0d03`), se §2i
   - steg 13, Etterlevelse og revisjon (`3b66c55d`, `5228b3e3`, `7ccb97f3`), se §2i
   - A34 (`db5699e1`) og A35 (`4ecae0ce`), se §2i
+  - steg 14, Leverandøroppfølging (`9e757eca`, `1ffb9586`, `87c3131e`, E2E-retting `5e887aaf`), se §2j
 - Wiki-delen av fase 0 og Risiko (steg 9) er gjennomført og godkjent 2026-10-22.
 - Avvik og forbedringer (steg 10) er gjennomført og godkjent 2026-10-22.
 - Ledelsens gjennomgang (steg 11) er gjennomført og godkjent 2026-10-22.
@@ -33,7 +34,8 @@
 - Reglene for sletting, koblinger og evidens i Kvalitet (§2h) er gjennomført og godkjent 2026-10-22.
 - A31 (behold, kontrollert) og A32 (versjonskontroll påkrevd) er gjennomført 2026-10-22, se §2i.
 - Etterlevelse og revisjon (steg 13) er gjennomført og godkjent 2026-10-22.
-- A34 og A35 er gjennomført 2026-10-23 og venter på vurdering (§2i). Leverandøroppfølging startes ikke før det.
+- A34 og A35 er gjennomført og godkjent 2026-10-23 (§2i). Etterlevelse og revisjon er ferdig i fase 0.
+- Leverandøroppfølging (steg 14) er gjennomført 2026-10-23 og venter på vurdering (§2j). Mål og KPI startes ikke før det.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -1255,6 +1257,123 @@ Et krav med historikk, med plass i et scope eller med funn kan ikke slettes, hel
   - Forslag til krav og vurderinger kan senere komme gjennom avgrensede API-operasjoner. De blir registrert først når en person tar dem i bruk.
   - Vurdering, revisjon og sletting forblir menneskeforbeholdt.
 
+### 2j. Leverandøroppfølging (steg 14) – kartlegging og gjennomføring (2026-10-23)
+
+#### Kartlegging før steget
+
+- Modulen er kundevid, uten fagområder. Nøklene er `supplier.view`/`edit`/`assess`/`assure`/`delete`. `assess`, `assure` og `delete` er menneskeforbeholdte.
+- System Owner har nøklene bare gjennom en egen rolle (`explicitGrantDomains()`).
+- `SupplierAccessService` bruker `CustomerPermissionService::has()`. Integrasjoner får derfor ingen menneskeforbeholdte nøkler.
+- Ingen leverandørtjeneste kalte `HumanDecisionGuard`.
+
+**Formelle beslutninger og ordinær registrering:**
+
+| Handling | Rettighet | Art | Kontrollert før steget |
+|---|---|---|---|
+| Vurder leverandør (`SupplierAssessmentService::record`) | `supplier.assess` | Formell vurdering | **Bare kontrolleren.** Tjenesten sjekket verken nøkkel eller leverandørens kunde. |
+| Slett leverandør (`SupplierLifecycleService::delete`) | `supplier.delete` | Formell beslutning | **Bare kontrolleren.** Tjenesten leste `isDeletable()` under lås. |
+| Kontroller krav, Bekreft kravene på nytt | `supplier.assure` | Formell vurdering | Nøkkelen i tjenesten, leverandøren via `visibleSuppliers()`. **Ikke modulen.** |
+| Legg til krav / Gjelder ikke denne leverandøren / Tilbake til automatisk vurdering | `supplier.assure` | Formell beslutning (hva som gjelder) | Som over |
+| Aktsomhetsvurdering | `supplier.assure` | Formell vurdering | Som over |
+| Kontrollkrav (katalog, krav for én leverandør, Sett som utgått, Slett), kravmaler, Wiki-veiledning | `supplier.assure` | Registerarbeid, men på en menneskeforbeholdt nøkkel | Nøkkelen i tjenesten, aktørens kunde. **Ikke modulen.** |
+| Registrer leverandør, Rediger | `supplier.edit` | Ordinær registrering | **Bare kontrolleren**, som også skrev endringene i stamdata |
+| Endre kritikalitet | `supplier.edit` | Klassifisering med begrunnelse og historikk | **Bare kontrolleren** |
+| Ta i bruk, Avslutt, Gjenåpne | `supplier.edit` | Livsløp med historikk | **Bare kontrolleren** |
+| Leverandørprofil | `supplier.edit` | Ordinær registrering med historikk | Nøkkelen i tjenesten. **Ikke modulen.** |
+| Dokumentasjon (registrere, rette, fornye, fil, slette) | `supplier.edit` eller `supplier.assure` | Ordinær registrering | **Bare kontrolleren.** `delete()` tok ikke aktør. |
+| Følg opp i Avvik / Opprett risiko, Koble til, Fjern koblingen | `supplier.edit` (fra kontroll eller aktsomhet: `supplier.assure`), og den andre modulens nøkkel | Overlevering | `abort_unless` på nøkkelen. **Ikke leverandørens kunde eller modulen.** Den andre modulen sjekker sin halvdel. |
+| Excel-import | `supplier.edit` | Ordinær registrering | `execute` sjekket nøkkelen, `upload` ingenting |
+| Overfør til Wiki | `supplier.assure` og `wiki.knowledge.handoff` | Overlevering | Wiki-delen i tjenesten. Leverandørdelen sjekket bare nøkkelen, **ikke leverandørens kunde eller modulen.** |
+
+**Historikk før steget:** Allerede beskyttet i databasen. Alle 11 historikktabellene nekter UPDATE og DELETE så lenge kunden finnes (triggere):
+- leverandørvurderinger, kontroller med dokumentasjonsøyeblikksbilder, unntak og tillegg, aktsomhetsvurderinger og den avviklede kontrollbeslutningen;
+- statusendringer, kritikalitetsendringer, profilendringer, statusendringer for kontrollkrav og slettelogg.
+
+En leverandør med historikk kan ikke slettes, heller ikke i SQL (sammensatt fremmednøkkel med `NO ACTION`). Dokumentasjon som en kontroll bygger på, slettes ikke (tjeneste og `NO ACTION`). Kontrollbeslutningen er avviklet. Ingen kode skriver den.
+
+**Koblinger til andre moduler:** Avvik (`supplier_improvement_cases`), Risiko (`supplier_risks`), Etterlevelse (forankring av kontrollkrav, og tidligere koblinger som bare kan leses), Wiki (veiledning og kunnskapsoverføring), Ledelsens gjennomgåelse (`SuppliersSection`, bare lesing) og Mine oppgaver (bare lesing). Ingen av dem endres av steget.
+
+#### Gjennomført
+
+| Commit | Innhold |
+|---|---|
+| `9e757eca` | `SupplierAccessService::may()`/`authorize()`: nøkkelen, `supplier.view`, aktørens kunde (leverandørens) og modulen. Vurder leverandør (`SUPPLIER_ASSESS`), Slett leverandør (`SUPPLIER_DELETE`) og alt arbeid under `supplier.assure` (`SUPPLIER_ASSURE`) kaller vakten og deretter regelen. |
+| `1ffb9586` | Ordinært registerarbeid sjekker `supplier.edit` i tjenesten. Stamdataendring er flyttet fra kontrolleren til `SupplierRegistration::update()`, med lås. Dokumentasjon krever `supplier.edit` eller `supplier.assure`, og `delete()` tar aktør og leser raden på nytt under lås. Koblinger og overleveringer låser leverandøren i dens egen kunde. Excel-importen sjekker også ved opplasting. |
+| `87c3131e` | «Overfør til Wiki» fra en leverandør krever `supplier.assure` i leverandørens kunde, med modulen. |
+| `5e887aaf` | E2E: `supplier-import` lagrer filene der E2E-appen leser dem. Bare testen er endret. |
+
+#### Sikkerhetsregler
+
+1. **Formelle beslutninger tas av personer.** Leverandørvurdering, kontroll av krav, hva som gjelder for en leverandør (tillegg og unntak), aktsomhetsvurdering, kontrollkravkatalogen og sletting av leverandør.
+   - Vakten nekter integrasjoner, inaktive personer og API-kanalen, også i delegert modus.
+   - Deretter kreves riktig nøkkel.
+2. **Kundeseparasjon og modul gjelder i tjenesten.** Hver skriving krever:
+   - `supplier.view` og nøkkelen;
+   - aktørens egen kunde, som må være leverandørens;
+   - at kunden har modulen.
+
+   En annen kundes person og System Owner nektes, også med en rolle som har alle nøkler. En kunde uten modulen nektes. Låsene leser leverandøren i aktørens kunde.
+3. **System Owner uten rolle har ingen beslutninger.** Uendret, og nå testet i tjenesten.
+4. **Det som er besluttet, beholder historikken.** Uendret og testet: en leverandør med en vurdering slettes ikke (tjeneste og SQL), og vurderingen kan ikke endres eller slettes.
+5. **Ordinært registerarbeid** (`supplier.edit`) er ikke menneskeforbeholdt. En integrasjon som har nøkkelen, kan gjøre det (testet). Se A36 og A37.
+6. **Overleveringer** til Avvik, Risiko og Wiki er ikke beslutninger og går ikke gjennom vakten. Den andre modulen sjekker sin halvdel, og resultatet behandles videre der av personer. Fra en kontroll eller aktsomhetsvurdering kreves `supplier.assure`, som en integrasjon aldri har.
+7. **Brukerne merker ingen endring.** Kontrollerne sjekker fortsatt først, så statuskoder og meldinger er uendret. Ingen nye statuser, skjermbilder, felt eller dialoger.
+
+#### Tester
+
+- `SupplierHumanDecisionTest` (9):
+  - en person med nøklene tar alle beslutningene, og historikken bærer navnet deres;
+  - 12 beslutninger kalles direkte på tjenestene, og disse nektes uten at noe skrives: integrasjon (som heller ikke får nøklene), API-kanal (delegert), inaktiv person, leser, redigerer, hver nøkkel for seg, nøklene uten `supplier.view`, en annen kundes person og System Owner, System Owner uten rolle og en kunde uten modulen;
+  - en leverandør med vurdering slettes ikke, og vurderingen kan ikke endres eller slettes i SQL.
+- `SupplierServiceAuthorizationTest` (5):
+  - en redigerer og en integrasjon med `supplier.edit` kan gjøre registerarbeid;
+  - 14 skrivinger nektes for leser, `assess`, `delete`, `assure` (unntatt dokumentasjon), nøklene uten `supplier.view`, en annen kundes redigerer og System Owner og en kunde uten modul, og ingenting skrives;
+  - overføring til Wiki.
+- To testdobler i `SupplierImportTest` sender den nye konstruktørparameteren til `SupplierRegistration`.
+- **Mutasjonssjekket, 28 mutanter, alle fanges:**
+  - kunde-, modul- og visningskontrollen i `may()`, og regelen for dokumentasjon;
+  - vakten og regelen i hver beslutningstjeneste;
+  - `isDeletable()` ved sletting av leverandør;
+  - regelen i hver tjeneste for registerarbeid, i koblingene og i kunnskapsoverføringen.
+- **Ikke dekket av mutasjon:** sjekken ved opplasting i Excel-importen. Den ligger før den eksisterende sjekken i `execute`, som er dekket av `SupplierImportTest`.
+
+#### Tester og kjøringer (2026-10-23)
+
+- **Grunnlinje før steget:** alle testfiler for Leverandøroppfølging, `WikiKnowledgeHandoffTest` og `tests/Unit/Services/Security`: 300 av 300 bestått.
+- **PHP etter steget:** samme filer, de to nye, oversettelsestesten og filene som berører modulen fra andre moduler (Ledelsens gjennomgåelse, Mine oppgaver, pakkebytte, kunnskapsintegrasjon i Wiki): 419 av 419 bestått, ingen hoppet over.
+- **JS:** 2130 av 2130 bestått. Ingen frontendendring, så bygget er ikke kjørt på nytt. Pint er rent på berørte filer.
+- **E2E i det isolerte miljøet:** alle spesifikasjoner for Leverandøroppfølging, `a11y-grc-suppliers`, `my-tasks-suppliers`, `knowledge-handoff` og `management-review` (10 filer, 36 tester). Telt fra Playwrights JSON-rapport, med `caffeinate`.
+  - Første kjøring: **35 bestått, 1 feilet, 0 hoppet over.**
+  - Feilen var i fiksturen, ikke i appen: `supplier-import` lagret malen under `storage/app` på verten, men i det isolerte miljøet er containerens `storage/` vertens `.e2e/storage` (`cef890b2`). Fiksturen fant derfor ikke filen. Feilen oppstår før noen leverandørtjeneste kjøres, og skyldes ikke steget. Den er rettet i en egen commit (`5e887aaf`).
+  - `supplier-import` kjørt på nytt etter rettingen: 1 av 1 bestått.
+  - **Resultat, per unik test: 36 bestått, 0 feilet, 0 hoppet over, til sammen 36.**
+
+**Migreringer:** ingen.
+
+**Endringer i brukeropplevelsen:** ingen. Skjemaer, knapper, meldinger, statuskoder og hvem som kan gjøre hva er som før. Den eneste forskjellen i oppførsel gjelder samtidige handlinger: lagres stamdata i samme øyeblikk som leverandøren avsluttes, avvises lagringen med den eksisterende meldingen «Leverandøren er avsluttet. Gjenåpne den før du endrer den.». Før ble den lagret på en avsluttet leverandør.
+
+#### Nye funn som krever beslutning
+
+| # | Funn | Anbefaling |
+|---|---|---|
+| A36 | **Kritikalitet og livsløp er registerarbeid (`supplier.edit`), ikke menneskeforbeholdt.** «Endre kritikalitet» avgjør hvilke kontrollkrav som gjelder automatisk, og når leverandøren skal vurderes på nytt. «Ta i bruk» og «Avslutt» er beslutninger om å bruke leverandøren. En integrasjon med `supplier.edit` kan i dag gjøre dette. Historikken er fullstendig (aktør, begrunnelse, før og etter). | Behandle «Endre kritikalitet», «Ta i bruk», «Avslutt» og «Gjenåpne» som menneskelige beslutninger: vakten, nøkkelen uendret, etter samme mønster som A35 (`COMPLIANCE_APPLICABILITY`). Ingen endring i skjermbilder, og ingen migrering. Alternativ: behold som i dag og løs det med føringen for agenter nedenfor. |
+| A37 | **Leverandørprofilen styrer hvilke kontrollkrav som gjelder, og endres med `supplier.edit`.** Den som kontrollerer (`supplier.assure`), kan med vilje ikke endre profilen. En integrasjon med `supplier.edit` kan. Hver lagring står i uforanderlig historikk med aktør. | Behold som registerarbeid. Profilen er fakta om leverandøren, og et senere API kan foreslå svar. Avgjøres sammen med A36 når omfanget av API v1 er kjent. |
+| A38 | **Dokumentasjon som ingen kontroll bygger på, kan slettes uten spor.** Filen slettes også. Regelen er «registrert ved en feil», og dokumentasjon en kontroll bygger på, er beskyttet. | Lav. Behold. Ønskes spor, kan sletting logges på samme måte som `supplier_deletions`. Det krever en liten migrering. |
+
+**Lav, ikke rettet:** Endringer i stamdata (blant annet intern ansvarlig) har ingen egen historikk. Bare siste verdi og `updated_by` lagres. Det er ordinært registerarbeid.
+
+**Klar for senere API-integrasjon**
+
+- Ja. Lesing, beslutninger og registerarbeid ligger i domenet med samme regler for enhver inngang.
+- Gjenstår før fase 1:
+  - A10 (feilformat);
+  - steg 19 (aktørtriggere for `supplier_assessments.assessed_by_user_id`, `supplier_requirement_evaluations.evaluated_by_user_id`, `supplier_requirement_overrides.created_by_user_id` og `supplier_due_diligence_assessments.assessed_by_user_id`);
+  - A36–A38 (beslutning).
+- **Føring (anbefalt, som for de andre modulene):**
+  - En AI-agent får ikke `supplier.edit` som standard.
+  - Forslag til leverandører, profilsvar og dokumentasjon kan senere komme gjennom avgrensede API-operasjoner. De blir registrert først når en person tar dem i bruk.
+  - Vurdering, kontroll, aktsomhet, kontrollkrav og sletting forblir menneskeforbeholdt.
+
 ## 3. Avgrensning
 
 **Med i fase 0:**
@@ -1382,7 +1501,7 @@ Kontrolleren beholder sine sjekker *før* tjenestekallet, slik at statuskoder og
 | **Etterlevelse** | `ComplianceAssessmentService::assess` | `canAssess` | `ComplianceRequirementController:363` |
 | | `ComplianceAuditLifecycleService::start`/`complete`/`cancel`/`reopen` | `canAudit` | `ComplianceAuditController:286–333` |
 | | `ComplianceRequirementLifecycleService::delete`, `ComplianceAuditLifecycleService::delete` (nye) | `canDelete` | `ComplianceRequirementController:450`, `ComplianceAuditController:504` |
-| **Leverandør** | `SupplierAssessmentService::record` | `canAssess` | `SupplierAssessmentController:36` |
+| **Leverandør** *(gjort, §2j)* | `SupplierAssessmentService::record` | `canAssess` | `SupplierAssessmentController:36` |
 | | `SupplierLifecycleService::delete` | `canDelete` | `SupplierManagementController:530` |
 | | `supplier.assure`-tjenestene | **Sjekker allerede selv.** Får bare vakten. | – |
 | **Ledelsens gjennomgåelse** *(gjort, §2e)* | `ManagementReviewFinalizationService::finalize`, `ManagementReviewService::addAmendment` | `canFinalize` | `ManagementReviewController:217, :248` |
@@ -1478,7 +1597,7 @@ Hver linje er én commit. Hver commit kjører sine målrettede tester før den l
 | 11 | `refactor(management-review): guard finalize, amendment and delete` | **Gjort** som tre commits (§2e) | 1 |
 | 12 | `refactor(quality): require an actor and guard flow approval and adoption` | Null-aktører og `QUALITY_FLOW_ADOPT` | 1 |
 | 13 | `refactor(compliance): guard assessment, audit lifecycle and delete` | **Gjort** som tre commits (§2i) | 1 |
-| 14 | `refactor(suppliers): guard assessment and delete; guard assure services` | | 1 |
+| 14 | `refactor(suppliers): guard assessment and delete; guard assure services` | **Gjort** som tre commits (§2j) | 1 |
 | 15 | `refactor(objectives): guard measurements and delete` | | 1 |
 | 16 | `feat(tender): require an explicit permission to decide requirements` | **B4**, `RequirementEditorService` uten null-aktør, rettighet i Tilganger, grensesnitt | 1 |
 | 17 | `feat(tender): record who changes a bid status` | `SavedNoticeStatusService` og `saved_notice_status_changes` | 1 |
