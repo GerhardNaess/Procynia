@@ -198,6 +198,39 @@ class HumanDecisionActorTriggerTest extends TestCase
         $this->assertNull(DB::table('enterprise_wiki_pages')->where('id', $page->id)->value('reviewed_by_user_id'));
     }
 
+    /** §6.1 punkt 5: the trigger never stands in the way of deleting a customer and its decisions. */
+    public function test_deleting_the_customer_still_takes_its_decisions_along(): void
+    {
+        $customer = $this->customer();
+        $person = $this->user($customer, User::ROLE_USER);
+        $this->user($customer, User::ROLE_INTEGRATION);
+
+        $savedNotice = $this->savedNotice($customer);
+        $requirement = SavedNoticeAiRequirement::query()->create([
+            'saved_notice_id' => $savedNotice->id,
+            'requirement_text' => 'Leverandøren skal ha ISO 9001.',
+            'requirement_type' => 'requirement',
+            'extraction_method' => 'manual',
+            'source_type' => SavedNoticeAiRequirement::SOURCE_TYPE_MANUAL,
+            'approval_status' => SavedNoticeAiRequirement::APPROVAL_STATUS_DRAFT,
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
+            'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
+            'publication_status' => SavedNoticeAiRequirement::PUBLICATION_STATUS_PUBLISHED,
+        ]);
+        DB::table('saved_notice_ai_requirements')->where('id', $requirement->id)->update(['approved_by_user_id' => $person->id]);
+        DB::table('customer_access_changes')->insert([
+            'customer_id' => $customer->id, 'subject_type' => 'user', 'subject_id' => $person->id,
+            'change_type' => 'updated', 'actor_user_id' => $person->id, 'created_at' => now(),
+        ]);
+
+        DB::table('customers')->where('id', $customer->id)->delete();
+
+        $this->assertDatabaseMissing('customers', ['id' => $customer->id]);
+        $this->assertDatabaseMissing('saved_notices', ['id' => $savedNotice->id]);
+        $this->assertDatabaseMissing('saved_notice_ai_requirements', ['id' => $requirement->id]);
+        $this->assertDatabaseMissing('customer_access_changes', ['customer_id' => $customer->id]);
+    }
+
     private function assertRefused(callable $statement, string $what): void
     {
         DB::beginTransaction();
