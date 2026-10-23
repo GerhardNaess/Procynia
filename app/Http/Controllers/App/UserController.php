@@ -6,12 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\BillingPrice;
 use App\Models\BillingProduct;
 use App\Models\Customer;
+use App\Models\CustomerAccessChange;
 use App\Models\CustomerRole;
 use App\Models\Department;
 use App\Models\User;
 use App\Rules\UniqueUserEmail;
 use App\Services\Billing\BillingEntitlementService;
 use App\Services\Billing\BillingService;
+use App\Services\Security\CustomerAccessChangeRecorder;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -192,6 +194,10 @@ class UserController extends Controller
             $this->syncUserDepartments($user, $departmentIds, $primaryDepartmentId);
             $this->syncManagedDepartments($user, $bidManagerScope, $managedDepartmentIds);
 
+            // Who gave this person their access (F4).
+            $recorder = app(CustomerAccessChangeRecorder::class);
+            $recorder->record($customerId, $actor, CustomerAccessChange::SUBJECT_USER, (int) $user->id, CustomerAccessChangeRecorder::USER_CREATED, null, $recorder->userSnapshot($user));
+
             if ($selectedUserLicense instanceof BillingPrice) {
                 $this->billingService->assignUserServiceLevel(
                     $customer,
@@ -273,6 +279,9 @@ class UserController extends Controller
             $customerRoleIds,
             $customerId
         ): void {
+            $recorder = app(CustomerAccessChangeRecorder::class);
+            $accessBefore = $recorder->userSnapshot($record);
+
             $attributes = [
                 'name' => Str::squish($validated['name']),
                 'role' => $nextRole,
@@ -297,6 +306,9 @@ class UserController extends Controller
             if ($customerRoleIds !== null) {
                 $this->syncCustomerRoles($record, $customerRoleIds, $customerId);
             }
+
+            // Only when something that decides access changed — a new name is not recorded (F4).
+            $recorder->record($customerId, $actor, CustomerAccessChange::SUBJECT_USER, (int) $record->id, CustomerAccessChangeRecorder::USER_ACCESS_CHANGED, $accessBefore, $recorder->userSnapshot($record));
         });
 
         if ($record->is($actor) && $nextBidRole !== User::BID_ROLE_BID_MANAGER) {
@@ -328,9 +340,24 @@ class UserController extends Controller
             return back()->with('error', 'Kunden må ha minst én aktiv systemeier.');
         }
 
-        $record->forceFill([
-            'is_active' => $nextActive,
-        ])->save();
+        DB::transaction(function () use ($record, $nextActive, $actor, $customerId): void {
+            $recorder = app(CustomerAccessChangeRecorder::class);
+            $before = $recorder->userSnapshot($record);
+
+            $record->forceFill([
+                'is_active' => $nextActive,
+            ])->save();
+
+            $recorder->record(
+                $customerId,
+                $actor,
+                CustomerAccessChange::SUBJECT_USER,
+                (int) $record->id,
+                $nextActive ? CustomerAccessChangeRecorder::USER_ACTIVATED : CustomerAccessChangeRecorder::USER_DEACTIVATED,
+                $before,
+                $recorder->userSnapshot($record),
+            );
+        });
 
         return $this->successRedirect($request, 'app.users.index', true)
             ->with('success', $nextActive ? 'Brukeren ble aktivert.' : 'Brukeren ble deaktivert.');

@@ -16,16 +16,13 @@ use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 /**
- * Characterisation of a known gap — docs/external-api-phase-0-plan.md, finding F4.
+ * F4 — docs/external-api-phase-0-plan.md, step 18.
  *
  * Changes to who may do what — a user's anbudsrolle and QA flag, their customer roles, a role's
- * permissions, and the Tilganger matrix — are written without recording who made them. Phase 0
- * makes roles the route to human-only decisions, so this is the trail an auditor would ask for.
- *
- * The test does not look for a specific table. It finds every actor-reference column in the
- * schema and proves that none of them gains a row pointing at the System Owner who made the
- * changes. When an audit trail is introduced this test fails, and should be turned into an
- * assertion that the trail is written.
+ * permissions, and the Tilganger matrix — used to be written without recording who made them. This
+ * test began as the characterisation of that gap; with customer_access_changes in place it scans the
+ * same actor columns and proves the trail is written: the acting System Owner is named, and in that
+ * table only.
  */
 class AdministrativeChangeAuditTrailTest extends TestCase
 {
@@ -51,7 +48,7 @@ class AdministrativeChangeAuditTrailTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_role_qa_and_access_changes_record_no_acting_user(): void
+    public function test_role_qa_and_access_changes_record_the_acting_user(): void
     {
         $customer = $this->createCustomer();
         $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
@@ -98,8 +95,11 @@ class AdministrativeChangeAuditTrailTest extends TestCase
             $customer->fresh()->resolvedPermissionSettings()[Customer::PERMISSION_APPROVE_WIKI_CLAIMS],
         );
 
-        // …and not one actor-reference column anywhere names the person who made them.
-        $this->assertSame($before, $this->actorReferences($owner), 'F4: no audit row records the acting System Owner');
+        // …and the person who made them is named, in the access trail and nowhere else.
+        $after = $this->actorReferences($owner);
+        $changed = array_keys(array_filter($after, fn (int $count, string $column): bool => $count !== ($before[$column] ?? 0), ARRAY_FILTER_USE_BOTH));
+        $this->assertSame(['customer_access_changes.actor_user_id'], $changed, 'F4: the acting System Owner is recorded in the access trail');
+        $this->assertSame(3, $after['customer_access_changes.actor_user_id'] - $before['customer_access_changes.actor_user_id']);
     }
 
     /**

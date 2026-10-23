@@ -5,13 +5,16 @@ namespace App\Http\Controllers\App;
 use App\Http\Controllers\Controller;
 use App\Models\BusinessArea;
 use App\Models\Customer;
+use App\Models\CustomerAccessChange;
 use App\Models\CustomerRole;
 use App\Models\Department;
 use App\Models\User;
+use App\Services\Security\CustomerAccessChangeRecorder;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -138,8 +141,25 @@ class CustomerEnvironmentController extends Controller
         ));
 
         $settings[$validated['permission']] = $roles;
-        $customer->permission_settings = $settings;
-        $customer->save();
+
+        DB::transaction(function () use ($customer, $settings, $request, $customerId, $validated): void {
+            $recorder = app(CustomerAccessChangeRecorder::class);
+            $before = $recorder->permissionSettingsSnapshot($customer);
+
+            $customer->permission_settings = $settings;
+            $customer->save();
+
+            // The one row of the matrix that was set, before and after (F4).
+            $recorder->record(
+                $customerId,
+                $request->user(),
+                CustomerAccessChange::SUBJECT_PERMISSION_SETTINGS,
+                null,
+                CustomerAccessChangeRecorder::PERMISSION_SETTINGS_CHANGED,
+                [$validated['permission'] => $before[$validated['permission']] ?? []],
+                [$validated['permission'] => $recorder->permissionSettingsSnapshot($customer)[$validated['permission']] ?? []],
+            );
+        });
 
         return redirect()->route('app.customer-environment.index', ['tab' => 'permissions']);
     }

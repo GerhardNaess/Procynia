@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\CustomerAccessChange;
 use App\Models\CustomerRole;
 use App\Models\User;
+use App\Services\Security\CustomerAccessChangeRecorder;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Http\RedirectResponse;
@@ -35,7 +37,7 @@ class CustomerRoleController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
-        [, $customerId] = $this->roleAdministrationContext($request);
+        [$actor, $customerId] = $this->roleAdministrationContext($request);
 
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:120'],
@@ -51,7 +53,7 @@ class CustomerRoleController extends Controller
         $name = trim($validated['name']);
         $this->guardUniqueName($customerId, $name, null);
 
-        DB::transaction(function () use ($customerId, $name, $validated): void {
+        DB::transaction(function () use ($customerId, $name, $validated, $actor): void {
             $role = CustomerRole::query()->create([
                 'customer_id' => $customerId,
                 'name' => $name,
@@ -67,6 +69,9 @@ class CustomerRoleController extends Controller
                     $validated['business_area_ids'] ?? [],
                 );
             }
+
+            $recorder = app(CustomerAccessChangeRecorder::class);
+            $recorder->record($customerId, $actor, CustomerAccessChange::SUBJECT_CUSTOMER_ROLE, (int) $role->id, CustomerAccessChangeRecorder::ROLE_CREATED, null, $recorder->roleSnapshot($role));
         });
 
         return $this->backToPermissions();
@@ -80,7 +85,7 @@ class CustomerRoleController extends Controller
      */
     public function update(Request $request, CustomerRole $customerRole): RedirectResponse
     {
-        [, $customerId] = $this->roleAdministrationContext($request);
+        [$actor, $customerId] = $this->roleAdministrationContext($request);
 
         abort_unless($customerRole->customer_id === $customerId, 404);
 
@@ -104,7 +109,9 @@ class CustomerRoleController extends Controller
             $this->guardUniqueName($customerId, $validated['name'], $customerRole->id);
         }
 
-        DB::transaction(function () use ($customerRole, $validated): void {
+        DB::transaction(function () use ($customerRole, $validated, $actor, $customerId): void {
+            $recorder = app(CustomerAccessChangeRecorder::class);
+            $before = $recorder->roleSnapshot($customerRole);
             $attributes = [];
 
             if (array_key_exists('name', $validated)) {
@@ -133,6 +140,9 @@ class CustomerRoleController extends Controller
                     $validated['business_area_ids'] ?? [],
                 );
             }
+
+            // A new description changes no one's access and is not recorded (F4).
+            $recorder->record($customerId, $actor, CustomerAccessChange::SUBJECT_CUSTOMER_ROLE, (int) $customerRole->id, CustomerAccessChangeRecorder::ROLE_CHANGED, $before, $recorder->roleSnapshot($customerRole));
         });
 
         return $this->backToPermissions();
@@ -145,11 +155,21 @@ class CustomerRoleController extends Controller
      */
     public function destroy(Request $request, CustomerRole $customerRole): RedirectResponse
     {
-        [, $customerId] = $this->roleAdministrationContext($request);
+        [$actor, $customerId] = $this->roleAdministrationContext($request);
 
         abort_unless($customerRole->customer_id === $customerId, 404);
 
-        $customerRole->delete();
+        DB::transaction(function () use ($customerRole, $actor, $customerId): void {
+            // Who held it goes with it (FK cascade), so the row keeps their ids (F4).
+            $recorder = app(CustomerAccessChangeRecorder::class);
+            $before = $recorder->roleSnapshot($customerRole) + [
+                'user_ids' => $customerRole->users()->pluck('users.id')->map(static fn ($id): int => (int) $id)->sort()->values()->all(),
+            ];
+
+            $customerRole->delete();
+
+            $recorder->record($customerId, $actor, CustomerAccessChange::SUBJECT_CUSTOMER_ROLE, (int) $customerRole->id, CustomerAccessChangeRecorder::ROLE_DELETED, $before, null);
+        });
 
         return $this->backToPermissions();
     }
