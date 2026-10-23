@@ -29,6 +29,7 @@
   - A36, kritikalitet og livsløp (`334380d8`), se §2j
   - steg 15, Mål og KPI (`3a6131f5`, `27405c7a`, `f3072ba1`, `2d9aee4a`), se §2k
   - A39 (`b02a9be3`), A40 (`fb7a131e`, E2E `befe835d`) og forutsetningen i `app-navigation` (`80ace998`), se §2k
+  - Anbud: kundegrensen i Wiki-research (`c0024132`), steg 16 / B4 (`1dc4a20a`), steg 17 (`18b93ab0`), historikk i databasen (`a5d63169`) og testene fra mutasjonssjekken (`610d214d`), se §2l
 - Wiki-delen av fase 0 og Risiko (steg 9) er gjennomført og godkjent 2026-10-22.
 - Avvik og forbedringer (steg 10) er gjennomført og godkjent 2026-10-22.
 - Ledelsens gjennomgang (steg 11) er gjennomført og godkjent 2026-10-22.
@@ -40,7 +41,8 @@
 - A34 og A35 er gjennomført og godkjent 2026-10-23 (§2i). Etterlevelse og revisjon er ferdig i fase 0.
 - Leverandøroppfølging (steg 14) er gjennomført og godkjent 2026-10-23 (§2j).
 - A36 er gjennomført og godkjent 2026-10-23, og A37 og A38 er besluttet (§2j). Leverandøroppfølging er ferdig i fase 0.
-- Mål og KPI (steg 15) er gjennomført og godkjent 2026-10-23 (§2k). A39 og A40 er besluttet og gjennomført, og E2E-feilene i `app-navigation` er rettet (§2k). Det venter på vurdering. Anbud startes ikke før det.
+- Mål og KPI (steg 15) er gjennomført og godkjent 2026-10-23 (§2k). A39 og A40 er besluttet og gjennomført, og E2E-feilene i `app-navigation` er rettet (§2k). Mål og KPI er ferdig i fase 0.
+- Anbud (steg 16 og 17) er gjennomført 2026-10-23 (§2l). Det venter på vurdering, med åpne produktbeslutninger A41–A45. Felles sikkerhetskontroll (steg 18–20) og API-implementering startes ikke før det.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -1625,6 +1627,152 @@ En leverandør med historikk kan ikke slettes, heller ikke i SQL (sammensatt fre
   - Forslag til mål, KPI-er og målverdier kan senere komme gjennom avgrensede API-operasjoner. De blir registrert først når en person tar dem i bruk.
   - Målinger (B7), sletting, lukking og avslutning (A39) forblir menneskeforbeholdt.
 
+### 2l. Anbud (steg 16 og 17) – kartlegging og gjennomføring (2026-10-23)
+
+#### Kartlegging før steget
+
+**Formålet som skal bevares.** Enterprise Wiki er det kvalitetssikrede kunnskapsgrunnlaget AI bruker til å svare på kundekrav. Kravuttrekk, oppslag i godkjent Wiki-kunnskap, svarutkast og vanlig redigering skal fortsatt virke for alle som jobber i saken. Bare beslutninger som binder virksomheten, krever en person og en egen rettighet.
+
+**Tilgangsmodellen.** Anbud bruker `users.bid_role` og Tilganger-matrisen (`customers.permission_settings`), ikke `CustomerPermissionCatalog`.
+- **Synlighet:** `SavedNoticeAccessService::visibleQueryFor()`.
+- **Arbeid i saken:** `manageableQueryFor()` / `canManage()`. Lesere (anbudsrollen `viewer` uten egen involvering, eller lesertilgang per sak) er utelukket.
+- **Kundeseparasjon:** alltid `customer_id = aktørens kunde`. En annen kundes sak gir 404.
+- **Modulgrensen:** `customer.module` på rutenavnene `app.ai.*`, `app.notices.*` og `app.bid-status`.
+- **Integrasjoner:** de kommer ikke inn i kundefrontenden (`canAccessCustomerFrontend`), og `canManage` er derfor alltid usann for dem.
+
+**Formelle beslutninger og ordinært arbeid:**
+
+| Handling | Art | Kontrollert før steget |
+|---|---|---|
+| Godkjenn, Avvis, Gjenopprett krav, «Avvis alle» | **Beslutning (B4)** | Bare synlighet. Lesere kunne godkjenne (O3). Tjenesten tok `?User` og godtok null-aktør. |
+| Statusendring: Kvalifisering, Go / No-Go, Go (I arbeid), Levert, Forhandling, Vunnet, Tapt, Trukket | **Beslutning (steg 17)** | `canManage` i kontrolleren. Ingen aktør ble lagret, bortsett fra ved No-Go. |
+| No-Go og gjenåpning etter No-Go | **Beslutning** | Kontrolleren (`canManage` / `canReopenAfterNoGo`). Aktøren ble lagret i `saved_notice_no_go_decisions`, men tabellen var ubeskyttet. |
+| Laste opp anbudsdokumenter, kravuttrekk (kø), legge til, redigere og slette krav | Ordinært arbeid. AI foreslår. | Bare synlighet (A41) |
+| Generere, redigere og vurdere Wiki-svar, svargrunnlag, ansvarlig og arbeidsstatus, eksport | Ordinært arbeid. AI foreslår. | Bare synlighet (A41) |
+| Go/No-go-vurdering (poeng og anbefaling) | Rådgivende. Styrer ikke status. | `canManage` |
+| Kommentarer, oppgaver, tidsfrister, eier og Bid Manager, tilgang per sak, arkivering, sletting | Ordinært saksarbeid | Kontrolleren, ulike regler (A44) |
+
+**AI-kjeden og Wiki.**
+- Uttrekket kjører på køen `ai-requirements` (`ProcessRequirementExtractionRun`, `…Chunk`, `Finalize…`). Det laster sak og kunde fra kjøringen og skriver kandidater uten aktør, alltid som utkast.
+- Wiki-svar og vurderinger lages synkront i forespørselen (`RequirementWikiAnswerService`, `RequirementWikiAssessmentService`). Begge går gjennom `RequirementWikiResearchService::research()`, og det gjør også operatørkommandoen `wiki:inspect-requirement-answer`, som ikke lagrer noe.
+- Hver Wiki-lesing filtreres på én kunde-id, i katalogen, lenkenavigasjonen, rangeringen, grafen og figurene. Bare publiserte versjoner leses (`published_version_id`).
+- Kunde-id-en kom som parameter og ble ikke sjekket mot kravets egen sak. Hver kaller sendte riktig kunde, men bare etter konvensjon.
+
+**Historikk før steget.**
+- `saved_notice_ai_requirement_revisions` (hvem godkjente, avviste og redigerte) og `saved_notice_no_go_decisions` var ikke beskyttet. SQL kunne endre eller slette dem.
+- Svar og vurderinger overskrives ved ny generering og har ingen historikk (A43).
+- Ingen tabell i Anbud hadde triggere.
+
+**Indirekte innganger.** Køjobbene over, `WikiInspectRequirementAnswer` (bare lesing), `RequirementResponsibilityTaskService` (oppgaver for ansvarlig), Mine oppgaver og varsler (bare lesing), og staleness-markering fra Wiki-ingest (kundeavgrenset). Ingen Filament-ressurs, kommando eller jobb godkjenner krav eller endrer anbudsstatus.
+
+#### Gjennomført
+
+| Commit | Innhold |
+|---|---|
+| `c0024132` | **Kundegrensen i Wiki-research.** `research()` leser kravets kunde fra databasen og nekter enhver annen kunde-id før første Wiki-spørring eller AI-kall. Det dekker svar, vurdering og operatørkommandoen. |
+| `1dc4a20a` | **B4 (steg 16).** Ny rettighet `decide_bid_requirements` i Tilganger (standard System Owner, Bid Manager og Contributor; QA-kolonnen virker). `RequirementEditorService::transitionRequirementReviewStatus()` og de tre innpakningene krever `User`. De kaller vakten (`TENDER_REQUIREMENT_DECIDE`) og regelen `mayDecide()` på kravet slik det står under lås: rettigheten, `canManage`, aktiv sak, egen kunde og Anbud-modulen. Kontrolleren svarer 403 først med samme regel. Siden viser Godkjenn, Avvis, Gjenopprett og «Avvis alle» bare for den som har beslutningen (`can_decide_requirements`). Et AI-uttrukket krav opprettes alltid uavgjort, uansett hva kandidaten eller overstyringene inneholder. |
+| `18b93ab0` | **Steg 17.** `SavedNoticeStatusService` er eneste vei til statusendring, No-Go og gjenåpning. Den kaller vakten (`TENDER_BID_STATUS`), bruker sidens regel under lås (`canManage` på aktiv sak, for gjenåpning `canReopenAfterNoGo`, egen kunde og modul) og skriver `saved_notice_status_changes` i samme transaksjon. Migrering `2026_10_23_000005`. En strukturtest holder tjenesten som eneste kaller av `transitionBidStatus()` og No-Go-tjenesten. |
+| `a5d63169` | **Historikken i databasen.** Migrering `2026_10_23_000006`: No-Go-beslutningen endres aldri og gjenåpnes én gang. Kravrevisjoner endres aldri. Begge slettes bare med krav, sak eller kunde, og en slettet bruker kan nulles. |
+| `610d214d` | Testene fra mutasjonssjekken: beslutning på gammel kopi og sletting av en hel sak. |
+
+#### Sikkerhetsregler
+
+1. **Kravbeslutninger tas av personer med rettigheten (B4).**
+   - Vakten nekter integrasjoner, inaktive personer, API-kanalen (også delegert) og manglende aktør.
+   - Deretter kreves `decide_bid_requirements`, rett til å jobbe i saken, aktiv sak, aktørens egen kunde og Anbud-modulen.
+   - Aktøren lagres alltid (`approved_by_user_id`, `rejected_by_user_id`, `changed_by_user_id`).
+2. **Statusbeslutninger tas av personer som kan jobbe i saken.** Det gjelder Go, No-Go, Levert, Vunnet, Tapt, Trukket og gjenåpning. Hver endring står i `saved_notice_status_changes` med person, tidspunkt og begrunnelse.
+3. **AI foreslår, personer beslutter.** Uttrekk lager bare uavgjorte krav. Svarutkast, vurderinger og redigering krever ingen beslutningsrett. En bidragsyter uten `decide_bid_requirements` redigerer krav og får generert Wiki-svar som før (testet).
+4. **Kunnskap krysser aldri kunder.** Wiki-research nekter en kunde-id som ikke eier kravet. Alle Wiki-spørringer var allerede kundeavgrenset og leser bare publiserte versjoner.
+5. **Beslutningshistorikken er beskyttet i databasen.** Det gjelder statusendringer, No-Go-beslutninger og kravrevisjoner. Bare nulling av en slettet bruker og én gjenåpning av en No-Go er tillatt. Historikken følger kravet, saken eller kunden ved sletting (A42).
+6. **Brukerne merker lite.** Se «Endringer i brukeropplevelsen».
+
+#### Tester
+
+- `TenderRequirementDecisionTest` (10):
+  - bidragsyter i saken godkjenner, avviser og gjenoppretter, og hver revisjon bærer navnet;
+  - «Avvis alle» navngir personen på hvert krav;
+  - over HTTP nektes leser per sak, anbudsrollen `viewer` som lagret saken, og bidragsyter utenfor matrisen, med 403 og uten at noe skrives;
+  - siden tilbyr beslutningen bare til dem som har den;
+  - tjenesten nekter integrasjon, inaktiv person, leser, `viewer`, kollega uten saken, en annen kundes System Owner og bidragsyter, bidragsyter utenfor matrisen, arkivert sak og kunde uten Anbud, og API-kanalen for en som har beslutningen. Ingenting skrives;
+  - matriseraden kan strammes inn og nås via QA;
+  - beslutningen tas på kravet slik det står nå: en gammel kopi overskriver ikke første godkjenners navn;
+  - et uttrukket krav er alltid uavgjort;
+  - saksarbeid og svarutkast krever ikke beslutningen.
+- `RequirementWikiResearchCustomerBoundaryTest` (1): research, svar og vurdering nektes for en fremmed kunde-id, uten AI-kall og uten at noe lagres. Egen kunde passerer.
+- `TenderBidStatusDecisionTest` (6):
+  - hver statusendring på siden navngir personen;
+  - No-Go og gjenåpning registreres begge;
+  - tjenesten nekter integrasjon, inaktiv person, leser, kollega, en annen kundes personer, arkivert sak og kunde uten modul, og API-kanalen;
+  - gjenåpning beholder sin egen regel (Bid Manager i saken eller System Owner);
+  - strukturtest: bare tjenesten endrer anbudsstatus.
+- `TenderHistoryProtectionTest` (6): statusendringer, No-Go (også ny gjenåpning) og kravrevisjoner nektes endret og slettet i SQL. En slettet person nulles. Sletting av krav, sak og kunde tar historikken med.
+- **Endret:** `NoticeControllerLiveSearchContractTest` bygger kontrolleren uten No-Go-tjenesten, som kontrolleren ikke lenger bruker. Ingen forventning er endret.
+- **Mutasjonssjekket, 44 mutanter:**
+  - B4 (13): vakten, regelen i tjenesten, matrisen, `canManage`, arkivert, modul, samme kunde, gammel kopi, kontrollerens to 403-sjekker, sideprop, standardmatrisen og uavgjort AI-kandidat.
+  - Kundegrensen (2).
+  - Steg 17 (12): vakt i overgang og gjenåpning, regelen, `canManage`, arkivert, modul, samme kunde, gjenåpningsregelen, `canReopenAfterNoGo`, registrering i begge veier, og en kontroller som går utenom tjenesten.
+  - Triggere (17): hver delete- og update-regel, nulling av bruker, ny tilskriving, gjenåpning én gang, de avgjorte kolonnene, og hvert kaskadeunntak. Migreringen ble rullet tilbake og kjørt på nytt for hver mutant.
+  - «Gammel kopi» overlevde først. Testen for samtidige beslutninger fanger den nå.
+  - **Alle fanges, unntatt sju ekvivalente:**
+    - Samme kunde (B4 og status): `canManage` avgrenser alltid til aktørens kunde.
+    - Kontrollerens to 403-sjekker: tjenesten gir selv 403. Sjekkene beholdes slik at kontrolleren svarer først, som i de andre modulene.
+    - `null`-sjekken i kundegrensen: et krav uten sak kan ikke finnes (fremmednøkkel).
+    - To kaskadeunntak i triggerne: kundens og sakens kaskade når fram før historikkradens egen. Unntakene beholdes som forsvar i dybden.
+
+#### Tester og kjøringer (2026-10-23)
+
+- **Grunnlinje før steget:** alle 102 testfiler som berører Anbud, AI-kjeden, Wiki-svar, Go/No-go, saker, varsler, Mine oppgaver og Tilganger-matrisen: **1417 av 1417 bestått.**
+- **PHP etter steget:** de samme filene, de fire nye, `tests/Unit/Services/Ai` og `NavigationEntitlementMatrixTest`: **1710 av 1710 bestått.**
+- **JS:** 2130 av 2130 bestått.
+- **E2E i det isolerte miljøet** (bygget på nytt): `a11y-forms`, `a11y-tenders-ai`, `ai-answer-markdown-table`, `app-navigation`, `a11y-navigation`, `breadcrumbs`, `gonogo-template-default-locked`, `live-filter-collapse`, `dashboard-structure`, `info-hint`, `validation-feedback`, `permission-sections` og `roles-on-user-edit` (13 filer, 99 tester). Telt fra Playwrights JSON-rapport, med `caffeinate`.
+  - **94 bestått, 3 feilet, 2 hoppet over.**
+  - **Alle tre feilene finnes på grunnlinjen (`3c55e462`), kjørt med samme spesifikasjoner.** De skyldes data som bare finnes i utviklingsdatabasen, ikke Anbud-endringene. Samme type forutsetning som i `app-navigation` (§2k):
+    - `ai-answer-markdown-table`: fiksturen bruker kunde-id 4 (hardkodet). De to hoppede testene er de neste i samme serielle fil.
+    - `breadcrumbs` («Anbud, Wiki and Hjem»): den delte E2E-brukeren mangler `wiki.view`.
+    - `roles-on-user-edit`: forventer kunderollen «Kvalitetsleder» i den delte kunden.
+  - Ikke rettet i dette steget. Anbefalt som egen opprydding, på samme måte som `NavigationE2EFixture::baseline()`.
+- **AI-avhengige tester:** PHP-testene for svar og vurdering bruker falske OpenAI-klienter. De beviser kjeden, tilgangen og lagringen, men ikke svarkvaliteten. Ingen test med ekte AI er kjørt. E2E for AI-siden (`a11y-tenders-ai`) bruker lagrede data.
+
+**Migreringer:**
+- `2026_10_23_000005_record_bid_status_changes`: ny tabell `saved_notice_status_changes` med trigger. Ingen tilbakefylling, fordi tidligere endringer har ingen kjent aktør.
+- `2026_10_23_000006_keep_tender_decision_history`: triggere på `saved_notice_no_go_decisions` og `saved_notice_ai_requirement_revisions`. Ingen rader endres.
+- Begge er reverserbare: `down()` er kjørt for hver databasemutant og ved en egen tilbakerulling.
+- Kjørt på `procynia_test`, utviklingsdatabasen og `procynia_e2e`.
+
+**Endringer i brukeropplevelsen:**
+- **Tilganger:** én ny rad, «Godkjenne og avvise krav i anbud», med hjelpetekst (no og en). Standard gir alle som kunne beslutte før, muligheten fortsatt. Unntaket er «Kommersiell eier», som etter matrisens konvensjon starter uten rettigheter (se A45).
+- **AI-siden:** Godkjenn, Avvis, Gjenopprett og «Avvis alle» vises ikke for den som ikke har beslutningen. Lesere (lesertilgang per sak, eller anbudsrollen `viewer`) ser dem ikke lenger og får 403 via URL. Det er B4.
+- **Statusendringer:** ingen synlig endring. Historikken lagres, men vises ikke i grensesnittet ennå.
+- Ingen nye skjermbilder, statuser eller dialoger.
+
+#### Funn som krever beslutning
+
+| # | Funn | Anbefaling |
+|---|---|---|
+| A41 | **Saksarbeid i AI-arbeidsflaten krever bare synlighet.** En leser (lesertilgang per sak, eller anbudsrollen `viewer`) kan laste opp og slette anbudsdokumenter, legge til, redigere og slette krav, generere og redigere Wiki-svar, endre svargrunnlag, ansvarlig og arbeidsstatus, og kjøre vurdering. Det koster AI-kapasitet. Det samme gjelder «Ny oppgave» i saken. | Krev `canManage` for alle skrivinger i `AiController` og for oppgaver, slik Go/No-go-vurderingen allerede gjør. Lesere leser og eksporterer. Det endrer hva lesere kan i dag, så det er en produktbeslutning. AI-funksjonene påvirkes ikke for dem som jobber i saken. |
+| A42 | **Sletting tar beslutningshistorikk med seg.** «Slett» på et krav, også et godkjent, sletter revisjonene, Wiki-svaret og vurderingen. Sletting av en sak tar med No-Go-beslutninger, statushistorikk, kravrevisjoner og AI-forbruksloggen (`customer_ai_case_usages`). Triggerne hindrer bare sletting av historikken alene. | Som B3 og A40: et godkjent krav slettes ikke (avvis det i stedet), og en sak med beslutningshistorikk slettes ikke (arkiver den). AI-forbruksloggen bør aldri følge saken. Synlig endring. |
+| A43 | **Svarutkast har ingen historikk og ingen ferdigstilling.** Redigering av Wiki-svaret lagrer verken forrige tekst eller hvem som redigerte. Ny generering overskriver svar, kilder og spor. Kildene peker på siden, ikke på den publiserte versjonen som ble lest. Eksporten tar med svar på avviste og erstattede krav. | Lagre redigering med aktør og forrige tekst (append-only), lagre `published_version_id` i kildene, og eksporter bare godkjente krav. Om svar skal kunne «ferdigstilles» som egen beslutning, er et produktspørsmål. Det er ikke innført. |
+| A44 | **Saksnivåreglene er ujevne.** <br>– «Lagre» på en kunngjøring som allerede er en sak, gir lagreren bidragsytertilgang til saken uten synlighetssjekk. Det er bevisst etter kommentaren i koden, men gjelder også lesere. <br>– `canComment` og `canArchive` ser bort fra lesertilgang per sak. <br>– Med standard «Se alle saker» behandler en bidragsyter med selskapstilknytning alle saker, så lesertilgang per sak begrenser ikke. <br>– Eier og Bid Manager kan endres på arkiverte saker. <br>– Arkivering, tilbaketrekking av tilgang, lukking av oppgaver og eierbytte lagrer ingen aktør. | Avklar lesertilgang per sak og selvtildeling ved lagring. Lagre aktør for arkivering og tilgangsendringer (hører naturlig til F4 / steg 18). |
+| A45 | **«Kommersiell eier» og den nye rettigheten.** Matrisen gir hovedrollen ingen rettigheter som standard (`CommercialOwnerRoleTest`). En kommersiell eier som er mulighetseier i en sak, kunne godkjenne krav før B4, men kan det ikke nå før en System Owner krysser av. | Behold konvensjonen (anbefalt). Alternativt tas rollen med i standarden for denne raden. |
+
+**Lav, ikke rettet:**
+- Figurer i Wiki-svar slås opp i sidens arbeidsversjon, ikke den publiserte (`RequirementWikiAnswerFigureResolver`). Det gjelder bare visning, innenfor kunden. Eksporten tar ikke med figurer.
+- Research og rangering filtrerer ikke på påstandenes godkjenningsstatus innenfor den publiserte versjonen.
+- `promoteRun` erstatter tidligere krav (også godkjente) med en masseoppdatering uten revisjon. `RequirementExtractionPipeline::syncDocumentRequirements()` sletter alle krav for et dokument, men har ingen kaller.
+- `app.go-no-go-templates.*` og `app.watch-profiles.*` er ikke bak Anbud-modulen.
+- Go/No-go-vurderingens svar har ingen historikk. Vurderingen er rådgivende, og selve Go-beslutningen står nå i statushistorikken.
+- `User::resolvedBidRole()` faller fortsatt tilbake til `contributor` for en integrasjon uten anbudsrolle (arkitektur §4.4). Det er ufarlig i dag, fordi integrasjoner ikke kommer inn i kundefrontenden og vakten nekter dem alle beslutninger. Det må rettes før et Anbud-API.
+
+**Klar for senere API-integrasjon**
+
+- Beslutningene (kravbeslutninger og anbudsstatus) ligger i domenet med samme regler for enhver inngang, og er menneskeforbeholdt.
+- Anbud holdes fortsatt utenfor API v1 (arkitektur §8.3). A41, A44 og avdelingsomfanget bør avklares først.
+- Gjenstår i fase 0: steg 18–20, inkludert aktørtriggerne for `saved_notice_ai_requirements.approved_by_user_id` og `rejected_by_user_id`.
+- **Føring for agenter (anbefalt):**
+  - En agent kan foreslå kravtekst, svarutkast og vurderinger gjennom avgrensede operasjoner, alltid som utkast.
+  - Kravbeslutninger og statusendringer forblir menneskeforbeholdt.
+
 ## 3. Avgrensning
 
 **Med i fase 0:**
@@ -1850,8 +1998,8 @@ Hver linje er én commit. Hver commit kjører sine målrettede tester før den l
 | 13 | `refactor(compliance): guard assessment, audit lifecycle and delete` | **Gjort** som tre commits (§2i) | 1 |
 | 14 | `refactor(suppliers): guard assessment and delete; guard assure services` | **Gjort** som tre commits (§2j) | 1 |
 | 15 | `refactor(objectives): guard measurements and delete` | **Gjort** som fire commits (§2k) | 1 |
-| 16 | `feat(tender): require an explicit permission to decide requirements` | **B4**, `RequirementEditorService` uten null-aktør, rettighet i Tilganger, grensesnitt | 1 |
-| 17 | `feat(tender): record who changes a bid status` | `SavedNoticeStatusService` og `saved_notice_status_changes` | 1 |
+| 16 | `feat(tender): require an explicit permission to decide requirements` | **B4**, `RequirementEditorService` uten null-aktør, rettighet i Tilganger, grensesnitt. **Gjort** (§2l) | 1 |
+| 17 | `feat(tender): record who changes a bid status` | `SavedNoticeStatusService` og `saved_notice_status_changes`. **Gjort** (§2l) | 1 |
 | 18 | `feat(security): audit trail for access changes` | **F4**: `customer_access_changes`. `AdministrativeChangeAuditTrailTest` skrives om til «sporet skrives». | – |
 | 19 | `feat(security): reject integration actors in decision columns` | Triggerne i §4.8 og datakontrollen | 9–17 |
 | 20 | `test(security): HumanDecisionContractTest` | §6.1 | 1–19 |
