@@ -7,9 +7,12 @@ use App\Models\SupplierControlRequirement;
 use App\Models\SupplierDueDiligenceAssessment;
 use App\Models\SupplierProfile;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Services\Suppliers\SupplierReviewSchedule;
 use App\Support\CalendarDate;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -33,7 +36,8 @@ use Illuminate\Validation\ValidationException;
  * derived from the areas. Nothing here writes or changes a SupplierAssuranceDecision, the criticality
  * or the lifecycle — «Høy» in every area is still only what the person registered.
  *
- * Inside one transaction, with the supplier row locked:
+ * A person's judgement (HumanDecision::SUPPLIER_ASSURE): the guard first, then supplier.assure in the
+ * supplier's own customer, with the module. Inside one transaction, with the supplier row locked:
  *  1. the supplier is looked up again through SupplierAccessService::visibleSuppliers() (another
  *     customer's is a 404) and the actor must hold supplier.assure — never edit, assess or delete;
  *  2. an ended supplier is refused;
@@ -46,6 +50,7 @@ class SupplierDueDiligenceService
         private readonly SupplierAccessService $access,
         private readonly SupplierReviewSchedule $schedule,
         private readonly SupplierRequirementReasonText $reasons,
+        private readonly HumanDecisionGuard $guard,
     ) {}
 
     /** @return array<string, list<mixed>> */
@@ -70,6 +75,9 @@ class SupplierDueDiligenceService
     /** @param  array<string, mixed>  $validated  rules() */
     public function record(User $actor, Supplier $supplier, array $validated): SupplierDueDiligenceAssessment
     {
+        $actor = $this->guard->assert($actor, HumanDecision::SUPPLIER_ASSURE);
+        $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_ASSURE, (int) $supplier->customer_id);
+
         $areas = [];
 
         foreach (SupplierDueDiligenceAssessment::AREAS as $area) {

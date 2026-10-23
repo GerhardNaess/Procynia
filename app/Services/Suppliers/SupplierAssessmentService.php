@@ -5,7 +5,10 @@ namespace App\Services\Suppliers;
 use App\Models\Supplier;
 use App\Models\SupplierAssessment;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
 use App\Support\CalendarDate;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -24,10 +27,17 @@ use Illuminate\Validation\ValidationException;
  * The supplier row is locked and its status checked again inside the lock, so an assessment can
  * never land on a supplier being ended at the same moment.
  *
- * Authorization is the caller's (supplier.assess through SupplierAccessService).
+ * A person's judgement (HumanDecision::SUPPLIER_ASSESS): the guard refuses an integration and the
+ * API channel first, then supplier.assess is required in the supplier's own customer, with the module
+ * (SupplierAccessService::authorize()). The controller checks the same before it calls.
  */
 class SupplierAssessmentService
 {
+    public function __construct(
+        private readonly HumanDecisionGuard $guard,
+        private readonly SupplierAccessService $access,
+    ) {}
+
     /** @return array<string, list<mixed>> */
     public static function rules(): array
     {
@@ -47,6 +57,9 @@ class SupplierAssessmentService
     /** @param  array<string, mixed>  $validated */
     public function record(Supplier $supplier, User $actor, array $validated): SupplierAssessment
     {
+        $actor = $this->guard->assert($actor, HumanDecision::SUPPLIER_ASSESS);
+        $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_ASSESS, (int) $supplier->customer_id);
+
         $rationale = trim((string) ($validated['rationale'] ?? ''));
 
         if ($rationale === '') {
@@ -54,7 +67,7 @@ class SupplierAssessmentService
         }
 
         return DB::transaction(function () use ($supplier, $actor, $validated, $rationale): SupplierAssessment {
-            $locked = Supplier::query()->whereKey($supplier->id)->lockForUpdate()->firstOrFail();
+            $locked = Supplier::query()->whereKey($supplier->id)->where('customer_id', (int) $actor->customer_id)->lockForUpdate()->firstOrFail();
 
             if ($locked->status !== Supplier::STATUS_ACTIVE) {
                 throw ValidationException::withMessages(['overall_result' => __('procynia.supplier_management.validation.assess_only_active')]);

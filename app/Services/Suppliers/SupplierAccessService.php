@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerPermissionCatalog;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
@@ -34,6 +35,12 @@ use Illuminate\Database\Eloquent\Builder;
  * any lookup. A supplier of another customer, or any supplier for a user without supplier.view, is
  * absent — not listed, not counted, not searchable and 404 by URL, the same answer as an id that
  * does not exist.
+ *
+ * THE SERVICES ASK TOO (phase 0, docs/external-api-phase-0-plan.md §2j). Every write checks
+ * authorize() itself — the key, in the actor's own customer, which must be the supplier's, with the
+ * module — so the rule holds for any entry point and not only a web request. The decisions
+ * (supplier.assess, supplier.assure, supplier.delete) pass HumanDecisionGuard first; those keys are
+ * human-only, which CustomerPermissionService::has() already withholds from an integration.
  */
 class SupplierAccessService
 {
@@ -41,6 +48,40 @@ class SupplierAccessService
         private readonly CustomerPermissionService $permissions,
         private readonly ModuleEntitlementService $entitlements,
     ) {}
+
+    /**
+     * The rule a service applies before it writes: the key, in the actor's own customer — the one the
+     * supplier belongs to — with the supplier module. canOpenModule() (supplier.view) comes with it,
+     * as it does for every can*() below.
+     */
+    public function may(?User $actor, string $permissionKey, ?int $customerId): bool
+    {
+        $customer = $actor?->customer;
+
+        return $customer !== null
+            && $customerId !== null
+            && (int) $actor->customer_id === $customerId
+            && $this->entitlements->hasModule($customer, 'supplier')
+            && $this->canOpenModule($actor)
+            && $this->permissions->has($actor, $permissionKey);
+    }
+
+    /** The rule, as a refusal (403). */
+    public function authorize(User $actor, string $permissionKey, int $customerId): void
+    {
+        if (! $this->may($actor, $permissionKey, $customerId)) {
+            throw new AuthorizationException("This user may not [{$permissionKey}] in this customer's Leverandøroppfølging.");
+        }
+    }
+
+    /** Documentation is kept by whoever keeps the register (supplier.edit) or controls it (supplier.assure). */
+    public function authorizeDocumentation(User $actor, int $customerId): void
+    {
+        if (! $this->may($actor, CustomerPermissionCatalog::SUPPLIER_EDIT, $customerId)
+            && ! $this->may($actor, CustomerPermissionCatalog::SUPPLIER_ASSURE, $customerId)) {
+            throw new AuthorizationException("This user may not keep documentation in this customer's Leverandøroppfølging.");
+        }
+    }
 
     /** Whether the user may open Leverandøroppfølging at all. */
     public function canOpenModule(?User $user): bool

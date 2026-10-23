@@ -9,8 +9,11 @@ use App\Models\SupplierProfile;
 use App\Models\SupplierRequirementEvaluation;
 use App\Models\SupplierRequirementEvaluationDocument;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Support\CalendarDate;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -25,6 +28,8 @@ use Illuminate\Validation\ValidationException;
  * person chose — nothing here derives it from a document type, a certificate or a date.
  *
  * Inside one transaction, with the supplier row locked:
+ *  0. before it, HumanDecisionGuard (a person, not an integration, not through the API) and
+ *     supplier.assure in the supplier's own customer, with the module (SupplierAccessService::authorize());
  *  1. the supplier is looked up again through SupplierAccessService::visibleSuppliers() (another
  *     customer's is a 404) and the actor must hold supplier.assure — never edit, assess or delete;
  *  2. an ended supplier is refused;
@@ -43,6 +48,7 @@ class SupplierRequirementEvaluationService
         private readonly SupplierAccessService $access,
         private readonly SupplierRequirementApplicability $applicability,
         private readonly SupplierRequirementReasonText $text,
+        private readonly HumanDecisionGuard $guard,
     ) {}
 
     /** @return array<string, list<mixed>> */
@@ -68,6 +74,8 @@ class SupplierRequirementEvaluationService
     /** @param  array<string, mixed>  $validated  rules() */
     public function record(User $actor, Supplier $supplier, array $validated): SupplierRequirementEvaluation
     {
+        $actor = $this->authorizeControl($actor, $supplier);
+
         $rationale = trim((string) ($validated['rationale'] ?? ''));
 
         if ($rationale === '') {
@@ -111,6 +119,8 @@ class SupplierRequirementEvaluationService
      */
     public function reconfirm(User $actor, Supplier $supplier, int $documentId, array $requirementIds, ?string $rationale): array
     {
+        $actor = $this->authorizeControl($actor, $supplier);
+
         $rationale = trim((string) $rationale);
 
         if ($rationale === '') {
@@ -215,6 +225,18 @@ class SupplierRequirementEvaluationService
         }
 
         return $documentId;
+    }
+
+    /**
+     * A control is a person's judgement (HumanDecision::SUPPLIER_ASSURE): the guard first, then
+     * supplier.assure in the supplier's own customer, with the module.
+     */
+    private function authorizeControl(User $actor, Supplier $supplier): User
+    {
+        $actor = $this->guard->assert($actor, HumanDecision::SUPPLIER_ASSURE);
+        $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_ASSURE, (int) $supplier->customer_id);
+
+        return $actor;
     }
 
     private function lock(User $actor, Supplier $supplier): Supplier

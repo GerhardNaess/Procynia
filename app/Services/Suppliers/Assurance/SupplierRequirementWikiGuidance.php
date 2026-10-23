@@ -9,8 +9,10 @@ use App\Models\SupplierControlRequirementWikiPage;
 use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Permissions\CustomerPermissionService;
+use App\Services\Security\HumanDecisionGuard;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -49,6 +51,7 @@ class SupplierRequirementWikiGuidance
         private readonly SupplierAccessService $access,
         private readonly CustomerPermissionService $permissions,
         private readonly ModuleEntitlementService $entitlements,
+        private readonly HumanDecisionGuard $guard,
     ) {}
 
     /** Whether the person may read Enterprise Wiki pages from here. */
@@ -221,8 +224,15 @@ class SupplierRequirementWikiGuidance
         ];
     }
 
+    /**
+     * supplier.assure is human-only: the guard first, then the key in the actor's own customer, with
+     * the supplier module, and Wiki read access.
+     */
     private function authorize(User $actor): void
     {
+        $this->guard->assert($actor, HumanDecision::SUPPLIER_ASSURE);
+        $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_ASSURE, (int) $actor->customer_id);
+
         if (! $this->canManage($actor)) {
             throw new AuthorizationException;
         }

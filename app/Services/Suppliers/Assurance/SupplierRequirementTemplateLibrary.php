@@ -5,10 +5,12 @@ namespace App\Services\Suppliers\Assurance;
 use App\Models\Customer;
 use App\Models\SupplierControlRequirement;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
 use App\Services\Suppliers\SupplierAccessService;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use App\Support\Suppliers\RequirementTemplates\RequirementLibrary;
 use App\Support\Suppliers\RequirementTemplates\RequirementTemplates;
-use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -38,6 +40,7 @@ class SupplierRequirementTemplateLibrary
 {
     public function __construct(
         private readonly SupplierAccessService $access,
+        private readonly HumanDecisionGuard $guard,
     ) {}
 
     /**
@@ -90,9 +93,10 @@ class SupplierRequirementTemplateLibrary
      */
     public function apply(User $actor, string $templateKey): array
     {
-        if (! $this->access->canAssure($actor)) {
-            throw new AuthorizationException;
-        }
+        // The catalogue is supplier.assure's, a human-only key: the guard first, then the key in the
+        // actor's own customer, with the module.
+        $actor = $this->guard->assert($actor, HumanDecision::SUPPLIER_ASSURE);
+        $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_ASSURE, (int) $actor->customer_id);
 
         $template = RequirementTemplates::find($templateKey) ?? throw new \InvalidArgumentException("Unknown requirement template [{$templateKey}].");
         $customerId = (int) $actor->customer_id;

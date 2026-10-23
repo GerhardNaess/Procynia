@@ -7,7 +7,10 @@ use App\Models\SupplierControlRequirement;
 use App\Models\SupplierProfile;
 use App\Models\SupplierRequirementOverride;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
 use App\Services\Suppliers\SupplierAccessService;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -19,7 +22,9 @@ use Illuminate\Validation\ValidationException;
  * SupplierRequirementOverride with a begrunnelse; nothing is ever updated or deleted, and clear is
  * a row too.
  *
- * Inside one transaction, with the supplier row locked:
+ * Whether a requirement applies is a person's decision (HumanDecision::SUPPLIER_ASSURE): the guard
+ * first, then supplier.assure in the supplier's own customer, with the module. Inside one
+ * transaction, with the supplier row locked:
  *  - the supplier is looked up again through SupplierAccessService::visibleSuppliers() (another
  *    customer's is a 404) and the actor must hold supplier.assure — never edit or assess;
  *  - an ended supplier is refused;
@@ -35,10 +40,13 @@ class SupplierRequirementOverrideService
     public function __construct(
         private readonly SupplierAccessService $access,
         private readonly SupplierRequirementApplicability $applicability,
+        private readonly HumanDecisionGuard $guard,
     ) {}
 
     public function record(User $actor, Supplier $supplier, int $requirementId, string $action, ?string $reason): SupplierRequirementOverride
     {
+        $actor = $this->guard->assert($actor, HumanDecision::SUPPLIER_ASSURE);
+        $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_ASSURE, (int) $supplier->customer_id);
         $reason = trim((string) $reason);
 
         return DB::transaction(function () use ($actor, $supplier, $requirementId, $action, $reason): SupplierRequirementOverride {

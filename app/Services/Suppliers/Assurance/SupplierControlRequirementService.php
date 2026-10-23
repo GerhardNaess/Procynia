@@ -9,9 +9,11 @@ use App\Models\SupplierControlRequirementStatusChange;
 use App\Models\SupplierDocument;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
+use App\Services\Security\HumanDecisionGuard;
 use App\Services\Suppliers\SupplierAccessService;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use App\Support\Suppliers\SupplierValidationMessages;
-use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -21,7 +23,9 @@ use Illuminate\Validation\ValidationException;
  * §5.1, §6.6, §13.2). The only writer of SupplierControlRequirement.
  *
  * WHO. supplier.assure, and only that (§13.2): the catalogue is what Leverandørkontroll checks
- * against. supplier.edit, supplier.assess and supplier.delete grant nothing here.
+ * against. supplier.edit, supplier.assess and supplier.delete grant nothing here. supplier.assure is
+ * human-only, so every write passes HumanDecisionGuard first (HumanDecision::SUPPLIER_ASSURE) and then
+ * needs the key in the actor's own customer, with the module.
  *
  * Mutable current state: an edit changes the requirement in place, and the overrides and controls
  * keep their own snapshot of title and level. Sett som utgått retires it — it then applies to no
@@ -46,6 +50,7 @@ class SupplierControlRequirementService
     public function __construct(
         private readonly SupplierAccessService $access,
         private readonly ComplianceAccessService $compliance,
+        private readonly HumanDecisionGuard $guard,
     ) {}
 
     /** @return array<string, list<mixed>> */
@@ -287,9 +292,8 @@ class SupplierControlRequirementService
 
     private function authorize(User $actor): void
     {
-        if (! $this->access->canAssure($actor)) {
-            throw new AuthorizationException;
-        }
+        $this->guard->assert($actor, HumanDecision::SUPPLIER_ASSURE);
+        $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_ASSURE, (int) $actor->customer_id);
     }
 
     /** The requirement row, locked, checked again inside the lock; for one supplier, that supplier open. */

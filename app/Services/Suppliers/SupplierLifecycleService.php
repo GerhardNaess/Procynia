@@ -7,6 +7,9 @@ use App\Models\SupplierComplianceRequirement;
 use App\Models\SupplierDeletion;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
+use App\Services\Security\HumanDecisionGuard;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\HumanDecision;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -31,11 +34,20 @@ use Illuminate\Validation\ValidationException;
  * SupplierDeletion — who, when, the supplier's id and name — so a deletion is never without its row,
  * and a row never without the deletion: if either fails, nothing is removed.
  *
- * Authorization is the caller's (supplier.edit through SupplierAccessService). This only guards the
- * transition itself.
+ * Slett leverandør is a person's decision (HumanDecision::SUPPLIER_DELETE): the guard refuses an
+ * integration and the API channel first, then supplier.delete is required in the supplier's own
+ * customer, with the module (SupplierAccessService::authorize()).
+ *
+ * Authorization of the transitions is the caller's (supplier.edit through SupplierAccessService).
+ * This only guards the transition itself.
  */
 class SupplierLifecycleService
 {
+    public function __construct(
+        private readonly HumanDecisionGuard $guard,
+        private readonly SupplierAccessService $access,
+    ) {}
+
     public function activate(Supplier $supplier, User $actor): Supplier
     {
         return $this->transition($supplier, $actor, [Supplier::STATUS_ONBOARDING], Supplier::STATUS_ACTIVE, null);
@@ -57,10 +69,13 @@ class SupplierLifecycleService
      */
     public function delete(Supplier $supplier, User $actor): bool
     {
+        $actor = $this->guard->assert($actor, HumanDecision::SUPPLIER_DELETE);
+        $this->access->authorize($actor, CustomerPermissionCatalog::SUPPLIER_DELETE, (int) $supplier->customer_id);
+
         return DB::transaction(function () use ($supplier, $actor): bool {
             $locked = Supplier::query()
                 ->whereKey($supplier->id)
-                ->where('customer_id', (int) $supplier->customer_id)
+                ->where('customer_id', (int) $actor->customer_id)
                 ->lockForUpdate()
                 ->first();
 
