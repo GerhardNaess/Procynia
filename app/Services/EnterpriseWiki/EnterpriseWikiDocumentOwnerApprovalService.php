@@ -425,6 +425,11 @@ class EnterpriseWikiDocumentOwnerApprovalService
             return false;
         }
 
+        // Within the requirement's customer: being System Owner somewhere else is no authority here.
+        if ((int) $actor->customer_id !== (int) $approval->customer_id) {
+            return false;
+        }
+
         // A superseded row is history. Deciding it would record a fresh decision against a
         // requirement that no longer exists — System Owner included.
         if ($approval->isSuperseded()) {

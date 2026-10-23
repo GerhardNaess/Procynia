@@ -119,6 +119,27 @@ class EnterpriseWikiDocumentOwnerDecisionHistoryTest extends TestCase
         $this->assertSame(Approval::APPROVAL_STATUS_PENDING, $approval->fresh()->approval_status);
     }
 
+    /** A System Owner of another customer decides nothing here (§2m). */
+    public function test_a_system_owner_of_another_customer_never_decides(): void
+    {
+        ['approval' => $approval] = $this->requirement();
+        ['customer' => $otherCustomer] = $this->requirement();
+        $stranger = $this->user($otherCustomer, User::BID_ROLE_SYSTEM_OWNER);
+        $service = app(EnterpriseWikiDocumentOwnerApprovalService::class);
+
+        $this->assertFalse($service->canDecide($approval, $stranger));
+
+        try {
+            $service->decide($approval, $stranger, Approval::APPROVAL_STATUS_APPROVED);
+            $this->fail('a System Owner of another customer must not decide');
+        } catch (AuthorizationException) {
+            $this->addToAssertionCount(1);
+        }
+
+        $this->assertSame(Approval::APPROVAL_STATUS_PENDING, $approval->fresh()->approval_status);
+        $this->assertSame(0, $approval->decisions()->count());
+    }
+
     public function test_an_integration_never_decides(): void
     {
         ['approval' => $approval, 'customer' => $customer] = $this->requirement();
