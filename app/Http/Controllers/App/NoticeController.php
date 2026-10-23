@@ -1157,6 +1157,9 @@ class NoticeController extends Controller
             'closed_at' => (string) $validated['status'] === SavedNoticeInfoItem::STATUS_CLOSED
                 ? now()
                 : null,
+            'closed_by_user_id' => (string) $validated['status'] === SavedNoticeInfoItem::STATUS_CLOSED
+                ? $user->id
+                : null,
             'closure_comment' => $closureComment !== '' ? $closureComment : null,
         ]);
 
@@ -1208,6 +1211,7 @@ class NoticeController extends Controller
         $targetInfoItem->forceFill([
             'status' => SavedNoticeInfoItem::STATUS_CLOSED,
             'closed_at' => now(),
+            'closed_by_user_id' => $user->id,
             'closure_comment' => $closureComment !== '' ? $closureComment : null,
         ])->save();
 

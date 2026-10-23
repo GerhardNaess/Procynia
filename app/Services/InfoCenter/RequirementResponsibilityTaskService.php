@@ -31,7 +31,7 @@ class RequirementResponsibilityTaskService
 
         if ($requirement->assigned_user_id === null) {
             foreach ($activeTasks as $activeTask) {
-                $this->closeTask($activeTask);
+                $this->closeTask($activeTask, $actor);
             }
 
             return null;
@@ -56,7 +56,7 @@ class RequirementResponsibilityTaskService
         }
 
         foreach ($activeTasks->skip(1) as $duplicateTask) {
-            $this->closeTask($duplicateTask);
+            $this->closeTask($duplicateTask, $actor);
         }
 
         return $task->refresh();
@@ -108,17 +108,20 @@ class RequirementResponsibilityTaskService
             'owner_user_id' => (int) $requirement->assigned_user_id,
             'created_by_user_id' => $task?->created_by_user_id ?? $actor?->id,
             'closed_at' => null,
+            'closed_by_user_id' => null,
             'closure_comment' => null,
             'source_type' => SavedNoticeInfoItem::SOURCE_TYPE_SAVED_NOTICE_AI_REQUIREMENT,
             'source_id' => $requirement->id,
         ];
     }
 
-    private function closeTask(SavedNoticeInfoItem $task): void
+    /** The task closes because of what $actor did to the requirement; null when nobody is known. */
+    private function closeTask(SavedNoticeInfoItem $task, ?User $actor): void
     {
         $task->forceFill([
             'status' => SavedNoticeInfoItem::STATUS_CLOSED,
             'closed_at' => now(),
+            'closed_by_user_id' => $actor?->id,
             'requires_response' => false,
             'response_due_at' => null,
         ])->save();

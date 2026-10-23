@@ -1486,6 +1486,8 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             $this->assertSame('2026-04-10', $infoItem->response_due_at?->toDateString());
             $this->assertSame($owner->id, $infoItem->owner_user_id);
             $this->assertSame($context['admin']->id, $infoItem->created_by_user_id);
+            $this->assertNull($infoItem->closed_at);
+            $this->assertNull($infoItem->closed_by_user_id);
 
             $showPage = $this->inertiaPage(
                 $this->actingAs($context['admin'])->get("/app/notices/saved/{$savedNotice->id}"),
@@ -1624,6 +1626,37 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         }
     }
 
+    /** An aksjon registered as already closed was closed by the person who registered it. */
+    public function test_an_info_item_created_closed_names_its_creator_as_the_closer(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1022-info-create-closed',
+            'Sak for lukket aksjon',
+            sourceType: SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+        );
+
+        $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from("/app/notices/saved/{$savedNotice->id}")
+            ->post("/app/notices/saved/{$savedNotice->id}/info-items", [
+                'type' => SavedNoticeInfoItem::TYPE_NOTE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'body' => 'Avklart på telefon.',
+                'status' => SavedNoticeInfoItem::STATUS_CLOSED,
+            ])
+            ->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+
+        $infoItem = SavedNoticeInfoItem::query()->where('saved_notice_id', $savedNotice->id)->sole();
+
+        $this->assertSame(SavedNoticeInfoItem::STATUS_CLOSED, $infoItem->status);
+        $this->assertNotNull($infoItem->closed_at);
+        $this->assertSame($context['admin']->id, $infoItem->closed_by_user_id);
+    }
+
     public function test_commercial_owner_can_close_info_item_without_comment_and_it_leaves_my_tasks_views(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-04-03 13:00:00'));
@@ -1677,6 +1710,8 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             $this->assertSame(SavedNoticeInfoItem::STATUS_CLOSED, $infoItem->status);
             $this->assertNotNull($infoItem->closed_at);
             $this->assertNull($infoItem->closure_comment);
+            // Who closed it is kept, as who archived a case is (§2m).
+            $this->assertSame($commercialOwner->id, $infoItem->closed_by_user_id);
 
             $showPage = $this->inertiaPage(
                 $this->actingAs($commercialOwner)->get("/app/notices/saved/{$savedNotice->id}"),
@@ -1754,6 +1789,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             $this->assertSame(SavedNoticeInfoItem::STATUS_CLOSED, $infoItem->status);
             $this->assertNotNull($infoItem->closed_at);
             $this->assertSame($closureComment, $infoItem->closure_comment);
+            $this->assertSame($bidManager->id, $infoItem->closed_by_user_id);
 
             $showPage = $this->inertiaPage(
                 $this->actingAs($bidManager)->get("/app/notices/saved/{$savedNotice->id}"),

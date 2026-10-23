@@ -103,6 +103,7 @@ class SavedNoticeInfoItem extends Model
         'owner_user_id',
         'created_by_user_id',
         'closed_at',
+        'closed_by_user_id',
         'closure_comment',
         'source_type',
         'source_id',

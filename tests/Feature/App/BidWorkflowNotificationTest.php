@@ -8,6 +8,7 @@ use App\Models\Nationality;
 use App\Models\Notice;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiRequirement;
+use App\Models\SavedNoticeInfoItem;
 use App\Models\SavedNoticePhaseComment;
 use App\Models\User;
 use App\Models\UserNotification;
@@ -88,6 +89,31 @@ class BidWorkflowNotificationTest extends TestCase
         $this->assignRequirement($notice, $person, $person);
 
         $this->assertCount(0, $this->notificationsFor($person, BidWorkflowNotificationService::EVENT_TASK_ASSIGNED));
+    }
+
+    /** Removing the assignee closes the task, and the person who removed them closed it (§2m). */
+    public function test_removing_the_assignee_closes_the_task_in_the_name_of_who_removed_them(): void
+    {
+        [$customer, $notice] = $this->activeCase();
+        $assignee = $this->user($customer);
+        $assigner = $this->user($customer);
+        $remover = $this->user($customer);
+
+        $requirement = $this->assignRequirement($notice, $assignee, $assigner);
+        $task = SavedNoticeInfoItem::query()
+            ->where('source_type', SavedNoticeInfoItem::SOURCE_TYPE_SAVED_NOTICE_AI_REQUIREMENT)
+            ->where('source_id', $requirement->id)
+            ->sole();
+        $this->assertNull($task->closed_by_user_id);
+
+        $requirement->forceFill(['assigned_user_id' => null])->save();
+        $this->taskService()->syncRequirementTask($requirement->fresh(), $remover);
+
+        $task->refresh();
+        $this->assertSame(SavedNoticeInfoItem::STATUS_CLOSED, $task->status);
+        $this->assertNotNull($task->closed_at);
+        $this->assertSame($remover->id, $task->closed_by_user_id);
+        $this->assertSame($assigner->id, $task->created_by_user_id);
     }
 
     // ── Deadline approaching ────────────────────────────────────────────────
