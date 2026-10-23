@@ -28,7 +28,7 @@ class HumanDecisionActorTriggerTest extends TestCase
     use UsesProjectPostgresConnection;
 
     /** @var array<string, list<string>> */
-    private const DECISION_COLUMNS = [
+    public const DECISION_COLUMNS = [
         'compliance_assessments' => ['assessed_by_user_id'],
         'compliance_audit_finding_changes' => ['changed_by_user_id'],
         'compliance_audit_status_changes' => ['changed_by_user_id'],
