@@ -11,6 +11,7 @@ use App\Models\SavedNoticeAiRequirement;
 use App\Models\User;
 use App\Services\Ai\Requirements\RequirementEditorService;
 use App\Services\SavedNoticeStatusService;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Concerns\UsesProjectPostgresConnection;
@@ -180,6 +181,57 @@ class TenderDeletionProtectionTest extends TestCase
         $this->assertNotNull($usage->fresh());
     }
 
+    /** Approved, then rejected: out of the bid, but its approval is history — kept, by the page and by SQL. */
+    public function test_a_requirement_approved_then_rejected_is_kept_by_delete_all_and_by_the_database(): void
+    {
+        $world = $this->world();
+        $requirement = $this->requirement($world['notice']);
+        app(RequirementEditorService::class)->approveRequirement($requirement, $world['owner']);
+        app(RequirementEditorService::class)->rejectRequirement($requirement, $world['owner']);
+
+        $this->actingAs($world['owner'])
+            ->delete(route('app.ai.requirements.destroy-all', ['savedNotice' => $world['notice']->id]))
+            ->assertRedirect()
+            ->assertSessionHas('success', __('procynia.ai.requirements_deleted_kept', ['count' => 0, 'kept' => 1]));
+        $this->assertNotNull($requirement->fresh());
+
+        $this->assertDatabaseRefuses(fn () => DB::table('saved_notice_ai_requirements')->where('id', $requirement->id)->delete(), 'an approved-then-rejected requirement');
+        $this->assertCaseKept($world, 'procynia.notices.delete_kept_history');
+    }
+
+    /** Approved before revisions were recorded: the row's own approval keeps it, and its case. */
+    public function test_a_requirement_approved_without_a_revision_keeps_its_case(): void
+    {
+        $world = $this->world();
+        $requirement = $this->requirement($world['notice']);
+        $requirement->forceFill([
+            'approval_status' => SavedNoticeAiRequirement::APPROVAL_STATUS_APPROVED,
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+            'approved_at' => now()->subYear(),
+        ])->save();
+
+        $this->assertFalse($requirement->fresh()->isDeletable());
+        $this->assertDatabaseRefuses(fn () => DB::table('saved_notice_ai_requirements')->where('id', $requirement->id)->delete(), 'a requirement approved without a revision');
+        $this->assertCaseKept($world, 'procynia.notices.delete_kept_history');
+    }
+
+    /** A No-Go recorded before status changes were (no status change row) still keeps the case. */
+    public function test_a_legacy_no_go_without_a_status_change_keeps_the_case(): void
+    {
+        $world = $this->world();
+        DB::table('saved_notice_no_go_decisions')->insert([
+            'saved_notice_id' => $world['notice']->id,
+            'customer_id' => $world['customer']->id,
+            'closed_by_user_id' => $world['owner']->id,
+            'closure_reason' => SavedNotice::BID_CLOSURE_REASON_CAPACITY,
+            'closed_at' => now()->subYear(),
+            'created_at' => now()->subYear(),
+            'updated_at' => now()->subYear(),
+        ]);
+
+        $this->assertCaseKept($world, 'procynia.notices.delete_kept_history');
+    }
+
     private function assertCaseKept(array $world, string $message): void
     {
         $this->actingAs($world['owner'])
@@ -189,6 +241,22 @@ class TenderDeletionProtectionTest extends TestCase
 
         $this->assertNotNull($world['notice']->fresh());
         $this->assertFalse($world['notice']->fresh()->isDeletable());
+        // And past every model: the database refuses the same (saved_notices_keep_decision_history).
+        $this->assertDatabaseRefuses(fn () => DB::table('saved_notices')->where('id', $world['notice']->id)->delete(), 'the case');
+    }
+
+    private function assertDatabaseRefuses(callable $statement, string $what): void
+    {
+        DB::beginTransaction();
+
+        try {
+            $statement();
+            $this->fail("The database deleted {$what}");
+        } catch (QueryException) {
+            // refused, as it should be
+        } finally {
+            DB::rollBack();
+        }
     }
 
     private function assertListOffersDelete(array $world, bool $expected): void
