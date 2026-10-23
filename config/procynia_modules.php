@@ -149,6 +149,8 @@ return [
         // Doffin competitor view (Konkurrenter) above.
         'app.supplier-management.' => 'supplier',
         'app.management-review.' => 'management_review',
+        // The external API. Only modules the API serves (ApiRouteContractTest).
+        'api.v1.risks.' => 'risk',
     ],
 
 ];

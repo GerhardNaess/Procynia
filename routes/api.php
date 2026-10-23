@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\MeController;
+use App\Http\Controllers\Api\V1\RiskController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -15,4 +16,5 @@ Route::prefix('v1')
     ->middleware(['api.log', 'api.client', 'api.customer', 'customer.module'])
     ->group(function (): void {
         Route::get('me', MeController::class)->name('me');
+        Route::get('risks', [RiskController::class, 'index'])->name('risks.index');
     });
