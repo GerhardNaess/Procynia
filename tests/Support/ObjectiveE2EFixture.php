@@ -396,16 +396,16 @@ class ObjectiveE2EFixture
             $areaIds = $sweepOnly(BusinessArea::query()->where('customer_id', $customerId)->where('name', '~', $pattern))->pluck('id');
 
             // A KPI carrying the marker goes even if a spec put it under someone else's objective;
-            // the rest go with their objectives below, and their history with them. A bulk delete,
-            // past the models: measurement history and process/activity links go with their KPI
-            // through the database cascade. Kvalitet's processes are never touched.
-            $sweepOnly(Kpi::query()->where('customer_id', $customerId)->where('title', '~', $pattern))->delete();
+            // the rest go with their objectives below, and their history with them. Past the models
+            // and the history trigger (ObjectiveTestDataPurge): measurement history and
+            // process/activity links go with their KPI through the database cascade. Kvalitet's
+            // processes are never touched.
+            ObjectiveTestDataPurge::delete($sweepOnly(Kpi::query()->where('customer_id', $customerId)->where('title', '~', $pattern)));
 
             // An objective is the run's when its title carries the marker, or when it lives in one of
             // the run's areas — a spec may retitle it, but it cannot leave an area no one else uses.
-            $sweepOnly(Objective::query()->where('customer_id', $customerId)
-                ->where(fn (Builder $query) => $query->where('title', '~', $pattern)->orWhereIn('business_area_id', $areaIds)))
-                ->delete();
+            ObjectiveTestDataPurge::delete($sweepOnly(Objective::query()->where('customer_id', $customerId)
+                ->where(fn (Builder $query) => $query->where('title', '~', $pattern)->orWhereIn('business_area_id', $areaIds))));
 
             // Role permissions, area grants and user-role links (also on the seeded E2E users)
             // cascade from the role.

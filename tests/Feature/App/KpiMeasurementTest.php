@@ -30,6 +30,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use LogicException;
 use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\Support\ObjectiveTestDataPurge;
 use Tests\TestCase;
 
 /**
@@ -798,8 +799,9 @@ class KpiMeasurementTest extends TestCase
             ->assertSessionHas('error', 'Målet kan ikke slettes.');
         $this->assertNotNull($objective->fresh());
 
-        // Database cleanup (customer or E2E) still removes everything, history included.
-        Objective::query()->whereKey($objective->id)->delete();
+        // The database holds the same rule (ObjectiveHistoryProtectionTest). E2E cleanup goes past it
+        // through the test-only purge, history included; the customer's own deletion does too.
+        ObjectiveTestDataPurge::delete(Objective::query()->whereKey($objective->id));
         $this->assertSame(0, KpiMeasurement::query()->where('kpi_id', $kpi->id)->count());
     }
 

@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use InvalidArgumentException;
+use LogicException;
 
 /**
  * A KPI — how progress towards one objective is measured.
@@ -149,6 +150,13 @@ class Kpi extends Model
     {
         static::saving(function (self $kpi): void {
             $kpi->guardInvariants();
+        });
+
+        // The database refuses the same (kpis_keep_measurement_history), also for SQL past the model.
+        static::deleting(function (self $kpi): void {
+            if ($kpi->hasMeasurementHistory()) {
+                throw new LogicException('A KPI with measurements is history and cannot be deleted. Retire it instead.');
+            }
         });
     }
 

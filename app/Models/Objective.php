@@ -6,6 +6,7 @@ use DomainException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use LogicException;
 
 /**
  * Et mål — what the virksomhet wants to achieve, in one fagområde, with one person responsible.
@@ -73,6 +74,13 @@ class Objective extends Model
         static::saving(function (self $objective): void {
             if (! in_array($objective->status, self::STATUSES, true)) {
                 throw new DomainException("Unknown objective status [{$objective->status}].");
+            }
+        });
+
+        // Its KPIs' measurements are history; the database refuses the same through kpis_keep_measurement_history.
+        static::deleting(function (self $objective): void {
+            if (! $objective->isDeletable()) {
+                throw new LogicException('An objective whose KPIs have measurements is history and cannot be deleted. Close it instead.');
             }
         });
     }

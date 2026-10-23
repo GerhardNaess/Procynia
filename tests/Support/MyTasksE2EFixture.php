@@ -117,8 +117,8 @@ class MyTasksE2EFixture
                 // Before the fagområde they hold with RESTRICT.
                 // Risks with history are closed, never deleted; a test run's own risks are purged (B3).
                 RiskTestDataPurge::delete(Risk::query()->where('customer_id', $customer->id));
-                Kpi::query()->where('customer_id', $customer->id)->delete();
-                Objective::query()->where('customer_id', $customer->id)->delete();
+                // Measurements are history; a test run's own objectives are purged with them.
+                ObjectiveTestDataPurge::delete(Objective::query()->where('customer_id', $customer->id));
                 $customer->delete();
             });
         }
