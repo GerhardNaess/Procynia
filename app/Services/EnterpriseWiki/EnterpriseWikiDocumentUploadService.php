@@ -4,7 +4,9 @@ namespace App\Services\EnterpriseWiki;
 
 use App\Jobs\EnterpriseWiki\ReconcileEnterpriseWikiClaimSourcesForDocument;
 use App\Models\EnterpriseWikiDocument;
+use App\Models\User;
 use App\Services\DocumentTextExtractor;
+use App\Support\HumanDecision;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -72,14 +74,24 @@ class EnterpriseWikiDocumentUploadService
     }
 
     /**
+     * A file a person uploads. Only a person of the customer uploads (B6: no agent upload), and the
+     * owner they name is checked here as well as in the form (A2, docs/external-api-phase-0-plan.md
+     * §2m). Which permission the upload rides on is the caller's: wiki.source.manage in the Wiki,
+     * quality.create/quality.edit in Kvalitet (F3b).
+     *
      * @return array{document: EnterpriseWikiDocument, reused: bool}
      */
     public function store(
         int $customerId,
         UploadedFile $file,
         ?int $ownerUserId,
-        ?int $uploadedByUserId,
+        User $uploadedBy,
     ): array {
+        $authority = app(EnterpriseWikiSourceAuthority::class);
+        $uploadedBy = $authority->assertPersonOfCustomer($uploadedBy, $customerId, HumanDecision::WIKI_SOURCE_UPLOAD);
+        $authority->assertMayNameOwner($uploadedBy, $customerId, $ownerUserId);
+        $uploadedByUserId = (int) $uploadedBy->id;
+
         $fileHash = $this->hashFor($file);
 
         $existing = $this->existingDocument($customerId, $fileHash);

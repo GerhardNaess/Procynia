@@ -1212,7 +1212,7 @@ class WikiController extends Controller
         abort_unless($document instanceof EnterpriseWikiDocument, 404);
         abort_unless($user instanceof User && $user->canDeleteEnterpriseWikiDocument($document), 403);
 
-        $result = $this->maintainerDecisionRecoveryService->attempt($run->id, caller: 'wiki_controller', allowManualOverride: true);
+        $result = $this->maintainerDecisionRecoveryService->retryAs($user, $run);
 
         if (! $result->isResumed()) {
             Log::info('[PROCYNIA][WIKI_RUN] Maintainer-decision retry requested but not resumed.', [
@@ -1263,7 +1263,7 @@ class WikiController extends Controller
         abort_unless($document instanceof EnterpriseWikiDocument, 404);
         abort_unless($user instanceof User && $user->canDeleteEnterpriseWikiDocument($document), 403);
 
-        $result = $this->pageGenerationRecoveryService->attempt($run->id, caller: 'wiki_controller');
+        $result = $this->pageGenerationRecoveryService->retryAs($user, $run);
 
         Log::info('[PROCYNIA][WIKI_RUN] Failed-page retry requested.', [
             'run_id' => $run->id,

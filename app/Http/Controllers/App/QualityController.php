@@ -341,7 +341,7 @@ class QualityController extends Controller
         // and reassigning the owner stays where it is, in Wiki → Kildedokumenter.
         $ownerUserId = $user->canBeEnterpriseWikiDocumentOwner() ? $user->id : null;
 
-        $result = $this->documentUploads->store($customerId, $file, $ownerUserId, $user->id);
+        $result = $this->documentUploads->store($customerId, $file, $ownerUserId, $user);
 
         $this->items->linkDocument(
             $customerId,
@@ -1540,7 +1540,7 @@ class QualityController extends Controller
         // and reassigning the owner stays where it is, in Wiki → Kildedokumenter.
         $ownerUserId = ($user?->canBeEnterpriseWikiDocumentOwner() ?? false) ? $user->id : null;
 
-        $result = $this->documentUploads->store((int) $customerId, $validated['file'], $ownerUserId, $user?->id);
+        $result = $this->documentUploads->store((int) $customerId, $validated['file'], $ownerUserId, $user);
 
         $this->items->linkDocument(
             (int) $customerId,
@@ -1603,7 +1603,7 @@ class QualityController extends Controller
 
         if ($request->hasFile('file')) {
             $ownerUserId = ($user?->canBeEnterpriseWikiDocumentOwner() ?? false) ? $user->id : null;
-            $document = $this->documentUploads->store((int) $customerId, $validated['file'], $ownerUserId, $user?->id)['document'];
+            $document = $this->documentUploads->store((int) $customerId, $validated['file'], $ownerUserId, $user)['document'];
         } else {
             $document = EnterpriseWikiDocument::query()
                 ->where('customer_id', $customerId)

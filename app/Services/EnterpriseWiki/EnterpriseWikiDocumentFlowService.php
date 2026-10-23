@@ -22,6 +22,7 @@ use App\Models\User;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Support\EnterpriseWiki\EnterpriseWikiQueueTrace;
 use App\Support\HumanDecision;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -195,6 +196,52 @@ class EnterpriseWikiDocumentFlowService
         ], true, true);
 
         return $prepared;
+    }
+
+    /**
+     * «Start» on a source in Wiki → Kildedokumenter: a person of the customer holding
+     * wiki.source.manage starts a run (A2). startForDocument() itself stays the system's way in —
+     * a knowledge handoff and Kvalitet's articles start their runs without a person deciding.
+     *
+     * @return array{run: EnterpriseWikiIngestRun, created: bool}
+     */
+    public function startForDocumentAs(User $actor, EnterpriseWikiDocument $document): array
+    {
+        app(EnterpriseWikiSourceAuthority::class)->assertMayAdministerSources($actor, (int) $document->customer_id, HumanDecision::WIKI_RUN_START);
+
+        return $this->startForDocument((int) $document->customer_id, (int) $document->id);
+    }
+
+    /**
+     * «Dokumenteier» on a source: who vouches for it. A person of the customer holding
+     * wiki.source.manage who may assign owners, naming nobody or an eligible person of the same
+     * customer (A2). The owner approvals follow in the same transaction.
+     */
+    public function changeDocumentOwner(User $actor, EnterpriseWikiDocument $document, ?int $ownerUserId): EnterpriseWikiDocument
+    {
+        $customerId = (int) $document->customer_id;
+        $authority = app(EnterpriseWikiSourceAuthority::class);
+        $actor = $authority->assertMayAdministerSources($actor, $customerId, HumanDecision::WIKI_SOURCE_OWNER_CHANGE);
+
+        if (! $actor->canAssignEnterpriseWikiDocumentOwner()) {
+            throw new AuthorizationException('This user may not assign document owners.');
+        }
+
+        $authority->assertMayNameOwner($actor, $customerId, $ownerUserId);
+
+        return DB::transaction(function () use ($customerId, $document, $ownerUserId): EnterpriseWikiDocument {
+            $locked = EnterpriseWikiDocument::query()
+                ->where('customer_id', $customerId)
+                ->whereKey($document->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $locked->forceFill(['owner_user_id' => $ownerUserId])->save();
+
+            $this->syncDocumentOwnerApprovals($locked->fresh());
+
+            return $locked->fresh();
+        });
     }
 
     /**

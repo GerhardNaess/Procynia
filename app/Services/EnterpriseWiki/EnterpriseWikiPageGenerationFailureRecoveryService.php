@@ -8,6 +8,8 @@ use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
+use App\Models\User;
+use App\Support\HumanDecision;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -114,6 +116,18 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
         }
 
         return $this->decide($run)['result'];
+    }
+
+    /**
+     * «Prøv igjen for feilede sider»: a person who may administer the run's document asks for it (A2, the same rule
+     * as cancelRun()). attempt() itself stays the system's way in — the
+     * maintenance cycle and the recovery command retry without a person deciding.
+     */
+    public function retryAs(User $actor, EnterpriseWikiIngestRun $run): EnterpriseWikiRunRecoveryResult
+    {
+        app(EnterpriseWikiSourceAuthority::class)->assertMayManageRun($actor, $run, HumanDecision::WIKI_RUN_START);
+
+        return $this->attempt((int) $run->id, caller: 'wiki_controller');
     }
 
     /**

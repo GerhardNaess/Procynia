@@ -6,6 +6,8 @@ use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
+use App\Models\User;
+use App\Support\HumanDecision;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -68,6 +70,18 @@ class EnterpriseWikiMaintainerDecisionFailureRecoveryService
         }
 
         return $this->decide($run, $allowManualOverride);
+    }
+
+    /**
+     * «Prøv beslutningsfasen på nytt»: a person who may administer the run's document asks for it (A2, the same rule
+     * as cancelRun()). It is always an explicit, one-off click, so the manual override applies. attempt() itself stays the system's way in — the
+     * maintenance cycle and the recovery command retry without a person deciding.
+     */
+    public function retryAs(User $actor, EnterpriseWikiIngestRun $run): EnterpriseWikiRunRecoveryResult
+    {
+        app(EnterpriseWikiSourceAuthority::class)->assertMayManageRun($actor, $run, HumanDecision::WIKI_RUN_START);
+
+        return $this->attempt((int) $run->id, caller: 'wiki_controller', allowManualOverride: true);
     }
 
     /**
