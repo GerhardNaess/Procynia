@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
 import { PHONE, sidewaysOverflow } from './helpers/readability.js';
 import { expectFocusIndicator, expectNoAxeViolations } from './helpers/a11y.js';
+import { tinker } from './helpers/risk.js';
 
 /**
  * A wide table scrolls sideways inside its box, and its last column holds the row's actions. At a
@@ -14,6 +15,21 @@ import { expectFocusIndicator, expectNoAxeViolations } from './helpers/a11y.js';
  * dismissed.
  */
 const LAPTOP = { width: 1366, height: 900 };
+
+/*
+ * The contributor test reads Wiki as the E2E user, who has no roles in the isolated environment and
+ * so no wiki.view. The spec gives it the reading baseline for the run and takes it away again
+ * (NavigationE2EFixture, as app-navigation and wiki-navigation do).
+ */
+const BASELINE_SUFFIX = Math.random().toString(36).slice(2, 8).padEnd(6, '0').toUpperCase();
+
+test.beforeAll(async () => {
+    await tinker(`\\Tests\\Support\\NavigationE2EFixture::baseline('${BASELINE_SUFFIX}');`);
+});
+
+test.afterAll(async () => {
+    await tinker(`\\Tests\\Support\\NavigationE2EFixture::cleanup('${BASELINE_SUFFIX}');`);
+});
 const NARROW_DESKTOP = { width: 1024, height: 800 };
 
 /**
