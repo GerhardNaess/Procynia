@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeSource;
 use App\Services\Suppliers\Assurance\SupplierRequirementStatus;
 use App\Services\Suppliers\SupplierAccessService;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -53,9 +54,11 @@ class SupplierKnowledgeSource implements WikiKnowledgeSource
         return $this->canOpenModule($user) ? $this->access->findVisibleSupplier($user, $sourceId) : null;
     }
 
+    /** supplier.assure in the supplier's own customer, with the module (phase 0 step 14). */
     public function canHandOff(User $user, Model $source): bool
     {
-        return $source instanceof Supplier && $this->access->canAssure($user);
+        return $source instanceof Supplier
+            && $this->access->may($user, CustomerPermissionCatalog::SUPPLIER_ASSURE, (int) $source->customer_id);
     }
 
     public function draft(User $user, Model $source): WikiKnowledgeDraft

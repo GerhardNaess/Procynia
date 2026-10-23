@@ -5,6 +5,7 @@ namespace Tests\Feature\App;
 use App\Models\Supplier;
 use App\Models\SupplierDocument;
 use App\Models\User;
+use App\Services\EnterpriseWiki\Knowledge\Sources\SupplierKnowledgeSource;
 use App\Services\Suppliers\Assurance\SupplierProfileService;
 use App\Services\Suppliers\SupplierCriticalityService;
 use App\Services\Suppliers\SupplierDocumentService;
@@ -129,6 +130,25 @@ class SupplierServiceAuthorizationTest extends TestCase
         $world['customer']->packageEntitlements()->delete();
 
         $this->assertWritesRefused($world, $world['editor']->fresh(), self::WRITES, 'no module');
+    }
+
+    /**
+     * «Overfør til Wiki» from a supplier: supplier.assure in the supplier's own customer, with the
+     * module. Wiki checks its own half (wiki.knowledge.handoff) in WikiKnowledgeHandoffService.
+     */
+    public function test_the_knowledge_handoff_needs_supplier_assure_in_the_suppliers_customer(): void
+    {
+        $world = $this->world();
+        $source = app(SupplierKnowledgeSource::class);
+        $assurer = $this->supplierUser($world['customer'], [CustomerPermissionCatalog::SUPPLIER_ASSURE]);
+        ['customer' => $other] = $this->context('grc');
+
+        $this->assertTrue($source->canHandOff($assurer, $world['supplier']));
+        $this->assertFalse($source->canHandOff($world['editor'], $world['supplier']), 'supplier.edit alone');
+        $this->assertFalse($source->canHandOff($this->supplierUser($other, [CustomerPermissionCatalog::SUPPLIER_ASSURE]), $world['supplier']), 'another customer');
+
+        $world['customer']->packageEntitlements()->delete();
+        $this->assertFalse($source->canHandOff($assurer->fresh(), $world['supplier']), 'no module');
     }
 
     /**
