@@ -42,7 +42,8 @@
 - Leverandøroppfølging (steg 14) er gjennomført og godkjent 2026-10-23 (§2j).
 - A36 er gjennomført og godkjent 2026-10-23, og A37 og A38 er besluttet (§2j). Leverandøroppfølging er ferdig i fase 0.
 - Mål og KPI (steg 15) er gjennomført og godkjent 2026-10-23 (§2k). A39 og A40 er besluttet og gjennomført, og E2E-feilene i `app-navigation` er rettet (§2k). Mål og KPI er ferdig i fase 0.
-- Anbud (steg 16 og 17) er gjennomført og godkjent som hovedleveranse 2026-10-23 (§2l). A41–A45 er godkjent. P1–P5 er avklart, migrering 000008 er verifisert og rettet, og steg 18 er gjennomført samme dag (§2l, «Avklaring av P1–P5»). Det venter på vurdering, med de åpne beslutningene P6 og P7. Steg 19–20 og API-implementering startes ikke før det.
+- Anbud (steg 16 og 17) er gjennomført og godkjent som hovedleveranse 2026-10-23 (§2l). A41–A45 er godkjent. P1–P5 er avklart, migrering 000008 er verifisert og rettet, og steg 18 er gjennomført samme dag (§2l, «Avklaring av P1–P5»). P2–P5 og steg 18 er godkjent, og P6 (A) og P7 (utsatt) er besluttet.
+- Steg 19 (`b14397a5`) og steg 20 (`134f51c3`) er gjennomført 2026-10-23, sammen med A2 (`8543c35d`), aktør ved lukking av aksjoner (`f08f84dc`), dokumenteiers avvisning i tjenesten (`64b4920f`) og kundeseparasjon i tre tjenester (`978649d2`, `45b61a83`, `f2f6870c`), se §2m. Det venter på vurdering. API-implementering startes ikke før det.
 - F1a, F1b og O6 er rettet.
 - F1c (`2af1ba86`) og F1d (`4e827d93`) er rettet.
 - Kjente testfeil på grunnlinjen: [`docs/testing/known-test-failures.md`](testing/known-test-failures.md) (KTF-1, KTF-2).
@@ -2009,8 +2010,8 @@ A41–A45 er godkjent. P1 og P3 er godkjent som valgt. Denne runden avklarer P2,
 
 | # | Tema | Beskrivelse | Anbefaling |
 |---|---|---|---|
-| P6 | «Se alle saker» og lesertilgang per sak | Med standarden for «Se alle saker» (System Owner, Bid Manager, bidragsyter) arbeider en bidragsyter med selskapstilknytning i alle saker. En lesertilgang per sak gitt til en slik person begrenser derfor ingenting. Tilgangspanelet tilbyr den likevel. Dette er ikke et hull, fordi «Se alle saker» er kundens administrative valg, men panelet kan gi et feil inntrykk. | **A (anbefalt):** behold regelen, og la panelet vise at personen allerede arbeider i alle saker gjennom «Se alle saker». Det er en ren visningsendring. **B:** la lesertilgang per sak begrense en person med «Se alle saker». Det er en ny regel og en produktbeslutning. **C:** kunder som vil styre per sak, snevrer inn «Se alle saker». Det er dagens mulighet. Ikke implementert. |
-| P7 | Visning av sporene | Tilgangssporet og svarhistorikken lagres, men vises ikke. | Vurder en enkel lesevisning når det er behov, for eksempel for revisjon. Ikke bygget. |
+| P6 *(besluttet: A, §2m)* | «Se alle saker» og lesertilgang per sak | Med standarden for «Se alle saker» (System Owner, Bid Manager, bidragsyter) arbeider en bidragsyter med selskapstilknytning i alle saker. En lesertilgang per sak gitt til en slik person begrenser derfor ingenting. Tilgangspanelet tilbyr den likevel. Dette er ikke et hull, fordi «Se alle saker» er kundens administrative valg, men panelet kan gi et feil inntrykk. | **A (anbefalt):** behold regelen, og la panelet vise at personen allerede arbeider i alle saker gjennom «Se alle saker». Det er en ren visningsendring. **B:** la lesertilgang per sak begrense en person med «Se alle saker». Det er en ny regel og en produktbeslutning. **C:** kunder som vil styre per sak, snevrer inn «Se alle saker». Det er dagens mulighet. Ikke implementert. |
+| P7 *(besluttet: utsatt, §2m)* | Visning av sporene | Tilgangssporet og svarhistorikken lagres, men vises ikke. | Vurder en enkel lesevisning når det er behov, for eksempel for revisjon. Ikke bygget. |
 
 #### Tester og kjøringer (avklaringen og steg 18)
 
@@ -2053,6 +2054,162 @@ A41–A45 er godkjent. P1 og P3 er godkjent som valgt. Denne runden avklarer P2,
 - **Svarpanelet** viser «Redigert manuelt» når den som redigerte ikke er kjent.
 - **På en sak i historikk** ser bare den som administrerer sakens tilgang, valgene for kommersiell eier og Bid Manager.
 - Ingen nye skjermbilder, statuser, dialoger eller godkjenningssteg. Sporene lagres, men vises ikke.
+
+### 2m. Steg 19–20 og verifiseringen før (2026-10-23)
+
+P2–P5 og steg 18 er godkjent som hovedleveranse. Alle ni moduler er gjennomgått.
+
+#### Produktbeslutninger
+
+| # | Beslutning | Konsekvens |
+|---|---|---|
+| P6 | **Alternativ A.** «Se alle saker» beholdes. Tilgang per sak begrenser ikke en person som allerede har bredere tilgang. | Rettighetsmodellen er uendret. En forklaring i tilgangspanelet kan vurderes senere. |
+| P7 | Egne skjermbilder for tilgangs- og svarhistorikk utsettes. | Historikken bevares og er teknisk tilgjengelig (`customer_access_changes`, `saved_notice_ai_requirement_wiki_answer_revisions`). |
+
+#### Før steg 19–20
+
+**1. Migreringskjeden på en helt ren database.**
+- Ny, tom database `procynia_migration_check` (samme Postgres-bilde med pgvector).
+- `migrate`: alle 391 migreringer kjørt uten feil.
+- `migrate:reset`: alle rullet tilbake uten feil og uten manuelle rettinger. Etterpå finnes bare tabellen `migrations`. Ingen egne funksjoner eller triggere står igjen. Utvidelsen `vector` blir stående, som tilsiktet: `CREATE EXTENSION IF NOT EXISTS` og ingen `DROP`.
+- Ny `migrate`: skjemaet (`pg_dump -s`) er identisk med første kjøring.
+- Sammenligning med de eksisterende databasene (`pg_dump -s --no-owner --no-privileges`):
+  - utviklingsdatabasen: bare utvidelsen `amcheck`, som er driftsverktøy;
+  - `procynia_test`: bare en skjemakommentar;
+  - `procynia_e2e`: kolonnene i `saved_notice_ai_requirement_wiki_answers` sto i annen rekkefølge etter den manuelle rettingen i forrige runde. Databasen er derfor bygget helt på nytt fra kjeden (`scripts/e2e-env.sh reset` og `up`) før E2E i denne runden.
+- 000013 og 000014 (denne runden) er også kjørt opp, ned og opp igjen på den rene databasen.
+
+**2. Tilbakefyllingen i 000008 med et faktisk svar.**
+- Utviklingsdatabasen har ett lagret Wiki-svar, og det er ikke redigert. Det finnes altså ikke et faktisk redigert svar noe sted.
+- **Fremgangsmåte:** den rene databasen rulles tilbake til før 000008. Det ekte svaret kopieres inn tre ganger:
+  - A: redigert slik den gamle koden gjorde det (`answer_text` endret, `updated_at` skrevet);
+  - B: urørt;
+  - C: bare merket som utdatert (`stale_at` og `updated_at` skrevet, teksten urørt).
+- **Resultat etter 000008:**
+  - A har `is_hand_edited = true`, og `edited_by_user_id` og `edited_at` er tomme;
+  - B og C er ikke merket;
+  - `updated_at` er urørt på alle tre;
+  - 000010 lager ingen historikkrader i ettertid.
+- Tilbakerulling og ny migrering med dataene til stede gir samme resultat.
+- Det ekte, urørte svaret blir ikke feilaktig tolket som redigert.
+
+**3. Aktør ved lukking av aksjoner (`saved_notice_info_items`), rettet (`f08f84dc`).**
+- Lukking skjedde tre steder, og ingen lagret hvem:
+  - «Lukk» på en aksjon (`NoticeController::closeSavedNoticeInfoItem`);
+  - en aksjon registrert som lukket (`storeSavedNoticeInfoItem`);
+  - kravoppgaven systemet lukker når en person fjerner kravansvarlig (`RequirementResponsibilityTaskService`).
+- Ny kolonne `closed_by_user_id` (migrering `2026_10_23_000013`), med samme mønster som `archived_by_user_id` i steg 18. Alle tre stedene skriver den. I det tredje tilfellet er det personen som fjernet ansvarlig.
+- Eldre lukkede aksjoner har ukjent lukker. Ingenting fylles inn: `created_by_user_id` og `owner_user_id` er ikke den som lukket.
+- Ingen endring i grensesnittet.
+
+#### Steg 19 – beslutningskolonner i databasen (`b14397a5`)
+
+- Migrering `2026_10_23_000014_reject_integration_actors_in_decision_columns`.
+- Én felles sjekk, `assert_human_decision_actor(actor, kolonne)`, og én triggerfunksjon. Hver tabell får én trigger, `human_decision_actor`, `BEFORE INSERT OR UPDATE OF` kolonnene.
+- **Bare en ny verdi sjekkes.** En rad der aktøren er uendret, passerer, og NULL passerer alltid. Dermed virker `nullOnDelete`, og en beslutning som kopieres til en ny versjon, beholder personen sin.
+- **Bare `role = 'integration'` nektes.**
+- **Kolonnene:** 44 kolonner i 36 tabeller.
+  - Planens §4.8: 33 kolonner.
+  - Beslutningsloggene fra steg 5–18 der hver skriving er en vaktet beslutning:
+    - `enterprise_wiki_document_owner_decisions`, `enterprise_wiki_page_review_events.actor_user_id` og `enterprise_wiki_page_versions.qa_assigned_by_user_id`;
+    - `objectives.closed_by_user_id`, `objective_status_changes`, `kpi_status_changes` og `kpi_measurements.withdrawn_by_user_id`;
+    - `compliance_requirements.applicability_set_by`, `compliance_requirement_applicability_changes` og `compliance_audit_finding_changes`;
+    - `supplier_criticality_changes`, `supplier_status_changes`, `supplier_control_requirement_status_changes` og `supplier_assurance_decisions`;
+    - `saved_notice_status_changes` og `saved_notice_no_go_decisions`;
+    - `customer_access_changes.actor_user_id`.
+  - **Ikke med:** tabeller som også skrives av vanlig registerarbeid. Eksempler er `improvement_case_status_changes` («Start»), `compliance_requirement_status_changes` («Utgått»/«Gjenåpne» under `compliance.edit`) og `quality_item_events`. En integrasjon kan senere få lov til å lage utkast der.
+- `down()` fjerner alle triggere med dette navnet, uansett hvilke tabeller som står på listen, og deretter begge funksjonene.
+- **Datakontroll (bare lesing, utviklingsdatabasen):**
+  - ingen integrasjonsbrukere;
+  - ingen integrasjonsaktør i noen av de 44 kolonnene;
+  - ingen avgjort rad uten aktør. Det er sjekket for godkjente sider, påstander og krav, avviste krav, lukkede avvik, ferdigstilte gjennomganger, godkjente prosesser, avgjorte dokumenteierkrav, tilbaketrukne målinger og tilbakekalte aksepter.
+- **Merknad til §4.3:** `users.role` er `NOT NULL` i skjemaet nå. Vakten behandler fortsatt NULL som et menneske, men databasen tillater ikke NULL.
+
+#### Steg 20 – kontrakttesten (`134f51c3`) og funnene den førte til
+
+**`HumanDecisionContractTest`** fører et register over alle 99 tjenestemetoder som tar en menneskelig beslutning, for alle 40 verdiene i `HumanDecision`. Registeret kontrolleres begge veier:
+- Hver beslutning har en metode. Hver offentlig metode i `app/` som når vakten, direkte eller gjennom egne hjelpemetoder, står i registeret med beslutningene den når.
+- **K1, K4 og B2:** hver metode kalles med en integrasjon som har System Owner-rollen, og med en person gjennom API-kanalen. Begge må nektes med metodens egen beslutning før én eneste `INSERT`, `UPDATE` eller `DELETE`. Det gir 198 kall. Tolv metoder validerer input før vakten eller tar beslutningen bare i én gren. De får argumenter som når vakten.
+- **K3:** aktøren er en påkrevd `User`. Det eneste unntaket er den eldre todelte signaturen til `applyManualMixedBlockEdit`, som nekter når ingen av de to plassene har en aktør.
+- **K2:** ingen kontroller skriver en beslutningskolonne. Tre kolonner med samme navn i andre tabeller er listet med tabellnavn.
+- **Systemstier:** ingen jobb, kommando, lytter, observatør, varsel, provider eller hendelse kaller en beslutningsmetode. Et kall i kø ville passert vakten i arbeideren, også for en forespørsel som kom via API-et.
+
+**A2 – koblet til (`8543c35d`):**
+- `EnterpriseWikiDocumentUploadService::store()` tar personen som laster opp, ikke en id.
+  - Den sjekker vakten (`WIKI_SOURCE_UPLOAD`, B6) og at personen tilhører kunden.
+  - Eieren som oppgis, kontrolleres også i tjenesten: aldri en integrasjon eller en person fra en annen kunde, og en annen enn en selv bare for den som kan tildele eiere.
+  - Hvilken rettighet opplastingen krever, avgjør kalleren: `wiki.source.manage` i Wiki og `quality.create`/`quality.edit` i Kvalitet (F3b).
+- `startForDocumentAs()` og `changeDocumentOwner()` krever vakt og `wiki.source.manage` i kunden. Skrivingen av eier og synkroniseringen av godkjenninger er flyttet ut av `WikiSourceController`.
+- `retryAs()` på begge gjenopprettingstjenestene krever vakt og samme regel som `cancelRun()`.
+- `startForDocument()` og `attempt()` er fortsatt systemets inngang, for kunnskapsoverføring, vedlikeholdssyklus og gjenopprettingskommandoen.
+
+**Dokumenteiers avvisning (`64b4920f`):** kontrolleren skrev returhendelsen og satte siden til «Sendt tilbake» etter `decide()`, og leste forrige status før radlåsen. Returen skjer nå i `decide()`, i samme transaksjon og under samme lås, og bare ved en ny avvisning. Ingen kontroller skriver lenger en beslutningskolonne.
+
+**Kundeseparasjon i tjenestelaget.** Funnet ved å kalle tjenestene direkte med en person fra en annen kunde. Ingen av hullene kunne nås via nettet, fordi kontrollerne slår opp siden eller saken i gjeldende kunde. Tjenestene stolte likevel på det.
+
+| Commit | Hull | Retting |
+|---|---|---|
+| `978649d2` | `EnterpriseWikiClaimDecisionService::canHandle()`: `has()` gir System Owner `wiki.review` i alle kunder, og `canHandleClaim()` slipper System Owner og QA gjennom. En System Owner eller QA fra en annen kunde kunne godkjenne, avvise, angre, overstyre blokkering og knytte kilder på denne kundens påstander. | Personen må tilhøre sidens kunde, og påstanden må høre til siden. |
+| `45b61a83` | `EnterpriseWikiDocumentOwnerApprovalService::canDecide()`: enhver aktiv System Owner kunne avgjøre et dokumenteierkrav i en annen kunde. | Personen må tilhøre kravets kunde. |
+| `f2f6870c` | `SavedNoticeAccessService::canManageContributorAccess()`: `true` for enhver System Owner. | Personen må tilhøre sakens kunde. |
+
+Gjennomgangstjenesten i Wiki nektet allerede, og det har nå en test.
+
+**Kundeseparasjon per modul (tester på tjenestenivå):**
+- **Risiko:** `RiskServiceAccessTest`.
+- **Avvik:** `ImprovementServiceAccessTest`.
+- **Ledelsens gjennomgang:** `ManagementReviewServiceAccessTest`.
+- **Kvalitet:** `QualityHumanDecisionTest`, `QualityItemTest` og flere.
+- **Etterlevelse:** `ComplianceServiceAuthorizationTest`.
+- **Leverandør:** `SupplierServiceAuthorizationTest`.
+- **Mål og KPI:** `ObjectiveServiceAuthorizationTest`.
+- **Anbud:** `TenderCaseWorkAccessTest`, `TenderRequirementDecisionTest`, `TenderBidStatusDecisionTest` og `TenderCaseAccessTrailTest`.
+- **Wiki:** `EnterpriseWikiPageReviewServiceAuthorityTest`, `EnterpriseWikiClaimDecisionServiceAuthorityTest`, `EnterpriseWikiDocumentOwnerDecisionHistoryTest` og `WikiSourceAdministrationAuthorityTest`.
+
+#### Nye observasjoner (ikke endret)
+
+| Id | Observasjon | Vurdering |
+|---|---|---|
+| A46 | «Flytt til historikk» med utfall (vunnet, tapt, No-Go) skrives i `NoticeController::archiveSavedNotice`, ikke i en tjeneste, og er ikke en `HumanDecision`. | Saksarbeid (`canArchive`) i dag. Utfallet teller som behandlet sak (P2). Skal ikke eksponeres i API-et før det er flyttet til en tjeneste og det er besluttet om utfallet er menneskeforbeholdt. |
+| A47 | `canHandleClaim()` i dokumenteiertjenesten slipper fortsatt System Owner og QA gjennom uten kundesjekk. | Brukes nå bare til visning innen egen kunde. Beslutningen går gjennom `canHandle()`, som er rettet. |
+
+#### Gjenstår før API fase 1
+
+- **A10:** feilformatet i API-laget (fase 1).
+- **A23:** Kvalitets AI-forslag (`interpret`, `integrate`, `propose`) og «Spør Wiki» kontrollerer fortsatt tilgangen bare i kontrolleren. Det er ikke menneskelige beslutninger, men AI-kostnad og lesetilgang. Operasjonene bør ikke åpnes i API-et før tjenestene tar `User` og kontrollerer selv (§2g).
+- **A46:** se over.
+- **Steg 21–22:** dokumentasjon av at fase 0 er ferdig, og merge-gate med full PHP-suite. Ikke kjørt.
+
+#### Tester og kjøringer
+
+- **Nye og utvidede testfiler:**
+  - `HumanDecisionContractTest` (203);
+  - `HumanDecisionActorTriggerTest` (3);
+  - `WikiSourceAdministrationAuthorityTest` (+5);
+  - `EnterpriseWikiClaimDecisionServiceAuthorityTest` (+2);
+  - `EnterpriseWikiPageReviewServiceAuthorityTest` (+1);
+  - `EnterpriseWikiDocumentOwnerDecisionHistoryTest` (+2);
+  - `TenderCaseAccessTrailTest`, `CustomerSavedNoticeWorklistTest` og `BidWorkflowNotificationTest` (aksjoner).
+- **PHP, hele Wiki-suiten** (`--filter=Wiki`): **4481 av 4481 bestått** (889 s).
+- **PHP, alle modul-, anbuds-, AI-, sikkerhets-, rettighets- og navigasjonsfiler uten Wiki** (232 filer, også `tests/Unit/Requirement*`): **2540 bestått, 0 feilet, 3 hoppet over.** De tre er Redis-kontrakttester som krever lokal Redis fra testcontaineren, og de berøres ikke av endringene.
+- **JS:** 2130 av 2130 bestått.
+- **E2E i det isolerte miljøet** (bygget på nytt med `reset` og `up`, databasen fra kjeden): 46 filer og **247 av 247 bestått**, uten skip og uten ustabile tester.
+  - Filene: alle 21 Wiki-spesifikasjoner, `a11y-wiki`, `knowledge-handoff`, Kvalitets opplastinger, `a11y-tenders-ai`, `table-row-actions-in-view`, `info-center-help`, `my-tasks-governance`, `permission-sections` og beslutningsreisene i Risiko, Avvik, Mål og KPI, Etterlevelse, Leverandør og Ledelsens gjennomgang.
+- **Mutasjonssjekket, alle fanget:**
+  - aksjonslukking (3);
+  - A2 (11, der én er ekvivalent: `canBeEnterpriseWikiDocumentOwner()` utelukker allerede integrasjoner);
+  - dokumenteiers avvisning (1);
+  - triggerne (6 databasemutanter, med tilbakerulling og ny migrering per mutant);
+  - kontrakttesten (8: feil beslutning, vakten ignorerer API, uregistrert metode, nullbar aktør, kontroller skriver eller tilordner beslutningskolonne, jobb kaller beslutning, skriving før vakten);
+  - kundeseparasjonen (4).
+- **Ikke verifisert:** ekte AI-kall. Wiki-kjøring, anbudssvar, vurdering, uttrekk og «Spør Wiki» er testet med falske AI-klienter. Ingen kjøring mot OpenAI er gjort i denne runden. Køarbeiderne er ikke startet på nytt og har ikke kjørt en ekte Wiki-kjøring med den nye koden.
+
+#### Endringer i brukeropplevelsen
+
+- Ingen nye skjermbilder, statuser, dialoger eller godkjenningssteg.
+- Lukking av en aksjon lagrer hvem som lukket, men det vises ikke (P7).
+- Alle arbeidsflyter for personer er uendret. Opplasting, «Start», «Dokumenteier», «Prøv igjen», dokumenteiers avvisning og påstandsbeslutninger gir samme resultat og samme meldinger.
+- En integrasjon eller en person fra en annen kunde nektes nå også når tjenestene kalles direkte.
 
 ## 3. Avgrensning
 
@@ -2282,8 +2439,8 @@ Hver linje er én commit. Hver commit kjører sine målrettede tester før den l
 | 16 | `feat(tender): require an explicit permission to decide requirements` | **B4**, `RequirementEditorService` uten null-aktør, rettighet i Tilganger, grensesnitt. **Gjort** (§2l) | 1 |
 | 17 | `feat(tender): record who changes a bid status` | `SavedNoticeStatusService` og `saved_notice_status_changes`. **Gjort** (§2l) | 1 |
 | 18 | `feat(security): audit trail for access changes` | **F4**: `customer_access_changes`. `AdministrativeChangeAuditTrailTest` skrives om til «sporet skrives». **Gjort** (`ef81bb0d`), og saksnivået i tillegg (`59c50a2c`), se §2l. | – |
-| 19 | `feat(security): reject integration actors in decision columns` | Triggerne i §4.8 og datakontrollen | 9–17 |
-| 20 | `test(security): HumanDecisionContractTest` | §6.1 | 1–19 |
+| 19 | `feat(security): reject integration actors in decision columns` | Triggerne i §4.8 og datakontrollen. **Gjort** (`b14397a5`), 44 kolonner, se §2m | 9–17 |
+| 20 | `test(security): HumanDecisionContractTest` | §6.1. **Gjort** (`134f51c3`), se §2m | 1–19 |
 | 21 | `docs: phase 0 complete` | Status i `external-api-architecture.md` §7/§14, `docs/operations/security.md`, `enterprise-wiki-approval-model.md` (F1-regelen) | 20 |
 | 22 | – | Merge-gate: full PHP-suite og relevante E2E-tester. Jeg spør før kjøring. | 21 |
 
