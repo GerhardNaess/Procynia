@@ -3,6 +3,21 @@ import { loginAs, SYSTEM_OWNER, USER } from './helpers/auth.js';
 import { DESKTOP, PHONE, expectPageHelp, expectReadable, sidewaysOverflow } from './helpers/readability.js';
 import { tinker } from './helpers/risk.js';
 
+/*
+ * The E2E user reads Wiki and Kvalitet and nothing else under Styring — the checks below are
+ * written against exactly that. E2ETestSeeder creates no roles, so the spec gives it for the run
+ * (NavigationE2EFixture::baseline) and takes it away again afterwards.
+ */
+const BASELINE_SUFFIX = Math.random().toString(36).slice(2, 8).padEnd(6, '0').toUpperCase();
+
+test.beforeAll(async () => {
+    await tinker(`\\Tests\\Support\\NavigationE2EFixture::baseline('${BASELINE_SUFFIX}');`);
+});
+
+test.afterAll(async () => {
+    await tinker(`\\Tests\\Support\\NavigationE2EFixture::cleanup('${BASELINE_SUFFIX}');`);
+});
+
 test.beforeEach(async ({ page }) => {
     await loginAs(page, USER.email, USER.password);
 });

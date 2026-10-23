@@ -31,6 +31,24 @@ class NavigationE2EFixture
     private const USER_EMAIL = 'e2e.user@procynia.test';
 
     /**
+     * What the whole spec takes the E2E user to hold: Wiki and Kvalitet to read, and nothing in
+     * Risiko, Mål og KPI, Avvik or Etterlevelse. E2ETestSeeder creates no roles, so the spec gives
+     * this itself, as a role of the run (removed by cleanup), instead of relying on roles someone
+     * once assigned by hand in a long-lived database.
+     */
+    public static function baseline(string $suffix): void
+    {
+        $customerId = self::customerId();
+        $user = User::query()->where('email', self::USER_EMAIL)->firstOrFail();
+
+        DB::transaction(function () use ($customerId, $user, $suffix): void {
+            $role = CustomerRole::query()->create(['customer_id' => $customerId, 'name' => self::name($suffix, 'Grunnrolle'), 'is_active' => true]);
+            $role->syncPermissions([CustomerPermissionCatalog::WIKI_VIEW, CustomerPermissionCatalog::QUALITY_VIEW]);
+            $user->customerRoles()->attach($role->id, ['customer_id' => $customerId]);
+        });
+    }
+
+    /**
      * Hands the E2E user a role with the given permission keys in one new fagområde.
      *
      * @param  list<string>  $permissionKeys
