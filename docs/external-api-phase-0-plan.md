@@ -1,6 +1,6 @@
 # Eksternt API – implementeringsplan for fase 0
 
-**Status:** Planen er godkjent 2026-10-22 med beslutningene B5–B9 (§1). Implementeringen er startet i rekkefølgen i §5.
+**Status:** **Fase 0 er godkjent 2026-10-23** på grunnlag av sluttrapporten (§2n). Planen ble godkjent 2026-10-22 med beslutningene B5–B9 (§1), og alle stegene i §5 er gjennomført. Godkjenningen gjelder herdingen i fase 0. Den er ikke en produksjonsgodkjenning: punktene under «Ikke verifisert» og «Sperrer for API-et» i §2n gjelder fortsatt.
 
 **Fremdrift:**
 - Ferdig:
@@ -2215,6 +2215,23 @@ Gjennomgangstjenesten i Wiki nektet allerede, og det har nå en test.
 ### 2n. Steg 21–22: sluttstatus og merge-gate (2026-10-23)
 
 Steg 19–20 og sikkerhetsrettingene i §2m er godkjent 2026-10-23.
+
+#### Godkjenning (2026-10-23)
+
+Fase 0 er godkjent 2026-10-23 på grunnlag av denne sluttrapporten:
+
+- Alle ni moduler er gjennomgått (tabellen under).
+- K1–K14 er oppfylt (§7 og tabellen under).
+- Hele PHP-suiten er grønn: 8566 bestått, 0 feilet, 3 hoppet over. De tre er Redis-testene i `RedisRuntimeContractTest`, med kjent årsak fra før fase 0.
+
+Hva godkjenningen **ikke** omfatter:
+
+- **Ikke produksjonsgodkjenning.** Migreringene 000005–000014 er ikke kjørt i Azure, og koden er ikke deployet.
+- **Ikke verifisert:** ekte AI-kall, Wiki-kjøring med køarbeidere, Redis mot et isolert oppsett og produksjonsdata (se «Ikke verifisert»).
+- **Ikke API-et.** Sperrene for A23 og A46 og avgrensningen for API fase 1 gjelder (se «Sperrer for API-et»).
+- **Restpunktene** under «Andre restpunkter» er ikke lukket.
+
+Når de uverifiserte punktene skal gjennomføres, står i [`external-api-phase-1-decisions.md`](external-api-phase-1-decisions.md) §11. API fase 1 implementeres ikke før de åpne arkitekturbeslutningene der er godkjent.
 
 #### Modulene
 

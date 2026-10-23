@@ -1,6 +1,6 @@
 # Eksternt Procynia-API – arkitektur og implementeringsplan
 
-**Status:** Forslag til arkitekturbeslutning. Fase 0 (herding, ingen API) er gjennomført 2026-10-23 (§7.4, §14). Selve API-et, fase 1 og senere, er ikke implementert. Produktbeslutningene for fase 0 er tatt 2026-10-22 (§7.3). Implementeringsplanen og sluttstatusen står i [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §2n.
+**Status:** Forslag til arkitekturbeslutning. Fase 0 (herding, ingen API) er gjennomført og godkjent 2026-10-23 (§7.4, §14). Godkjenningen er ikke en produksjonsgodkjenning. Selve API-et, fase 1 og senere, er ikke implementert. Produktbeslutningene for fase 0 er tatt 2026-10-22 (§7.3). Implementeringsplanen og sluttstatusen står i [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §2n.
 **Dato:** 2026-10-22
 **Første konsument:** Siggjo (Advanias AI- og utviklingsmiljø: dashboards i PostgreSQL/Claude, agenter i Microsoft Foundry).
 **Mål:** Et generelt, tilgangsstyrt API som også kan brukes av andre integrasjoner.
