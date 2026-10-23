@@ -5,8 +5,6 @@ namespace App\Services\Auth;
 use App\Models\IdentityProvider;
 use Firebase\JWT\JWK;
 use Firebase\JWT\JWT;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use League\OAuth2\Client\Provider\GenericProvider;
 use RuntimeException;
@@ -28,7 +26,10 @@ use RuntimeException;
  */
 class EntraOidcClient
 {
-    public function __construct(private readonly EntraConfig $config) {}
+    public function __construct(
+        private readonly EntraConfig $config,
+        private readonly EntraJwksProvider $jwks,
+    ) {}
 
     /**
      * Values the caller must keep in the session until the callback returns.
@@ -95,7 +96,7 @@ class EntraOidcClient
 
         // Signature. Throws on an unknown key id, a wrong signature or an expired token.
         $claims = (array) json_decode(
-            (string) json_encode(JWT::decode($idToken, JWK::parseKeySet($this->jwks($provider)))),
+            (string) json_encode(JWT::decode($idToken, JWK::parseKeySet($this->jwks->forTenant($provider->tenant_id)))),
             true,
         );
 
@@ -148,32 +149,5 @@ class EntraOidcClient
             'urlResourceOwnerDetails' => '',
             'scopeSeparator' => ' ',
         ]);
-    }
-
-    /**
-     * The tenant's signing keys.
-     *
-     * Cached for an hour: Microsoft rotates these, so pinning them would break logins, and fetching
-     * them on every callback would put an external dependency in the login path.
-     *
-     * @return array<string, mixed>
-     */
-    private function jwks(IdentityProvider $provider): array
-    {
-        return Cache::remember(
-            'entra:jwks:'.$provider->tenant_id,
-            now()->addHour(),
-            function () use ($provider): array {
-                $url = 'https://login.microsoftonline.com/'.$provider->tenant_id.'/discovery/v2.0/keys';
-
-                $response = Http::timeout(10)->get($url);
-
-                if (! $response->successful()) {
-                    throw new RuntimeException('Could not retrieve the signing keys for the identity provider.');
-                }
-
-                return (array) $response->json();
-            },
-        );
     }
 }

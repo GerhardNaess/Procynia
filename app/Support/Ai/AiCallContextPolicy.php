@@ -5,6 +5,7 @@ namespace App\Support\Ai;
 use App\Data\Ai\AiCallContext;
 use App\Exceptions\Ai\AiCallContextException;
 use App\Services\Ai\Operational\AiOperationalAlertService;
+use App\Services\Security\ActorChannel;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -16,6 +17,8 @@ use Illuminate\Support\Facades\Log;
  *    In `strict` mode a call without one is refused; in `warn` mode it proceeds, is recorded as
  *    `unattributed` and raises an operational alert naming the operation.
  *
+ *  - It is not made from the external API (D11, docs/external-api-phase-1-decisions.md §9).
+ *
  * Called by OpenAiClient only, so it covers every path that can reach the provider.
  */
 class AiCallContextPolicy
@@ -24,6 +27,15 @@ class AiCallContextPolicy
 
     public function enforce(AiCallContext $context): AiCallContext
     {
+        // D11: the external API never spends AI. Asked of the request at call time, so no path —
+        // a presenter, an attention service, a future endpoint — can reach the provider from /api.
+        if (app(ActorChannel::class)->isApi()) {
+            throw new AiCallContextException(sprintf(
+                'AI provider call [%s] refused: AI is not available through the external API.',
+                (string) ($context->operation ?? 'null'),
+            ));
+        }
+
         if (! AiOperationCatalog::isWellFormed($context->operation)) {
             throw new AiCallContextException(sprintf(
                 'AI provider call has no valid operation (got [%s]); every call must name a registered <feature>.<operation>.',

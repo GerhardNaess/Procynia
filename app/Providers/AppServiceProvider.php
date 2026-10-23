@@ -18,6 +18,7 @@ use App\Services\Notifications\AssignmentNotifier;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Services\Quality\QualityActivityLinkCleanup;
 use App\Services\Security\ActorChannel;
+use App\Services\Security\ApiActorChannel;
 use App\Services\Security\InteractiveActorChannel;
 use App\Services\Ted\TedSourceAdapter;
 use App\Support\Ai\AiCallContextScope;
@@ -43,9 +44,12 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->singleton(AiCallContextScope::class);
 
-        // How the current request reached Procynia. Scoped, so the external API (phase 1) can bind
-        // its own request context per request; everything else is interactive.
-        $this->app->scoped(ActorChannel::class, InteractiveActorChannel::class);
+        // How the current request reached Procynia, asked of the request each time it is resolved:
+        // every request under /api is the API channel, everything else is interactive. Not cached,
+        // so a process that serves both kinds of request never answers with the wrong one.
+        $this->app->bind(ActorChannel::class, fn ($app): ActorChannel => ApiActorChannel::covers($app['request'])
+            ? new ApiActorChannel
+            : new InteractiveActorChannel);
 
         // Every opportunity source Procynia can speak to, addressed by its own key.
         //

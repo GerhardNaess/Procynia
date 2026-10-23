@@ -1,13 +1,16 @@
 <?php
 
 use App\Http\Middleware\AddSecurityHeaders;
+use App\Http\Middleware\Api\AuthenticateApiClient;
 use App\Http\Middleware\Api\ForceJsonResponse;
+use App\Http\Middleware\Api\LogApiRequest;
 use App\Http\Middleware\EnsureCustomerFrontendAccess;
 use App\Http\Middleware\EnsureHealthToken;
 use App\Http\Middleware\EnsureModuleIsEnabled;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\SetCustomerLocale;
 use App\Services\Api\ApiErrorResponder;
+use App\Services\Security\ApiActorChannel;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -36,6 +39,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'health.token' => EnsureHealthToken::class,
             'customer.frontend' => EnsureCustomerFrontendAccess::class,
             'customer.module' => EnsureModuleIsEnabled::class,
+            'api.log' => LogApiRequest::class,
+            'api.client' => AuthenticateApiClient::class,
         ]);
 
         $middleware->api(prepend: [
@@ -55,7 +60,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // The external API answers every failure in its own format (A10). The web application is
         // untouched: the callback declines anything outside /api.
         $exceptions->render(function (Throwable $e, Request $request) {
-            return $request->is('api', 'api/*')
+            return ApiActorChannel::covers($request)
                 ? app(ApiErrorResponder::class)->render($e, $request)
                 : null;
         });

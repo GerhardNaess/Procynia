@@ -268,6 +268,41 @@ return [
         ],
     ],
 
+    /*
+     * The external Procynia API (docs/external-api-architecture.md,
+     * docs/external-api-phase-1-decisions.md). Application mode only: a client application
+     * authenticates with an Entra access token for the "Procynia API" app registration (D3).
+     */
+    'api' => [
+        'entra' => [
+            /*
+             * Accepted `aud` values. With accessTokenAcceptedVersion 2 this is the API app
+             * registration's application (client) id; the App ID URI (api://procynia) may be listed
+             * too. Empty refuses every token: the API is closed until it is configured.
+             */
+            'audiences' => array_values(array_filter(array_map(
+                'trim',
+                explode(',', (string) env('API_ENTRA_AUDIENCES', '')),
+            ))),
+
+            /*
+             * The app role a token must carry to call the read endpoints. A ceiling only: what the
+             * integration may see is decided by its Procynia roles and fagområder (D4).
+             */
+            'read_role' => env('API_ENTRA_READ_ROLE', 'Procynia.Read.All'),
+
+            /*
+             * Clock skew allowed when validating `exp`/`nbf`, in seconds. Same as sign-in.
+             */
+            'leeway_seconds' => 60,
+        ],
+
+        /*
+         * Requests per minute per (client, customer).
+         */
+        'rate_limit_per_minute' => (int) env('API_RATE_LIMIT_PER_MINUTE', 240),
+    ],
+
     'backup' => [
         /*
          * Does THIS runtime support the legacy, Compose-based backup mechanism?
