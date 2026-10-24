@@ -1,7 +1,7 @@
 # Procynia API – status og plan for full API-dekning
 
 **Sist oppdatert:** 2026-10-24
-**Grunnlag:** koden på grenen `feature/external-api-foundation` (fase 3 med D15–D17, og AVF-04 og AVF-05 i fase 4), `routes/api.php`, `routes/web.php` (kundefrontenden), domenetjenestene i `app/Services/`, registeret i `tests/Feature/Security/HumanDecisionContractTest.php` og arkitekturdokumentene [`external-api-architecture.md`](external-api-architecture.md), [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) og [`external-api-phase-1-decisions.md`](external-api-phase-1-decisions.md).
+**Grunnlag:** koden på grenen `feature/external-api-foundation` (fase 3 med D15–D17, AVF-04 og AVF-05 i fase 4, og WIK-01–03 i fase 6 med D18–D22), `routes/api.php`, `routes/web.php` (kundefrontenden), domenetjenestene i `app/Services/`, registeret i `tests/Feature/Security/HumanDecisionContractTest.php` og arkitekturdokumentene [`external-api-architecture.md`](external-api-architecture.md), [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) og [`external-api-phase-1-decisions.md`](external-api-phase-1-decisions.md).
 **Faseplan:** vedtatt 2026-10-24 (del 1 «Vedtatt faseplan» og del 4).
 **Formål:** én samlet oversikt over hva som er ferdig, hva som mangler, rekkefølgen videre og beslutningene som gjenstår. Dokumentet er et styringsdokument. De tekniske detaljene og begrunnelsene står i arkitekturdokumentene.
 
@@ -15,11 +15,11 @@
 
 | | |
 |---|---|
-| **Prosjektstatus** | 🟧 **Delvis dekket.** API-fundamentet er bygget og testet lokalt. Sju av ni moduler har API-støtte. Lesingen i styringsmodulene er fullført lokalt i fase 2 og 3, etter beslutningene D15–D17. Fase 4 har levert registrering av avvik, forbedringsforslag og tiltak lokalt. **Ingenting er i produksjon.** |
-| **API-operasjoner i dag** | **34 operasjoner:** 29 for lesing og 5 for skriving (se tabellen under). Skrivingen går gjennom tre navngitte operasjoner som System Owner slår på per integrasjon. |
-| **Lokalt verifisert** | Ja. Alle 189 API-tester består (kjørt 2026-10-24, etter AVF-04 og AVF-05). Siste fulle kjøring av PHP-suiten ga 8667 tester og 0 feil (2026-10-24, før OpenAPI og fase 2 og 3). |
+| **Prosjektstatus** | 🟧 **Delvis dekket.** API-fundamentet er bygget og testet lokalt. Åtte av ni moduler har API-støtte. Lesingen i styringsmodulene er fullført lokalt i fase 2 og 3, etter beslutningene D15–D17. Fase 4 har levert registrering av avvik, forbedringsforslag og tiltak lokalt. Fase 6 har levert publisert Wiki-kunnskap og «Spør Wiki» lokalt, etter D18–D22. **Ingenting er i produksjon.** |
+| **API-operasjoner i dag** | **37 operasjoner:** 31 for lesing, 5 for skriving og 1 AI-spørsmål («Spør Wiki»), se tabellen under. Skrivingen og «Spør Wiki» går gjennom fire navngitte operasjoner som System Owner slår på per integrasjon. |
+| **Lokalt verifisert** | Ja. Alle 204 API-tester består (kjørt 2026-10-24, etter fase 6). Siste fulle kjøring av PHP-suiten ga 8667 tester og 0 feil (2026-10-24, før OpenAPI og fase 2 og 3). |
 | **Produksjonsklart** | **Nei.** Grenen er ikke flettet inn i `main`, migreringene er ikke kjørt i Azure, og API-et er ikke prøvd med et ekte token fra Microsoft Entra ID eller med Siggjo. |
-| **API-spesifikasjon** | 🟩 OpenAPI 3.1 for alle 34 operasjoner i [`api/openapi.yaml`](api/openapi.yaml), validert og låst mot rutene med en kontrakttest. 335 ekte svar fra API-testene er kontrollert mot skjemaene uten avvik (2026-10-24, etter fase 3). |
+| **API-spesifikasjon** | 🟩 OpenAPI 3.1 for alle 37 operasjoner i [`api/openapi.yaml`](api/openapi.yaml), validert og låst mot rutene med en kontrakttest. 335 ekte svar fra API-testene er kontrollert mot skjemaene uten avvik (2026-10-24, etter fase 3), og 26 svar fra Wiki-testene etter fase 6. |
 | **Neste milepæl** | **Pilotklar API på testkunde:** dagens seks operasjoner flettet inn, beskrevet i en API-spesifikasjon og prøvd med ekte Entra-token i staging (fase 1 under). |
 
 ### Implementerte API-operasjoner
@@ -60,6 +60,9 @@
 | 32 | Registrer forbedringsforslag (`POST /api/v1/improvements`) | Skriving | Avvik og forbedringer | Ja | Nei |
 | 33 | Opprett tiltak på et avvik (`POST /api/v1/deviations/{id}/actions`) | Skriving | Avvik og forbedringer | Ja | Nei |
 | 34 | Opprett tiltak på en forbedring (`POST /api/v1/improvements/{id}/actions`) | Skriving | Avvik og forbedringer | Ja | Nei |
+| 35 | Publiserte Wiki-sider (`GET /api/v1/wiki/pages`) | Lesing | Enterprise Wiki | Ja | Nei |
+| 36 | Én publisert Wiki-side med lenker (`GET /api/v1/wiki/pages/{id}`) | Lesing | Enterprise Wiki | Ja | Nei |
+| 37 | Spør Wiki over publisert kunnskap (`POST /api/v1/wiki/ask`) | AI-spørsmål (skriver ikke) | Enterprise Wiki | Ja | Nei |
 
 «Lokalt verifisert» betyr automatiske tester med simulerte Entra-tokens og testdata. Det betyr ikke at operasjonen er prøvd mot Microsoft, Azure eller Siggjo.
 
@@ -72,9 +75,9 @@
 | Kundetildeling og integrasjonsidentitet | 🟩 Fullt dekket (lokalt) | System Owner gir og trekker tilgang i **Kundemiljø → Integrasjoner**. Interne administratorer registrerer applikasjoner i Filament. Alt logges. |
 | Integrasjoner behandles aldri som mennesker | 🟩 Fullt dekket (lokalt) | Ingen innlogging, lisens, varsler, eierskap eller beslutningsrett. |
 | Sperre for menneskelige beslutninger | 🟩 Fullt dekket (lokalt) | Sperren i domenelaget og i databasen gjelder alle ni moduler. |
-| Sperre for AI-kall via API-et | 🟩 Fullt dekket (lokalt) | Ingen AI-kostnad kan utløses gjennom API-et i dag. |
+| Sperre for AI-kall via API-et | 🟩 Fullt dekket (lokalt) | Bare «Spør Wiki» kan bruke AI, og bare de tre Wiki-operasjonene fra den ruten (`ApiAiOperations`, D19). Kundens AI-kapasitet er en hard grense på API-kanalen, også ved samtidige kall (D20). |
 | Felles feilformat, logging, ratebegrensning | 🟩 Fullt dekket (lokalt) | |
-| Modell for navngitte skriveoperasjoner | 🟧 Delvis dekket | Modellen er generell. Katalogen har tre operasjoner: `risk.treatment_action.create`, `improvement.case.create` og `improvement.action.create`. |
+| Modell for navngitte operasjoner | 🟧 Delvis dekket | Modellen er generell. Katalogen har fire operasjoner: `risk.treatment_action.create`, `improvement.case.create`, `improvement.action.create` og `wiki.ask`. Bare `wiki.ask` skriver ingenting, og den krever derfor ikke skriverollen (D19). |
 | Beskyttelse mot dobbelregistrering (idempotens) | ⬜ Ikke startet | Et gjentatt skrivekall gir duplikat. Akseptert for de tre operasjonene, slik som for risikotiltak (funn 23). Ingen ny mekanisme er bygget. |
 | API-spesifikasjon (OpenAPI) | 🟩 Fullt dekket (lokalt) | [`api/openapi.yaml`](api/openapi.yaml) beskriver de seks operasjonene. Validert mot OpenAPI 3.1 med Redocly CLI. `ApiOpenApiContractTest` låser stier, metoder, app-roller, enums og feilkoder mot koden. Vedlikehold: [`api/README.md`](api/README.md). Ikke publisert til Siggjo ennå. |
 | Detaljvisning av enkeltposter (`/{id}`) | 🟩 Fullt dekket (lokalt) for de sju modulene med API | Kvalitet viser bare godkjent prosessflyt (D15). |
@@ -93,7 +96,7 @@
 | Etterlevelse og revisjon | 🟧 Delvis dekket | Kravregister, status, revisjoner, kravbibliotek, oppmerksomhet | – | Alle A-funksjoner er levert lokalt. Ikke produksjonsklar. |
 | Leverandøroppfølging | 🟧 Delvis dekket | Register, én leverandør, kontrollkrav, oppmerksomhet | – | Alle A-funksjoner er levert lokalt. Ikke produksjonsklar. |
 | Ledelsens gjennomgang | 🟧 Delvis dekket | Gjennomganger, én gjennomgang med seksjoner, beslutninger og tiltak | – | Alle A-funksjoner er levert lokalt. Ikke produksjonsklar. |
-| Enterprise Wiki | ⬜ Ikke startet | – | – | Arkitekturbeslutning om lesing via den felles Wiki-kjernen |
+| Enterprise Wiki | 🟧 Delvis dekket | Publiserte sider, én publisert side med lenker, «Spør Wiki» fra publisert kunnskap (D18–D21) | – | Kunnskapsoverføring (WIK-05) er utsatt (D22). Ikke produksjonsklar. |
 | Anbud | 🟥 Blokkert | – | – | Fire kjente hindre må løses først (se under) |
 
 Ingen modul er «Fullt dekket». Det betyr at alle funksjoner i kategori A (se del 3) har API-støtte, er verifisert og er produksjonsklare.
@@ -104,23 +107,24 @@ Grunnlaget er de 117 funksjonene i del 3: **32 A-funksjoner, 51 B-funksjoner og 
 
 | Status | Betydning | A | B | C | Sum |
 |---|---|---|---|---|---|
-| 🟩 **Implementert** | Endepunktet finnes og er verifisert lokalt. Ikke i produksjon. | 32 | 1 | – | 33 |
+| 🟩 **Implementert** | Endepunktet finnes og er verifisert lokalt. Ikke i produksjon. | 32 | 4 | – | 36 |
 | 🟦 **Planlagt** | Har en fase i den vedtatte planen og kan bygges uten ny beslutning. | – | – | – | – |
-| 🟥 **Blokkert** | Har en fase, men kan ikke startes eller fullføres før en navngitt beslutning eller hindring er løst. | – | 42 | – | 42 |
+| 🟥 **Blokkert** | Har en fase, men kan ikke startes eller fullføres før en navngitt beslutning eller hindring er løst. | – | 39 | – | 39 |
 | ⬛ **Ikke anbefalt** | Ikke planlagt. Tas bare opp igjen etter egen beslutning. | – | 8 | – | 8 |
 | ⛔ **Utenfor API-et** | Formell menneskelig beslutning. Kan aldri utføres av en integrasjon og teller ikke som manglende. | – | – | 34 | 34 |
 | **Sum** | | **32** | **51** | **34** | **117** |
 
-**Implementert (32 A-funksjoner og 1 B-funksjon):** RIS-01–04, MOK-01–06, AVF-01–05, FEL-01–03, ETR-01–05, LEV-01–03, LDG-01–03, KVA-01, KVA-03 og KVA-04, og B-funksjonen KVA-02.
+**Implementert (32 A-funksjoner og 4 B-funksjoner):** RIS-01–04, MOK-01–06, AVF-01–05, FEL-01–03, ETR-01–05, LEV-01–03, LDG-01–03, KVA-01, KVA-03 og KVA-04, og B-funksjonene KVA-02 og WIK-01–03.
 
 - Fase 2 leverte RIS-03, MOK-03, MOK-04, resten av MOK-05, AVF-02, AVF-03, FEL-02 og resten av FEL-03.
 - Fase 3 leverte ETR-01–05, LEV-01–03, LDG-01–03, KVA-01 og KVA-03, og utvidet FEL-02.
 - Etter D15–D17 er RIS-02, MOK-06, KVA-04 og KVA-02 fullført (2026-10-24).
 - Fase 4 leverte AVF-04 og AVF-05 (2026-10-24). Alle 32 A-funksjoner er nå implementert lokalt.
+- Fase 6 leverte WIK-01–03 etter D18–D22 (2026-10-24).
 
 **Planlagt:** ingen. AVF-04 og AVF-05 er levert (fase 4). Fellesforutsetningene ble avgjort slik: ingen idempotens (som for risikotiltak), opphavet vises i Avvik og forbedringer, og varslene følger webgrensesnittets regel (funn 23–25).
 
-**Blokkert (42 B-funksjoner):** alle B-funksjoner som har en fase, unntatt KVA-02. Hindringen står i kolonnen «Avhengigheter» i del 3, og de samlede beslutningene står i «Viktigste avhengigheter og beslutninger» under. Hele Anbud-modulen er blokkert (funn 2, 3 og 6 i del 5, og K16).
+**Blokkert (39 B-funksjoner):** alle B-funksjoner som har en fase, unntatt KVA-02 og WIK-01–03. WIK-05 og kunnskapsoverføringen i modulene er utsatt (D22). Hindringen står i kolonnen «Avhengigheter» i del 3, og de samlede beslutningene står i «Viktigste avhengigheter og beslutninger» under. Hele Anbud-modulen er blokkert (funn 2, 3 og 6 i del 5, og K16).
 
 **Ikke anbefalt (8 B-funksjoner):** RIS-06, ETR-07, LEV-04, LDG-04, LDG-05, WIK-04, ANB-10, og FEL-06 (permanent utenfor API-et).
 
@@ -135,7 +139,7 @@ Faseplanen ble vedtatt 2026-10-24. Endringer i rekkefølge eller innhold krever 
 | **3** | Lesing i resten av styringsmodulene | Etterlevelse og revisjon, Leverandøroppfølging, Ledelsens gjennomgang, Kvalitet | 🟩 Fullført lokalt 2026-10-24, med restpunktene løst etter D15–D17. Ikke produksjonsklar. |
 | **4** | Avgrensede registreringer (utkast og forslag) | Styringsmodulene | 🟧 Påbegynt. AVF-04 og AVF-05 levert lokalt 2026-10-24. Andre registreringer (for eksempel RIS-05) krever beslutning per operasjon. |
 | **5** | Tilgang på vegne av en person | Mine oppgaver, personlige dashboards | 🟥 Blokkert av D2. Kontrollert 2026-10-24: ingen av fasens funksjoner kan bygges før D2 er opphevet (funn 27). Ingenting er implementert. |
-| **6** | Wiki gjennom den felles kunnskapskjernen | Enterprise Wiki | 🟥 Blokkert av Wiki-arkitekturbeslutning, A23 og S4 |
+| **6** | Wiki gjennom den felles kunnskapskjernen | Enterprise Wiki | 🟧 Levert lokalt 2026-10-24: WIK-01–03 etter D18–D22. Kunnskapsoverføring (WIK-05) er utsatt (D22, S4). Ikke produksjonsklar. |
 | **7** | Anbud | Anbud | 🟥 Blokkert av K16, `isBidManager()`, avdelingsomfang og A46. Kontrollert 2026-10-24: ingen funksjon er godkjent, og hindrene står fortsatt i koden (funn 28). Ingenting er implementert. |
 | **8** | Kopi av data og agentlag | Siggjos datamodell, MCP | 🟥 Blokkert av D7 og D14. Kontrollert 2026-10-24: alternativ B er ikke valgt (D7), og MCP-laget er ikke besluttet (funn 29). Ingenting er implementert. |
 
@@ -164,12 +168,13 @@ Detaljer står i del 4.
 | 5 | Idempotens og visning av opphav i alle moduler | Fase 4 (flere skriveoperasjoner). For AVF-04 og AVF-05: ingen idempotens, opphav vist i Avvik og forbedringer (funn 23 og 24). | Arkitektur |
 | 6 | Hvilke registreringer agenter skal få gjøre, én operasjon om gangen | Fase 4 | Produkteier |
 | 7 | B6 og B7: skal agenter kunne laste opp kildedokumenter eller registrere KPI-målinger? I dag er svaret nei. | Fase 4 | Produkteier |
-| 8 | Om agentutløst AI-arbeid er tillatt, og hvordan kostnaden begrenses (S4) | Fase 4 og 6 | Produkteier |
-| 9 | A23: Kvalitets AI-forslag og «Spør Wiki» må kontrollere tilgang i tjenesten | Fase 6 | Arkitektur |
+| 8 | Om agentutløst AI-arbeid er tillatt, og hvordan kostnaden begrenses (S4). **Løst for «Spør Wiki» (D20).** Gjenstår for kunnskapsoverføring, som starter en Wiki-kjøring (D22). | Fase 4 og kunnskapsoverføring i fase 6 | Produkteier |
+| 9 | A23: Kvalitets AI-forslag og «Spør Wiki» må kontrollere tilgang i tjenesten. **Løst for «Spør Wiki»** (`askAs()`, D19). Kvalitets AI-forslag gjenstår. | Kvalitets AI-forslag | Arkitektur |
 | 10 | Anbud: delte arbeidsflytfelt på kunngjøringer (K16), avdelingsomfang og A46 | Fase 7 | Produkteier / arkitektur |
 | 11 | ~~KVA-02: skal API-et vise godkjent versjon av prosessflyten, arbeidsversjonen eller begge?~~ **Besluttet 2026-10-24 (D15): bare godkjent versjon.** | Ingenting lenger. RIS-02, MOK-06 og KVA-02 kan implementeres. | Produkteier |
 | 12 | ~~Skal beslutningstekstene i Ledelsens gjennomgang eksponeres?~~ **Besluttet 2026-10-24 (D16): nei, ikke før innholdet er vurdert som egnet.** | Ingenting. API-et oppfyller dette allerede. | Produkteier |
 | 14 | **D2: skal delegert modus (tilgang på vegne av en person) bygges?** I dag gjelder D2: bare applikasjonsmodus. Hvis ja: hvilke scopes, om FEL-05 (varsler) skal være med, og om LDG-06 (statusoppdatering på egne tiltak) skal være en skriveoperasjon i delegert modus. | Hele fase 5 (FEL-04, FEL-05, LDG-06). Se funn 27. | Produkteier |
+| 15 | ~~Fase 6: hvordan skal integrasjoner få tilgang til Wiki-kunnskap?~~ **Besluttet 2026-10-24 (D18–D22):** bare publisert versjon, «Spør Wiki» som egen operasjon, hard kapasitetsstopp, sitater med utdrag, kunnskapsoverføring utsatt. | Ingenting for WIK-01–03. WIK-05 venter på S4. | Produkteier |
 | 13 | ~~D17: hvordan skal `controls_without_activity` vurderes i API-et?~~ **Besluttet 2026-10-24 (D17): utelates fra API-et.** Kvalitets regler og visning endres ikke, og det lages ingen egen API-regel. | Ingenting. KVA-04 er fullført. | Produkteier |
 
 ### Neste anbefalte milepæl
@@ -198,7 +203,7 @@ Kompleksitet: **Lav** = gjenbruk av en eksisterende tjeneste og presentasjon. **
 | **Etterlevelse og revisjon** | Kravregister, etterlevelsesstatus per standard, revisjoner og funn, oppmerksomhet | Kravregister, status per kilde, revisjoner med scope, kontrollhandlinger og funn, kravbibliotek, oppmerksomhet | – | Ingen A-funksjon. Kvalitet-konteksten (prosesser og kontroller) er utelatt. | Vurdering, relevans og **hele revisjonsløpet** (også opprettelse) er menneskelige beslutninger. Modulen krever eksplisitt tildeling. | Middels | 3 |
 | **Leverandøroppfølging** | Leverandørregister, kritikalitet, kontrollstatus, oppfølgingsplan | Register, én leverandør med krav, aktsomhet, oppfølgingsplan og koblinger, kontrollkrav, oppmerksomhet | – | Ingen A-funksjon | Registrering, kritikalitet, livsløp, vurderinger og kontrollarbeid er menneskelige beslutninger. Krever eksplisitt tildeling. Dokumentfiler skannes ikke i dag. | Middels | 3 |
 | **Ledelsens gjennomgang** | Gjennomganger, seksjoner, beslutninger og tiltak med status | Gjennomganger, én gjennomgang med seksjoner, beslutninger og tiltak | – | Ingen A-funksjon. Grunnlagstallene og beslutningstekstene er utelatt (funn 19). | Ferdigstilling og sletting er menneskelige beslutninger. Seksjoner fra andre moduler vises bare med tilgang til modulen. | Lav–middels (presentasjonsklassen finnes) | 3 |
-| **Enterprise Wiki** | Lese publisert kunnskap, navigere, stille spørsmål, overføre kunnskap fra andre moduler | – | – | Alt | All redigering, godkjenning, kildeadministrasjon og alle kjøringer er menneskelige beslutninger. Lesing må gå gjennom den felles kunnskapskjernen og bare vise gjeldende innhold. «Spør Wiki» er sperret (A23). | Høy | 6 |
+| **Enterprise Wiki** | Lese publisert kunnskap, navigere, stille spørsmål, overføre kunnskap fra andre moduler | Publiserte sider, én publisert side med lenker, «Spør Wiki» fra publisert kunnskap (D18–D21) | – | Kunnskapsoverføring (WIK-05), utsatt (D22) | All redigering, godkjenning, kildeadministrasjon og alle kjøringer er menneskelige beslutninger. Bare publisert versjon, aldri arbeidsversjonen (D18). «Spør Wiki» bruker kundens AI-kapasitet, som er en hard grense på API-kanalen (D20). | Høy | 6 |
 | **Anbud** | Saker og cockpit, krav og svarstatus, frister, Go/No-go-grunnlag | – | – | Alt | Budstatus og godkjenning av krav er menneskelige beslutninger. Avdelingsbasert synlighet. De fleste skrivinger ligger i kontrollerne, ikke i tjenester. | Høy | 7 |
 
 ---
@@ -240,7 +245,7 @@ Kompleksitet: **Lav** = gjenbruk av en eksisterende tjeneste og presentasjon. **
 | Etterlevelse og revisjon | 5 | 5 | 4 | 4 |
 | Leverandøroppfølging | 3 | 3 | 5 | 5 |
 | Ledelsens gjennomgang | 3 | 3 | 4 | 2 |
-| Enterprise Wiki | 0 | 0 | 5 | 8 |
+| Enterprise Wiki | 0 | 0 (+ WIK-01–03, B) | 5 | 8 |
 | Anbud | 0 | 0 | 10 | 2 |
 | Felles | 3 | 3 | 3 | 0 |
 | **Sum** | **32** | **32** | **51** | **34** |
@@ -384,15 +389,15 @@ Tilgang: `ManagementReviewAccessService` (`visibleReviews`, `findVisible`). Pres
 
 ### Enterprise Wiki
 
-Wiki eksponeres bare gjennom den felles navigasjons- og retrieval-kjernen, med gjeldende innhold og etter Wiki-sjekklisten (`enterprise-wiki-architecture.md` §J, `AGENTS.md`). Visningen av en side (`WikiController::show`) er inline og **skriver ved lesing** (`syncForPageVersion`). Den kan derfor ikke gjenbrukes direkte i et lese-API.
+Wiki eksponeres bare gjennom den felles navigasjons- og retrieval-kjernen, med gjeldende innhold og etter Wiki-sjekklisten (`enterprise-wiki-architecture.md` §J, `AGENTS.md`). Visningen av en side (`WikiController::show`) er inline og **skriver ved lesing** (`syncForPageVersion`). Den brukes derfor ikke. API-et leser Wikiens egen katalog i `GROUNDING_PUBLISHED_ONLY` gjennom `EnterpriseWikiPublishedKnowledgeReader`, og bare publiserte versjoner (D18).
 
 | ID | Funksjon | Domenetjeneste | API-endepunkt | API-status | Integrasjon i dag | Kat. | Avhengigheter | Fase |
 |---|---|---|---|---|---|---|---|---|
-| WIK-01 | Les publiserte Wiki-sider | Ingen lesetjeneste. `RequirementWikiPageReader::read` brukes av AI-sporet. | – | – | Nei | B | Arkitekturbeslutning om API-lesing via den felles kjernen. `visibleEnterpriseWikiPageStatuses()` gir tom liste for integrasjoner. | 6 |
-| WIK-02 | Navigasjon, relasjoner og graf | `EnterpriseWikiPageTraversalService`, `EnterpriseWikiGraphDataService` | – | – | Nei | B | Som WIK-01 | 6 |
-| WIK-03 | Spør Wiki | `EnterpriseWikiQuestionAnswerService::ask` | – | – | Nei (sperret) | B | A23 og D11. AI-kostnad (S4). | 6 |
+| WIK-01 | Les publiserte Wiki-sider | `EnterpriseWikiPublishedKnowledgeReader::pages`/`page` over `RequirementWikiCatalogBuilder` (`GROUNDING_PUBLISHED_ONLY`) | `GET /api/v1/wiki/pages`, `GET /api/v1/wiki/pages/{pageId}` | Implementert | Ja (`wiki.view`) | B | Bare publisert versjon (D18). Sidestatus er ikke et filter. | Ferdig |
+| WIK-02 | Navigasjon, relasjoner og graf | `EnterpriseWikiLinkParser` over den publiserte teksten | `links` i `GET /api/v1/wiki/pages/{pageId}` | Implementert | Ja (`wiki.view`) | B | Lenker til publiserte sider, lest fra den publiserte teksten. Lenketabellen følger arbeidsversjonen og brukes ikke. Tilbakelenker og graf er ikke med. | Ferdig |
+| WIK-03 | Spør Wiki | `EnterpriseWikiQuestionAnswerService::askAs` (felles kjerne, tilgang i tjenesten) | `POST /api/v1/wiki/ask` | Implementert | Ja, med operasjonen `wiki.ask` | B | Publisert grunnlag (D18), egen operasjon (D19), hard kapasitetsstopp og egen ratebegrensning (D20), sitater med publisert versjon (D21). | Ferdig |
 | WIK-04 | Kildedokumenter og kjøringer (lesing) | Inline, `EnterpriseWikiRunFindingsService` | – | – | Nei | B | Administrativ informasjon. Behov ikke dokumentert. | Ikke anbefalt nå |
-| WIK-05 | Kunnskapsoverføring fra andre moduler (blir et kildedokument som går gjennom vanlig kjøring og menneskelig godkjenning) | `WikiKnowledgeHandoffService::handOff` (egen rettighet `wiki.knowledge.handoff`, ingen menneskesperre) | – | – | Nei | B | Den eneste lovlige veien inn i Wiki for agenter (arkitektur §10.1). S4: utløser en full Wiki-kjøring med AI. | 6 |
+| WIK-05 | Kunnskapsoverføring fra andre moduler (blir et kildedokument som går gjennom vanlig kjøring og menneskelig godkjenning) | `WikiKnowledgeHandoffService::handOff` (egen rettighet `wiki.knowledge.handoff`, ingen menneskesperre) | – | – | Nei | B | Den eneste lovlige veien inn i Wiki for agenter (arkitektur §10.1). S4: utløser en full Wiki-kjøring med AI. Utsatt (D22). | 6 |
 | WIK-06 | Last opp kilde, start eller prøv kjøring på nytt, endre dokumenteier | `EnterpriseWikiDocumentUploadService::store`, `EnterpriseWikiDocumentFlowService::startForDocumentAs`/`changeDocumentOwner`, `*FailureRecoveryService::retryAs` | – | – | Aldri | C | `WIKI_SOURCE_UPLOAD`, `WIKI_RUN_START`, `WIKI_SOURCE_OWNER_CHANGE`, B6 | – |
 | WIK-07 | Avbryt eller fjern kjøring, slett kildedokument | `EnterpriseWikiDocumentFlowService::cancelRun`, `EnterpriseWikiRunDismissalService::dismiss`, `EnterpriseWikiDocumentDeletionService::delete` | – | – | Aldri | C | `WIKI_RUN_CANCEL`, `WIKI_RUN_DISMISS`, `WIKI_SOURCE_DELETE` | – |
 | WIK-08 | Rediger arbeidsversjon | `EnterpriseWikiClaimContentRepairService::applyWorkingVersionBlockEdits` | – | – | Aldri | C | `WIKI_PAGE_EDIT` | – |
@@ -507,6 +512,7 @@ Prinsipper: bruk eksisterende domenetjenester og tilgangstjenester, gjenbruk mø
 | **Avhengigheter** | Arkitekturbeslutning etter Wiki-sjekklisten. A23. Beslutning om AI-kostnad (S4). Ingen vektorindeks hos Siggjo (K13). |
 | **Kompleksitet** | Høy |
 | **Ferdig når** | Wiki-sjekklisten er gjennomgått. Bare gjeldende innhold leveres, «utilstrekkelig grunnlag» er et gyldig svar, og AI-bruk via API-et er sporbar og begrenset per kunde. |
+| **Status** | 🟧 Levert lokalt 2026-10-24 etter D18–D22: WIK-01–03 (funn 30). Kunnskapsoverføring (WIK-05 og tilsvarende i modulene) er utsatt (D22). Ikke produksjonsklar. Se `external-api-phase-1-decisions.md` §23. |
 
 ### Fase 7 – Anbud
 
@@ -536,7 +542,7 @@ Prinsipper: bruk eksisterende domenetjenester og tilgangstjenester, gjenbruk mø
 
 ## Del 5 – Funn fra denne gjennomgangen
 
-Kontrollert i koden 2026-10-24. Funn 1, 13 og 17 er løst (se radene). Funn 13–16 kom fra fase 2, funn 17–22 fra fase 3, funn 23–26 fra fase 4, funn 27 fra fase 5 og funn 28–29 fra kontrollen av fase 7 og 8.
+Kontrollert i koden 2026-10-24. Funn 1, 13 og 17 er løst (se radene). Funn 13–16 kom fra fase 2, funn 17–22 fra fase 3, funn 23–26 fra fase 4, funn 27 fra fase 5, funn 28–29 fra kontrollen av fase 7 og 8, og funn 30 fra fase 6.
 
 | # | Funn | Betydning | Hører til |
 |---|---|---|---|
@@ -569,3 +575,4 @@ Kontrollert i koden 2026-10-24. Funn 1, 13 og 17 er løst (se radene). Funn 13�
 | 27 | **Fase 5 er blokkert i sin helhet av D2.** FEL-04 (Mine oppgaver), FEL-05 (varsler) og LDG-06 (statusoppdatering på egne tiltak) gjelder en bestemt person og har ingen mening for en integrasjon i applikasjonsmodus. Delegert modus krever i tillegg en ny innloggingsvei (delegerte scopes i Entra, kobling `oid` → `user_identities`, on-behalf-of hos Siggjo), som er både en produktbeslutning og en ny generell sikkerhetsmekanisme. Ingen av delene er bygget, og `EntraAccessTokenValidator` avviser fortsatt delegerte tokens med 403. | Ingen kode er endret i fase 5. Fasen kan startes når produkteier har opphevet D2 og tatt stilling til FEL-05 og LDG-06 (avhengighet 14 i del 1). Verifisering krever også Entra-registreringen fra fase 1. | Fase 5 |
 | 28 | **Fase 7 er blokkert i sin helhet.** Ingen av Anbud-funksjonene er godkjent: ANB-01–09 er B-funksjoner, ANB-10 er ikke anbefalt, og ANB-11 og ANB-12 er C. Hindrene står fortsatt i koden: K16 (`internal_status`, `decision_by_user_id` og `assigned_to_user_id` ligger på den globale `Notice`), `User::isBidManager()` faller tilbake til `contributor` og sperrer ikke integrasjoner (funn 2), `SavedNoticeAccessService::applyVisibility` gir ingen treff for en integrasjon og har ingen `findVisible*`, og avdelingsomfanget for en integrasjon er ikke besluttet. Selv lesing (ANB-01–03) krever en ny lesevei og en beslutning om avdelinger. Retting av K16 er en datamodellendring med migrering av delte felt. | Ingen kode er endret i fase 7. Fasen kan startes når produkteier har besluttet avdelingsomfang og A46, og arkitekturen har godkjent rettingen av K16 og sperren i `isBidManager()` (avhengighet 10 i del 1). | Fase 7 |
 | 29 | **Fase 8 er blokkert i sin helhet.** Leveransene for kopi av data gjelder bare alternativ B, og D7 valgte øyeblikksbilde med kundebestemt publikum. Dashboards kan allerede hente øyeblikksbildet gjennom dagens leseendepunkter. MCP-laget er beskrevet i arkitekturen (§10.4), men er ikke besluttet som leveranse, og det vil være et nytt rammeverk. D14 (DPIA) gjelder før ekte kundedata går til Siggjo. | Ingen kode er endret i fase 8. Fasen krever en beslutning om alternativ B eller om MCP-laget. | Fase 8 |
+| 30 | **Fase 6: Wiki-kjernen var bygget for personer.** «Spør Wiki» grunnet i nyeste versjon, også upublisert. Sitatene pekte på sidens nåværende versjon, ikke den som ble lest. Tilgangen lå bare i kontrolleren (A23), og navigasjonskallet fikk kundekonteksten fra den innloggede brukeren. **Løst:** grunnlaget følger den som spør (publisert for integrasjoner), sitatene bruker katalogens versjon, tilgangen ligger i `askAs()`, og hele forløpet kjører i kundens kontekst. Kapasiteten håndheves på API-kanalen uansett modus, og en kunde uten definert kapasitet nektes (fail closed). | Websiden er uendret. En integrasjon kan få et annet svar enn en person (D18). | Fase 6 |

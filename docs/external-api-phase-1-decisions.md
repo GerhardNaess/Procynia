@@ -1,6 +1,6 @@
 # Eksternt API – beslutningsgrunnlag for fase 1
 
-**Status:** API-et leser i sju moduler og har tre navngitte skriveoperasjoner (§20, §22). Bygget: autentisering, kundetildeling, feilformat, `GET /api/v1/me`, `GET /api/v1/risks` (§15), D13 med beskyttelse av integrasjonsidentiteter (§16), kontrollen 2026-10-24 (§17) `GET /api/v1/deviations` (§18) og `GET /api/v1/objectives` og `GET /api/v1/kpis` (§19). Mål og KPI venter på vurdering. Ingen flere moduler før den. Ekte Entra-, Azure- og Siggjo-testing er utsatt fordi miljøene ikke er tilgjengelige. Ingenting er satt i produksjon.
+**Status:** API-et leser i åtte moduler, har tre navngitte skriveoperasjoner (§20, §22) og «Spør Wiki» over publisert Wiki-kunnskap (§23, D18–D22). Bygget: autentisering, kundetildeling, feilformat, `GET /api/v1/me`, `GET /api/v1/risks` (§15), D13 med beskyttelse av integrasjonsidentiteter (§16), kontrollen 2026-10-24 (§17) `GET /api/v1/deviations` (§18) og `GET /api/v1/objectives` og `GET /api/v1/kpis` (§19). Mål og KPI venter på vurdering. Ingen flere moduler før den. Ekte Entra-, Azure- og Siggjo-testing er utsatt fordi miljøene ikke er tilgjengelige. Ingenting er satt i produksjon.
 **Dato:** 2026-10-23
 **Gren:** `feature/external-api-foundation`
 **Bygger på:** [`external-api-architecture.md`](external-api-architecture.md) (særlig §4, §5, §8.3, §9 og §15), [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §2n, [`operations/entra-sso.md`](operations/entra-sso.md), [`operations/security.md`](operations/security.md) §9 og [`AGENTS.md`](../AGENTS.md).
@@ -31,10 +31,11 @@ Grunnprinsipp for anbefalingene: **den enkleste løsningen som er sikker for les
 | D8 | Felt i svarene | Strukturerte felt, tittel og eier. Lang fritekst og kommentarer holdes utenfor til DPIA er gjort. |
 | D9 | Første endepunkter | `me`, Risiko, Mål og KPI, Avvik og forbedringer, Revisjoner, Etterlevelsesstatus og samlet oppmerksomhet. Bare `GET`. |
 | D10 | Logging | Strukturert logg til stderr (Log Analytics) og `last_used_at` på tildelingen. Ingen `api_request_log`-tabell før skrive-API. |
-| D11 | AI på API-kanalen | Alle AI-kall nektes når forespørselen kommer via API-et. Det gjør A23 teknisk uoppnåelig, ikke bare urutet. |
+| D11 | AI på API-kanalen | Alle AI-kall nektes når forespørselen kommer via API-et. Det gjør A23 teknisk uoppnåelig, ikke bare urutet. **Endret ved D19 (§23):** unntatt de tre Wiki-operasjonene fra ruten `api.v1.wiki.ask`. |
 | D12 | API Management eller WAF | Ikke i pilot med testdata. Besluttes før første kunde med ekte data. |
 | D13 | Registrering av klienter | Interne administratorer registrerer klienter i Filament. Kundens System Owner gir og trekker tildelinger. |
 | D14 | Personvern | DPIA og databehandleravtaler før ekte kundedata går til Siggjo. Blokkerer ikke bygging og pilot på testkunde. |
+| D18–D22 | Enterprise Wiki via API | Besluttet 2026-10-24, se §23: bare publisert versjon, «Spør Wiki» som egen operasjon, hard kapasitetsstopp, sitater med utdrag, kunnskapsoverføring utsatt. |
 
 A10 løses med én felles feilrenderer for `api/*` (§8). A23 og A46 holdes utilgjengelige med fire uavhengige lag (§9).
 
@@ -1160,3 +1161,86 @@ Ny: `ApiImprovementRegistrationTest` (12 tester). Endret: `ApiRouteContractTest`
 ### Gjenstår før produksjon
 
 Som §20: app-rollen `Procynia.Write.All` i Entra, et ekte token mot Procynia, og at System Owner hos testkunden slår operasjonene på.
+
+## 23. Fase 6: Enterprise Wiki via API (2026-10-24)
+
+Beslutningssaken for fase 6 ble godkjent 2026-10-24 i henhold til anbefalingene. Beslutningene og det som er bygget står her.
+
+### D18 – bare publisert versjon **[BESLUTTET]**
+
+**Beslutning:** API-et viser bare den **publiserte versjonen** av en Wiki-side, også i «Spør Wiki». Arbeidsversjonen leses aldri.
+
+- Kilden er Wikiens egen katalog, `RequirementWikiCatalogBuilder` med `GROUNDING_PUBLISHED_ONLY`, som anbudssvarene allerede grunner i. Det finnes ingen ny indeks.
+- En side som aldri er publisert, finnes ikke i API-et. En side der arbeidsversjonen er til godkjenning eller returnert, vises med den versjonen som fortsatt er publisert. Arkiverte og erstattede sider er utelatt.
+- For en integrasjon er sidestatus ikke et filter. Publisert er grensen.
+- **Konsekvens:** en integrasjon kan få et annet svar enn en person i «Spør Wiki» på websiden, som svarer fra nyeste versjon. Det er bevisst. Websiden er uendret.
+
+### D19 – «Spør Wiki» som egen operasjon **[BESLUTTET]**
+
+**Beslutning:** «Spør Wiki» åpnes via API-et som operasjonen `wiki.ask` i `ApiOperationCatalog`. System Owner slår den på per tildeling. Den er av som standard.
+
+- Operasjonen skriver ingenting, så den krever **ikke** skriverollen `Procynia.Write.All` (`ApiOperationCatalog::requiresWriteRole()`). Lesing av sider krever bare `wiki.view`.
+- D11 er erstattet av en eksplisitt liste (`ApiAiOperations`): ruten `api.v1.wiki.ask` kan bruke `wiki.navigation_plan`, `wiki.ask.retrieval_plan` og `wiki.ask.answer`. Ingen annen rute kan bruke AI, og ruten kan ikke bruke andre operasjoner. `AiCallContextPolicy` spør listen før hvert leverandørkall.
+- A23 er løst for Wiki-delen: tilgangen ligger i `EnterpriseWikiQuestionAnswerService::askAs()`, som websiden og API-et begge bruker. Kvalitets AI-forslag (resten av A23) er fortsatt sperret.
+
+### D20 – kostnadskontroll **[BESLUTTET]**
+
+**Beslutning:** Kallene teller i kundens felles AI-kapasitet og knyttes til integrasjonsidentiteten. På API-kanalen er kapasiteten en hard grense.
+
+- `AiCostControlService` håndhever kapasiteten for API-kanalen uansett modus (`ai_customer_capacity.enforcement`). Websiden er uendret og fortsatt i `observe`.
+- **Fail closed:** en kunde uten definert kapasitet, eller et kall uten kostnadsanslag (pris mangler), nektes på API-kanalen.
+- **Samtidige kall:** `admit()` tar radlåsen på kunden og åpner forsøket med reservert anslag før låsen slippes. Et samtidig kall venter på låsen og ser da reservasjonen. Dermed kan to kall aldri slippe seg inn i den samme ledige kapasiteten. Hvert av de tre AI-kallene i et spørsmål slippes inn hver for seg. Er kapasiteten brukt opp mellom to av dem, stoppes resten. Det som er brukt, er registrert.
+- **Ratebegrensning:** samme `WikiAskRateLimiter` og samme grenser som på websiden (standard 10 per identitet og 60 per kunde per 15 minutter), i egne bøtter for API-et. En travel integrasjon bruker ikke opp kvoten til menneskene, og omvendt.
+- Kravet om AI-tilbud (`canUseAiOffer`) gjelder, i tjenesten.
+- **Svar:** brukt opp kapasitet, også budsjettstopp per kunde, gir 429 `ai_capacity_exhausted`. AI ikke tilgjengelig for kunden gir 403. AI-stopp på Procynias side gir 503. Årsakskoden sendes aldri.
+
+### D21 – sitater med utdrag **[BESLUTTET]**
+
+**Beslutning:** Svaret har sitater med side, overskrift og utdrag, som på websiden, og med nummeret på den publiserte versjonen som ble lest. Utdragene er Wiki-tekst, ikke tekst fra kildedokumentene. Interne versjons-id-er og rangeringen sendes ikke.
+
+Sitatene peker nå på versjonen svaret faktisk ble lest fra (katalogens `version_id`), ikke på sidens nåværende versjon. Rettelsen gjelder også websiden, der det ikke endrer noe: der er versjonen som leses, den nyeste.
+
+### D22 – kunnskapsoverføring utsettes **[BESLUTTET]**
+
+**Beslutning:** Kunnskapsoverføring fra integrasjoner (WIK-05 og tilsvarende i modulene) inngår ikke i fase 6. Overføringen starter en full Wiki-kjøring med gpt-5. Det krever et eget svar på S4: om agenter skal kunne starte kjøringer, og hvordan det begrenses.
+
+### Endepunkter
+
+| Endepunkt | Innhold | Tilgang |
+|---|---|---|
+| `GET /api/v1/wiki/pages` | Publiserte sider: id, tittel, slug, type, omfang, versjonsnummer, overskrifter, utdrag. Filter `page_type`, markørpaginering. | `wiki`-modulen og `wiki.view` |
+| `GET /api/v1/wiki/pages/{pageId}` | I tillegg publisert tekst (Markdown) og lenker til publiserte sider, lest fra den publiserte teksten. Lenketabellen følger arbeidsversjonen og brukes ikke. | Som over. Ikke publisert, utgått, annen kunde eller ukjent gir 404. |
+| `POST /api/v1/wiki/ask` | `answer_status`, `answer`, `citations`, `pages_used` | Som over, AI-tilbudet og operasjonen `wiki.ask` |
+
+Aldri med: arbeidsversjonen og om den finnes, sidestatus, innholdsblokker med kildeutdrag, påstander og verifiseringsgrunnlag, kildedokumenter, kjøringer, figurer, eiere, kontrollører og QA. Lesing skriver ingenting (`WikiController::show` på websiden synkroniserer eiergodkjenninger og brukes ikke).
+
+### Komponenter
+
+- **Gjenbrukt uendret:** `RequirementWikiCatalogBuilder`, `EnterpriseWikiSemanticRetrievalService`, `RequirementWikiPageReader`, `EnterpriseWikiLinkParser`, `WikiQuestionAnswerAiClient`, `AiCostControlService::admit()`, `CustomerAiCapacityService`, `IntegrationOperationAuthority`, `CustomerPermissionService`, `ModuleEntitlementService`, `BillingEntitlementService`.
+- **Nytt:** `EnterpriseWikiPublishedKnowledgeReader` (lesing og leseregel), `WikiPresenter`, `Api\V1\WikiController`, `ApiAiOperations`, `WikiAskRateLimiter` (trukket ut av `WikiAskController` med samme nøkler).
+- **Endret:** `EnterpriseWikiQuestionAnswerService` (`askAs()`, `mayAsk()`, grunnlagsmodus som parameter, riktig versjon i sitatene), `AiCallContextPolicy`, `AiCostControlService::assertCapacityAllows()`, `ApiOperationCatalog`, `IntegrationOperationAuthority`, `ApiErrorResponder`, `ApiAccessSummary` (`wiki` i `/me` og i Kundemiljø).
+- **Websiden:** `WikiAskController` bruker `askAs()` og den uttrukne ratebegrensningen. Kontrollene, nøklene, svarene og grunnlaget (nyeste versjon) er de samme. I Kundemiljø → Integrasjoner heter avkrysningslisten nå «Kan bruke gjennom API-et», og «Tillat Spør Wiki (bruker kundens AI-kapasitet)» er lagt til.
+
+### Wiki-sjekklisten (`enterprise-wiki-architecture.md` §J)
+
+1. **Wiki som autoritativt kunnskapslag:** ja. Alt kommer fra publiserte Wiki-versjoner, aldri fra kildedokumenter eller rå utdrag.
+2. **AI kan orientere seg:** ja. «Spør Wiki» bruker den samme indeksen og navigasjonen (`EnterpriseWikiSemanticRetrievalService`) som websiden og anbudssvarene.
+3. **Ny hard gate som skjuler relevant kunnskap:** nei. Grensen er publisert versjon, en produktbeslutning (D18), ikke en leksikalsk gate. Det er den samme grensen anbudssvarene bruker.
+4. **Samme mekanisme for Q&A og kravarbeid:** ja. Begge bruker samme kjerne, og API-et bruker samme grunnlagsmodus som anbudssvarene.
+5. **Avgrenset navigasjon:** ja, med de eksisterende grensene (sider, tegn, ett spørsmål, ingen samtale, ingen agentløkke).
+6. **Grounding bevart:** ja. «Utilstrekkelig grunnlag» er et gyldig svar, og et sitat til en side som ikke var i konteksten forkastes.
+7. **Generisk og domenefri:** ja. Ingen ny ordliste eller domeneregel.
+8. **Kompilering fremfor reparasjon ved spørring:** ingen endring i kompileringen.
+9. **Eksplisitt arkitekturbeslutning:** ja, D18–D22. Ingen vektorindeks (K13).
+10. **Brudd på invariantene:** ingen funnet.
+
+### Tester
+
+Nye: `ApiWikiReadTest`, `ApiWikiAskTest`. Endret: `ApiAiRefusalTest`, `ApiRouteContractTest` (Wiki er en betjent modul, egen kategori for AI-ruter uten `api.write`), `ApiOpenApiContractTest`, `IntegrationOperationAuthorityTest`, `ApiCustomerGrantTest`, `ApiClientGrantAdministrationTest`. Uendret og grønne: `WikiAskControllerTest`, kapasitets- og kostnadskontrolltestene.
+
+### Gjenstår før produksjon
+
+- Det samme som for resten av API-et: ekte Entra-token, staging og DPIA (D14).
+- Et ekte «Spør Wiki»-kall via API-et mot OpenAI på utviklingsstakken med testkunde (V2). Testene mocker modellen eller leverandøren.
+- Kapasitetstallene (nivåer og vekter) er foreløpige. Den harde grensen bruker dem som de er.
+

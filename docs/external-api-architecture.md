@@ -369,7 +369,7 @@ Tabellen i §7.1 beskriver utgangspunktet. Etter fase 0 gjelder:
 | Område | Begrunnelse |
 |---|---|
 | **Anbud** | Avdelingsbasert synlighet, uavklart oppførsel for integrasjoner (§4.4), og gamle arbeidsflytfelt på globale `notices` som deles mellom kunder (`customer-tenancy.md`). |
-| **Wiki** | Lesing skal gå via den felles navigasjons- og retrieval-kjernen og bare bruke gjeldende innhold (`AGENTS.md`). Et Wiki-endepunkt er en egen fase og må gjennom Wiki-sjekklisten (`enterprise-wiki-architecture.md` §J). |
+| **Wiki** | Lesing skal gå via den felles navigasjons- og retrieval-kjernen og bare bruke gjeldende innhold (`AGENTS.md`). Et Wiki-endepunkt er en egen fase og må gjennom Wiki-sjekklisten (`enterprise-wiki-architecture.md` §J). **Fase 6 (2026-10-24, D18–D22):** publiserte sider og «Spør Wiki» over publisert kunnskap er levert lokalt gjennom Wikiens egen katalog og kjerne. Sjekklisten er gjennomgått i `external-api-phase-1-decisions.md` §23. Kunnskapsoverføring er utsatt (D22). |
 | **Leverandører og Ledelsens gjennomgang** | Kan legges til i v1.1 med samme mønster (`SupplierAccessService`, `ManagementReviewAccessService`, `SectionBuilder`). |
 
 ### 8.4 Eksempelendepunkter (v1)
