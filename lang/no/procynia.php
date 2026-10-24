@@ -11710,4 +11710,37 @@ return [
         'severity_info' => 'Info',
         'severity_warning' => 'Advarsel',
     ],
+
+    'api_clients' => [
+        'navigation_label' => 'API-klienter',
+        'model_label' => 'API-klient',
+        'plural_model_label' => 'API-klienter',
+        'fields' => [
+            'name' => 'Navn',
+            'description' => 'Beskrivelse',
+            'entra_app_id' => 'Entra applikasjons-ID',
+            'home_tenant_id' => 'Entra tenant-ID',
+            'status' => 'Status',
+            'active_grants' => 'Aktive kundetildelinger',
+            'created_at' => 'Registrert',
+        ],
+        'help' => [
+            'entra_app_id' => 'Klientapplikasjonens Application (client) ID i Entra. Kan ikke endres etter registrering.',
+            'home_tenant_id' => 'Tenanten applikasjonen er registrert i. Kan ikke endres etter registrering.',
+        ],
+        'status' => [
+            'enabled' => 'Aktiv',
+            'disabled' => 'Deaktivert',
+        ],
+        'actions' => [
+            'create' => 'Registrer klient',
+            'edit' => 'Rediger',
+            'disable' => 'Deaktiver',
+            'enable' => 'Aktiver',
+        ],
+        'confirm' => [
+            'disable' => 'Applikasjonen avvises ved neste API-kall, for alle kunder. Kundenes tildelinger beholdes.',
+            'enable' => 'Applikasjonen kan igjen kalle API-et for kunder som har gitt den tilgang. Registrering alene gir ingen tilgang til kundedata.',
+        ],
+    ],
 ];

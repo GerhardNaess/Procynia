@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * An external application registered to call the Procynia API — for example Siggjo.
@@ -32,5 +33,17 @@ class ApiClient extends Model
         return [
             'is_enabled' => 'boolean',
         ];
+    }
+
+    /** @return HasMany<ApiClientCustomerGrant, $this> */
+    public function grants(): HasMany
+    {
+        return $this->hasMany(ApiClientCustomerGrant::class);
+    }
+
+    /** @return HasMany<ApiClientChange, $this> */
+    public function changes(): HasMany
+    {
+        return $this->hasMany(ApiClientChange::class);
     }
 }

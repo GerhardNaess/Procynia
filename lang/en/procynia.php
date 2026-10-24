@@ -11706,4 +11706,37 @@ return [
         'severity_info' => 'Info',
         'severity_warning' => 'Warning',
     ],
+
+    'api_clients' => [
+        'navigation_label' => 'API clients',
+        'model_label' => 'API client',
+        'plural_model_label' => 'API clients',
+        'fields' => [
+            'name' => 'Name',
+            'description' => 'Description',
+            'entra_app_id' => 'Entra application ID',
+            'home_tenant_id' => 'Entra tenant ID',
+            'status' => 'Status',
+            'active_grants' => 'Active customer grants',
+            'created_at' => 'Registered',
+        ],
+        'help' => [
+            'entra_app_id' => 'The client application\'s Application (client) ID in Entra. Cannot be changed after registration.',
+            'home_tenant_id' => 'The tenant the application is registered in. Cannot be changed after registration.',
+        ],
+        'status' => [
+            'enabled' => 'Active',
+            'disabled' => 'Disabled',
+        ],
+        'actions' => [
+            'create' => 'Register client',
+            'edit' => 'Edit',
+            'disable' => 'Disable',
+            'enable' => 'Enable',
+        ],
+        'confirm' => [
+            'disable' => 'The application is refused on its next API call, for every customer. The customers\' grants are kept.',
+            'enable' => 'The application may again call the API for customers that have granted it access. Registration alone gives no access to customer data.',
+        ],
+    ],
 ];
