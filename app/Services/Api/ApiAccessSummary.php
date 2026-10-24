@@ -6,6 +6,7 @@ use App\Models\BusinessArea;
 use App\Models\Customer;
 use App\Models\User;
 use App\Services\Improvements\ImprovementCaseAccessService;
+use App\Services\ManagementReview\ManagementReviewAccessService;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Objectives\ObjectiveAccessService;
 use App\Services\Risk\RiskAccessService;
@@ -27,10 +28,11 @@ class ApiAccessSummary
         private readonly RiskAccessService $risks,
         private readonly ImprovementCaseAccessService $improvements,
         private readonly ObjectiveAccessService $objectives,
+        private readonly ManagementReviewAccessService $managementReviews,
     ) {}
 
     /**
-     * @return array<string, array{entitled: bool, readable: bool, business_areas: 'all'|list<array{id: int, name: string}>}>
+     * @return array<string, array{entitled: bool, readable: bool, business_areas: 'all'|list<array{id: int, name: string}>|null}>
      */
     public function for(User $identity, Customer $customer): array
     {
@@ -54,6 +56,11 @@ class ApiAccessSummary
                 $this->entitlements->hasModule($customer, 'objectives'),
                 fn (): bool => $this->objectives->reachesAllAreas($identity, CustomerPermissionCatalog::OBJECTIVE_VIEW),
                 fn (): EloquentCollection => $this->objectives->areasFor($identity, CustomerPermissionCatalog::OBJECTIVE_VIEW),
+            ),
+            // GET /api/v1/management-reviews: Ledelsens gjennomgang. Customer-wide: no fagområder.
+            'management_review' => $this->customerWide(
+                $this->entitlements->hasModule($customer, 'management_review') && $this->managementReviews->canOpenModule($identity),
+                $this->entitlements->hasModule($customer, 'management_review'),
             ),
         ];
     }
@@ -99,6 +106,17 @@ class ApiAccessSummary
      * @param  callable(): EloquentCollection<int, BusinessArea>  $areas
      * @return array{entitled: bool, readable: bool, business_areas: 'all'|list<array{id: int, name: string}>}
      */
+    /**
+     * A module read across the whole customer, without fagområder: business_areas is null, never
+     * a list, so it is not mistaken for «no areas reached».
+     *
+     * @return array{entitled: bool, readable: bool, business_areas: null}
+     */
+    private function customerWide(bool $readable, bool $entitled): array
+    {
+        return ['entitled' => $entitled, 'readable' => $readable, 'business_areas' => null];
+    }
+
     private function module(bool $readable, bool $entitled, callable $reachesAll, callable $areas): array
     {
         return [

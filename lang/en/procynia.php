@@ -2795,10 +2795,12 @@ return [
             'access_label' => 'Can read through the API',
             'no_access' => 'Nothing. Give the integration a role with read permission.',
             'all_areas' => 'all business areas',
+            'customer_wide' => 'the whole customer environment',
             'modules' => [
                 'risk' => 'Risk',
-                'deviations' => 'Deviations',
+                'deviations' => 'Deviations and improvements',
                 'objectives' => 'Objectives and KPIs',
+                'management_review' => 'Management review',
             ],
             'granted_meta' => 'Access given :date by :name',
             'unknown_person' => 'unknown',

@@ -82,6 +82,8 @@ tags:
     description: Avvik og forbedringer — deviations (avvik) and improvement proposals (forbedringer), each on its own endpoints.
   - name: Objectives and KPIs
     description: Mål og KPI.
+  - name: Management review
+    description: Ledelsens gjennomgang.
 
 paths:
   /v1/me:
@@ -792,6 +794,105 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /v1/management-reviews:
+    get:
+      tags: [Management review]
+      operationId: listManagementReviews
+      summary: Ledelsens gjennomganger
+      description: |
+        The management reviews the integration identity may read: every review of the customer,
+        when the customer has the module and the identity has `management_review.view`. A review
+        is customer-wide; its fagområder narrow what its basis covers, never who may read it.
+
+        Requires the Ledelsens gjennomgang module and `management_review.view`.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/ManagementReviewStatusFilter'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of reviews.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ManagementReview'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/management-reviews/{reviewId}:
+    get:
+      tags: [Management review]
+      operationId: getManagementReview
+      summary: One review with its sections and decisions
+      description: |
+        One review the integration identity may read, with each section's state and judgement and
+        every decision and tiltak. The review page's own gates apply: a module section's judgement
+        is given only when the identity may read that module (otherwise its state is `no_access`
+        and the judgement null), and a case followed up in Avvik og forbedringer is named only when
+        the identity may read cases in that case's fagområde. A review of another customer, or one
+        that does not exist, is 404.
+
+        Not included: purpose, conclusion, section comments and notes, decision texts, completion
+        notes, amendments, participants' names, who finalized, the history and the basis figures
+        from the other modules (read those through the modules' own endpoints).
+
+        Requires the Ledelsens gjennomgang module and `management_review.view`.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/ReviewId'
+      responses:
+        '200':
+          description: The review.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ManagementReviewDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
 components:
   securitySchemes:
     entraApplicationToken:
@@ -871,6 +972,21 @@ components:
       schema:
         type: integer
         minimum: 0
+    ReviewId:
+      name: reviewId
+      in: path
+      required: true
+      description: The review's id.
+      schema:
+        type: integer
+        minimum: 0
+    ManagementReviewStatusFilter:
+      name: status
+      in: query
+      required: false
+      description: Only reviews with this status.
+      schema:
+        $ref: '#/components/schemas/ManagementReviewStatus'
     BusinessAreaId:
       name: business_area_id
       in: query
@@ -1157,7 +1273,7 @@ components:
         modules:
           type: object
           description: The modules this API serves, by the key of their endpoints.
-          required: [risk, deviations, objectives]
+          required: [risk, deviations, objectives, management_review]
           additionalProperties: false
           properties:
             risk:
@@ -1169,6 +1285,9 @@ components:
             objectives:
               $ref: '#/components/schemas/ModuleAccess'
               description: Mål og KPI — `GET /v1/objectives` and `GET /v1/kpis`.
+            management_review:
+              $ref: '#/components/schemas/ModuleAccess'
+              description: Ledelsens gjennomgang — `GET /v1/management-reviews`. Customer-wide, so `business_areas` is null.
     ModuleAccess:
       type: object
       required: [entitled, readable, business_areas]
@@ -1183,8 +1302,10 @@ components:
         business_areas:
           description: |
             The fagområder the identity reads in: `"all"` when it reaches every fagområde, otherwise
-            the list. Empty when the module is not readable.
+            the list. Empty when the module is not readable. Null for a module without fagområder,
+            which is read across the whole customer.
           oneOf:
+            - type: 'null'
             - type: string
               const: all
             - type: array
@@ -1200,7 +1321,7 @@ components:
 
     ApiModule:
       type: string
-      description: A module the API serves, by the key `/v1/me` uses. `deviations` covers both avvik and forbedringer.
+      description: A module with fagområder, by the key `/v1/me` uses. `deviations` covers both avvik and forbedringer.
       enum: [risk, deviations, objectives]
     AttentionItemType:
       type: string
@@ -1967,4 +2088,204 @@ components:
         updated_at:
           oneOf:
             - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+
+    ManagementReviewStatus:
+      type: string
+      description: draft until finalized; a finalized review is fixed.
+      enum: [draft, finalized]
+    ManagementReviewJudgement:
+      type: string
+      enum: [satisfactory, needs_improvement, not_satisfactory]
+    ManagementReviewSectionType:
+      type: string
+      description: own (the review's previous decisions), manual (judged without module figures), module (built from a module).
+      enum: [own, manual, module]
+    ManagementReviewSectionState:
+      type: string
+      description: |
+        available; module_unavailable (the customer does not have the module); no_access (the
+        identity may not read the module); not_captured (a finalized review's section that was not
+        captured at finalization).
+      enum: [available, module_unavailable, no_access, not_captured]
+    ManagementReviewDecisionKind:
+      type: string
+      description: decision (a recorded decision) or action (a tiltak with ansvarlig and frist).
+      enum: [decision, action]
+    ManagementReviewDecisionFollowUp:
+      type: string
+      description: own (followed up in the review) or improvement_case (followed up as a case in Avvik og forbedringer).
+      enum: [own, improvement_case]
+    ManagementReviewDecisionStatus:
+      type: string
+      enum: [open, completed, cancelled]
+    ManagementReview:
+      description: |
+        A ledelsens gjennomgang, structured fields only. Not included: purpose, conclusion, who
+        finalized it.
+      allOf:
+        - $ref: '#/components/schemas/ManagementReviewFields'
+      unevaluatedProperties: false
+    ManagementReviewFields:
+      type: object
+      required: [id, title, status, period_start, period_end, meeting_date, scope, frameworks, owner, next_review_due_on, finalized_at, decisions, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        status:
+          $ref: '#/components/schemas/ManagementReviewStatus'
+        period_start:
+          type: [string, 'null']
+          format: date
+        period_end:
+          type: [string, 'null']
+          format: date
+        meeting_date:
+          type: [string, 'null']
+          format: date
+        scope:
+          type: object
+          description: What the review's basis covers. It never limits who may read the review.
+          required: [all_business_areas, business_areas]
+          additionalProperties: false
+          properties:
+            all_business_areas:
+              type: boolean
+              description: The whole organisation («Hele virksomheten»).
+            business_areas:
+              type: array
+              description: The chosen fagområder. Empty when all_business_areas is true.
+              items:
+                $ref: '#/components/schemas/Reference'
+        frameworks:
+          type: array
+          description: The standards the review is held against, by library key (for example `iso9001:2015`).
+          items:
+            type: string
+        owner:
+          description: The responsible person, or null.
+          oneOf:
+            - $ref: '#/components/schemas/Person'
+            - type: 'null'
+        next_review_due_on:
+          type: [string, 'null']
+          format: date
+        finalized_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        decisions:
+          type: object
+          required: [total, actions_open]
+          additionalProperties: false
+          properties:
+            total:
+              type: integer
+              description: Decisions and tiltak.
+            actions_open:
+              type: integer
+              description: Tiltak followed up in the review that are still open.
+        created_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        updated_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    ManagementReviewDetail:
+      description: A review with its sections and decisions, under the review page's gates.
+      allOf:
+        - $ref: '#/components/schemas/ManagementReviewFields'
+        - type: object
+          required: [participant_count, sections, decision_list]
+          properties:
+            participant_count:
+              type: integer
+              description: How many took part. Their names are not included.
+            sections:
+              type: array
+              items:
+                $ref: '#/components/schemas/ManagementReviewSection'
+            decision_list:
+              type: array
+              description: Decisions and tiltak, in the review's order.
+              items:
+                $ref: '#/components/schemas/ManagementReviewDecision'
+      unevaluatedProperties: false
+    ManagementReviewSection:
+      type: object
+      required: [key, type, module, state, judgement]
+      additionalProperties: false
+      properties:
+        key:
+          type: string
+          description: The section, for example `risks`, `compliance` or `resources`.
+        type:
+          $ref: '#/components/schemas/ManagementReviewSectionType'
+        module:
+          type: [string, 'null']
+          description: The module a section's figures come from (`risk`, `objectives`, `improvements`, `compliance`, `quality`, `supplier`), or null.
+        state:
+          $ref: '#/components/schemas/ManagementReviewSectionState'
+        judgement:
+          description: The review's judgement of the section. Null when not judged, or when the identity may not see the section's basis.
+          oneOf:
+            - $ref: '#/components/schemas/ManagementReviewJudgement'
+            - type: 'null'
+    ManagementReviewDecision:
+      type: object
+      required: [id, kind, section_key, owner, due_on, follow_up, status, is_overdue, completed_at, improvement_case]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        kind:
+          $ref: '#/components/schemas/ManagementReviewDecisionKind'
+        section_key:
+          type: [string, 'null']
+          description: The section it belongs to, or null.
+        owner:
+          description: The tiltak's responsible person. Null for a decision.
+          oneOf:
+            - $ref: '#/components/schemas/Person'
+            - type: 'null'
+        due_on:
+          type: [string, 'null']
+          format: date
+        follow_up:
+          description: Null for a decision.
+          oneOf:
+            - $ref: '#/components/schemas/ManagementReviewDecisionFollowUp'
+            - type: 'null'
+        status:
+          description: Of a tiltak followed up in the review. Null for a decision and for one followed up as a case.
+          oneOf:
+            - $ref: '#/components/schemas/ManagementReviewDecisionStatus'
+            - type: 'null'
+        is_overdue:
+          type: boolean
+          description: Open, followed up in the review, and the frist is before today.
+        completed_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        improvement_case:
+          description: |
+            The case in Avvik og forbedringer the tiltak is followed up in, with its live status and
+            frist, when the identity may read it there. Null otherwise.
+          oneOf:
+            - type: object
+              required: [id, status, due_on]
+              additionalProperties: false
+              properties:
+                id:
+                  type: integer
+                status:
+                  $ref: '#/components/schemas/ImprovementCaseStatus'
+                due_on:
+                  type: [string, 'null']
+                  format: date
             - type: 'null'

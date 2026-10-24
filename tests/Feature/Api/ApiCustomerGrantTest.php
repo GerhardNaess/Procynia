@@ -74,6 +74,8 @@ class ApiCustomerGrantTest extends TestCase
                     'risk' => ['entitled' => true, 'readable' => true, 'business_areas' => 'all'],
                     'deviations' => ['entitled' => true, 'readable' => false, 'business_areas' => []],
                     'objectives' => ['entitled' => true, 'readable' => false, 'business_areas' => []],
+                    // Customer-wide: no fagområder at all, so null rather than a list.
+                    'management_review' => ['entitled' => true, 'readable' => false, 'business_areas' => null],
                 ],
             ],
             'meta' => [

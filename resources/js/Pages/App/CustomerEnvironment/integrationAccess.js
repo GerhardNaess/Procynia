@@ -3,16 +3,24 @@
  * summary GET /api/v1/me returns. A module the customer has not ordered, or the integration's roles
  * do not open, is left out: the list says what is readable, nothing else.
  */
-const MODULE_LABELS = { risk: 'Risiko', deviations: 'Avvik', objectives: 'Mål og KPI' };
+const MODULE_LABELS = {
+    risk: 'Risiko',
+    deviations: 'Avvik og forbedringer',
+    objectives: 'Mål og KPI',
+    management_review: 'Ledelsens gjennomgang',
+};
 
 export function integrationAccessLines(access = {}, t = {}) {
     return Object.entries(access ?? {})
         .filter(([, module]) => module?.entitled && module?.readable)
         .map(([key, module]) => {
             const label = t.modules?.[key] ?? MODULE_LABELS[key] ?? key;
-            const areas = module.business_areas === 'all'
-                ? (t.all_areas ?? 'alle fagområder')
-                : (module.business_areas ?? []).map((area) => area.name).join(', ');
+            // null: the module has no fagområder and is read across the whole customer environment.
+            const areas = module.business_areas === null
+                ? (t.customer_wide ?? 'hele kundemiljøet')
+                : module.business_areas === 'all'
+                    ? (t.all_areas ?? 'alle fagområder')
+                    : (module.business_areas ?? []).map((area) => area.name).join(', ');
 
             return `${label}: ${areas}`;
         });

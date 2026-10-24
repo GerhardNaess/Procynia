@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\BusinessAreaController;
 use App\Http\Controllers\Api\V1\DeviationController;
 use App\Http\Controllers\Api\V1\ImprovementController;
 use App\Http\Controllers\Api\V1\KpiController;
+use App\Http\Controllers\Api\V1\ManagementReviewController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\ObjectiveController;
 use App\Http\Controllers\Api\V1\RiskController;
@@ -42,4 +43,6 @@ Route::prefix('v1')
         Route::get('objectives/{objectiveId}', [ObjectiveController::class, 'show'])->whereNumber('objectiveId')->name('objectives.show');
         Route::get('kpis', [KpiController::class, 'index'])->name('kpis.index');
         Route::get('kpis/{kpiId}/measurements', [KpiController::class, 'measurements'])->whereNumber('kpiId')->name('kpis.measurements');
+        Route::get('management-reviews', [ManagementReviewController::class, 'index'])->name('management-reviews.index');
+        Route::get('management-reviews/{reviewId}', [ManagementReviewController::class, 'show'])->whereNumber('reviewId')->name('management-reviews.show');
     });

@@ -27,7 +27,7 @@ class ApiRouteContractTest extends TestCase
     private const STACK = ['api', 'api.log', 'api.client', 'api.customer', 'customer.module'];
 
     /** Modules the API may serve. Extend deliberately, with the module's own access tests. */
-    private const SERVED_MODULES = ['risk', 'improvements', 'objectives'];
+    private const SERVED_MODULES = ['risk', 'improvements', 'objectives', 'management_review'];
 
     /** The write routes, by name, with the one method each accepts. Extend deliberately. */
     private const WRITE_ROUTES = [

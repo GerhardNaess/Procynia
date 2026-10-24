@@ -2799,10 +2799,12 @@ return [
             'access_label' => 'Kan lese gjennom API-et',
             'no_access' => 'Ingenting. Gi integrasjonen en rolle med leserettighet.',
             'all_areas' => 'alle fagområder',
+            'customer_wide' => 'hele kundemiljøet',
             'modules' => [
                 'risk' => 'Risiko',
-                'deviations' => 'Avvik',
+                'deviations' => 'Avvik og forbedringer',
                 'objectives' => 'Mål og KPI',
+                'management_review' => 'Ledelsens gjennomgang',
             ],
             'granted_meta' => 'Tilgang gitt :date av :name',
             'unknown_person' => 'ukjent',

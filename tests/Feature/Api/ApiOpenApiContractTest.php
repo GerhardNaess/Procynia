@@ -6,11 +6,14 @@ use App\Models\ImprovementAction;
 use App\Models\ImprovementActionVerification;
 use App\Models\ImprovementCase;
 use App\Models\Kpi;
+use App\Models\ManagementReview;
+use App\Models\ManagementReviewDecision;
 use App\Models\Objective;
 use App\Models\Risk;
 use App\Models\RiskTreatmentAction;
 use App\Services\Api\ApiErrorResponder;
 use App\Services\Improvements\ImprovementAttentionService;
+use App\Services\ManagementReview\ManagementReviewSectionCatalog as ReviewSections;
 use App\Services\Objectives\KpiTarget;
 use App\Services\Objectives\KpiTargetPolicy;
 use App\Services\Objectives\ObjectiveAttentionService;
@@ -121,6 +124,13 @@ class ApiOpenApiContractTest extends TestCase
             'KpiCurrentResult' => [...KpiTargetPolicy::RESULTS, KpiPagePresenter::NOT_MEASURED],
             'KpiAttentionCode' => [ObjectiveAttentionService::KPI_OFF_TARGET, ObjectiveAttentionService::MEASUREMENT_MISSING],
             'ErrorCode' => array_keys(ApiErrorResponder::MESSAGES),
+            'ManagementReviewStatus' => ManagementReview::STATUSES,
+            'ManagementReviewJudgement' => ManagementReview::JUDGEMENTS,
+            'ManagementReviewSectionType' => [ReviewSections::TYPE_OWN, ReviewSections::TYPE_MANUAL, ReviewSections::TYPE_MODULE],
+            'ManagementReviewSectionState' => [ReviewSections::STATE_AVAILABLE, ReviewSections::STATE_MODULE_UNAVAILABLE, ReviewSections::STATE_NO_ACCESS, ReviewSections::STATE_NOT_CAPTURED],
+            'ManagementReviewDecisionKind' => ManagementReviewDecision::KINDS,
+            'ManagementReviewDecisionFollowUp' => [ManagementReviewDecision::FOLLOW_UP_OWN, ManagementReviewDecision::FOLLOW_UP_IMPROVEMENT_CASE],
+            'ManagementReviewDecisionStatus' => ManagementReviewDecision::STATUSES,
             // The keys of ApiAccessSummary::for() and the item types of ApiAttentionOverview.
             'ApiModule' => ['risk', 'deviations', 'objectives'],
             'AttentionItemType' => ['risk', 'deviation', 'improvement', 'objective', 'kpi'],
