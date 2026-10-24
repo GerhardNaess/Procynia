@@ -524,7 +524,7 @@ Prinsipper: bruk eksisterende domenetjenester og tilgangstjenester, gjenbruk mø
 | **Avhengigheter** | Produkt- og arkitekturbeslutninger over |
 | **Kompleksitet** | Høy |
 | **Ferdig når** | ANB-01–03 er tilgjengelige med tester for avdelinger og kundeseparasjon, og alle hindre i «Anbud» under funn er lukket. |
-| **Status** | 🟥 Ikke startet. Kontrollert 2026-10-24: ANB-01–09 er B-funksjoner uten beslutning, ANB-10 er ikke anbefalt, og ANB-11–12 er C. Ingen kan bygges med dagens arkitektur (funn 28). |
+| **Status** | 🟥 Ikke startet. Kontrollert 2026-10-24: ANB-01–09 er B-funksjoner uten beslutning, ANB-10 er ikke anbefalt, og ANB-11–12 er C. Ingen kan bygges med dagens arkitektur (funn 28). Beslutningssak D23–D28: [`external-api-phase-7-tender-decisions.md`](external-api-phase-7-tender-decisions.md). |
 
 ### Fase 8 – Kopi av data og agentlag
 
