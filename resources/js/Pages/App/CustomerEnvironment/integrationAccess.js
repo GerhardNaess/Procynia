@@ -3,7 +3,7 @@
  * summary GET /api/v1/me returns. A module the customer has not ordered, or the integration's roles
  * do not open, is left out: the list says what is readable, nothing else.
  */
-const MODULE_LABELS = { risk: 'Risiko' };
+const MODULE_LABELS = { risk: 'Risiko', deviations: 'Avvik' };
 
 export function integrationAccessLines(access = {}, t = {}) {
     return Object.entries(access ?? {})

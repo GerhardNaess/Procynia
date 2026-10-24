@@ -2797,6 +2797,7 @@ return [
             'all_areas' => 'all business areas',
             'modules' => [
                 'risk' => 'Risk',
+                'deviations' => 'Deviations',
             ],
             'granted_meta' => 'Access given :date by :name',
             'unknown_person' => 'unknown',

@@ -151,6 +151,7 @@ return [
         'app.management-review.' => 'management_review',
         // The external API. Only modules the API serves (ApiRouteContractTest).
         'api.v1.risks.' => 'risk',
+        'api.v1.deviations.' => 'improvements',
     ],
 
 ];

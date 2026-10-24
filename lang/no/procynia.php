@@ -2801,6 +2801,7 @@ return [
             'all_areas' => 'alle fagområder',
             'modules' => [
                 'risk' => 'Risiko',
+                'deviations' => 'Avvik',
             ],
             'granted_meta' => 'Tilgang gitt :date av :name',
             'unknown_person' => 'ukjent',

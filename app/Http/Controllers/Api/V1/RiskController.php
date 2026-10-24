@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Risk;
+use App\Services\Api\ApiCursor;
 use App\Services\Api\ApiRequestContext;
 use App\Services\Api\ApiResponse;
 use App\Services\Api\Presenters\RiskPresenter;
@@ -12,7 +13,6 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\ValidationException;
 
 /**
  * GET /api/v1/risks — the risks the integration identity may read, a page at a time.
@@ -48,7 +48,7 @@ class RiskController extends Controller
         ]);
 
         $limit = (int) ($validated['limit'] ?? self::DEFAULT_LIMIT);
-        $after = isset($validated['cursor']) ? $this->decodeCursor($validated['cursor']) : null;
+        $after = isset($validated['cursor']) ? ApiCursor::decode($validated['cursor']) : null;
 
         $query = $access->visibleRisks($actor)
             ->with(['businessArea:id,name', 'owner:id,name'])
@@ -75,32 +75,8 @@ class RiskController extends Controller
             $context,
             [
                 'limit' => $limit,
-                'next_cursor' => $found->count() > $limit ? $this->encodeCursor((int) $page->last()->id) : null,
+                'next_cursor' => $found->count() > $limit ? ApiCursor::encode((int) $page->last()->id) : null,
             ],
         );
-    }
-
-    /**
-     * Opaque to the client: the last id of the previous page, nothing else. It carries no
-     * customer, so it can only continue the list the access service already scoped.
-     */
-    private function encodeCursor(int $lastId): string
-    {
-        return rtrim(strtr(base64_encode((string) json_encode(['after' => $lastId])), '+/', '-_'), '=');
-    }
-
-    private function decodeCursor(string $cursor): int
-    {
-        $json = preg_match('/^[A-Za-z0-9_-]+$/', $cursor) === 1
-            ? base64_decode(strtr($cursor, '-_', '+/'), true)
-            : false;
-        $decoded = is_string($json) ? json_decode($json, true) : null;
-        $after = is_array($decoded) ? ($decoded['after'] ?? null) : null;
-
-        if (! is_int($after) || $after < 1 || count($decoded) !== 1) {
-            throw ValidationException::withMessages(['cursor' => 'The cursor is invalid.']);
-        }
-
-        return $after;
     }
 }

@@ -70,7 +70,10 @@ class ApiCustomerGrantTest extends TestCase
                 'customer' => ['id' => $customer->id, 'name' => 'Nordlys AS'],
                 'mode' => 'application',
                 'actor' => ['id' => $identity->id, 'name' => $identity->name, 'type' => 'integration'],
-                'modules' => ['risk' => ['entitled' => true, 'readable' => true, 'business_areas' => 'all']],
+                'modules' => [
+                    'risk' => ['entitled' => true, 'readable' => true, 'business_areas' => 'all'],
+                    'deviations' => ['entitled' => true, 'readable' => false, 'business_areas' => []],
+                ],
             ],
             'meta' => [
                 'as_of' => $response->json('meta.as_of'),
