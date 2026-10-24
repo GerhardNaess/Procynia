@@ -9,15 +9,16 @@ use App\Services\Security\ActorChannel;
 use App\Support\ApiOperationCatalog;
 
 /**
- * Whether an integration identity may perform one named write operation now (ApiOperationCatalog).
+ * Whether an integration identity may perform one named operation now (ApiOperationCatalog).
  *
  * Asked by the domain access services, not by controllers, so the answer is the same however the
  * domain service is reached. Every condition is read fresh and fails closed:
  *
  *  - the actor is an active integration identity;
  *  - the operation is in the catalog;
- *  - the request came through the API, as this identity, with a token carrying the write app role
- *    (Procynia.Write.All) — outside an API request an integration writes nothing;
+ *  - the request came through the API, as this identity — outside an API request an integration
+ *    does nothing — and, for an operation that writes, with a token carrying the write app role
+ *    (Procynia.Write.All);
  *  - the identity's grant is active, for its own customer, and its client is enabled and is the
  *    one that called;
  *  - the System Owner has switched the operation on for that grant;
@@ -54,7 +55,7 @@ class IntegrationOperationAuthority
             return 'not_an_api_request';
         }
 
-        if (! $context->writeRole) {
+        if (ApiOperationCatalog::requiresWriteRole($operation) && ! $context->writeRole) {
             return 'missing_write_role';
         }
 

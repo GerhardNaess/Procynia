@@ -16,7 +16,8 @@ Spesifikasjonen er skrevet for hånd og versjoneres sammen med koden. Den genere
 | Feilformat og feilkoder | `ApiErrorResponder` |
 | Paginering | `ApiCursor` |
 | Token og app-roller | `EntraAccessTokenValidator`, `RequireApiWriteRole`, `config/procynia.php` → `api` |
-| Skriveoperasjoner | `ApiOperationCatalog` |
+| Navngitte operasjoner (skriving og «Spør Wiki») | `ApiOperationCatalog` |
+| AI på API-kanalen | `ApiAiOperations` (hvilke ruter som kan bruke hvilke AI-operasjoner), `AiCostControlService` |
 
 ## Automatisk kontroll
 
@@ -33,7 +34,7 @@ Testen leser filen linje for linje, fordi prosjektet ikke har en YAML-parser. De
 - skjemaer på fire mellomrom under `components.schemas`;
 - hver enum på én linje: `enum: [a, b, c]`.
 
-Testen dekker ikke feltlistene i svarene. Feltene er låst av `assertExactJsonStructure` og `assertJsonPath` i lesetestene (`ApiRiskReadTest`, `ApiRiskDetailReadTest`, `ApiDeviationReadTest`, `ApiImprovementCaseReadTest`, `ApiObjectiveKpiReadTest`, `ApiObjectiveKpiDetailReadTest`, `ApiAttentionAndBusinessAreaReadTest`) og av `assertExactJson` i `ApiCustomerGrantTest`, `ApiRiskTreatmentActionCreateTest` og `ApiImprovementRegistrationTest`. Når de endres, må spesifikasjonen endres for hånd. Kontrollen av ekte svar under fanger det som er glemt.
+Testen dekker ikke feltlistene i svarene. Feltene er låst av `assertExactJsonStructure` og `assertJsonPath` i lesetestene (`ApiRiskReadTest`, `ApiRiskDetailReadTest`, `ApiDeviationReadTest`, `ApiImprovementCaseReadTest`, `ApiObjectiveKpiReadTest`, `ApiObjectiveKpiDetailReadTest`, `ApiAttentionAndBusinessAreaReadTest`) og av `assertExactJson` i `ApiCustomerGrantTest`, `ApiRiskTreatmentActionCreateTest` og `ApiImprovementRegistrationTest`. Wiki-feltene låses i `ApiWikiReadTest` og `ApiWikiAskTest`. Når de endres, må spesifikasjonen endres for hånd. Kontrollen av ekte svar under fanger det som er glemt.
 
 ```bash
 docker exec procynia-app php artisan test --filter='ApiOpenApiContractTest|ApiRouteContractTest'
@@ -52,7 +53,7 @@ Forventet resultat: gyldig, med én advarsel (`info-license`). Lisensvilkårene 
 
 ## Kontroll av ekte svar mot skjemaene
 
-Ved en større endring kontrolleres ekte svar mot skjemaene i spesifikasjonen. Det ble gjort etter fase 2 (18 svar) og etter fase 3 (335 svar fra 13 API-testklasser), begge ganger uten avvik (2026-10-24). Fremgangsmåten krever ingen nye avhengigheter i prosjektet:
+Ved en større endring kontrolleres ekte svar mot skjemaene i spesifikasjonen. Det ble gjort etter fase 2 (18 svar), etter fase 3 (335 svar fra 13 API-testklasser) og etter fase 6 (26 svar fra `ApiWikiReadTest` og `ApiWikiAskTest`), alle gangene uten avvik til slutt (2026-10-24). I fase 6 fant kontrollen én feil i et skjema før den ble rettet. Fremgangsmåten krever ingen nye avhengigheter i prosjektet:
 
 1. Svarene samles fra de eksisterende API-testene. En midlertidig trait overstyrer `get()` og `postJson()` og skriver `{method, path, status, body}` for hvert API-kall til en JSON-fil under `storage/app/`. Banen er rutens mal (`$response->baseRequest->route()->uri()`). Én midlertidig underklasse per testklasse bruker traiten. Alternativt kan én midlertidig test lage testdata og kalle hver operasjon.
 2. Et lite Node-skript i scratch-katalogen kjører i Docker-bildet `node:22` med `ajv` (JSON Schema 2020-12), `ajv-formats` og `js-yaml`. Det slår opp svarskjemaet for sti, metode og status i spesifikasjonen og validerer hvert svar.
@@ -74,7 +75,7 @@ Ved en større endring kontrolleres ekte svar mot skjemaene i spesifikasjonen. D
 2. Beskriv svarfeltene som et gjenbrukbart skjema under `components.schemas`. Bare feltene presentasjonsklassen sender, med samme navn og samme nullbarhet. Fritekst, filer, interne felt og webruter skal heller ikke stå i spesifikasjonen.
 3. Gjenbruk de felles delene: `Limit`, `Cursor`, `BusinessAreaId`, `PageMeta`, `Meta`, `Reference`, `Person`, `Timestamp`, `Decimal` og feilsvarene under `components.responses`.
 4. Skriv nye enums på én linje og legg dem til i `test_the_enums_are_the_codes_own_values`, med konstanten de kommer fra.
-5. For en skriveoperasjon: krev `[Procynia.Read.All, Procynia.Write.All]` under `security`, nevn operasjonsnavnet fra `ApiOperationCatalog` i beskrivelsen, og beskriv rekkefølgen kontrollene skjer i. Si eksplisitt om operasjonen er idempotent.
+5. For en skriveoperasjon: krev `[Procynia.Read.All, Procynia.Write.All]` under `security`, nevn operasjonsnavnet fra `ApiOperationCatalog` i beskrivelsen, og beskriv rekkefølgen kontrollene skjer i. Si eksplisitt om operasjonen er idempotent. En operasjon som ikke skriver (som `wiki.ask`), krever ikke skriverollen og har ingen `security` utover standarden. Bruker den AI, må ruten stå i `ApiAiOperations` og i `AI_ROUTES` i `ApiRouteContractTest`, og 429 `ai_capacity_exhausted` må beskrives.
 6. Kjør kontrakttesten og Redocly-valideringen over.
 7. Oppdater `info.version` når kontrakten endres. Ny valgfri funksjonalitet gir en ny mindre versjon (1.1.0). Endringer som bryter med eksisterende klienter hører til en ny API-versjon (`/v2`).
 8. Oppdater [`../external-api-coverage-status.md`](../external-api-coverage-status.md) etter reglene der.

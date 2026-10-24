@@ -6,6 +6,7 @@ use App\Models\BusinessArea;
 use App\Models\Customer;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPublishedKnowledgeReader;
 use App\Services\Improvements\ImprovementCaseAccessService;
 use App\Services\ManagementReview\ManagementReviewAccessService;
 use App\Services\Modules\ModuleEntitlementService;
@@ -35,6 +36,7 @@ class ApiAccessSummary
         private readonly ComplianceAccessService $compliance,
         private readonly SupplierAccessService $suppliers,
         private readonly QualityProcessContextReader $quality,
+        private readonly EnterpriseWikiPublishedKnowledgeReader $wiki,
     ) {}
 
     /**
@@ -82,6 +84,11 @@ class ApiAccessSummary
             'quality' => $this->customerWide(
                 $this->quality->canRead($identity),
                 $this->entitlements->hasModule($customer, 'quality'),
+            ),
+            // GET /api/v1/wiki/…: Enterprise Wiki, published knowledge. Customer-wide.
+            'wiki' => $this->customerWide(
+                $this->wiki->canRead($identity),
+                $this->entitlements->hasModule($customer, 'wiki'),
             ),
         ];
     }

@@ -159,6 +159,7 @@ return [
         'api.v1.compliance.' => 'compliance',
         'api.v1.suppliers.' => 'supplier',
         'api.v1.quality.' => 'quality',
+        'api.v1.wiki.' => 'wiki',
     ],
 
 ];

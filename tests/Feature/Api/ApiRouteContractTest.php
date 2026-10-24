@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api;
 
+use App\Support\Ai\ApiAiOperations;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\Route as Router;
@@ -13,21 +14,24 @@ use Tests\TestCase;
  * The shape every external API route must have, checked over the real route table
  * (docs/external-api-phase-1-decisions.md §5 and §9).
  *
- *  - Read by default: GET (and the HEAD Laravel adds). The only exceptions are the named write
- *    routes in WRITE_ROUTES, each a POST behind api.write that performs one catalogued operation
- *    (ApiOperationCatalog). No route decides or starts work — which is also what keeps A23 (AI
- *    work) and A46 («Flytt til historikk») unreachable.
+ *  - Read by default: GET (and the HEAD Laravel adds). The exceptions are the named write routes
+ *    in WRITE_ROUTES, each a POST behind api.write that performs one catalogued operation
+ *    (ApiOperationCatalog), and the AI routes in AI_ROUTES — «Spør Wiki» (D19) — a POST that writes
+ *    nothing and so has no api.write, and the only routes ApiAiOperations lets spend AI. No route
+ *    decides — which is also what keeps A46 («Flytt til historikk») and the Kvalitet half of A23
+ *    unreachable.
  *  - The whole stack, in order, on every route: log, application, customer grant, module.
- *  - Only modules the API is meant to serve. Kvalitet, Wiki and Anbud are not among them.
+ *  - Only modules the API is meant to serve. Anbud is not among them.
  *  - No route model binding: a record is found through the access services, never by id alone.
- *  - API controllers do not touch the services behind A23 and A46.
+ *  - API controllers do not touch the services behind A23 and A46, except «Spør Wiki» from the
+ *    Wiki controller, whose service now holds the access rule itself.
  */
 class ApiRouteContractTest extends TestCase
 {
     private const STACK = ['api', 'api.log', 'api.client', 'api.customer', 'customer.module'];
 
     /** Modules the API may serve. Extend deliberately, with the module's own access tests. */
-    private const SERVED_MODULES = ['risk', 'improvements', 'objectives', 'management_review', 'compliance', 'supplier', 'quality'];
+    private const SERVED_MODULES = ['risk', 'improvements', 'objectives', 'management_review', 'compliance', 'supplier', 'quality', 'wiki'];
 
     /** The write routes, by name, with the one method each accepts. Extend deliberately. */
     private const WRITE_ROUTES = [
@@ -36,6 +40,11 @@ class ApiRouteContractTest extends TestCase
         'api.v1.deviations.actions.store' => 'POST',
         'api.v1.improvements.store' => 'POST',
         'api.v1.improvements.actions.store' => 'POST',
+    ];
+
+    /** The routes that spend AI (ApiAiOperations), with the one method each accepts. Extend deliberately. */
+    private const AI_ROUTES = [
+        'api.v1.wiki.ask' => 'POST',
     ];
 
     /**
@@ -53,6 +62,11 @@ class ApiRouteContractTest extends TestCase
         'NoticeController',
         'SavedNotice',
         'OpenAiClient',
+    ];
+
+    /** The one exception (A23 resolved for the Wiki half): the service authorizes itself. */
+    private const ALLOWED_REFERENCES = [
+        'WikiController.php' => ['EnterpriseWikiQuestionAnswerService'],
     ];
 
     public function test_there_is_at_least_one_api_route(): void
@@ -75,6 +89,13 @@ class ApiRouteContractTest extends TestCase
                 continue;
             }
 
+            if (array_key_exists($name, self::AI_ROUTES)) {
+                $this->assertSame([self::AI_ROUTES[$name]], $route->methods(), "AI route [{$name}] accepts another method.");
+                $this->assertNotContains('api.write', $route->gatherMiddleware(), "AI route [{$name}] writes nothing and needs no write role.");
+
+                continue;
+            }
+
             $this->assertSame(
                 [],
                 array_values(array_diff($route->methods(), ['GET', 'HEAD'])),
@@ -83,9 +104,15 @@ class ApiRouteContractTest extends TestCase
             $this->assertNotContains('api.write', $route->gatherMiddleware());
         }
 
-        foreach (array_keys(self::WRITE_ROUTES) as $name) {
-            $this->assertContains($name, $names, "Write route [{$name}] is not registered.");
+        foreach ([...array_keys(self::WRITE_ROUTES), ...array_keys(self::AI_ROUTES)] as $name) {
+            $this->assertContains($name, $names, "Route [{$name}] is not registered.");
         }
+    }
+
+    public function test_only_the_ai_routes_may_spend_ai(): void
+    {
+        $this->assertSame(array_keys(self::AI_ROUTES), array_keys(ApiAiOperations::byRoute()));
+        $this->assertSame(['wiki.navigation_plan', 'wiki.ask.retrieval_plan', 'wiki.ask.answer'], ApiAiOperations::byRoute()['api.v1.wiki.ask']);
     }
 
     public function test_every_api_route_is_named_under_v1(): void
@@ -163,8 +190,9 @@ class ApiRouteContractTest extends TestCase
 
         foreach ($files as $path) {
             $source = (string) file_get_contents($path);
+            $allowed = self::ALLOWED_REFERENCES[basename($path)] ?? [];
 
-            foreach (self::FORBIDDEN_REFERENCES as $class) {
+            foreach (array_diff(self::FORBIDDEN_REFERENCES, $allowed) as $class) {
                 $this->assertDoesNotMatchRegularExpression(
                     '/\b'.$class.'\b/',
                     $source,

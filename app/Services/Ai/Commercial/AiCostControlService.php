@@ -20,6 +20,7 @@ use App\Services\Ai\Operational\AiOperationalAlertService;
 use App\Services\Ai\Operational\AiOperationalBudgetService;
 use App\Services\Ai\Operational\AiOperationalPricingService;
 use App\Services\Ai\Operational\AiPaymentPolicyService;
+use App\Services\Security\ActorChannel;
 use App\Support\Ai\AiCallContextScope;
 use App\Support\Ai\AiProviderFailure;
 use Carbon\CarbonImmutable;
@@ -223,10 +224,16 @@ class AiCostControlService
      * pending with this same estimate, before the customer lock is released — not a second
      * reservation store. In `observe` mode (the default while the Anbud AI-case quota is still the
      * commercial gate) a refusal is only logged. Returns the verdict recorded on the attempt.
+     *
+     * A call from the external API (D20) is always enforced, whatever the mode, and fails closed
+     * where the gate could not hold: a customer with no defined capacity, or a call with no
+     * estimate to reserve, is refused rather than let through unmeasured. Concurrency is the same
+     * as for everyone — the customer row lock and the pending attempt opened under it.
      */
     private function assertCapacityAllows(AiCallContext $context, Customer $customer, ?float $estimatedCostNok): ?string
     {
-        $mode = (string) config('ai_customer_capacity.enforcement', 'observe');
+        $api = app(ActorChannel::class)->isApi();
+        $mode = $api ? 'enforce' : (string) config('ai_customer_capacity.enforcement', 'observe');
 
         if ($mode === 'off') {
             return null;
@@ -234,6 +241,10 @@ class AiCostControlService
 
         $verdict = $this->capacity->evaluate($customer, $estimatedCostNok);
         $refusal = CustomerAiCapacityService::refusalReason($verdict);
+
+        if ($api && $refusal === null && ($verdict === CustomerAiCapacityService::VERDICT_UNMETERED || $estimatedCostNok === null)) {
+            $refusal = AiCostControlException::CAPACITY_INSUFFICIENT;
+        }
 
         if ($refusal === null) {
             return $verdict;

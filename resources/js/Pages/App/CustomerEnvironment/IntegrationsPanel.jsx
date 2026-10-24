@@ -12,8 +12,9 @@ import { integrationAccessLines } from './integrationAccess';
  * shows what the integration can actually read, so the effect of the roles is visible, not only
  * their names. Revoking takes effect on the application's next call.
  *
- * Write operations are a separate, explicit choice per grant (ApiOperationCatalog): a role never
- * gives one. Ticking one saves at once, like a switch.
+ * Operations beyond reading — the registrations, and «Spør Wiki», which spends AI capacity — are a
+ * separate, explicit choice per grant (ApiOperationCatalog): a role never gives one. Ticking one
+ * saves at once, like a switch.
  */
 function formatDateTime(value, locale) {
     if (!value) {
@@ -71,9 +72,9 @@ function OperationChoice({ grant, operations, t }) {
 
     return (
         <fieldset className="mt-4" aria-describedby={hintId}>
-            <legend className="text-base font-semibold text-slate-900">{t.operations_label ?? 'Kan registrere gjennom API-et'}</legend>
+            <legend className="text-base font-semibold text-slate-900">{t.operations_label ?? 'Kan bruke gjennom API-et'}</legend>
             <p id={hintId} className="mt-1 text-base leading-6 text-slate-600">
-                {t.operations_hint ?? 'Slå bare på det applikasjonen trenger. Det gjelder bare i fagområdene integrasjonen kan lese, og applikasjonen må i tillegg ha skriverollen i Entra ID.'}
+                {t.operations_hint ?? 'Slå bare på det applikasjonen trenger. Registreringer gjelder bare i fagområdene integrasjonen kan lese, og applikasjonen må i tillegg ha skriverollen i Entra ID. Spør Wiki svarer bare fra publisert innhold og bruker kundens AI-kapasitet.'}
             </p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {operations.map((operation) => (

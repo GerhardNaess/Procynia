@@ -7,7 +7,7 @@ openapi: 3.1.0
 info:
   title: Procynia API
   version: 1.0.0
-  summary: Read access to Procynia's governance registers, and named write operations, for integrations.
+  summary: Read access to Procynia's governance registers and published Wiki knowledge, and named operations, for integrations.
   description: |
     The external API of Procynia for integrations acting for a customer (for example a dashboard
     supplier). It is **not in production** yet: it has been verified locally with automated tests,
@@ -44,6 +44,10 @@ info:
     the record. Formal human decisions (assessments, approvals, acceptance of risk, closing,
     deleting) are never available to an integration.
 
+    **Spør Wiki.** `POST /v1/wiki/ask` writes nothing and so needs no write role, but it spends the
+    customer's AI capacity. It needs operation `wiki.ask` switched on for the grant, and is answered
+    from published Wiki versions only.
+
     ## Conventions
 
     - Every success response is `{"data": …, "meta": {"as_of", "request_id", …}}`.
@@ -62,7 +66,12 @@ info:
     - Rate limit: 240 requests per minute per (client application, customer) by default. Over the limit the
       answer is 429 with `Retry-After`.
     - No write is idempotent: repeating a write request creates another record.
-    - Nothing in the API starts AI work.
+    - Only `POST /v1/wiki/ask` uses AI. It counts against the customer's shared AI capacity, and
+      through the API that capacity is a hard limit: when it is used up, or what is left does not
+      cover the question, the answer is 429 `ai_capacity_exhausted`. Questions also have their own
+      limit per integration identity and per customer (by default 10 and 60 per 15 minutes),
+      separate from the people in the web application; over it the answer is 429 `rate_limited`.
+    - Nothing else in the API starts AI work.
   contact:
     name: Procynia
 
@@ -90,6 +99,8 @@ tags:
     description: Kvalitet — the register, controls and attention, without process flows.
   - name: Compliance and audit
     description: Etterlevelse og revisjon — kravregister, status, revisjoner and Kravbiblioteket.
+  - name: Wiki
+    description: Enterprise Wiki — published pages and «Spør Wiki», never a working version.
 
 paths:
   /v1/me:
@@ -1836,6 +1847,171 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /v1/wiki/pages:
+    get:
+      tags: [Wiki]
+      operationId: listWikiPages
+      summary: Published Wiki pages
+      description: |
+        The customer's published Enterprise Wiki pages, a page at a time: each in its **published**
+        version — the version a reviewer approved and published (D18). A page that has never been
+        published is not listed; a page whose working version is in review or was returned is listed
+        with the version that is still published. Archived and superseded pages are not listed.
+        `version_number` is that published version's number.
+
+        Not included: the working version and whether one exists, the page's status, content blocks
+        and their source excerpts, claims and the verification basis, source documents, runs,
+        figures, owners, reviewers and QA. These are the same pages `POST /v1/wiki/ask` answers from.
+
+        Requires the Enterprise Wiki module and `wiki.view`.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/WikiPageTypeFilter'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of published Wiki pages.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WikiPage'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/wiki/pages/{pageId}:
+    get:
+      tags: [Wiki]
+      operationId: getWikiPage
+      summary: One published Wiki page
+      description: |
+        One published Wiki page: its published text as Markdown, and the published pages that text
+        links to (`[[slug]]` or `[[slug|text]]` in `content_markdown`), in the order they first
+        occur. A link to a page that is not published is not in `links`. Only the published version
+        is read (D18); the working version is never read, and reading writes nothing.
+
+        A page that has never been published, an archived or superseded page, another customer's
+        page or one that does not exist is 404.
+
+        Requires the Enterprise Wiki module and `wiki.view`.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/PageId'
+      responses:
+        '200':
+          description: The page.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/WikiPageDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/wiki/ask:
+    post:
+      tags: [Wiki]
+      operationId: askWiki
+      summary: Spør Wiki — a grounded answer from published Wiki knowledge
+      description: |
+        Operation `wiki.ask`. One question, one answer, through the same Wiki navigation and
+        retrieval core as «Spør Wiki» in the web application (D19) — but grounded in **published**
+        versions only (D18). `insufficient_evidence` is a valid answer: the Wiki is never
+        supplemented with general knowledge. Each citation names the published version it was read
+        from (D21). Nothing is written to the Wiki, and no conversation is kept.
+
+        Requires, in this order of checking (after the token and the customer grant):
+
+        1. The customer has ordered the Enterprise Wiki module (403).
+        2. The integration identity has `wiki.view`, the customer has the AI offer, and the
+           customer's System Owner has switched on `wiki.ask` for the grant (403). No write role is
+           needed.
+        3. The limit on questions (429 `rate_limited`).
+        4. A valid body (422).
+        5. The customer's AI capacity covers the question (429 `ai_capacity_exhausted`), checked
+           before every AI call it makes. A customer whose AI is suspended or not paid for is 403;
+           an AI stop on Procynia's side is 503.
+
+        Not idempotent: each request asks again and spends capacity again.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WikiQuestion'
+      responses:
+        '200':
+          description: The answer.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/WikiAnswer'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/AiCapacityOrRateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
 components:
   securitySchemes:
     entraApplicationToken:
@@ -2041,6 +2217,20 @@ components:
       schema:
         type: integer
         minimum: 0
+    PageId:
+      name: pageId
+      in: path
+      required: true
+      description: The Wiki page's id.
+      schema:
+        type: integer
+    WikiPageTypeFilter:
+      name: page_type
+      in: query
+      required: false
+      description: Only pages of this type.
+      schema:
+        $ref: '#/components/schemas/WikiPageType'
     BusinessAreaId:
       name: business_area_id
       in: query
@@ -2151,6 +2341,19 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    AiCapacityOrRateLimited:
+      description: |
+        `ai_capacity_exhausted`: the customer's AI capacity is used up, or what is left does not
+        cover the question. `rate_limited`: too many questions, or too many requests per minute.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: { code: ai_capacity_exhausted, message: The AI capacity available to this customer does not cover the request., request_id: 01JB2Y6Q5M0Z8W3K4V7N9R2T1A }
     ServerError:
       description: An unexpected error. The response never contains the internal error message.
       headers:
@@ -2161,7 +2364,9 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     ServiceUnavailable:
-      description: Microsoft Entra ID's signing keys could not be fetched, so the token could not be checked. Retry later.
+      description: |
+        Microsoft Entra ID's signing keys could not be fetched, so the token could not be checked;
+        or, for `POST /v1/wiki/ask`, Procynia has stopped AI work for now. Retry later.
       headers:
         X-Request-Id:
           $ref: '#/components/headers/XRequestId'
@@ -2211,11 +2416,12 @@ components:
       description: |
         A stable code per HTTP status: 400 `bad_request`, 401 `unauthenticated`, 403 `forbidden`,
         404 `not_found`, 405 `method_not_allowed`, 409 `conflict`, 422 `validation_failed`, 429
-        `rate_limited`, 503 `service_unavailable`. Any other 4xx is `request_error`, any other 5xx
+        `rate_limited` (or `ai_capacity_exhausted` from `POST /v1/wiki/ask`), 503
+        `service_unavailable`. Any other 4xx is `request_error`, any other 5xx
         `server_error`. The operations in this version can return the codes their responses list,
         plus `not_found` for an unknown path and `method_not_allowed` (with `Allow`) for a wrong
         method.
-      enum: [unauthenticated, forbidden, not_found, method_not_allowed, conflict, validation_failed, rate_limited, bad_request, request_error, service_unavailable, server_error]
+      enum: [unauthenticated, forbidden, not_found, method_not_allowed, conflict, validation_failed, rate_limited, ai_capacity_exhausted, bad_request, request_error, service_unavailable, server_error]
     Error:
       type: object
       required: [error]
@@ -2327,7 +2533,7 @@ components:
         modules:
           type: object
           description: The modules this API serves, by the key of their endpoints.
-          required: [risk, deviations, objectives, management_review, compliance, suppliers, quality]
+          required: [risk, deviations, objectives, management_review, compliance, suppliers, quality, wiki]
           additionalProperties: false
           properties:
             risk:
@@ -2351,6 +2557,9 @@ components:
             quality:
               $ref: '#/components/schemas/ModuleAccess'
               description: Kvalitet — `GET /v1/quality/…`, and the Kvalitet links of risks and KPIs. Customer-wide, so `business_areas` is null.
+            wiki:
+              $ref: '#/components/schemas/ModuleAccess'
+              description: Enterprise Wiki — `GET /v1/wiki/pages…`, published knowledge. Customer-wide, so `business_areas` is null. `POST /v1/wiki/ask` also needs operation `wiki.ask`.
     ModuleAccess:
       type: object
       required: [entitled, readable, business_areas]
@@ -4517,3 +4726,117 @@ components:
               label:
                 type: [string, 'null']
                 description: A decision's outcome, or null.
+
+    WikiPageType:
+      type: string
+      enum: [article, summary, concept, entity, index, backlinks]
+    WikiAnswerStatus:
+      type: string
+      description: |
+        `answered`: the published Wiki supports an answer. `insufficient_evidence`: it does not, and
+        `answer` is empty or says so — a valid result, never filled in from general knowledge.
+        `conflicting_evidence`: published pages disagree, and the answer says how.
+      enum: [answered, insufficient_evidence, conflicting_evidence]
+    WikiPageReference:
+      type: object
+      required: [id, title, slug, page_type]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        slug:
+          type: string
+        page_type:
+          $ref: '#/components/schemas/WikiPageType'
+    WikiPageFields:
+      type: object
+      required: [id, title, slug, page_type, scope, version_number, headings, excerpt]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        slug:
+          type: string
+        page_type:
+          $ref: '#/components/schemas/WikiPageType'
+        scope:
+          type: [string, 'null']
+          description: The page's scope (for example `company`), as the Wiki sets it.
+        version_number:
+          type: integer
+          description: The number of the published version everything here is read from.
+        headings:
+          type: array
+          description: The headings of the published text, in order.
+          items:
+            type: string
+        excerpt:
+          type: string
+          description: The start of the published text, shortened.
+    WikiPage:
+      allOf:
+        - $ref: '#/components/schemas/WikiPageFields'
+      unevaluatedProperties: false
+    WikiPageDetail:
+      allOf:
+        - $ref: '#/components/schemas/WikiPageFields'
+        - type: object
+          required: [content_markdown, links]
+          properties:
+            content_markdown:
+              type: string
+              description: The published text, as Markdown with `[[slug]]` links.
+            links:
+              type: array
+              description: The published pages the text links to, in the order they first occur.
+              items:
+                $ref: '#/components/schemas/WikiPageReference'
+      unevaluatedProperties: false
+    WikiQuestion:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+          minLength: 3
+          maxLength: 500
+    WikiCitation:
+      type: object
+      required: [page_id, title, slug, version_number, heading, excerpt]
+      additionalProperties: false
+      properties:
+        page_id:
+          type: integer
+        title:
+          type: string
+        slug:
+          type: string
+        version_number:
+          type: integer
+          description: The published version the answer read — the same `version_number` `GET /v1/wiki/pages/{pageId}` shows while it is still the published one.
+        heading:
+          type: [string, 'null']
+          description: The heading of the section cited, when the answer names one.
+        excerpt:
+          type: string
+          description: The Wiki text cited.
+    WikiAnswer:
+      type: object
+      required: [answer_status, answer, citations, pages_used]
+      additionalProperties: false
+      properties:
+        answer_status:
+          $ref: '#/components/schemas/WikiAnswerStatus'
+        answer:
+          type: string
+        citations:
+          type: array
+          description: Only pages the answer was given from; a citation the model made up is dropped.
+          items:
+            $ref: '#/components/schemas/WikiCitation'
+        pages_used:
+          type: integer
+          description: How many published pages were read for the answer.

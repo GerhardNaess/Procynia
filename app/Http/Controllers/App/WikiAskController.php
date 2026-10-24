@@ -6,12 +6,11 @@ use App\Data\Ai\AiCallContext;
 use App\Exceptions\Ai\AiCostControlException;
 use App\Http\Controllers\Concerns\AuthorizesWikiPermissions;
 use App\Http\Controllers\Controller;
-use App\Models\EnterpriseWikiPage;
-use App\Models\User;
 use App\Services\Ai\Commercial\AiCostControlService;
 use App\Services\Ai\Wiki\WikiQuestionAnswerAiClient;
 use App\Services\Billing\BillingEntitlementService;
 use App\Services\EnterpriseWiki\EnterpriseWikiQuestionAnswerService;
+use App\Services\EnterpriseWiki\WikiAskRateLimiter;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Support\Ai\AiCostControlPresenter;
 use App\Support\CustomerContext;
@@ -19,7 +18,6 @@ use App\Support\CustomerPermissionCatalog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -41,6 +39,7 @@ class WikiAskController extends Controller
         private readonly BillingEntitlementService $billingEntitlementService,
         private readonly AiCostControlService $costControl,
         private readonly CustomerPermissionService $customerPermissions,
+        private readonly WikiAskRateLimiter $rateLimiter,
     ) {}
 
     public function index(): Response
@@ -94,12 +93,12 @@ class WikiAskController extends Controller
                 resourceType: 'enterprise_wiki',
                 requestCorrelationId: $requestCorrelationId,
             ));
-            $result = $this->questionAnswerService->ask(
+            // The service holds the access rule itself (A23); the checks above only shape the
+            // web response, and both agree.
+            $result = $this->questionAnswerService->askAs(
+                $user,
                 $question,
-                $customerId,
-                $this->visibleStatuses($user),
                 $this->customerContext->resolveLanguageCode(),
-                $user?->id,
                 $requestCorrelationId,
             );
         } catch (AiCostControlException $e) {
@@ -149,44 +148,7 @@ class WikiAskController extends Controller
 
     private function assertWithinRateLimits(int $customerId, ?int $userId): void
     {
-        $windowSeconds = max(60, (int) config('procynia.ai.wiki_ask.window_seconds', 900));
-        $userLimit = max(1, (int) config('procynia.ai.wiki_ask.user_attempts', 10));
-        $customerLimit = max(1, (int) config('procynia.ai.wiki_ask.customer_attempts', 60));
-        $userKey = sprintf('ai:wiki-ask:user:%d:customer:%d', (int) $userId, $customerId);
-        $customerKey = sprintf('ai:wiki-ask:customer:%d', $customerId);
-
-        foreach ([[$userKey, $userLimit, 'user'], [$customerKey, $customerLimit, 'customer']] as [$key, $limit, $scope]) {
-            if (RateLimiter::tooManyAttempts($key, $limit)) {
-                Log::warning('[WIKI_ASK] AI request rate limited.', [
-                    'reason' => 'rate_limit_'.$scope,
-                    'customer_id' => $customerId,
-                    'user_id' => $userId,
-                    'operation' => 'wiki.ask',
-                ]);
-
-                abort(429, __('procynia.wiki.ask_rate_limited'));
-            }
-        }
-
-        RateLimiter::hit($userKey, $windowSeconds);
-        RateLimiter::hit($customerKey, $windowSeconds);
-    }
-
-    /**
-     * The same read model the Wiki pages themselves use: a user is only ever answered from pages that
-     * user is allowed to read. Falls back to approved-only for a user with no explicit rights.
-     *
-     * Note this can legitimately return archived/superseded/rejected too — those are readable page
-     * statuses. Retrieval grounds only in published versions regardless, so
-     * stale content can never enter the answer context no matter what is passed here.
-     *
-     * @return list<string>
-     */
-    private function visibleStatuses(?User $user): array
-    {
-        $statuses = $user?->visibleEnterpriseWikiPageStatuses() ?? [];
-
-        return $statuses !== [] ? array_values($statuses) : [EnterpriseWikiPage::STATUS_APPROVED];
+        $this->rateLimiter->hit($customerId, $userId, WikiAskRateLimiter::CHANNEL_APP);
     }
 
     /** Exposed for tests/readability: the statuses the answer client can ever report. */

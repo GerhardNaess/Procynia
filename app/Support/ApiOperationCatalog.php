@@ -3,14 +3,19 @@
 namespace App\Support;
 
 /**
- * The closed list of write operations an integration can be allowed to perform through the API.
+ * The closed list of operations an integration can be allowed to perform through the API, beyond
+ * reading.
  *
  * An operation is narrow and named for what it does — never an existing edit key. It is reached
- * only when all three hold: the token carries the write app role (the ceiling), the customer's
- * System Owner has switched the operation on for the grant (api_client_customer_grants.
- * allowed_operations), and the domain's own access service says yes for this record
- * (IntegrationOperationAuthority is asked from there). Human decisions stay with HumanDecisionGuard
- * and are never operations.
+ * only when all of these hold: the customer's System Owner has switched the operation on for the
+ * grant (api_client_customer_grants.allowed_operations), the domain's own access service says yes
+ * (IntegrationOperationAuthority is asked from there), and — for a write — the token carries the
+ * write app role (the ceiling). Human decisions stay with HumanDecisionGuard and are never
+ * operations.
+ *
+ * Most operations write. «Spør Wiki» (D19) does not: it reads published Wiki knowledge but spends
+ * the customer's AI capacity, which is why it is a choice per grant and not part of reading. It
+ * needs no write role, because it writes nothing.
  *
  * Adding an operation is adding a row here, the domain check that asks for it, and its label.
  */
@@ -24,7 +29,13 @@ final class ApiOperationCatalog
     /** Adding a planned tiltak to an open or ongoing case. Working, completing or verifying it is not. */
     public const IMPROVEMENT_ACTION_CREATE = 'improvement.action.create';
 
-    /** Per operation: the module the customer must have ordered, and the label key in Kundemiljø. */
+    /** «Spør Wiki» over published Wiki knowledge (D18, D19). Reads, and spends AI capacity. */
+    public const WIKI_ASK = 'wiki.ask';
+
+    /**
+     * Per operation: the module the customer must have ordered, the label key in Kundemiljø, and
+     * whether it writes (and so needs the write app role).
+     */
     private const OPERATIONS = [
         self::RISK_TREATMENT_ACTION_CREATE => [
             'module' => 'risk',
@@ -37,6 +48,11 @@ final class ApiOperationCatalog
         self::IMPROVEMENT_ACTION_CREATE => [
             'module' => 'improvements',
             'label' => 'procynia.customer_env.integrations.operations.improvement_action_create',
+        ],
+        self::WIKI_ASK => [
+            'module' => 'wiki',
+            'label' => 'procynia.customer_env.integrations.operations.wiki_ask',
+            'writes' => false,
         ],
     ];
 
@@ -59,5 +75,11 @@ final class ApiOperationCatalog
     public static function labelKey(string $operation): ?string
     {
         return self::OPERATIONS[$operation]['label'] ?? null;
+    }
+
+    /** Whether the operation writes, and so needs the write app role. Unknown operations do. */
+    public static function requiresWriteRole(string $operation): bool
+    {
+        return (bool) (self::OPERATIONS[$operation]['writes'] ?? true);
     }
 }

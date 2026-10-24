@@ -4,21 +4,31 @@ namespace App\Services\EnterpriseWiki;
 
 use App\Data\Ai\AiCallContext;
 use App\Models\EnterpriseWikiPage;
+use App\Models\User;
 use App\Services\Ai\AiUsageMeter;
 use App\Services\Ai\Wiki\EnterpriseWikiSemanticRetrievalService;
 use App\Services\Ai\Wiki\RequirementWikiCatalogBuilder;
 use App\Services\Ai\Wiki\RequirementWikiPageReader;
 use App\Services\Ai\Wiki\RequirementWikiTermNormalizer;
 use App\Services\Ai\Wiki\WikiQuestionAnswerAiClient;
+use App\Services\Api\IntegrationOperationAuthority;
+use App\Services\Billing\BillingEntitlementService;
+use App\Support\Ai\AiCallContextScope;
+use App\Support\ApiOperationCatalog;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\Log;
 
 /**
  * "Spør Wiki" — bounded retrieval over one customer's current Enterprise Wiki knowledge, then one
  * grounded answer.
  *
- * "Current" is meant literally: the newest version each readable page actually has, published or
- * not. Tender answer drafting keeps the stricter rule and grounds only in published versions —
- * see RequirementWikiCatalogBuilder's grounding modes.
+ * For a person "current" is meant literally: the newest version each readable page actually has,
+ * published or not. Tender answer drafting keeps the stricter rule and grounds only in published
+ * versions — see RequirementWikiCatalogBuilder's grounding modes — and so does an integration
+ * asking through the external API (D18): askAs() decides the mode from who asks, never the caller.
+ *
+ * askAs() is the entry point: it holds the access rule (A23), so the app and the API are answered
+ * under the same one. ask() is the pipeline beneath it.
  *
  * Read-only by construction: it creates no page version, no claim, no link, no finding and no run.
  * Nothing in this class writes to the Wiki at all.
@@ -60,17 +70,96 @@ class EnterpriseWikiQuestionAnswerService
         private readonly RequirementWikiPageReader $pageReader,
         private readonly WikiQuestionAnswerAiClient $aiClient,
         private readonly AiUsageMeter $usageMeter,
+        private readonly EnterpriseWikiPublishedKnowledgeReader $knowledge,
+        private readonly BillingEntitlementService $billingEntitlements,
+        private readonly IntegrationOperationAuthority $operations,
+        private readonly AiCallContextScope $contextScope,
     ) {}
 
     /**
-     * @param  list<string>  $visibleStatuses  The asking user's readable page statuses.
+     * Answer one question for $actor, after the access rule every asker meets (A23, D19, D20):
+     *
+     *  - the Wiki is readable for them (the `wiki` module and wiki.view);
+     *  - the customer has the AI offer;
+     *  - an integration also has «Spør Wiki» switched on for its grant (ApiOperationCatalog::
+     *    WIKI_ASK), which only holds inside its own API request.
+     *
+     * The grounding follows the asker, never the call site: a person is answered from the pages they
+     * can read, in their current version; an integration only from published versions (D18), with
+     * no status filter — a page whose working version is in review keeps answering from what was
+     * published. The whole pipeline runs in the asker's customer context, so every provider call it
+     * makes is metered and capacity-checked against that customer.
+     *
+     * Refuses with AuthorizationException. Cost control refuses with AiCostControlException.
+     *
+     * @return array<string, mixed> As ask()
+     */
+    public function askAs(User $actor, string $question, string $languageCode, ?string $requestCorrelationId = null): array
+    {
+        if (! $this->mayAsk($actor)) {
+            throw new AuthorizationException;
+        }
+
+        $customer = $actor->customer;
+        $integration = $actor->isIntegration();
+
+        return $this->contextScope->within(
+            new AiCallContext(customerId: (int) $customer->id, userId: (int) $actor->id, requestCorrelationId: $requestCorrelationId),
+            fn (): array => $this->ask(
+                $question,
+                (int) $customer->id,
+                $integration ? null : $this->visibleStatusesFor($actor),
+                $languageCode,
+                (int) $actor->id,
+                $requestCorrelationId,
+                $integration ? RequirementWikiCatalogBuilder::GROUNDING_PUBLISHED_ONLY : RequirementWikiCatalogBuilder::GROUNDING_CURRENT_KNOWLEDGE,
+            ),
+        );
+    }
+
+    /** The access rule askAs() applies, for an entry point that must refuse before it counts a request. */
+    public function mayAsk(?User $actor): bool
+    {
+        $customer = $actor?->customer;
+
+        if (! $this->knowledge->canRead($actor) || $customer === null || ! $this->billingEntitlements->canUseAiOffer($customer)) {
+            return false;
+        }
+
+        return ! $actor->isIntegration() || $this->operations->allows($actor, ApiOperationCatalog::WIKI_ASK);
+    }
+
+    /**
+     * The same read model the Wiki pages themselves use: a person is only ever answered from pages
+     * they may read. Falls back to approved-only for a user with no explicit rights.
+     *
+     * @return list<string>
+     */
+    private function visibleStatusesFor(User $user): array
+    {
+        $statuses = $user->visibleEnterpriseWikiPageStatuses();
+
+        return $statuses !== [] ? array_values($statuses) : [EnterpriseWikiPage::STATUS_APPROVED];
+    }
+
+    /**
+     * @param  list<string>|null  $visibleStatuses  The asking user's readable page statuses; null
+     *                                              means every non-retired status.
+     * @param  string  $grounding  RequirementWikiCatalogBuilder::GROUNDING_*
      * @return array{
      *   answer_status: string, answer: string, citations: list<array<string, mixed>>,
      *   retrieval: array{pages_considered: int, pages_used: int, context_chars: int, question_understanding: array<string, mixed>, ranking: list<array<string, mixed>>}
      * }
      */
-    public function ask(string $question, int $customerId, array $visibleStatuses, string $languageCode, ?int $userId = null, ?string $requestCorrelationId = null): array
-    {
+    public function ask(
+        string $question,
+        int $customerId,
+        ?array $visibleStatuses,
+        string $languageCode,
+        ?int $userId = null,
+        ?string $requestCorrelationId = null,
+        string $grounding = RequirementWikiCatalogBuilder::GROUNDING_CURRENT_KNOWLEDGE,
+    ): array {
         $question = trim($question);
         $queryTokens = RequirementWikiTermNormalizer::tokenize($question);
 
@@ -84,7 +173,7 @@ class EnterpriseWikiQuestionAnswerService
             $question,
             $customerId,
             $languageCode,
-            RequirementWikiCatalogBuilder::GROUNDING_CURRENT_KNOWLEDGE,
+            $grounding,
             $visibleStatuses,
         );
         $catalog = $semanticRetrieval['catalog'];
@@ -225,7 +314,10 @@ class EnterpriseWikiQuestionAnswerService
                         'page_slug' => (string) $candidate['slug'],
                         'page_type' => (string) $candidate['page_type'],
                         'page_scope' => (string) $candidate['scope'],
-                        'page_version_id' => $this->currentVersionIdFor($pageId),
+                        // The version this entry's text was read from — the published one under
+                        // GROUNDING_PUBLISHED_ONLY — so a citation names what was actually used.
+                        'page_version_id' => (int) $catalogEntry['version_id'],
+                        'page_version_number' => (int) $catalogEntry['version_number'],
                         'content_markdown' => $read['content_markdown'],
                         'content_mode' => $read['content_mode'],
                         'selected_headings' => $read['selected_headings'],
@@ -330,13 +422,6 @@ class EnterpriseWikiQuestionAnswerService
         ];
     }
 
-    private function currentVersionIdFor(int $pageId): ?int
-    {
-        $page = EnterpriseWikiPage::query()->with('currentVersion')->find($pageId);
-
-        return $page?->currentVersion?->id !== null ? (int) $page->currentVersion->id : null;
-    }
-
     /**
      * Rebuilds every citation from the retrieval context rather than trusting the model's own
      * metadata. The model may only name a page_id; the title, slug and version come from what we
@@ -390,6 +475,7 @@ class EnterpriseWikiQuestionAnswerService
                 'page_title' => $entry['page_title'],
                 'page_slug' => $entry['page_slug'],
                 'page_version_id' => $entry['page_version_id'],
+                'page_version_number' => $entry['page_version_number'],
                 'heading' => $heading !== '' ? $heading : null,
                 'excerpt' => $excerpt,
             ];

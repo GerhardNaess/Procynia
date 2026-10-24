@@ -2808,6 +2808,7 @@ return [
                 'compliance' => 'Etterlevelse og revisjon',
                 'suppliers' => 'Leverandøroppfølging',
                 'quality' => 'Kvalitet',
+                'wiki' => 'Enterprise Wiki (publisert innhold)',
             ],
             'granted_meta' => 'Tilgang gitt :date av :name',
             'unknown_person' => 'ukjent',
@@ -2823,12 +2824,13 @@ return [
             'save' => 'Lagre',
             'saving' => 'Lagrer...',
             'identity_name' => 'Integrasjon: :client',
-            'operations_label' => 'Kan registrere gjennom API-et',
-            'operations_hint' => 'Slå bare på det applikasjonen trenger. Det gjelder bare i fagområdene integrasjonen kan lese, og applikasjonen må i tillegg ha skriverollen i Entra ID.',
+            'operations_label' => 'Kan bruke gjennom API-et',
+            'operations_hint' => 'Slå bare på det applikasjonen trenger. Registreringer gjelder bare i fagområdene integrasjonen kan lese, og applikasjonen må i tillegg ha skriverollen i Entra ID. Spør Wiki svarer bare fra publisert innhold og bruker kundens AI-kapasitet.',
             'operations' => [
                 'risk_treatment_action_create' => 'Tillat opprettelse av risikotiltak',
                 'improvement_case_create' => 'Tillat registrering av avvik og forbedringsforslag',
                 'improvement_action_create' => 'Tillat opprettelse av tiltak på avvik og forbedringer',
+                'wiki_ask' => 'Tillat Spør Wiki (bruker kundens AI-kapasitet)',
             ],
             'help_title' => 'Integrasjoner',
             'help_steps' => [
@@ -2836,7 +2838,7 @@ return [
                 '2. Under «Godkjente applikasjoner» velger du Gi tilgang ved applikasjonen.',
                 '3. Velg rollene integrasjonen skal ha, og trykk Gi tilgang. Bare leserettighetene i rollene gjelder, og bare i moduler dere har bestilt.',
                 '4. Under «Applikasjoner med tilgang» ser du hva integrasjonen kan lese. Bruk Endre roller for å endre det.',
-                '5. Under «Kan registrere gjennom API-et» krysser du av for det applikasjonen skal kunne registrere, for eksempel Tillat opprettelse av risikotiltak. Endringen lagres med en gang. Fjern krysset for å trekke tillatelsen tilbake.',
+                '5. Under «Kan bruke gjennom API-et» krysser du av for det applikasjonen skal kunne gjøre, for eksempel Tillat opprettelse av risikotiltak eller Tillat Spør Wiki. Endringen lagres med en gang. Fjern krysset for å trekke tillatelsen tilbake.',
                 '6. Bruk Trekk tilbake når applikasjonen ikke lenger skal ha tilgang. Den avvises ved neste kall.',
             ],
             'errors' => [

@@ -2,6 +2,7 @@
 
 namespace App\Services\Api;
 
+use App\Exceptions\Ai\AiCostControlException;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -41,6 +42,9 @@ class ApiErrorResponder
 
     public const RATE_LIMITED = 'rate_limited';
 
+    /** The customer's AI capacity, or an AI safety budget, does not cover the operation (D20). */
+    public const AI_CAPACITY_EXHAUSTED = 'ai_capacity_exhausted';
+
     public const BAD_REQUEST = 'bad_request';
 
     public const REQUEST_ERROR = 'request_error';
@@ -58,6 +62,7 @@ class ApiErrorResponder
         self::CONFLICT => 'The request conflicts with the current state of the resource.',
         self::VALIDATION_FAILED => 'The request is invalid.',
         self::RATE_LIMITED => 'Too many requests.',
+        self::AI_CAPACITY_EXHAUSTED => 'The AI capacity available to this customer does not cover the request.',
         self::BAD_REQUEST => 'The request could not be understood.',
         self::REQUEST_ERROR => 'The request could not be processed.',
         self::SERVICE_UNAVAILABLE => 'The service is temporarily unavailable.',
@@ -77,10 +82,32 @@ class ApiErrorResponder
         503 => self::SERVICE_UNAVAILABLE,
     ];
 
+    /**
+     * AI cost control refusals (AiCostControlException), by reason: what the customer has left is
+     * used up (429), the customer is not allowed AI (403), or Procynia has stopped spending (503).
+     * The reason itself is never sent.
+     */
+    private const AI_REFUSALS = [
+        AiCostControlException::CAPACITY_EXHAUSTED => [429, self::AI_CAPACITY_EXHAUSTED],
+        AiCostControlException::CAPACITY_INSUFFICIENT => [429, self::AI_CAPACITY_EXHAUSTED],
+        AiCostControlException::QUOTA_EXHAUSTED => [429, self::AI_CAPACITY_EXHAUSTED],
+        AiCostControlException::CUSTOMER_DAILY_BUDGET_EXHAUSTED => [429, self::AI_CAPACITY_EXHAUSTED],
+        AiCostControlException::CUSTOMER_MONTHLY_BUDGET_EXHAUSTED => [429, self::AI_CAPACITY_EXHAUSTED],
+        AiCostControlException::NOT_INCLUDED => [403, self::FORBIDDEN],
+        AiCostControlException::CUSTOMER_SUSPENDED => [403, self::FORBIDDEN],
+        AiCostControlException::PAYMENT_UNPAID => [403, self::FORBIDDEN],
+        AiCostControlException::PAYMENT_INCOMPLETE => [403, self::FORBIDDEN],
+    ];
+
     public function render(Throwable $e, Request $request): JsonResponse
     {
-        $status = $this->statusFor($e);
-        $code = self::STATUS_CODES[$status] ?? ($status >= 500 ? self::SERVER_ERROR : self::REQUEST_ERROR);
+        if ($e instanceof AiCostControlException) {
+            // Any other reason is a platform stop: global stop and budgets, an unpriceable model.
+            [$status, $code] = self::AI_REFUSALS[$e->reason] ?? [503, self::SERVICE_UNAVAILABLE];
+        } else {
+            $status = $this->statusFor($e);
+            $code = self::STATUS_CODES[$status] ?? ($status >= 500 ? self::SERVER_ERROR : self::REQUEST_ERROR);
+        }
 
         $error = [
             'code' => $code,

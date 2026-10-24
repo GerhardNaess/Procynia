@@ -469,6 +469,7 @@ class ApiClientGrantAdministrationTest extends TestCase
                     ['key' => ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE, 'label' => 'Tillat opprettelse av risikotiltak'],
                     ['key' => ApiOperationCatalog::IMPROVEMENT_CASE_CREATE, 'label' => 'Tillat registrering av avvik og forbedringsforslag'],
                     ['key' => ApiOperationCatalog::IMPROVEMENT_ACTION_CREATE, 'label' => 'Tillat opprettelse av tiltak på avvik og forbedringer'],
+                    ['key' => ApiOperationCatalog::WIKI_ASK, 'label' => 'Tillat Spør Wiki (bruker kundens AI-kapasitet)'],
                 ])
                 ->where('integrations.grants.0.allowed_operations', [ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE])
                 ->where('integrations.grants.0.operations_url', route('app.customer-environment.integrations.operations.update', ['grantId' => $grant->id])));

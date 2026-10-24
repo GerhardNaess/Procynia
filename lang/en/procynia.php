@@ -2804,6 +2804,7 @@ return [
                 'compliance' => 'Compliance and audit',
                 'suppliers' => 'Supplier management',
                 'quality' => 'Quality',
+                'wiki' => 'Enterprise Wiki (published content)',
             ],
             'granted_meta' => 'Access given :date by :name',
             'unknown_person' => 'unknown',
@@ -2819,12 +2820,13 @@ return [
             'save' => 'Save',
             'saving' => 'Saving...',
             'identity_name' => 'Integration: :client',
-            'operations_label' => 'Can register through the API',
-            'operations_hint' => 'Switch on only what the application needs. It applies only in the business areas the integration can read, and the application must also hold the write role in Entra ID.',
+            'operations_label' => 'Can use through the API',
+            'operations_hint' => 'Switch on only what the application needs. Registrations apply only in the business areas the integration can read, and the application must also hold the write role in Entra ID. Ask the Wiki answers from published content only and uses the customer\'s AI capacity.',
             'operations' => [
                 'risk_treatment_action_create' => 'Allow creating risk treatment actions',
                 'improvement_case_create' => 'Allow registering deviations and improvement proposals',
                 'improvement_action_create' => 'Allow creating actions on deviations and improvements',
+                'wiki_ask' => 'Allow Ask the Wiki (uses the customer\'s AI capacity)',
             ],
             'help_title' => 'Integrations',
             'help_steps' => [
@@ -2832,7 +2834,7 @@ return [
                 '2. Under «Approved applications», choose Give access next to the application.',
                 '3. Choose the roles the integration should hold and press Give access. Only the read permissions in the roles apply, and only in modules you have ordered.',
                 '4. Under «Applications with access» you see what the integration can read. Use Change roles to change it.',
-                '5. Under «Can register through the API», tick what the application should be able to register, for example Allow creating risk treatment actions. The change is saved at once. Clear the tick to withdraw the permission.',
+                '5. Under «Can use through the API», tick what the application should be able to do, for example Allow creating risk treatment actions or Allow Ask the Wiki. The change is saved at once. Clear the tick to withdraw the permission.',
                 '6. Use Revoke when the application should no longer have access. It is refused on its next call.',
             ],
             'errors' => [

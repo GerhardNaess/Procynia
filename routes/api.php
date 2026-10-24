@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\V1\QualityController;
 use App\Http\Controllers\Api\V1\RiskController;
 use App\Http\Controllers\Api\V1\RiskTreatmentActionController;
 use App\Http\Controllers\Api\V1\SupplierController;
+use App\Http\Controllers\Api\V1\WikiController;
 use App\Models\ImprovementCase;
 use Illuminate\Support\Facades\Route;
 
@@ -26,7 +27,9 @@ use Illuminate\Support\Facades\Route;
  * Mounted under /api by bootstrap/app.php. Every route runs the whole stack in this order — log,
  * authenticate the application, resolve the customer grant, module entitlement. Routes read (GET),
  * except the named write routes, which also require the write app role (api.write) and an operation
- * from App\Support\ApiOperationCatalog that the domain checks. ApiRouteContractTest enforces this.
+ * from App\Support\ApiOperationCatalog that the domain checks, and «Spør Wiki», which writes
+ * nothing but needs its own operation (D19) and is the only route allowed to spend AI
+ * (App\Support\Ai\ApiAiOperations). ApiRouteContractTest enforces this.
  */
 Route::prefix('v1')
     ->name('api.v1.')
@@ -79,4 +82,8 @@ Route::prefix('v1')
         Route::get('quality/items', [QualityController::class, 'items'])->name('quality.items');
         Route::get('quality/items/{itemId}', [QualityController::class, 'show'])->whereNumber('itemId')->name('quality.items.show');
         Route::get('quality/controls', [QualityController::class, 'controls'])->name('quality.controls');
+        // Enterprise Wiki: published knowledge only (D18). Asking writes nothing, so no write role.
+        Route::get('wiki/pages', [WikiController::class, 'index'])->name('wiki.pages.index');
+        Route::get('wiki/pages/{pageId}', [WikiController::class, 'show'])->whereNumber('pageId')->name('wiki.pages.show');
+        Route::post('wiki/ask', [WikiController::class, 'ask'])->name('wiki.ask');
     });

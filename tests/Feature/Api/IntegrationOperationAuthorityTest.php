@@ -51,16 +51,24 @@ class IntegrationOperationAuthorityTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_the_catalog_is_closed_and_names_its_three_operations_only(): void
+    public function test_the_catalog_is_closed_and_names_its_four_operations_only(): void
     {
         $this->assertSame([
             self::OPERATION,
             ApiOperationCatalog::IMPROVEMENT_CASE_CREATE,
             ApiOperationCatalog::IMPROVEMENT_ACTION_CREATE,
+            ApiOperationCatalog::WIKI_ASK,
         ], ApiOperationCatalog::all());
         $this->assertSame('risk', ApiOperationCatalog::module(self::OPERATION));
         $this->assertSame('improvements', ApiOperationCatalog::module(ApiOperationCatalog::IMPROVEMENT_CASE_CREATE));
         $this->assertSame('improvements', ApiOperationCatalog::module(ApiOperationCatalog::IMPROVEMENT_ACTION_CREATE));
+        $this->assertSame('wiki', ApiOperationCatalog::module(ApiOperationCatalog::WIKI_ASK));
+        // Only «Spør Wiki» writes nothing, and only it needs no write role (D19).
+        $this->assertSame(
+            [ApiOperationCatalog::WIKI_ASK],
+            array_values(array_filter(ApiOperationCatalog::all(), fn (string $operation): bool => ! ApiOperationCatalog::requiresWriteRole($operation))),
+        );
+        $this->assertTrue(ApiOperationCatalog::requiresWriteRole('risk.edit'), 'An unknown operation is treated as a write.');
         $this->assertFalse(ApiOperationCatalog::exists('improvement.edit'));
         $this->assertFalse(ApiOperationCatalog::exists('risk.edit'));
         $this->assertNull(ApiOperationCatalog::module('risk.edit'));
@@ -127,6 +135,35 @@ class IntegrationOperationAuthorityTest extends TestCase
         $identity->forceFill(['is_active' => false])->save();
         $this->inApiRequest($client, $identity, writeRole: true);
         $this->assertSame('not_an_active_integration', $authority()->refusal($identity, self::OPERATION));
+    }
+
+    public function test_wiki_ask_needs_no_write_role_but_every_other_condition(): void
+    {
+        $authority = fn (): IntegrationOperationAuthority => app(IntegrationOperationAuthority::class);
+        $setup = function (): array {
+            $client = $this->apiClient(['entra_app_id' => (string) Str::uuid()]);
+            $customer = $this->apiCustomer('Kunde '.Str::random(4));
+            $identity = $this->integrationIdentity($customer);
+            $grant = $this->grantTo($client, $customer, $identity, ['allowed_operations' => [ApiOperationCatalog::WIKI_ASK]]);
+
+            return [$client, $identity, $grant];
+        };
+
+        [$client, $identity] = $setup();
+        $this->inApiRequest($client, $identity, writeRole: false);
+        $this->assertNull($authority()->refusal($identity, ApiOperationCatalog::WIKI_ASK));
+        // The write operations still need the role, also on the same grant.
+        $this->assertSame('missing_write_role', $authority()->refusal($identity, self::OPERATION));
+
+        [$client, $identity, $grant] = $setup();
+        $grant->forceFill(['allowed_operations' => []])->save();
+        $this->inApiRequest($client, $identity, writeRole: false);
+        $this->assertSame('operation_not_allowed', $authority()->refusal($identity, ApiOperationCatalog::WIKI_ASK));
+
+        [$client, $identity] = $setup();
+        $this->inApiRequest($client, $identity, writeRole: false);
+        $this->app->instance(ActorChannel::class, new InteractiveActorChannel);
+        $this->assertSame('not_an_api_request', $authority()->refusal($identity, ApiOperationCatalog::WIKI_ASK));
     }
 
     public function test_outside_an_api_request_an_integration_is_refused(): void

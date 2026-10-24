@@ -11,6 +11,7 @@ const MODULE_LABELS = {
     compliance: 'Etterlevelse og revisjon',
     suppliers: 'Leverandøroppfølging',
     quality: 'Kvalitet',
+    wiki: 'Enterprise Wiki (publisert innhold)',
 };
 
 export function integrationAccessLines(access = {}, t = {}) {

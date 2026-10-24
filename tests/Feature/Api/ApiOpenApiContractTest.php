@@ -8,6 +8,7 @@ use App\Models\ComplianceAuditFinding;
 use App\Models\ComplianceFrameworkNode;
 use App\Models\ComplianceRequirement;
 use App\Models\ComplianceSource;
+use App\Models\EnterpriseWikiPage;
 use App\Models\ImprovementAction;
 use App\Models\ImprovementActionVerification;
 use App\Models\ImprovementCase;
@@ -27,6 +28,7 @@ use App\Models\SupplierControlRequirement;
 use App\Models\SupplierDocument;
 use App\Models\SupplierDueDiligenceAssessment;
 use App\Models\SupplierRequirementEvaluation;
+use App\Services\Ai\Wiki\WikiQuestionAnswerAiClient;
 use App\Services\Api\ApiErrorResponder;
 use App\Services\Api\Presenters\QualityPresenter;
 use App\Services\Compliance\ComplianceAssessmentOverview;
@@ -123,7 +125,7 @@ class ApiOpenApiContractTest extends TestCase
         $spec = implode("\n", $this->lines());
 
         foreach (ApiOperationCatalog::all() as $operation) {
-            $this->assertStringContainsString("`{$operation}`", $spec, "Write operation [{$operation}] is not described.");
+            $this->assertStringContainsString("`{$operation}`", $spec, "Operation [{$operation}] is not described.");
         }
     }
 
@@ -197,6 +199,8 @@ class ApiOpenApiContractTest extends TestCase
             'ManagementReviewDecisionKind' => ManagementReviewDecision::KINDS,
             'ManagementReviewDecisionFollowUp' => [ManagementReviewDecision::FOLLOW_UP_OWN, ManagementReviewDecision::FOLLOW_UP_IMPROVEMENT_CASE],
             'ManagementReviewDecisionStatus' => ManagementReviewDecision::STATUSES,
+            'WikiPageType' => EnterpriseWikiPage::PAGE_TYPES,
+            'WikiAnswerStatus' => WikiQuestionAnswerAiClient::STATUSES,
             // The keys of ApiAccessSummary::for() and the item types of ApiAttentionOverview.
             'ApiModule' => ['risk', 'deviations', 'objectives'],
             'AttentionItemType' => ['risk', 'deviation', 'improvement', 'objective', 'kpi', 'compliance_requirement', 'compliance_audit', 'supplier', 'quality_item'],

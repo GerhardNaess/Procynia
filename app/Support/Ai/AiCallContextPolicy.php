@@ -17,7 +17,8 @@ use Illuminate\Support\Facades\Log;
  *    In `strict` mode a call without one is refused; in `warn` mode it proceeds, is recorded as
  *    `unattributed` and raises an operational alert naming the operation.
  *
- *  - It is not made from the external API (D11, docs/external-api-phase-1-decisions.md §9).
+ *  - It is not made from the external API (D11, docs/external-api-phase-1-decisions.md §9), unless
+ *    the route being handled is allowed that operation (ApiAiOperations, D19).
  *
  * Called by OpenAiClient only, so it covers every path that can reach the provider.
  */
@@ -27,9 +28,10 @@ class AiCallContextPolicy
 
     public function enforce(AiCallContext $context): AiCallContext
     {
-        // D11: the external API never spends AI. Asked of the request at call time, so no path —
-        // a presenter, an attention service, a future endpoint — can reach the provider from /api.
-        if (app(ActorChannel::class)->isApi()) {
+        // D11: the external API spends no AI, except the operations ApiAiOperations names for the
+        // route being handled (D19). Asked of the request at call time, so no path — a presenter,
+        // an attention service, a future endpoint — can reach the provider from /api otherwise.
+        if (app(ActorChannel::class)->isApi() && ! ApiAiOperations::allows(request()->route()?->getName(), $context->operation)) {
             throw new AiCallContextException(sprintf(
                 'AI provider call [%s] refused: AI is not available through the external API.',
                 (string) ($context->operation ?? 'null'),
