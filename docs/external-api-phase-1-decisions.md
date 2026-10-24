@@ -312,7 +312,7 @@ Fase 0 er godkjent uten disse. Ingen av dem blokkerer at fase 1 bygges. Alle må
 |---|---|---|---|---|
 | V1 | Redis-testene (`RedisRuntimeContractTest`, tre tester) | Før merge av `feature/external-api-foundation` til `main` | Kjøres mot en egen Redis-instans med passord og egen database, ikke mot utviklingsstakkens DB 0. Enklest: en Redis-tjeneste i det isolerte E2E-miljøet (`scripts/e2e-env.sh`), med `REDIS_PASSWORD` gitt til testprosessen. | 3 av 3 bestått, ingen hoppet over |
 | V2 | Ekte AI-kall og Wiki-kjøring med køarbeidere | Før merge til `main`, etter V1 | På utviklingsstakken med en egen testkunde, etter omstart av alle `queue-*`-arbeidere. Minst: én Wiki-kjøring fra opplasting til publisert side via tildelt kontrollør, én «Overfør til Wiki», ett kravsvar og én vurdering i Anbud, ett AI-forslag i Kvalitet og ett «Spør Wiki»-svar. Kostnaden er liten, men det er ekte OpenAI-kall og må startes eksplisitt. | Alle fullført uten feil. Beslutningskolonnene har menneskelig aktør. Ingen `unattributed` i AI-bruksloggen. |
-| V3 | Migreringer og deploy i Azure | Før produksjonsdeploy av fase 0, i staging først | (1) Datakontrollen fra steg 19 kjøres mot en kopi av produksjonsdata. (2) Migreringene 000005–000014 kjøres i staging. (3) Triggerne og funksjonene kontrolleres i katalogen. (4) `down()` prøves i staging. (5) Røyktest av beslutningsflytene i alle ni moduler. (6) Produksjon i et vedlikeholdsvindu med backup rett før. | Staging og produksjon har samme triggere. Røyktesten er grønn. Ingen rader stoppet av triggerne. |
+| V3 | Migreringer og deploy i Azure | Før produksjonsdeploy av fase 0, i staging først | (1) Datakontrollen fra steg 19 kjøres mot en kopi av produksjonsdata (`scripts/v3/decision-actor-data-check.sql`). (2) Alle ventende migreringer kjøres i staging: mot `main` de 30 på grenen (`2026_10_22_000001` til `2026_10_24_000003`, med fase 0-migreringene og de fem API-migreringene), og eventuelt de som mangler fra `main` (§11.3). (3) Triggerne og funksjonene sammenlignes med referansen (`scripts/v3/compare-trigger-function-catalog.sh`). (4) `down()` prøves i staging. (5) Røyktest av beslutningsflytene i alle ni moduler. (6) Produksjon i et vedlikeholdsvindu med backup rett før. | Staging og produksjon har samme triggere. Røyktesten er grønn. Ingen rader stoppet av triggerne. |
 | V4 | Integrasjons- og sikkerhetstester for API-et | Automatiske: i fase 1 og 2, som en del av hver commit. Ekte Entra: før første kunde med ekte data. | Automatisk: arkitektur §11.2 punkt 1–4, 6 og 9, `ApiRouteContractTest` (§9), feilformatet (§8) og D11. Med ekte Entra i staging: gyldig token fra en managed identity, feil `aud`, annen tenant, fremmed app med samme rolle, deaktivert klient, trukket tildeling, og `Procynia-Customer` for en kunde uten tildeling. | Alle automatiske tester grønne. Staging-sjekklisten signert. |
 
 V1–V3 hører til fase 0 og kan gjøres parallelt med bygging av fase 1. V4 hører til API-et. API-et eksponeres ikke mot en kunde med ekte data før V1–V4 og D14 er oppfylt.
@@ -325,7 +325,7 @@ Kjørt på `feature/external-api-foundation` etter fase 7. Hele PHP-suiten ble i
 |---|---|---|
 | V1 | 🟩 **Godkjent** | 3 av 3 Redis-tester bestått, ingen hoppet over (9 av 9 i filen). Kjørt mot en egen `redis:7-alpine` med tilfeldig passord på stakkens nettverk, ikke mot utviklingsstakkens Redis. Instansen var tom etter kjøringen og er fjernet. |
 | V2 | 🟩 **Godkjent** | Kjørt 2026-10-24, se §11.2. Alle seks tester er fullført. Test 4 ble kjørt på nytt etter rettelsen av V2-F1 og V2-F2 (2fac7339). 128 kall og 5,08 NOK, ingen `unattributed`. Observasjonene V2-O1 til V2-O5 er åpne. |
-| V3 | 🟧 **Lokal del gjennomført** | Staging og produksjon gjenstår. |
+| V3 | 🟧 **Lokal del gjennomført, staging forberedt** | Kontrollskript, triggerreferanse og sjekkliste er klare (§11.3). Staging og produksjon gjenstår og krever Azure. |
 
 **V1 – avvik i testen, rettet.** Testen koblet alltid til `redis` uten passord. Den kunne derfor bare hoppe over («NOAUTH»), aldri bestå mot en Redis med passord. Den leser nå `REDIS_RUNTIME_TEST_HOST`, `REDIS_RUNTIME_TEST_PORT` og `REDIS_RUNTIME_TEST_PASSWORD`. Uten disse er oppførselen uendret. Kontrollprøve: med feil passord hopper de tre testene over. «Ingen hoppet over» må derfor alltid leses i resultatet. Slik kjøres V1 på nytt:
 
@@ -357,6 +357,44 @@ Begge kontrolldatabasene er slettet.
 - **V3 (2)–(5):** migrering, triggerkontroll, `down()` og røyktest i staging.
 - **V3 (6):** produksjonsdeploy i vedlikeholdsvindu med backup.
 
+
+### 11.3 Forberedelse av V3 i staging (2026-10-24)
+
+Det som kan gjøres uten Azure, er gjort. Det er ikke kjørt noen migreringer, ingen databaser er endret, og ingen produksjonsdata er kopiert. Sjekklisten med rekkefølge og stoppunkter står i [`testing/v3-staging-checklist.md`](testing/v3-staging-checklist.md).
+
+**Migreringsomfanget.** «000005–000014» i tabellen over var et foreldet utsnitt. `migrate --force` kjører alle ventende migreringer samtidig. Mot en database på dagens `main` er det de 30 migreringene på grenen, fra `2026_10_22_000001` til `2026_10_24_000003`: 25 fra fase 0 (med beslutningskolonnene i `2026_10_23_000014`) og 5 fra API-et. Står produksjon bak `main`, kommer de manglende migreringene fra `main` i tillegg. Den faktiske listen tas fra `migrate:status --pending` i staging før kjøring.
+
+| Del | Status | Fil |
+|---|---|---|
+| Datakontrollen fra steg 19, gjenbrukbar | 🟩 Klar | `scripts/v3/decision-actor-data-check.sql` |
+| Referanse for triggere og funksjoner | 🟩 Klar | `docs/testing/v3-trigger-function-catalog.txt` og `scripts/v3/compare-trigger-function-catalog.sh` |
+| Røyktest av beslutninger i ni moduler | 🟩 Sjekkliste klar, ikke kjørt | `docs/testing/v3-staging-checklist.md` |
+| (1)–(5) i staging | ⬜ Krever Azure og en godkjent kopi av produksjonsdata | – |
+| (6) Produksjon | ⬜ Krever vedlikeholdsvindu og egen godkjenning | – |
+
+**Datakontrollen** kjører i én READ ONLY-transaksjon og oppretter ingenting. Den har fire deler:
+- **A.** Integrasjonsidentiteter: tildeling, samme kunde, tilbakekalling og menneskelige markører.
+- **B.** Integrasjon som aktør i de 44 kolonnene fra 000014.
+- **C.** Avgjort rad uten aktør, med samme utvalg som steg 19.
+- **D.** Skriptets liste mot triggerkatalogen.
+
+Den tåler en database fra før migreringene (manglende tabeller vises som `HOPPET OVER`). Resultatet er `STOPP` (må være 0) eller `VURDER` (må forklares).
+
+Prøvd med skrivebeskyttet sesjon:
+- **Utviklingsdatabasen og `procynia_e2e`:** 0 STOPP og 0 VURDER, 44 av 44 kolonner kontrollert, og del D er lik triggerne.
+- **En eldre lokal database uten grenens migreringer** (`procynia_restore_check`): 42 kolonner hoppet over og del D hoppet over, uten feil.
+
+Grenene som skal gi STOPP og VURDER, er ikke prøvd med plantede data, fordi det ville kreve skriving.
+
+**Triggerreferansen** er laget fra utviklingsdatabasen (398 migreringer, PostgreSQL 16.14). Den har 97 triggere og 58 funksjoner med md5 av definisjonen, uten utvidelser og interne fremmednøkkeltriggere. Den er identisk i `procynia_test` og `procynia_e2e`, og stemmer med tallene i §11.1. Sammenligningsskriptet ga exit 0 mot `procynia_e2e` og exit 1 med diff mot den eldre databasen.
+
+**Fortsatt åpent:**
+- Azure-miljøet (runbookens A1–A11).
+- Godkjenning av at produksjonsdata kopieres til staging. Det berører personopplysninger og D14.
+- Om staging bygges fra grenen eller fra `main` etter merge.
+- Om produksjonsmålet er dagens Compose-miljø eller Azure-produksjon.
+- Restore-øvelse i Azure (runbook 12.5).
+- I røyktesten lages en Wiki-side og den første prosessflyten i Kvalitet bare med AI. Røyktesten bruker derfor sider og flyter som finnes i kopien. Finnes de ikke, krever punktet en godkjent AI-kjøring.
 
 ### 11.2 V2 med ekte OpenAI (2026-10-24)
 
