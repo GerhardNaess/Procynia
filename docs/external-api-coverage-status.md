@@ -70,6 +70,17 @@ Til sammen er 37 B-funksjoner blokkert. 8 B-funksjoner er ikke anbefalt, og de 3
 | 7 | Beslutte WAF eller API Management og retensjon i Log Analytics (D12) | Første kunde med ekte data | Produkteier / drift |
 | 8 | Gjennomføre DPIA og inngå databehandleravtaler (D14), med funn 22 og 26 | Ekte kundedata til Siggjo | Produkteier / juridisk |
 
+### Verifisering V1–V4 (status 2026-10-24)
+
+Kravene står i [`external-api-phase-1-decisions.md`](external-api-phase-1-decisions.md) §11, og resultatene står i §11.1.
+
+| # | Hva | Status | Gjenstår | Ekstern avhengighet |
+|---|---|---|---|---|
+| V1 | Redis-testene | 🟩 Godkjent. 3 av 3 bestått mot en egen Redis med passord, ingen hoppet over. | Ingenting | Ingen |
+| V2 | Ekte AI-kall og Wiki-kjøring med køarbeidere | ⬜ Ikke startet | Hele kjøringen på utviklingsstakken med egen testkunde, etter omstart av `queue-*`-arbeiderne | Eksplisitt godkjenning før ekte OpenAI-kall |
+| V3 | Migreringer, triggere og deploy | 🟧 Lokal verifisering fullført: migrering, `down()`, triggerkatalog og datakontroll på lokale databaser | Datakontroll mot en kopi av produksjonsdata, migrering, triggerkontroll, `down()` og røyktest i staging, og produksjonsdeploy i vedlikeholdsvindu | Azure staging og produksjon, drift |
+| V4 | Integrasjons- og sikkerhetstester med ekte Entra | ⬜ Ikke startet. De automatiske API-testene med simulerte tokens består lokalt. | Sjekklisten med ekte token i staging: gyldig token, feil `aud`, annen tenant, fremmed app, deaktivert klient, trukket tildeling og kunde uten tildeling | Entra-registrering (Advania), Siggjos identitet og staging |
+
 ### Implementerte API-operasjoner
 
 | # | Operasjon | Type | Modul | Lokalt verifisert | Produksjonsklar |
