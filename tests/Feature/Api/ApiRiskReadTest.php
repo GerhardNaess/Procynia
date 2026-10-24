@@ -30,7 +30,7 @@ class ApiRiskReadTest extends TestCase
 
     private const ROW_KEYS = [
         'id', 'title', 'status', 'treatment_strategy', 'business_area', 'owner', 'inherent', 'residual',
-        'last_assessed_on', 'review_interval_months', 'next_review_on', 'is_review_overdue', 'updated_at',
+        'last_assessed_on', 'review_interval_months', 'next_review_on', 'is_review_overdue', 'attention', 'updated_at',
     ];
 
     /** @var list<array{level: string, message: string, context: array<string, mixed>}> */
@@ -103,6 +103,8 @@ class ApiRiskReadTest extends TestCase
             'review_interval_months' => 3,
             'next_review_on' => now()->subMonths(4)->addMonthsNoOverflow(3)->toDateString(),
             'is_review_overdue' => true,
+            // RiskAttentionService's codes, as on the register's «Trenger oppmerksomhet».
+            'attention' => ['review_overdue'],
             'updated_at' => $risk->updated_at->utc()->toIso8601ZuluString(),
         ]);
         $this->assertNotNull($response->json('data.0.inherent.level'));
@@ -125,7 +127,8 @@ class ApiRiskReadTest extends TestCase
             ->assertJsonPath('data.0.inherent', null)
             ->assertJsonPath('data.0.residual', null)
             ->assertJsonPath('data.0.next_review_on', null)
-            ->assertJsonPath('data.0.is_review_overdue', false);
+            ->assertJsonPath('data.0.is_review_overdue', false)
+            ->assertJsonPath('data.0.attention', ['not_assessed']);
     }
 
     public function test_the_identity_reads_only_its_fagomrader(): void
@@ -276,8 +279,10 @@ class ApiRiskReadTest extends TestCase
             $this->{$method.'Json'}('/api/v1/risks', ['title' => 'Endret'], $headers)
                 ->assertStatus(405)
                 ->assertJsonPath('error.code', 'method_not_allowed');
+            // GET /risks/{id} reads one risk; nothing else is accepted there.
             $this->{$method.'Json'}('/api/v1/risks/'.$risk->id, ['title' => 'Endret'], $headers)
-                ->assertNotFound();
+                ->assertStatus(405)
+                ->assertJsonPath('error.code', 'method_not_allowed');
         }
 
         $this->assertSame('Uendret', $risk->fresh()->title);

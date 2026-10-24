@@ -12,6 +12,7 @@ use App\Services\Improvements\ImprovementAttentionService;
 use App\Services\Objectives\KpiTarget;
 use App\Services\Objectives\KpiTargetPolicy;
 use App\Services\Objectives\ObjectiveAttentionService;
+use App\Services\Risk\RiskAttentionService;
 use App\Services\Risk\RiskScoringPolicy;
 use App\Support\ApiOperationCatalog;
 use App\Support\Objectives\KpiPresenter as KpiPagePresenter;
@@ -100,7 +101,10 @@ class ApiOpenApiContractTest extends TestCase
             'RiskStatus' => Risk::STATUSES,
             'RiskTreatmentStrategy' => Risk::TREATMENT_STRATEGIES,
             'RiskLevel' => $levels,
+            'RiskAttentionCode' => RiskAttentionService::CATEGORIES,
             'RiskTreatmentActionStatus' => [RiskTreatmentAction::STATUS_OPEN],
+            'RiskTreatmentActionRowStatus' => RiskTreatmentAction::STATUSES,
+            'RiskAcceptanceState' => ['current', 'superseded', 'revoked'],
             'DeviationStatus' => ImprovementCase::STATUSES,
             'DeviationAttentionCode' => array_keys(ImprovementAttentionService::CATEGORIES),
             'ObjectiveStatus' => Objective::STATUSES,

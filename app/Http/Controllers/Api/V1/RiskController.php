@@ -10,17 +10,20 @@ use App\Services\Api\ApiResponse;
 use App\Services\Api\Presenters\RiskPresenter;
 use App\Services\Risk\RiskAccessService;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
 /**
- * GET /api/v1/risks — the risks the integration identity may read, a page at a time.
+ * GET /api/v1/risks — the risks the integration identity may read, a page at a time — and
+ * GET /api/v1/risks/{riskId}, one of them with its history and follow-up.
  *
  * The list is RiskAccessService::visibleRisks() for the identity, exactly as the register builds
  * it for a person: the customer, the risk.view permission and the identity's fagområder. Filters
  * and the cursor narrow that list; none of them can widen it. A business area or cursor from
- * another customer therefore finds nothing.
+ * another customer therefore finds nothing. One risk is RiskAccessService::findVisible(): a risk of
+ * another customer, outside the identity's fagområder or not there at all is the same 404.
  */
 class RiskController extends Controller
 {
@@ -78,5 +81,25 @@ class RiskController extends Controller
                 'next_cursor' => $found->count() > $limit ? ApiCursor::encode((int) $page->last()->id) : null,
             ],
         );
+    }
+
+    public function show(
+        ApiRequestContext $context,
+        RiskAccessService $access,
+        RiskPresenter $presenter,
+        int $riskId,
+    ): JsonResponse {
+        $actor = $context->actor;
+
+        if (! $access->canOpenModule($actor)) {
+            throw new AuthorizationException;
+        }
+
+        $risk = $access->findVisible($actor, $riskId)
+            ?? throw (new ModelNotFoundException)->setModel(Risk::class);
+        $risk->load(['businessArea:id,name', 'owner:id,name']);
+        $context->rows = 1;
+
+        return ApiResponse::ok($presenter->detail($risk, now()), $context);
     }
 }

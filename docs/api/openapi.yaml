@@ -180,6 +180,54 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /v1/risks/{riskId}:
+    get:
+      tags: [Risk]
+      operationId: getRisk
+      summary: One risk with its history and follow-up
+      description: |
+        One risk the integration identity may read, with the fields of the register, the
+        assessment history, the treatment actions (tiltak) and the acceptance of residual risk.
+        A risk of another customer, outside the identity's fagområder, or one that does not exist
+        is 404.
+
+        Not included: the links to Kvalitet (controls, process context), which become available
+        when Kvalitet can be read through the API, and the supplier the risk concerns.
+
+        Requires the Risiko module and `risk.view`.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/RiskId'
+      responses:
+        '200':
+          description: The risk.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RiskDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /v1/risks/{riskId}/treatment-actions:
     post:
       tags: [Risk]
@@ -208,13 +256,7 @@ paths:
         - entraApplicationToken: [Procynia.Read.All, Procynia.Write.All]
       parameters:
         - $ref: '#/components/parameters/ProcyniaCustomer'
-        - name: riskId
-          in: path
-          required: true
-          description: The risk's id.
-          schema:
-            type: integer
-            minimum: 0
+        - $ref: '#/components/parameters/RiskId'
       requestBody:
         required: true
         content:
@@ -468,6 +510,14 @@ components:
         type: string
         pattern: '^[1-9][0-9]{0,17}$'
       example: '42'
+    RiskId:
+      name: riskId
+      in: path
+      required: true
+      description: The risk's id.
+      schema:
+        type: integer
+        minimum: 0
     BusinessAreaId:
       name: business_area_id
       in: query
@@ -805,6 +855,13 @@ components:
     RiskLevel:
       type: string
       enum: [low, moderate, high, very_high]
+    RiskAttentionCode:
+      type: string
+      description: |
+        Why a risk that is not closed needs attention, in this order: high or very high residual
+        risk, never assessed, the latest assessment has no residual risk, the periodic review is
+        overdue, the acceptance of residual risk has expired, a tiltak is past its frist.
+      enum: [high_residual, not_assessed, residual_not_assessed, review_overdue, acceptance_expired, actions_overdue]
     RiskScore:
       type: object
       description: |
@@ -828,12 +885,16 @@ components:
         level:
           $ref: '#/components/schemas/RiskLevel'
     Risk:
-      type: object
       description: |
         A risk, structured fields only. Not included: årsak, hendelse, konsekvens, utfyllende
         informasjon, begrunnelser and other free text.
-      required: [id, title, status, treatment_strategy, business_area, owner, inherent, residual, last_assessed_on, review_interval_months, next_review_on, is_review_overdue, updated_at]
-      additionalProperties: false
+      allOf:
+        - $ref: '#/components/schemas/RiskFields'
+      unevaluatedProperties: false
+    RiskFields:
+      type: object
+      description: The fields of a risk in the register, shared by Risk and RiskDetail.
+      required: [id, title, status, treatment_strategy, business_area, owner, inherent, residual, last_assessed_on, review_interval_months, next_review_on, is_review_overdue, attention, updated_at]
       properties:
         id:
           type: integer
@@ -880,7 +941,124 @@ components:
           description: When the next periodic review is due.
         is_review_overdue:
           type: boolean
+        attention:
+          type: array
+          description: Empty for a closed risk.
+          items:
+            $ref: '#/components/schemas/RiskAttentionCode'
         updated_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    RiskDetail:
+      description: |
+        A risk with its history and follow-up. Not included: rationales, tiltak results, who
+        assessed, accepted or revoked, and the Kvalitet links.
+      allOf:
+        - $ref: '#/components/schemas/RiskFields'
+        - type: object
+          required: [assessments, treatment_actions, acceptance]
+          properties:
+            assessments:
+              type: array
+              description: Every assessment, newest first.
+              items:
+                $ref: '#/components/schemas/RiskAssessment'
+            treatment_actions:
+              type: array
+              description: Open tiltak by frist first, then completed ones, most recently completed first.
+              items:
+                $ref: '#/components/schemas/RiskTreatmentActionRow'
+            acceptance:
+              type: object
+              description: The acceptance of residual risk.
+              required: [current, history]
+              additionalProperties: false
+              properties:
+                current:
+                  description: The acceptance of the latest assessment that is not revoked, or null.
+                  oneOf:
+                    - $ref: '#/components/schemas/RiskAcceptance'
+                    - type: 'null'
+                history:
+                  type: array
+                  description: Earlier and revoked acceptances, newest first.
+                  items:
+                    $ref: '#/components/schemas/RiskAcceptance'
+      unevaluatedProperties: false
+    RiskAssessment:
+      type: object
+      required: [id, assessed_at, inherent, residual]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        assessed_at:
+          $ref: '#/components/schemas/Timestamp'
+        inherent:
+          $ref: '#/components/schemas/RiskScore'
+        residual:
+          description: Null when the assessment has no residual risk.
+          oneOf:
+            - $ref: '#/components/schemas/RiskScore'
+            - type: 'null'
+    RiskTreatmentActionRowStatus:
+      type: string
+      enum: [open, completed]
+    RiskTreatmentActionRow:
+      type: object
+      required: [id, title, status, owner, due_at, completed_at, is_overdue]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        status:
+          $ref: '#/components/schemas/RiskTreatmentActionRowStatus'
+        owner:
+          description: The responsible person, or null.
+          oneOf:
+            - $ref: '#/components/schemas/Person'
+            - type: 'null'
+        due_at:
+          type: [string, 'null']
+          format: date
+          description: The frist.
+        completed_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        is_overdue:
+          type: boolean
+          description: Open, and the frist is before today.
+    RiskAcceptanceState:
+      type: string
+      description: current, superseded (accepted for an assessment that is no longer the latest), or revoked.
+      enum: [current, superseded, revoked]
+    RiskAcceptance:
+      type: object
+      required: [id, assessment_id, state, accepted_at, valid_until, is_expired, revoked_at]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        assessment_id:
+          type: integer
+          description: The assessment whose residual risk was accepted.
+        state:
+          $ref: '#/components/schemas/RiskAcceptanceState'
+        accepted_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        valid_until:
+          type: [string, 'null']
+          format: date
+        is_expired:
+          type: boolean
+          description: valid_until is before today.
+        revoked_at:
           oneOf:
             - $ref: '#/components/schemas/Timestamp'
             - type: 'null'

@@ -22,6 +22,7 @@ Route::prefix('v1')
     ->group(function (): void {
         Route::get('me', MeController::class)->name('me');
         Route::get('risks', [RiskController::class, 'index'])->name('risks.index');
+        Route::get('risks/{riskId}', [RiskController::class, 'show'])->whereNumber('riskId')->name('risks.show');
         // The one write route: needs the write app role on top, and the operation allowed for the grant.
         Route::post('risks/{riskId}/treatment-actions', [RiskTreatmentActionController::class, 'store'])
             ->whereNumber('riskId')
