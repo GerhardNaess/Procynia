@@ -1586,7 +1586,7 @@ components:
         occurred_on:
           type: [string, 'null']
           format: date
-          description: When it happened (hendelsesdato).
+          description: When it happened (hendelsesdato). Avvik only; always null for a forbedring.
         due_on:
           type: [string, 'null']
           format: date

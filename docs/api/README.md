@@ -11,7 +11,7 @@ Spesifikasjonen er skrevet for hånd og versjoneres sammen med koden. Den genere
 | Stier og metoder | `routes/api.php` |
 | Middleware-rekkefølge, tilgang og 403/404 | `bootstrap/app.php`, `app/Http/Middleware/Api/`, tilgangstjenestene (`RiskAccessService` m.fl.) |
 | Spørreparametere, grenser og validering | `$request->validate()` i `app/Http/Controllers/Api/V1/` |
-| Svarfelter | Presentasjonsklassene i `app/Services/Api/Presenters/` og `MeController` / `RiskTreatmentActionController` |
+| Svarfelter | Presentasjonsklassene i `app/Services/Api/Presenters/`, `ApiAttentionOverview`, `ApiAccessSummary` og `MeController` / `RiskTreatmentActionController` |
 | Konvolutt (`data`, `meta`) | `ApiResponse` |
 | Feilformat og feilkoder | `ApiErrorResponder` |
 | Paginering | `ApiCursor` |
@@ -33,7 +33,7 @@ Testen leser filen linje for linje, fordi prosjektet ikke har en YAML-parser. De
 - skjemaer på fire mellomrom under `components.schemas`;
 - hver enum på én linje: `enum: [a, b, c]`.
 
-Testen dekker ikke feltlistene i svarene. Feltene er låst av `assertExactJsonStructure` i lesetestene (`ApiRiskReadTest`, `ApiDeviationReadTest`, `ApiObjectiveKpiReadTest`) og av `assertExactJson` i `ApiCustomerGrantTest` og `ApiRiskTreatmentActionCreateTest`. Når de endres, må spesifikasjonen endres for hånd.
+Testen dekker ikke feltlistene i svarene. Feltene er låst av `assertExactJsonStructure` og `assertJsonPath` i lesetestene (`ApiRiskReadTest`, `ApiRiskDetailReadTest`, `ApiDeviationReadTest`, `ApiImprovementCaseReadTest`, `ApiObjectiveKpiReadTest`, `ApiObjectiveKpiDetailReadTest`, `ApiAttentionAndBusinessAreaReadTest`) og av `assertExactJson` i `ApiCustomerGrantTest` og `ApiRiskTreatmentActionCreateTest`. Når de endres, må spesifikasjonen endres for hånd. Kontrollen av ekte svar under fanger det som er glemt.
 
 ```bash
 docker exec procynia-app php artisan test --filter='ApiOpenApiContractTest|ApiRouteContractTest'
@@ -49,6 +49,21 @@ docker run --rm -v "$PWD/docs/api:/spec:ro" -w /tmp node:22 \
 ```
 
 Forventet resultat: gyldig, med én advarsel (`info-license`). Lisensvilkårene for API-et er ikke bestemt, og spesifikasjonen sier derfor ikke noe om dem.
+
+## Kontroll av ekte svar mot skjemaene
+
+Ved en større endring kontrolleres ekte svar mot skjemaene i spesifikasjonen. Det ble gjort for alle operasjonene i fase 2 (2026-10-24), med 18 svar (200, 201, 401, 404 og 422) og ingen avvik. Fremgangsmåten krever ingen nye avhengigheter i prosjektet:
+
+1. En midlertidig test i `tests/Feature/Api/` lager testdata som gir alle feltene, kaller hver operasjon og skriver `{method, path, status, body}` for hvert kall til en JSON-fil under `storage/app/`.
+2. Et lite Node-skript i scratch-katalogen kjører i Docker-bildet `node:22` med `ajv` (JSON Schema 2020-12), `ajv-formats` og `js-yaml`. Det slår opp svarskjemaet for sti, metode og status i spesifikasjonen og validerer hvert svar.
+3. Kontroller at skriptet faktisk avviser feil: legg til et felt, fjern et påkrevd felt og endre en type i en kopi av svarene.
+4. Slett den midlertidige testen og JSON-filen. Ingen av dem committes.
+
+## Mønstre i spesifikasjonen
+
+- **Liste og detalj deler felt:** `XFields` har feltene uten `additionalProperties`. Listeraden er `allOf: [XFields]`, detaljen er `allOf: [XFields, {de ekstra feltene}]`, og begge har `unevaluatedProperties: false`. Bruk ikke `additionalProperties: false` på et skjema som inngår i `allOf`, for da avvises detaljens ekstra felt.
+- **Lister uten paginering:** `GET /attention`, `GET /business-areas` og `GET /kpis/{id}/measurements` gir hele listen og har `Meta`, ikke `PageMeta`. Beskrivelsen må si det.
+- **Ruter uten modul:** `/me`, `/attention` og `/business-areas` står i `MODULE_FREE` i `ApiRouteContractTest`. De tar med hver modul bare der `ApiAccessSummary` sier at den er lesbar.
 
 ## Når et nytt endepunkt utvikles
 
