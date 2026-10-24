@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\DeviationController;
+use App\Http\Controllers\Api\V1\ImprovementController;
 use App\Http\Controllers\Api\V1\KpiController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\ObjectiveController;
@@ -29,6 +30,9 @@ Route::prefix('v1')
             ->middleware('api.write')
             ->name('risks.treatment-actions.store');
         Route::get('deviations', [DeviationController::class, 'index'])->name('deviations.index');
+        Route::get('deviations/{caseId}', [DeviationController::class, 'show'])->whereNumber('caseId')->name('deviations.show');
+        Route::get('improvements', [ImprovementController::class, 'index'])->name('improvements.index');
+        Route::get('improvements/{caseId}', [ImprovementController::class, 'show'])->whereNumber('caseId')->name('improvements.show');
         Route::get('objectives', [ObjectiveController::class, 'index'])->name('objectives.index');
         Route::get('kpis', [KpiController::class, 'index'])->name('kpis.index');
     });

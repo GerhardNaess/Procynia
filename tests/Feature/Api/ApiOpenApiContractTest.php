@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Api;
 
+use App\Models\ImprovementAction;
+use App\Models\ImprovementActionVerification;
 use App\Models\ImprovementCase;
 use App\Models\Kpi;
 use App\Models\Objective;
@@ -105,8 +107,10 @@ class ApiOpenApiContractTest extends TestCase
             'RiskTreatmentActionStatus' => [RiskTreatmentAction::STATUS_OPEN],
             'RiskTreatmentActionRowStatus' => RiskTreatmentAction::STATUSES,
             'RiskAcceptanceState' => ['current', 'superseded', 'revoked'],
-            'DeviationStatus' => ImprovementCase::STATUSES,
-            'DeviationAttentionCode' => array_keys(ImprovementAttentionService::CATEGORIES),
+            'ImprovementCaseStatus' => ImprovementCase::STATUSES,
+            'ImprovementAttentionCode' => array_keys(ImprovementAttentionService::CATEGORIES),
+            'ImprovementActionStatus' => ImprovementAction::STATUSES,
+            'ImprovementActionVerificationResult' => ImprovementActionVerification::RESULTS,
             'ObjectiveStatus' => Objective::STATUSES,
             'ObjectiveAttentionCode' => [ObjectiveAttentionService::TARGET_DATE_PASSED, ObjectiveAttentionService::OWNER_MISSING],
             'KpiStatus' => Kpi::STATUSES,

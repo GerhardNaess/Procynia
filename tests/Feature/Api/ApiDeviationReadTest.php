@@ -311,7 +311,12 @@ class ApiDeviationReadTest extends TestCase
                 ->assertStatus(405)
                 ->assertJsonPath('error.code', 'method_not_allowed');
 
-            foreach (['', '/close', '/cancel', '/start', '/reopen'] as $suffix) {
+            // GET /deviations/{id} reads one avvik; nothing else is accepted there.
+            $this->{$method.'Json'}("/api/v1/deviations/{$case->id}", ['closing_note' => 'Lukket av maskin'], $headers)
+                ->assertStatus(405)
+                ->assertJsonPath('error.code', 'method_not_allowed');
+
+            foreach (['/close', '/cancel', '/start', '/reopen'] as $suffix) {
                 $this->{$method.'Json'}("/api/v1/deviations/{$case->id}{$suffix}", ['closing_note' => 'Lukket av maskin'], $headers)->assertNotFound();
             }
         }

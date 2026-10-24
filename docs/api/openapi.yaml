@@ -78,8 +78,8 @@ tags:
     description: Who is calling and what it can read.
   - name: Risk
     description: Risiko — the risk register and treatment actions (tiltak).
-  - name: Deviations
-    description: Avvik og forbedringer — deviations (avvik) only.
+  - name: Deviations and improvements
+    description: Avvik og forbedringer — deviations (avvik) and improvement proposals (forbedringer), each on its own endpoints.
   - name: Objectives and KPIs
     description: Mål og KPI.
 
@@ -297,34 +297,21 @@ paths:
 
   /v1/deviations:
     get:
-      tags: [Deviations]
+      tags: [Deviations and improvements]
       operationId: listDeviations
       summary: The deviation register (avvik)
       description: |
         The avvik the integration identity may read: the customer's cases of type avvik in the
         fagområder where its roles give `improvement.view`. Improvement proposals (forbedringer)
-        are not part of this endpoint. The follow-up is computed by the same rules as «Trenger
-        oppmerksomhet» in the web application.
+        are not part of this endpoint: see `GET /v1/improvements`. The follow-up is computed by
+        the same rules as «Trenger oppmerksomhet» in the web application.
 
         Requires the Avvik og forbedringer module and `improvement.view`.
       parameters:
         - $ref: '#/components/parameters/ProcyniaCustomer'
-        - name: status
-          in: query
-          required: false
-          description: Only avvik with this status.
-          schema:
-            $ref: '#/components/schemas/DeviationStatus'
+        - $ref: '#/components/parameters/ImprovementCaseStatusFilter'
         - $ref: '#/components/parameters/BusinessAreaId'
-        - name: overdue
-          in: query
-          required: false
-          description: |
-            `true`: only active avvik (open or in progress) whose frist is before today.
-            `false`: all others.
-          schema:
-            type: string
-            enum: ['true', 'false']
+        - $ref: '#/components/parameters/ImprovementCaseOverdue'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
@@ -343,7 +330,7 @@ paths:
                   data:
                     type: array
                     items:
-                      $ref: '#/components/schemas/Deviation'
+                      $ref: '#/components/schemas/ImprovementCase'
                   meta:
                     $ref: '#/components/schemas/PageMeta'
         '401':
@@ -352,6 +339,145 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/deviations/{caseId}:
+    get:
+      tags: [Deviations and improvements]
+      operationId: getDeviation
+      summary: One avvik with its tiltak
+      description: |
+        One avvik the integration identity may read, with the fields of the register and its
+        tiltak, each with its effect verification (effektverifisering). An avvik of another
+        customer, outside the identity's fagområder, a forbedring, or one that does not exist is
+        404.
+
+        Requires the Avvik og forbedringer module and `improvement.view`.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/CaseId'
+      responses:
+        '200':
+          description: The case.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ImprovementCaseDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/improvements:
+    get:
+      tags: [Deviations and improvements]
+      operationId: listImprovements
+      summary: The improvement proposals (forbedringer)
+      description: |
+        The forbedringer the integration identity may read: the customer's cases of type
+        forbedring in the fagområder where its roles give `improvement.view`. The same fields,
+        filters and access rule as `GET /v1/deviations`. Avvik are not part of this endpoint.
+
+        Requires the Avvik og forbedringer module and `improvement.view`.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/ImprovementCaseStatusFilter'
+        - $ref: '#/components/parameters/BusinessAreaId'
+        - $ref: '#/components/parameters/ImprovementCaseOverdue'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of forbedringer.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ImprovementCase'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/improvements/{caseId}:
+    get:
+      tags: [Deviations and improvements]
+      operationId: getImprovement
+      summary: One forbedring with its tiltak
+      description: |
+        One forbedring the integration identity may read, in the same fields as
+        `GET /v1/deviations/{caseId}`. A forbedring of another customer, outside the identity's
+        fagområder, an avvik, or one that does not exist is 404.
+
+        Requires the Avvik og forbedringer module and `improvement.view`.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/CaseId'
+      responses:
+        '200':
+          description: The case.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ImprovementCaseDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -518,6 +644,31 @@ components:
       schema:
         type: integer
         minimum: 0
+    CaseId:
+      name: caseId
+      in: path
+      required: true
+      description: The case's id.
+      schema:
+        type: integer
+        minimum: 0
+    ImprovementCaseStatusFilter:
+      name: status
+      in: query
+      required: false
+      description: Only cases with this status.
+      schema:
+        $ref: '#/components/schemas/ImprovementCaseStatus'
+    ImprovementCaseOverdue:
+      name: overdue
+      in: query
+      required: false
+      description: |
+        `true`: only active cases (open or in progress) whose frist is before today.
+        `false`: all others.
+      schema:
+        type: string
+        enum: ['true', 'false']
     BusinessAreaId:
       name: business_area_id
       in: query
@@ -812,7 +963,7 @@ components:
               description: Risiko — `GET /v1/risks`.
             deviations:
               $ref: '#/components/schemas/ModuleAccess'
-              description: Avvik og forbedringer, avvik only — `GET /v1/deviations`.
+              description: Avvik og forbedringer — `GET /v1/deviations` and `GET /v1/improvements`, which read the same module with the same permission.
             objectives:
               $ref: '#/components/schemas/ModuleAccess'
               description: Mål og KPI — `GET /v1/objectives` and `GET /v1/kpis`.
@@ -1117,36 +1268,40 @@ components:
             - $ref: '#/components/schemas/Timestamp'
             - type: 'null'
 
-    DeviationStatus:
+    ImprovementCaseStatus:
       type: string
       description: open and in_progress are active; closed and cancelled have ended.
       enum: [open, in_progress, closed, cancelled]
-    DeviationAttentionCode:
+    ImprovementAttentionCode:
       type: string
       description: |
-        Why an active avvik needs attention, in this order: its frist has passed, a tiltak's frist
-        has passed, it has no responsible person, a tiltak has no responsible person, a completed
-        tiltak awaits effect verification, a tiltak was verified as not effective.
+        Why an active case needs attention, in this order: its frist has passed, a tiltak's frist
+        has passed, it has no responsible person, an active tiltak has no responsible person, a
+        completed tiltak awaits effect verification, a tiltak was verified as not effective.
       enum: [case_overdue, action_overdue, case_owner_missing, action_owner_missing, awaiting_verification, not_effective]
-    Deviation:
-      type: object
+    ImprovementCase:
       description: |
-        An avvik, structured fields only. Not included: beskrivelse, årsaksanalyse,
-        avslutningsnotat and other free text, the reporter, who closed it, tiltak titles and
-        documents.
+        An avvik or a forbedring, structured fields only. Not included: beskrivelse,
+        årsaksanalyse, avslutningsnotat and other free text, the reporter, who closed it, tiltak
+        titles and documents.
+      allOf:
+        - $ref: '#/components/schemas/ImprovementCaseFields'
+      unevaluatedProperties: false
+    ImprovementCaseFields:
+      type: object
+      description: The fields of a case in the register, shared by ImprovementCase and ImprovementCaseDetail.
       required: [id, title, status, business_area, owner, occurred_on, due_on, is_overdue, closed_at, follow_up, created_at, updated_at]
-      additionalProperties: false
       properties:
         id:
           type: integer
         title:
           type: string
-          description: Written by people. May contain personal data.
+          description: Written by people. May contain personal data, in avvik most of all.
         status:
-          $ref: '#/components/schemas/DeviationStatus'
+          $ref: '#/components/schemas/ImprovementCaseStatus'
         business_area:
           $ref: '#/components/schemas/Reference'
-          description: The avvik's fagområde.
+          description: The case's fagområde.
         owner:
           description: The responsible person, or null.
           oneOf:
@@ -1175,20 +1330,103 @@ components:
           properties:
             actions_total:
               type: integer
-              description: All tiltak on the avvik.
+              description: All tiltak on the case.
             actions_open:
               type: integer
-              description: Tiltak still being worked on.
+              description: Tiltak still being worked on (planned or in progress).
             attention:
               type: array
-              description: Empty unless the avvik is active.
+              description: Empty unless the case is active.
               items:
-                $ref: '#/components/schemas/DeviationAttentionCode'
+                $ref: '#/components/schemas/ImprovementAttentionCode'
         created_at:
           oneOf:
             - $ref: '#/components/schemas/Timestamp'
             - type: 'null'
         updated_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    ImprovementCaseDetail:
+      description: |
+        A case with its tiltak. Not included: tiltak descriptions and completion notes,
+        verification notes, who completed or verified, the status history, the Kvalitet links and
+        the origin in other modules.
+      allOf:
+        - $ref: '#/components/schemas/ImprovementCaseFields'
+        - type: object
+          required: [actions]
+          properties:
+            actions:
+              type: array
+              description: The tiltak, in the order they were added.
+              items:
+                $ref: '#/components/schemas/ImprovementAction'
+      unevaluatedProperties: false
+    ImprovementActionStatus:
+      type: string
+      description: planned and in_progress are active; completed and cancelled have ended.
+      enum: [planned, in_progress, completed, cancelled]
+    ImprovementActionVerificationResult:
+      type: string
+      enum: [effective, not_effective]
+    ImprovementAction:
+      type: object
+      required: [id, title, status, owner, due_on, is_overdue, completed_at, verification]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+          description: Written by people. May contain personal data.
+        status:
+          $ref: '#/components/schemas/ImprovementActionStatus'
+        owner:
+          description: The responsible person, or null.
+          oneOf:
+            - $ref: '#/components/schemas/Person'
+            - type: 'null'
+        due_on:
+          type: [string, 'null']
+          format: date
+          description: The frist.
+        is_overdue:
+          type: boolean
+          description: The case is active, the tiltak is active, and its frist is before today.
+        completed_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        verification:
+          type: object
+          description: The effect verification (effektverifisering) of a completed tiltak.
+          required: [awaiting, current, earlier]
+          additionalProperties: false
+          properties:
+            awaiting:
+              type: boolean
+              description: Completed, and the current completion is not yet verified.
+            current:
+              description: The verification of the current completion, or null.
+              oneOf:
+                - $ref: '#/components/schemas/ImprovementActionVerification'
+                - type: 'null'
+            earlier:
+              type: array
+              description: Other verifications, newest first — of earlier completions that were later reopened.
+              items:
+                $ref: '#/components/schemas/ImprovementActionVerification'
+    ImprovementActionVerification:
+      type: object
+      required: [id, result, verified_at]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        result:
+          $ref: '#/components/schemas/ImprovementActionVerificationResult'
+        verified_at:
           oneOf:
             - $ref: '#/components/schemas/Timestamp'
             - type: 'null'
