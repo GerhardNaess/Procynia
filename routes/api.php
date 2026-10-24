@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\V1\QualityController;
 use App\Http\Controllers\Api\V1\RiskController;
 use App\Http\Controllers\Api\V1\RiskTreatmentActionController;
 use App\Http\Controllers\Api\V1\SupplierController;
+use App\Http\Controllers\Api\V1\TenderController;
 use App\Http\Controllers\Api\V1\WikiController;
 use App\Models\ImprovementCase;
 use Illuminate\Support\Facades\Route;
@@ -86,4 +87,8 @@ Route::prefix('v1')
         Route::get('wiki/pages', [WikiController::class, 'index'])->name('wiki.pages.index');
         Route::get('wiki/pages/{pageId}', [WikiController::class, 'show'])->whereNumber('pageId')->name('wiki.pages.show');
         Route::post('wiki/ask', [WikiController::class, 'ask'])->name('wiki.ask');
+        // Anbud: reading cases and their requirements' metadata, with tender.read on for the grant (D23).
+        Route::get('tender/cases', [TenderController::class, 'index'])->name('tender.cases.index');
+        Route::get('tender/cases/{caseId}', [TenderController::class, 'show'])->whereNumber('caseId')->name('tender.cases.show');
+        Route::get('tender/cases/{caseId}/requirements', [TenderController::class, 'requirements'])->whereNumber('caseId')->name('tender.cases.requirements');
     });

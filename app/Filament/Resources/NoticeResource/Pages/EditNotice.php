@@ -16,6 +16,21 @@ class EditNotice extends EditRecord
 {
     protected static string $resource = NoticeResource::class;
 
+    /**
+     * The internal workflow fields are hidden from serialization (Notice::INTERNAL_WORKFLOW_FIELDS),
+     * and Filament fills the form from attributesToArray(), so they are put back here.
+     */
+    protected function mutateFormDataBeforeFill(array $data): array
+    {
+        $record = $this->getRecord();
+
+        foreach (['internal_status', 'internal_comment', 'assigned_to_user_id'] as $field) {
+            $data[$field] = $record->getAttribute($field);
+        }
+
+        return $data;
+    }
+
     protected function handleRecordUpdate(Model $record, array $data): Model
     {
         if (! $record instanceof Notice) {

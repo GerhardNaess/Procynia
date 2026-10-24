@@ -15,11 +15,11 @@
 
 | | |
 |---|---|
-| **Prosjektstatus** | 🟧 **Delvis dekket.** API-fundamentet er bygget og testet lokalt. Åtte av ni moduler har API-støtte. Lesingen i styringsmodulene er fullført lokalt i fase 2 og 3, etter beslutningene D15–D17. Fase 4 har levert registrering av avvik, forbedringsforslag og tiltak lokalt. Fase 6 har levert publisert Wiki-kunnskap og «Spør Wiki» lokalt, etter D18–D22. **Ingenting er i produksjon.** |
-| **API-operasjoner i dag** | **37 operasjoner:** 31 for lesing, 5 for skriving og 1 AI-spørsmål («Spør Wiki»), se tabellen under. Skrivingen og «Spør Wiki» går gjennom fire navngitte operasjoner som System Owner slår på per integrasjon. |
-| **Lokalt verifisert** | Ja. Alle 204 API-tester består (kjørt 2026-10-24, etter fase 6). Siste fulle kjøring av PHP-suiten ga 8667 tester og 0 feil (2026-10-24, før OpenAPI og fase 2 og 3). |
+| **Prosjektstatus** | 🟧 **Delvis dekket.** API-fundamentet er bygget og testet lokalt. Alle ni moduler har API-støtte. Lesingen i styringsmodulene er fullført lokalt i fase 2 og 3, etter beslutningene D15–D17. Fase 4 har levert registrering av avvik, forbedringsforslag og tiltak lokalt. Fase 6 har levert publisert Wiki-kunnskap og «Spør Wiki» lokalt, etter D18–D22. Fase 7 har levert lesing av anbudssaker og krav lokalt, etter D23–D28. **Ingenting er i produksjon.** |
+| **API-operasjoner i dag** | **40 operasjoner:** 34 for lesing, 5 for skriving og 1 AI-spørsmål («Spør Wiki»), se tabellen under. Skrivingen, «Spør Wiki» og lesingen av Anbud går gjennom fem navngitte operasjoner som System Owner slår på per integrasjon. |
+| **Lokalt verifisert** | Ja. Alle 214 API-tester består (kjørt 2026-10-24, etter fase 7). Siste fulle kjøring av PHP-suiten ga 8667 tester og 0 feil (2026-10-24, før OpenAPI og fase 2 og 3). |
 | **Produksjonsklart** | **Nei.** Grenen er ikke flettet inn i `main`, migreringene er ikke kjørt i Azure, og API-et er ikke prøvd med et ekte token fra Microsoft Entra ID eller med Siggjo. |
-| **API-spesifikasjon** | 🟩 OpenAPI 3.1 for alle 37 operasjoner i [`api/openapi.yaml`](api/openapi.yaml), validert og låst mot rutene med en kontrakttest. 335 ekte svar fra API-testene er kontrollert mot skjemaene uten avvik (2026-10-24, etter fase 3), og 26 svar fra Wiki-testene etter fase 6. |
+| **API-spesifikasjon** | 🟩 OpenAPI 3.1 for alle 40 operasjoner i [`api/openapi.yaml`](api/openapi.yaml), validert og låst mot rutene med en kontrakttest. 335 ekte svar fra API-testene er kontrollert mot skjemaene uten avvik (2026-10-24, etter fase 3), og 26 svar fra Wiki-testene etter fase 6. |
 | **Neste milepæl** | **Pilotklar API på testkunde:** dagens seks operasjoner flettet inn, beskrevet i en API-spesifikasjon og prøvd med ekte Entra-token i staging (fase 1 under). |
 
 ### Implementerte API-operasjoner
@@ -63,6 +63,9 @@
 | 35 | Publiserte Wiki-sider (`GET /api/v1/wiki/pages`) | Lesing | Enterprise Wiki | Ja | Nei |
 | 36 | Én publisert Wiki-side med lenker (`GET /api/v1/wiki/pages/{id}`) | Lesing | Enterprise Wiki | Ja | Nei |
 | 37 | Spør Wiki over publisert kunnskap (`POST /api/v1/wiki/ask`) | AI-spørsmål (skriver ikke) | Enterprise Wiki | Ja | Nei |
+| 38 | Anbudssaker (`GET /api/v1/tender/cases`) | Lesing (`tender.read`) | Anbud | Ja | Nei |
+| 39 | Én anbudssak med frister og signaler (`GET /api/v1/tender/cases/{id}`) | Lesing (`tender.read`) | Anbud | Ja | Nei |
+| 40 | Kravmetadata i en sak (`GET /api/v1/tender/cases/{id}/requirements`) | Lesing (`tender.read`) | Anbud | Ja | Nei |
 
 «Lokalt verifisert» betyr automatiske tester med simulerte Entra-tokens og testdata. Det betyr ikke at operasjonen er prøvd mot Microsoft, Azure eller Siggjo.
 
@@ -97,7 +100,7 @@
 | Leverandøroppfølging | 🟧 Delvis dekket | Register, én leverandør, kontrollkrav, oppmerksomhet | – | Alle A-funksjoner er levert lokalt. Ikke produksjonsklar. |
 | Ledelsens gjennomgang | 🟧 Delvis dekket | Gjennomganger, én gjennomgang med seksjoner, beslutninger og tiltak | – | Alle A-funksjoner er levert lokalt. Ikke produksjonsklar. |
 | Enterprise Wiki | 🟧 Delvis dekket | Publiserte sider, én publisert side med lenker, «Spør Wiki» fra publisert kunnskap (D18–D21) | – | Kunnskapsoverføring (WIK-05) er utsatt (D22). Ikke produksjonsklar. |
-| Anbud | 🟥 Blokkert | – | – | Fire kjente hindre må løses først (se under) |
+| Anbud | 🟧 Delvis dekket | Saker, én sak med frister og signaler, kravmetadata (D23–D28, operasjonen `tender.read`) | – | Søk i kunngjøringer (ANB-03) og alt saks- og kravarbeid er utsatt (D28). Ikke produksjonsklar. |
 
 Ingen modul er «Fullt dekket». Det betyr at alle funksjoner i kategori A (se del 3) har API-støtte, er verifisert og er produksjonsklare.
 
@@ -107,24 +110,25 @@ Grunnlaget er de 117 funksjonene i del 3: **32 A-funksjoner, 51 B-funksjoner og 
 
 | Status | Betydning | A | B | C | Sum |
 |---|---|---|---|---|---|
-| 🟩 **Implementert** | Endepunktet finnes og er verifisert lokalt. Ikke i produksjon. | 32 | 4 | – | 36 |
+| 🟩 **Implementert** | Endepunktet finnes og er verifisert lokalt. Ikke i produksjon. | 32 | 6 | – | 38 |
 | 🟦 **Planlagt** | Har en fase i den vedtatte planen og kan bygges uten ny beslutning. | – | – | – | – |
-| 🟥 **Blokkert** | Har en fase, men kan ikke startes eller fullføres før en navngitt beslutning eller hindring er løst. | – | 39 | – | 39 |
+| 🟥 **Blokkert** | Har en fase, men kan ikke startes eller fullføres før en navngitt beslutning eller hindring er løst. | – | 37 | – | 37 |
 | ⬛ **Ikke anbefalt** | Ikke planlagt. Tas bare opp igjen etter egen beslutning. | – | 8 | – | 8 |
 | ⛔ **Utenfor API-et** | Formell menneskelig beslutning. Kan aldri utføres av en integrasjon og teller ikke som manglende. | – | – | 34 | 34 |
 | **Sum** | | **32** | **51** | **34** | **117** |
 
-**Implementert (32 A-funksjoner og 4 B-funksjoner):** RIS-01–04, MOK-01–06, AVF-01–05, FEL-01–03, ETR-01–05, LEV-01–03, LDG-01–03, KVA-01, KVA-03 og KVA-04, og B-funksjonene KVA-02 og WIK-01–03.
+**Implementert (32 A-funksjoner og 6 B-funksjoner):** RIS-01–04, MOK-01–06, AVF-01–05, FEL-01–03, ETR-01–05, LEV-01–03, LDG-01–03, KVA-01, KVA-03 og KVA-04, og B-funksjonene KVA-02, WIK-01–03, ANB-01 og ANB-02.
 
 - Fase 2 leverte RIS-03, MOK-03, MOK-04, resten av MOK-05, AVF-02, AVF-03, FEL-02 og resten av FEL-03.
 - Fase 3 leverte ETR-01–05, LEV-01–03, LDG-01–03, KVA-01 og KVA-03, og utvidet FEL-02.
 - Etter D15–D17 er RIS-02, MOK-06, KVA-04 og KVA-02 fullført (2026-10-24).
 - Fase 4 leverte AVF-04 og AVF-05 (2026-10-24). Alle 32 A-funksjoner er nå implementert lokalt.
 - Fase 6 leverte WIK-01–03 etter D18–D22 (2026-10-24).
+- Fase 7 leverte ANB-01 og ANB-02 etter D23–D28 (2026-10-24).
 
 **Planlagt:** ingen. AVF-04 og AVF-05 er levert (fase 4). Fellesforutsetningene ble avgjort slik: ingen idempotens (som for risikotiltak), opphavet vises i Avvik og forbedringer, og varslene følger webgrensesnittets regel (funn 23–25).
 
-**Blokkert (39 B-funksjoner):** alle B-funksjoner som har en fase, unntatt KVA-02 og WIK-01–03. WIK-05 og kunnskapsoverføringen i modulene er utsatt (D22). Hindringen står i kolonnen «Avhengigheter» i del 3, og de samlede beslutningene står i «Viktigste avhengigheter og beslutninger» under. Hele Anbud-modulen er blokkert (funn 2, 3 og 6 i del 5, og K16).
+**Blokkert (37 B-funksjoner):** alle B-funksjoner som har en fase, unntatt KVA-02, WIK-01–03, ANB-01 og ANB-02. WIK-05 og kunnskapsoverføringen i modulene er utsatt (D22). ANB-03–09 er utsatt (D28). Hindringen står i kolonnen «Avhengigheter» i del 3, og de samlede beslutningene står i «Viktigste avhengigheter og beslutninger» under.
 
 **Ikke anbefalt (8 B-funksjoner):** RIS-06, ETR-07, LEV-04, LDG-04, LDG-05, WIK-04, ANB-10, og FEL-06 (permanent utenfor API-et).
 
@@ -140,7 +144,7 @@ Faseplanen ble vedtatt 2026-10-24. Endringer i rekkefølge eller innhold krever 
 | **4** | Avgrensede registreringer (utkast og forslag) | Styringsmodulene | 🟧 Påbegynt. AVF-04 og AVF-05 levert lokalt 2026-10-24. Andre registreringer (for eksempel RIS-05) krever beslutning per operasjon. |
 | **5** | Tilgang på vegne av en person | Mine oppgaver, personlige dashboards | 🟥 Blokkert av D2. Kontrollert 2026-10-24: ingen av fasens funksjoner kan bygges før D2 er opphevet (funn 27). Ingenting er implementert. |
 | **6** | Wiki gjennom den felles kunnskapskjernen | Enterprise Wiki | 🟧 Levert lokalt 2026-10-24: WIK-01–03 etter D18–D22. Kunnskapsoverføring (WIK-05) er utsatt (D22, S4). Ikke produksjonsklar. |
-| **7** | Anbud | Anbud | 🟥 Blokkert av K16, `isBidManager()`, avdelingsomfang og A46. Kontrollert 2026-10-24: ingen funksjon er godkjent, og hindrene står fortsatt i koden (funn 28). Ingenting er implementert. |
+| **7** | Anbud | Anbud | 🟧 Levert lokalt 2026-10-24: ANB-01 og ANB-02 etter D23–D28. ANB-03–09 er utsatt (D28), og ANB-11–12 eksponeres aldri. Ikke produksjonsklar. |
 | **8** | Kopi av data og agentlag | Siggjos datamodell, MCP | 🟥 Blokkert av D7 og D14. Kontrollert 2026-10-24: alternativ B er ikke valgt (D7), og MCP-laget er ikke besluttet (funn 29). Ingenting er implementert. |
 
 ### Vedtatt rekkefølge for de neste leveransene
@@ -170,7 +174,7 @@ Detaljer står i del 4.
 | 7 | B6 og B7: skal agenter kunne laste opp kildedokumenter eller registrere KPI-målinger? I dag er svaret nei. | Fase 4 | Produkteier |
 | 8 | Om agentutløst AI-arbeid er tillatt, og hvordan kostnaden begrenses (S4). **Løst for «Spør Wiki» (D20).** Gjenstår for kunnskapsoverføring, som starter en Wiki-kjøring (D22). | Fase 4 og kunnskapsoverføring i fase 6 | Produkteier |
 | 9 | A23: Kvalitets AI-forslag og «Spør Wiki» må kontrollere tilgang i tjenesten. **Løst for «Spør Wiki»** (`askAs()`, D19). Kvalitets AI-forslag gjenstår. | Kvalitets AI-forslag | Arkitektur |
-| 10 | Anbud: delte arbeidsflytfelt på kunngjøringer (K16), avdelingsomfang og A46 | Fase 7 | Produkteier / arkitektur |
+| 10 | ~~Anbud: delte arbeidsflytfelt på kunngjøringer (K16), avdelingsomfang og A46~~ **Besluttet 2026-10-24 (D23–D28):** `tender.read` per tildeling, hele kunden, K16 skjult uten migrering, integrasjoner er alltid lesere. Avdelingsavgrensning og A46 er utsatt. | Ingenting for ANB-01–02. ANB-03 venter på funn 31, ANB-05–06 på A46. | Produkteier / arkitektur |
 | 11 | ~~KVA-02: skal API-et vise godkjent versjon av prosessflyten, arbeidsversjonen eller begge?~~ **Besluttet 2026-10-24 (D15): bare godkjent versjon.** | Ingenting lenger. RIS-02, MOK-06 og KVA-02 kan implementeres. | Produkteier |
 | 12 | ~~Skal beslutningstekstene i Ledelsens gjennomgang eksponeres?~~ **Besluttet 2026-10-24 (D16): nei, ikke før innholdet er vurdert som egnet.** | Ingenting. API-et oppfyller dette allerede. | Produkteier |
 | 14 | **D2: skal delegert modus (tilgang på vegne av en person) bygges?** I dag gjelder D2: bare applikasjonsmodus. Hvis ja: hvilke scopes, om FEL-05 (varsler) skal være med, og om LDG-06 (statusoppdatering på egne tiltak) skal være en skriveoperasjon i delegert modus. | Hele fase 5 (FEL-04, FEL-05, LDG-06). Se funn 27. | Produkteier |
@@ -246,7 +250,7 @@ Kompleksitet: **Lav** = gjenbruk av en eksisterende tjeneste og presentasjon. **
 | Leverandøroppfølging | 3 | 3 | 5 | 5 |
 | Ledelsens gjennomgang | 3 | 3 | 4 | 2 |
 | Enterprise Wiki | 0 | 0 (+ WIK-01–03, B) | 5 | 8 |
-| Anbud | 0 | 0 | 10 | 2 |
+| Anbud | 0 | 0 (+ ANB-01–02, B) | 10 | 2 |
 | Felles | 3 | 3 | 3 | 0 |
 | **Sum** | **32** | **32** | **51** | **34** |
 
@@ -409,13 +413,13 @@ Wiki eksponeres bare gjennom den felles navigasjons- og retrieval-kjernen, med g
 
 ### Anbud
 
-Tilgang: `SavedNoticeAccessService` (`visibleQueryFor`, `manageableQueryFor`). Den gir **ingen** treff for en integrasjon, fordi `applyVisibility` krever tilgang til kundefrontenden. Det finnes ingen `findVisible*`. De fleste skrivinger ligger i `NoticeController`, `GoNoGoAssessmentController` og `AiController`, ikke i tjenester.
+Tilgang for personer: `SavedNoticeAccessService` (`visibleQueryFor`, `manageableQueryFor`). Den gir **ingen** treff for en integrasjon, fordi `applyVisibility` krever tilgang til kundefrontenden. Integrasjoner leser gjennom en egen lesevei, `integrationReadableQuery()`, som krever operasjonen `tender.read` og gir hele kundens saker (D23, D24). De fleste skrivinger ligger i `NoticeController`, `GoNoGoAssessmentController` og `AiController`, ikke i tjenester.
 
 | ID | Funksjon | Domenetjeneste | API-endepunkt | API-status | Integrasjon i dag | Kat. | Avhengigheter | Fase |
 |---|---|---|---|---|---|---|---|---|
-| ANB-01 | Les saker, bud-cockpit og én sak | `SavedNoticeAccessService::visibleQueryFor`/`cockpitScopeQueryFor`, `SavedNoticeWorkflowSignals` | – | – | Nei | B | Ny lesevei for integrasjoner, avdelingsomfang, K16 og sperren i `isBidManager()` (se funn) | 7 |
-| ANB-02 | Les krav og svarstatus i en sak | `RequirementLoader::loadForCase` | – | – | Nei | B | Som ANB-01 | 7 |
-| ANB-03 | Søk i kunngjøringer og varsler | `OpportunitySourceRegistry`, `CustomerContext::scopeNoticeDiscovery` | – | – | Nei | B | Synligheten følger `notice_attentions` | 7 |
+| ANB-01 | Les saker og én sak | `SavedNoticeAccessService::integrationReadableQuery`, `SavedNoticeWorkflowSignals` | `GET /tender/cases`, `GET /tender/cases/{id}` | 🟩 Implementert lokalt | Ja, med `tender.read` | B | D23–D27. Bud-cockpiten som egen visning er ikke med; signalene står på hver sak. | 7 |
+| ANB-02 | Les krav og svarstatus i en sak | `RequirementLoader::loadForCase` etter at saken er funnet | `GET /tender/cases/{id}/requirements` | 🟩 Implementert lokalt | Ja, med `tender.read` | B | D27: bare metadata, aldri kravtekst eller svartekst | 7 |
+| ANB-03 | Søk i kunngjøringer og varsler | `OpportunitySourceRegistry`, `CustomerContext::scopeNoticeDiscovery` | – | – | Nei | B | Utsatt (D28). `scopeNoticeDiscovery` avgrenser ikke etter `notice_attentions` (funn 31). | 7 |
 | ANB-04 | Last ned konkurransedokumenter | `DoffinNoticeDocumentService::syncFromNotice` + inline | – | – | Nei | B | Filer, og skriving ved lesing | 7 |
 | ANB-05 | Saksarbeid: lagre sak, frister, aksjoner, fasekommentarer, tilgang, innsendinger, Go/No-go-vurdering, tilbudsansvarlig | Inline i kontrollerne. `OpportunityRegistrar` ved lagring. | – | – | Nei | B | Må flyttes til tjenester før API | 7 |
 | ANB-06 | Flytt til historikk med utfall (vunnet, tapt, No-Go) | Inline i `NoticeController::archiveSavedNotice` | – | – | Nei | B | A46: er utfallet en menneskelig beslutning? | 7 |
@@ -520,11 +524,11 @@ Prinsipper: bruk eksisterende domenetjenester og tilgangstjenester, gjenbruk mø
 |---|---|
 | **Mål** | Lesing av anbudsstatus, krav og frister for integrasjoner. Eventuelt kravarbeid senere. |
 | **Moduler** | Anbud |
-| **Leveranser** | Retting av K16 (kundeavgrensede arbeidsflytfelt). `isBidManager()` og tilsvarende sjekker nekter integrasjoner. Beslutning om avdelingsomfang. Ny lesevei i `SavedNoticeAccessService`. Saksarbeid flyttet fra kontrollerne til tjenester. Beslutning om A46 og egen nøkkel for Anbud-AI. |
+| **Leveranser** | Levert: K16 skjult ved serialisering (D25). `isBidManager()` og `resolvedBidRole()` nekter integrasjoner (D26). Ny lesevei i `SavedNoticeAccessService` med `tender.read` (D23, D24). Gjenstår: saksarbeid flyttet fra kontrollerne til tjenester, beslutning om A46 og egen nøkkel for Anbud-AI. |
 | **Avhengigheter** | Produkt- og arkitekturbeslutninger over |
 | **Kompleksitet** | Høy |
-| **Ferdig når** | ANB-01–03 er tilgjengelige med tester for avdelinger og kundeseparasjon, og alle hindre i «Anbud» under funn er lukket. |
-| **Status** | 🟥 Ikke startet. Kontrollert 2026-10-24: ANB-01–09 er B-funksjoner uten beslutning, ANB-10 er ikke anbefalt, og ANB-11–12 er C. Ingen kan bygges med dagens arkitektur (funn 28). Beslutningssak D23–D28: [`external-api-phase-7-tender-decisions.md`](external-api-phase-7-tender-decisions.md). |
+| **Ferdig når** | ANB-01 og ANB-02 er tilgjengelige med tester for kundeseparasjon, tilgang og feltutvalg (D23–D28). ANB-03 er flyttet ut av fasen (D28, funn 31). |
+| **Status** | 🟧 Levert lokalt 2026-10-24 etter D23–D28: ANB-01 og ANB-02. Ikke produksjonsklar. Beslutningssak og leveranse: [`external-api-phase-7-tender-decisions.md`](external-api-phase-7-tender-decisions.md). |
 
 ### Fase 8 – Kopi av data og agentlag
 
@@ -542,13 +546,13 @@ Prinsipper: bruk eksisterende domenetjenester og tilgangstjenester, gjenbruk mø
 
 ## Del 5 – Funn fra denne gjennomgangen
 
-Kontrollert i koden 2026-10-24. Funn 1, 13 og 17 er løst (se radene). Funn 13–16 kom fra fase 2, funn 17–22 fra fase 3, funn 23–26 fra fase 4, funn 27 fra fase 5, funn 28–29 fra kontrollen av fase 7 og 8, og funn 30 fra fase 6.
+Kontrollert i koden 2026-10-24. Funn 1, 2, 3, 13, 17 og 28 er løst (se radene). Funn 13–16 kom fra fase 2, funn 17–22 fra fase 3, funn 23–26 fra fase 4, funn 27 fra fase 5, funn 28–29 fra kontrollen av fase 7 og 8, funn 30 fra fase 6, og funn 31–32 fra fase 7.
 
 | # | Funn | Betydning | Hører til |
 |---|---|---|---|
 | 1 | **Ingen OpenAPI-spesifikasjon.** Arkitekturen (§8.4, §11.2 punkt 2) forutsetter en, men den finnes ikke. **Løst 2026-10-24:** [`api/openapi.yaml`](api/openapi.yaml) og `ApiOpenApiContractTest`. | Klientene mangler en formell kontrakt, og kontraktstesten mot spesifikasjonen mangler. | Fase 1 |
-| 2 | **`User::isBidManager()` tar ikke hensyn til integrasjoner.** `resolvedBidRole()` faller fortsatt tilbake til `contributor` (arkitektur K4). `isSystemOwner()` og `isQa()` er sperret. Integrasjoner holdes i dag ute av Anbud bare av sperren for kundefrontenden. | Ingen feil i dag, men den må rettes før Anbud får API. | Fase 7 |
-| 3 | **K16 er ikke løst.** `internal_status`, `internal_comment`, `assigned_to_user_id` og `decision_by_user_id` ligger fortsatt på de globale `notices`. | Blokkerer Anbud-API. | Fase 7 |
+| 2 | **`User::isBidManager()` tar ikke hensyn til integrasjoner.** `resolvedBidRole()` faller fortsatt tilbake til `contributor` (arkitektur K4). `isSystemOwner()` og `isQa()` er sperret. Integrasjoner holdes i dag ute av Anbud bare av sperren for kundefrontenden. **Løst 2026-10-24 (D26):** `isBidManager()` og `resolvedBidRole()` (som gir `viewer`) sperrer integrasjoner, uansett hva raden har. | Ingen feil i dag, men den må rettes før Anbud får API. | Fase 7 |
+| 3 | **K16 er ikke løst.** `internal_status`, `internal_comment`, `assigned_to_user_id` og `decision_by_user_id` ligger fortsatt på de globale `notices`. **Løst 2026-10-24 (D25), uten migrering:** feltene er interne adminfelt, ligger i `Notice::$hidden`, og API-et serialiserer aldri `Notice`. Filament leser dem fortsatt (`EditNotice` legger dem tilbake i skjemaet). | Blokkerte Anbud-API. | Fase 7 |
 | 4 | **A23 er åpen.** Kvalitets AI-forslag tar ingen aktør og kontrollerer tilgang bare i kontrolleren. | Blokkerer AI-funksjoner i Kvalitet og «Spør Wiki». D11 holder dem sperret. | Fase 6 |
 | 5 | **Kvalitet har ingen lesetjeneste.** All lesing er inline i `QualityController`. Oppmerksomheten er avgrenset per kunde, ikke per bruker. | Den største tekniske jobben i fase 3 | Fase 3 |
 | 6 | **Wiki-sider og konkurransedokumenter skriver ved lesing** (`WikiController::show`, `NoticeController::show`). | Webvisningen kan ikke gjenbrukes direkte i et lese-API. | Fase 6, 7 |
@@ -573,6 +577,8 @@ Kontrollert i koden 2026-10-24. Funn 1, 13 og 17 er løst (se radene). Funn 13�
 | 25 | **Varsler følger webgrensesnittets regel.** Den ansvarlige får det vanlige varselet om tildeling (`AssignmentObserver`), med integrasjonen som `assigned_by_user_id`, akkurat som for risikotiltak. Det er ikke laget en egen varselregel for integrasjoner (S6). | System Owner bestemmer hvem som kan få varsler fra en integrasjon gjennom hvilke fagområder den kan lese. | Fase 4 |
 | 26 | **Beskrivelsen er fritekst som skrives, men aldri leses tilbake.** Domeneregelen krever beskrivelse på en sak. API-et tar den imot og lagrer den, men svarene inneholder den ikke (D8). | Integrasjonen kan ikke kontrollere hva den skrev. Tas med i DPIA (D14), fordi avvik kan inneholde særlige kategorier av personopplysninger. | Personvern |
 | 27 | **Fase 5 er blokkert i sin helhet av D2.** FEL-04 (Mine oppgaver), FEL-05 (varsler) og LDG-06 (statusoppdatering på egne tiltak) gjelder en bestemt person og har ingen mening for en integrasjon i applikasjonsmodus. Delegert modus krever i tillegg en ny innloggingsvei (delegerte scopes i Entra, kobling `oid` → `user_identities`, on-behalf-of hos Siggjo), som er både en produktbeslutning og en ny generell sikkerhetsmekanisme. Ingen av delene er bygget, og `EntraAccessTokenValidator` avviser fortsatt delegerte tokens med 403. | Ingen kode er endret i fase 5. Fasen kan startes når produkteier har opphevet D2 og tatt stilling til FEL-05 og LDG-06 (avhengighet 14 i del 1). Verifisering krever også Entra-registreringen fra fase 1. | Fase 5 |
-| 28 | **Fase 7 er blokkert i sin helhet.** Ingen av Anbud-funksjonene er godkjent: ANB-01–09 er B-funksjoner, ANB-10 er ikke anbefalt, og ANB-11 og ANB-12 er C. Hindrene står fortsatt i koden: K16 (`internal_status`, `decision_by_user_id` og `assigned_to_user_id` ligger på den globale `Notice`), `User::isBidManager()` faller tilbake til `contributor` og sperrer ikke integrasjoner (funn 2), `SavedNoticeAccessService::applyVisibility` gir ingen treff for en integrasjon og har ingen `findVisible*`, og avdelingsomfanget for en integrasjon er ikke besluttet. Selv lesing (ANB-01–03) krever en ny lesevei og en beslutning om avdelinger. Retting av K16 er en datamodellendring med migrering av delte felt. | Ingen kode er endret i fase 7. Fasen kan startes når produkteier har besluttet avdelingsomfang og A46, og arkitekturen har godkjent rettingen av K16 og sperren i `isBidManager()` (avhengighet 10 i del 1). | Fase 7 |
+| 28 | **Fase 7 er blokkert i sin helhet.** Ingen av Anbud-funksjonene er godkjent: ANB-01–09 er B-funksjoner, ANB-10 er ikke anbefalt, og ANB-11 og ANB-12 er C. Hindrene står fortsatt i koden: K16 (`internal_status`, `decision_by_user_id` og `assigned_to_user_id` ligger på den globale `Notice`), `User::isBidManager()` faller tilbake til `contributor` og sperrer ikke integrasjoner (funn 2), `SavedNoticeAccessService::applyVisibility` gir ingen treff for en integrasjon og har ingen `findVisible*`, og avdelingsomfanget for en integrasjon er ikke besluttet. Selv lesing (ANB-01–03) krever en ny lesevei og en beslutning om avdelinger. Retting av K16 er en datamodellendring med migrering av delte felt. **Løst 2026-10-24:** D23–D28 er godkjent, og ANB-01 og ANB-02 er levert lokalt. | Avdelingsavgrensning for integrasjoner og A46 er fortsatt utsatt. | Fase 7 |
 | 29 | **Fase 8 er blokkert i sin helhet.** Leveransene for kopi av data gjelder bare alternativ B, og D7 valgte øyeblikksbilde med kundebestemt publikum. Dashboards kan allerede hente øyeblikksbildet gjennom dagens leseendepunkter. MCP-laget er beskrevet i arkitekturen (§10.4), men er ikke besluttet som leveranse, og det vil være et nytt rammeverk. D14 (DPIA) gjelder før ekte kundedata går til Siggjo. | Ingen kode er endret i fase 8. Fasen krever en beslutning om alternativ B eller om MCP-laget. | Fase 8 |
 | 30 | **Fase 6: Wiki-kjernen var bygget for personer.** «Spør Wiki» grunnet i nyeste versjon, også upublisert. Sitatene pekte på sidens nåværende versjon, ikke den som ble lest. Tilgangen lå bare i kontrolleren (A23), og navigasjonskallet fikk kundekonteksten fra den innloggede brukeren. **Løst:** grunnlaget følger den som spør (publisert for integrasjoner), sitatene bruker katalogens versjon, tilgangen ligger i `askAs()`, og hele forløpet kjører i kundens kontekst. Kapasiteten håndheves på API-kanalen uansett modus, og en kunde uten definert kapasitet nektes (fail closed). | Websiden er uendret. En integrasjon kan få et annet svar enn en person (D18). | Fase 6 |
+| 31 | **Kunngjøringssøket er ikke avgrenset per kunde slik dokumentasjonen sier.** `CustomerContext::scopeNoticeDiscovery` krever bare en kunde og parsede kunngjøringer, og leser ikke `notice_attentions`. Del 3 sa at synligheten følger `notice_attentions`. | ANB-03 er utsatt til dette er avklart (D28). Webgrensesnittet er ikke endret. | Fase 7 |
+| 32 | **`answer_draft_coverage` brukes ikke lenger.** D27 nevnte kolonnen som kilde for dekning, men den hørte til den nedlagte Kunnskapsbasen. Dekningen i API-et kommer fra kravets Wiki-svar (`coverage_status`: `full`, `partial`, `none`), og `has_answer_draft` sier om Wiki-svaret har tekst. | Samme felt som Anbud viser i webgrensesnittet. | Fase 7 |

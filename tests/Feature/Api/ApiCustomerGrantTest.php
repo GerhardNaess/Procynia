@@ -81,6 +81,8 @@ class ApiCustomerGrantTest extends TestCase
                     'suppliers' => ['entitled' => false, 'readable' => false, 'business_areas' => null],
                     'quality' => ['entitled' => true, 'readable' => false, 'business_areas' => null],
                     'wiki' => ['entitled' => true, 'readable' => false, 'business_areas' => null],
+                    // Anbud is ordered, but tender.read is not switched on for the grant.
+                    'tender' => ['entitled' => true, 'readable' => false, 'business_areas' => null],
                 ],
             ],
             'meta' => [

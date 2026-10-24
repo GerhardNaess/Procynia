@@ -160,6 +160,7 @@ return [
         'api.v1.suppliers.' => 'supplier',
         'api.v1.quality.' => 'quality',
         'api.v1.wiki.' => 'wiki',
+        'api.v1.tender.' => 'tender',
     ],
 
 ];

@@ -21,7 +21,8 @@ use Tests\TestCase;
  *    decides — which is also what keeps A46 («Flytt til historikk») and the Kvalitet half of A23
  *    unreachable.
  *  - The whole stack, in order, on every route: log, application, customer grant, module.
- *  - Only modules the API is meant to serve. Anbud is not among them.
+ *  - Only modules the API is meant to serve. Anbud is served for reading only (D23): its controller
+ *    may name SavedNotice, but never writes, archives or moves a case (A46 stays unreachable).
  *  - No route model binding: a record is found through the access services, never by id alone.
  *  - API controllers do not touch the services behind A23 and A46, except «Spør Wiki» from the
  *    Wiki controller, whose service now holds the access rule itself.
@@ -31,7 +32,7 @@ class ApiRouteContractTest extends TestCase
     private const STACK = ['api', 'api.log', 'api.client', 'api.customer', 'customer.module'];
 
     /** Modules the API may serve. Extend deliberately, with the module's own access tests. */
-    private const SERVED_MODULES = ['risk', 'improvements', 'objectives', 'management_review', 'compliance', 'supplier', 'quality', 'wiki'];
+    private const SERVED_MODULES = ['risk', 'improvements', 'objectives', 'management_review', 'compliance', 'supplier', 'quality', 'wiki', 'tender'];
 
     /** The write routes, by name, with the one method each accepts. Extend deliberately. */
     private const WRITE_ROUTES = [
@@ -67,6 +68,8 @@ class ApiRouteContractTest extends TestCase
     /** The one exception (A23 resolved for the Wiki half): the service authorizes itself. */
     private const ALLOWED_REFERENCES = [
         'WikiController.php' => ['EnterpriseWikiQuestionAnswerService'],
+        // Anbud reading (D23): the model's statuses and its 404, never its writes (see below).
+        'TenderController.php' => ['SavedNotice'],
     ];
 
     public function test_there_is_at_least_one_api_route(): void
@@ -199,6 +202,17 @@ class ApiRouteContractTest extends TestCase
                     basename($path)." references {$class}.",
                 );
             }
+        }
+    }
+
+    public function test_the_tender_controller_only_reads_through_the_integration_read_path(): void
+    {
+        $source = (string) file_get_contents(app_path('Http/Controllers/Api/V1/TenderController.php'));
+
+        $this->assertStringContainsString('integrationReadableQuery', $source);
+
+        foreach (['archiveWithHistoryType', 'mayWork', 'authorizeWork', 'visibleQueryFor', 'manageableQueryFor', '->save(', '->update(', '->delete(', '::create(', 'forceFill', 'HumanDecision'] as $write) {
+            $this->assertStringNotContainsString($write, $source, "TenderController reaches [{$write}].");
         }
     }
 

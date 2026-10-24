@@ -470,6 +470,8 @@ class ApiClientGrantAdministrationTest extends TestCase
                     ['key' => ApiOperationCatalog::IMPROVEMENT_CASE_CREATE, 'label' => 'Tillat registrering av avvik og forbedringsforslag'],
                     ['key' => ApiOperationCatalog::IMPROVEMENT_ACTION_CREATE, 'label' => 'Tillat opprettelse av tiltak på avvik og forbedringer'],
                     ['key' => ApiOperationCatalog::WIKI_ASK, 'label' => 'Tillat Spør Wiki (bruker kundens AI-kapasitet)'],
+                    // Reading the whole tender portfolio, which the System Owner sees in the label (D23).
+                    ['key' => ApiOperationCatalog::TENDER_READ, 'label' => 'Tillat lesing av alle anbudssaker og krav (hele anbudsporteføljen)'],
                 ])
                 ->where('integrations.grants.0.allowed_operations', [ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE])
                 ->where('integrations.grants.0.operations_url', route('app.customer-environment.integrations.operations.update', ['grantId' => $grant->id])));

@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
+use App\Services\Api\IntegrationOperationAuthority;
+use App\Support\ApiOperationCatalog;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -198,6 +200,35 @@ class SavedNoticeAccessService
         }
 
         return $actor;
+    }
+
+    /**
+     * May this integration identity read Anbud through the API (D23, D24)? Only when the System
+     * Owner has switched tender.read on for its grant, in an API request as that identity, and the
+     * customer holds Anbud — IntegrationOperationAuthority reads all of it fresh. A person is never
+     * an integration and gets false: people read through applyVisibility().
+     */
+    public function integrationMayRead(User $identity): bool
+    {
+        return app(IntegrationOperationAuthority::class)->allows($identity, ApiOperationCatalog::TENDER_READ);
+    }
+
+    /**
+     * The cases an integration identity may read: every case of its own customer — with or without
+     * a department, public notices and private requests alike — once integrationMayRead() holds,
+     * otherwise none. The customer is the identity's, which the grant fixed; the request never
+     * names it. Department scoping for integrations is deferred (D24). applyVisibility() is the
+     * people's rule and gives an integration nothing, which this does not change.
+     */
+    public function integrationReadableQuery(User $identity): Builder
+    {
+        $query = SavedNotice::query();
+
+        if (! $identity->isIntegration() || ! $identity->is_active || $identity->customer_id === null || ! $this->integrationMayRead($identity)) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where('saved_notices.customer_id', (int) $identity->customer_id);
     }
 
     private function applyVisibility(Builder $query, User $user, bool $requireManage): Builder

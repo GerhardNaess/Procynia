@@ -12,6 +12,7 @@ const MODULE_LABELS = {
     suppliers: 'Leverandøroppfølging',
     quality: 'Kvalitet',
     wiki: 'Enterprise Wiki (publisert innhold)',
+    tender: 'Anbud (alle anbudssaker og krav)',
 };
 
 export function integrationAccessLines(access = {}, t = {}) {

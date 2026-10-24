@@ -74,7 +74,7 @@ function OperationChoice({ grant, operations, t }) {
         <fieldset className="mt-4" aria-describedby={hintId}>
             <legend className="text-base font-semibold text-slate-900">{t.operations_label ?? 'Kan bruke gjennom API-et'}</legend>
             <p id={hintId} className="mt-1 text-base leading-6 text-slate-600">
-                {t.operations_hint ?? 'Slå bare på det applikasjonen trenger. Registreringer gjelder bare i fagområdene integrasjonen kan lese, og applikasjonen må i tillegg ha skriverollen i Entra ID. Spør Wiki svarer bare fra publisert innhold og bruker kundens AI-kapasitet.'}
+                {t.operations_hint ?? 'Slå bare på det applikasjonen trenger. Registreringer gjelder bare i fagområdene integrasjonen kan lese, og applikasjonen må i tillegg ha skriverollen i Entra ID. Spør Wiki svarer bare fra publisert innhold og bruker kundens AI-kapasitet. Anbud gir lesetilgang til alle kundens anbudssaker og krav, uansett avdeling, men aldri til kravtekst, svar, kommentarer eller filer.'}
             </p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {operations.map((operation) => (

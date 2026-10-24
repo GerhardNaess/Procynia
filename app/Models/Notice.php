@@ -9,6 +9,22 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Notice extends Model
 {
+    /**
+     * The old internal admin workflow on shared notices (K16, D25): read and written only by the
+     * Filament panel, never part of any customer-facing or external serialization. Filament reads
+     * the attributes directly; EditNotice puts them back into its form.
+     */
+    public const INTERNAL_WORKFLOW_FIELDS = [
+        'internal_status',
+        'internal_comment',
+        'assigned_to_user_id',
+        'decision_by_user_id',
+        'status_changed_at',
+        'status_changed_by_user_id',
+    ];
+
+    protected $hidden = self::INTERNAL_WORKFLOW_FIELDS;
+
     protected $fillable = [
         'notice_id',
         'title',

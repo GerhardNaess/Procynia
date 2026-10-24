@@ -595,7 +595,7 @@ Agenter skal kunne *foreslå*, ikke *beslutte*. I prioritert rekkefølge:
 | K1 | Beslutningsrettigheter håndheves i kontrollerne (§7.1) | Et API ville gå forbi dem | Flytt kontrollene ned og innfør `HumanDecisionGuard` **før** skrivende API. Lese-API påvirkes ikke. |
 | K2 | Wiki-arbeidsflyten ligger i `WikiController`/`WikiClaimController` uten tjenestelag | Kan ikke gjenbrukes trygt | Trekk ut til tjenester. Ingen Wiki-skriving via API før det er gjort. |
 | K3 | Null-aktør godtas (`QualityProcessBlueprintService::approve`, `RequirementEditorService`), og `transitionBidStatus` lagrer ingen aktør | Beslutning uten ansvarlig | Krev `User $actor`. |
-| K4 | `users.role` har tre verdier, og `resolvedBidRole()` faller tilbake til `contributor` | Integrasjon kan få stille anbudstilgang | Ny rolle `integration`. Tilbakefallet endres for den rollen. |
+| K4 | `users.role` har tre verdier, og `resolvedBidRole()` faller tilbake til `contributor` | Integrasjon kan få stille anbudstilgang | Ny rolle `integration`. Tilbakefallet endres for den rollen. **Lukket 2026-10-24 (D26):** `resolvedBidRole()` gir `viewer` og `isBidManager()` nei for en integrasjon. |
 | K5 | E-post er påkrevd og globalt unik, passord er påkrevd | Maskinrader trenger syntetiske verdier | Syntetisk `.invalid`-adresse, ubrukelig passord og eksplisitt innloggingsavvisning. |
 | K6 | Velgere, varsler og lisenstelling forutsetter at alle `users` er mennesker | Integrasjon kan bli eier eller motta varsler | `User::scopeHumans()` med strukturell test (§4.3). |
 | K7 | Entra-invarianten: ingen Entra-roller kobles til Procynia-roller | App-roller og scopes i API-et kan oppfattes som brudd | Presiser at scopes bare er tak, aldri tildeling (§5.4). |
@@ -607,7 +607,7 @@ Agenter skal kunne *foreslå*, ikke *beslutte*. I prioritert rekkefølge:
 | K13 | Wiki-invarianter: felles retrieval-kjerne, ingen rå utdrag, ingen vektordatabase uten beslutning, ingen ukontrollerte agentløkker | En Siggjo- eller agentindeks over Wiki-innhold vil være et parallelt kunnskapslag | Wiki eksponeres bare via den felles kjernen. En egen vektorindeks hos Siggjo krever eksplisitt arkitekturbeslutning. |
 | K14 | Infrastruktur uten API Management, WAF eller VNet. MFA mangler. Ingress-område ikke verifisert. | Offentlig API-flate uten et ekstra lag | **[BESLUTNING]** Azure API Management eller Front Door med WAF foran `/api`. Uavhengig av det: ratebegrensning og logging i appen. |
 | K15 | Ingen DPIA eller databehandleravtaler dokumentert. Ny AI-leverandør (Claude) via Siggjo. | Juridisk hinder for kopiering til Siggjo | DPIA og databehandleravtaler før fase 3. |
-| K16 | `notices` har arbeidsflytfelt som deles mellom kunder | Anbud-API kan lekke arbeidsflyttilstand | Anbud holdes utenfor til feltene er kundeavgrenset. |
+| K16 | `notices` har arbeidsflytfelt som deles mellom kunder | Anbud-API kan lekke arbeidsflyttilstand | **Omklassifisert 2026-10-24 (D25):** interne adminfelt på delte data, brukt bare av Filament. De holdes utenfor all kundesynlig og ekstern serialisering (`Notice::$hidden`, `Notice::INTERNAL_WORKFLOW_FIELDS`), og API-et serialiserer aldri `Notice`. Ingen migrering. |
 | K17 | Manuelle Wiki-endringer tar ikke hensyn til åpen godkjenning eller publisering (F1a, F1b) | Fireøyneprinsippet ved overlevering kan brytes, og en endring på en publisert side får ingen vei til godkjenning | Rettes i fase 0, steg 3. |
 | K18 | `wiki.source.manage` dekker både kildeadministrasjon og kunnskapsoverføring | Fase 4 ville gi agenter sletting av kilder for å kunne overføre kunnskap | Ny rettighet `wiki.knowledge.handoff` (B1). |
 
@@ -693,7 +693,7 @@ Forutsetning: A23 og A46 holdes utenfor til kravene i fase 0-planen §2n er oppf
 
 1. Andre identitetsleverandører eller Procynia-utstedte klientlegitimasjoner (`ApiTokenValidator`).
 2. Utgående webhooks basert på samme outbox.
-3. Anbud-API når K16 og avdelingsomfanget er avklart.
+3. Anbud-API: lesing av saker og krav er levert (D23–D28). Avdelingsavgrensning for integrasjoner er utsatt.
 4. Kommersiell pakking av integrasjoner.
 
 ---

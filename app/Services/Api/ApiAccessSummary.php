@@ -2,6 +2,7 @@
 
 namespace App\Services\Api;
 
+use App\Models\ApiClientCustomerGrant;
 use App\Models\BusinessArea;
 use App\Models\Customer;
 use App\Models\User;
@@ -14,6 +15,7 @@ use App\Services\Objectives\ObjectiveAccessService;
 use App\Services\Quality\QualityProcessContextReader;
 use App\Services\Risk\RiskAccessService;
 use App\Services\Suppliers\SupplierAccessService;
+use App\Support\ApiOperationCatalog;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 
@@ -90,6 +92,11 @@ class ApiAccessSummary
                 $this->wiki->canRead($identity),
                 $this->entitlements->hasModule($customer, 'wiki'),
             ),
+            // GET /api/v1/tender/…: Anbud. Customer-wide, every case, once tender.read is on (D23).
+            'tender' => $this->customerWide(
+                $this->entitlements->hasModule($customer, 'tender') && $this->tenderReadSwitchedOn($identity, $customer),
+                $this->entitlements->hasModule($customer, 'tender'),
+            ),
         ];
     }
 
@@ -127,6 +134,24 @@ class ApiAccessSummary
         }
 
         return collect($areas)->sortBy([['name', 'asc'], ['id', 'asc']])->values()->all();
+    }
+
+    /**
+     * Whether the System Owner has switched tender.read on for the identity's active grant. Read
+     * from the grant, not from IntegrationOperationAuthority, because Kundemiljø asks outside an
+     * API request; in a request the endpoints still ask the authority, which also checks the client.
+     */
+    private function tenderReadSwitchedOn(User $identity, Customer $customer): bool
+    {
+        return $identity->isIntegration()
+            && $identity->is_active
+            && (int) $identity->customer_id === (int) $customer->id
+            && ApiClientCustomerGrant::query()
+                ->active()
+                ->where('integration_user_id', (int) $identity->id)
+                ->where('customer_id', (int) $customer->id)
+                ->get()
+                ->contains(fn (ApiClientCustomerGrant $grant): bool => $grant->allowsOperation(ApiOperationCatalog::TENDER_READ));
     }
 
     /**

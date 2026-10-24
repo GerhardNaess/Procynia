@@ -7,7 +7,7 @@ openapi: 3.1.0
 info:
   title: Procynia API
   version: 1.0.0
-  summary: Read access to Procynia's governance registers and published Wiki knowledge, and named operations, for integrations.
+  summary: Read access to Procynia's governance registers, tender cases and published Wiki knowledge, and named operations, for integrations.
   description: |
     The external API of Procynia for integrations acting for a customer (for example a dashboard
     supplier). It is **not in production** yet: it has been verified locally with automated tests,
@@ -47,6 +47,13 @@ info:
     **Spør Wiki.** `POST /v1/wiki/ask` writes nothing and so needs no write role, but it spends the
     customer's AI capacity. It needs operation `wiki.ask` switched on for the grant, and is answered
     from published Wiki versions only.
+
+    **Anbud.** `GET /v1/tender/…` reads the customer's tender cases and their requirements'
+    metadata. Anbud has no permission an integration's roles can carry, so reading it needs
+    operation `tender.read` switched on for the grant (it needs no write role). It then reads
+    **every** case of the customer, whatever the department — the System Owner switches it on
+    knowing that. An integration is always a reader: it never works on a case, never moves it and
+    never takes a bid decision.
 
     ## Conventions
 
@@ -101,6 +108,8 @@ tags:
     description: Etterlevelse og revisjon — kravregister, status, revisjoner and Kravbiblioteket.
   - name: Wiki
     description: Enterprise Wiki — published pages and «Spør Wiki», never a working version.
+  - name: Tender
+    description: Anbud — tender cases and their requirements' metadata, read only, with operation `tender.read`.
 
 paths:
   /v1/me:
@@ -2012,6 +2021,162 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /v1/tender/cases:
+    get:
+      tags: [Tender]
+      operationId: listTenderCases
+      summary: Anbudssaker
+      description: |
+        The customer's tender cases, a page at a time. Active cases (not archived) by default;
+        `archived=true` lists the archived ones instead, with their outcome.
+
+        Not included: requirement text and answers, phase comments and info items, Go/No-go
+        reasoning and closure notes, notes and summary, contact persons, documents and files, AI
+        traces, and the old internal admin fields of the shared notice.
+
+        Requires the Anbud module and operation `tender.read` switched on for the grant (D23). The
+        identity reads every case of the customer, with or without a department, public notices and
+        private requests alike.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/TenderBidStatusFilter'
+        - $ref: '#/components/parameters/TenderArchivedFilter'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of cases.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TenderCase'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/tender/cases/{caseId}:
+    get:
+      tags: [Tender]
+      operationId: getTenderCase
+      summary: One tender case
+      description: |
+        One case, archived or not, in the same fields as the list. A case of another customer, or
+        one that does not exist, is 404.
+
+        Requires the Anbud module and operation `tender.read` switched on for the grant (D23). The
+        identity reads every case of the customer, with or without a department, public notices and
+        private requests alike.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/CaseId'
+      responses:
+        '200':
+          description: The case.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TenderCase'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/tender/cases/{caseId}/requirements:
+    get:
+      tags: [Tender]
+      operationId: listTenderCaseRequirements
+      summary: The published requirements of a case
+      description: |
+        Every published requirement of one case, in the order of the case's requirement list (not
+        paginated). Staged and superseded requirements are not included. A case of another customer,
+        or one that does not exist, is 404.
+
+        Metadata only: the requirement text, the answer text and its sources, assessments, comments
+        and files are not included (D27).
+
+        Requires the Anbud module and operation `tender.read` switched on for the grant (D23). The
+        identity reads every case of the customer, with or without a department, public notices and
+        private requests alike.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/CaseId'
+      responses:
+        '200':
+          description: The case's requirements.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TenderRequirement'
+                  meta:
+                    allOf:
+                      - $ref: '#/components/schemas/Meta'
+                      - type: object
+                        required: [case_id]
+                        properties:
+                          case_id:
+                            type: integer
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
 components:
   securitySchemes:
     entraApplicationToken:
@@ -2231,6 +2396,22 @@ components:
       description: Only pages of this type.
       schema:
         $ref: '#/components/schemas/WikiPageType'
+    TenderBidStatusFilter:
+      name: bid_status
+      in: query
+      required: false
+      description: Only cases with this bid status.
+      schema:
+        $ref: '#/components/schemas/TenderBidStatus'
+    TenderArchivedFilter:
+      name: archived
+      in: query
+      required: false
+      description: '`false` (default): active cases only. `true`: archived cases only.'
+      schema:
+        type: string
+        enum: ['true', 'false']
+        default: 'false'
     BusinessAreaId:
       name: business_area_id
       in: query
@@ -2533,7 +2714,7 @@ components:
         modules:
           type: object
           description: The modules this API serves, by the key of their endpoints.
-          required: [risk, deviations, objectives, management_review, compliance, suppliers, quality, wiki]
+          required: [risk, deviations, objectives, management_review, compliance, suppliers, quality, wiki, tender]
           additionalProperties: false
           properties:
             risk:
@@ -2560,6 +2741,9 @@ components:
             wiki:
               $ref: '#/components/schemas/ModuleAccess'
               description: Enterprise Wiki — `GET /v1/wiki/pages…`, published knowledge. Customer-wide, so `business_areas` is null. `POST /v1/wiki/ask` also needs operation `wiki.ask`.
+            tender:
+              $ref: '#/components/schemas/ModuleAccess'
+              description: Anbud — `GET /v1/tender/…`. Readable when the module is ordered and operation `tender.read` is switched on for the grant. Customer-wide, every case, so `business_areas` is null.
     ModuleAccess:
       type: object
       required: [entitled, readable, business_areas]
@@ -4840,3 +5024,190 @@ components:
         pages_used:
           type: integer
           description: How many published pages were read for the answer.
+
+    TenderBidStatus:
+      type: string
+      enum: [discovered, qualifying, go_no_go, in_progress, submitted, negotiation, won, lost, no_go, withdrawn, archived]
+    TenderSourceType:
+      type: string
+      description: '`public_notice`: from a register (Doffin, TED). `private_request`: a request sent directly to the customer.'
+      enum: [public_notice, private_request]
+    TenderOutcome:
+      type: string
+      description: How an archived case ended («Flytt til historikk»).
+      enum: [won, lost, aborted, no_go]
+    TenderDeadlineType:
+      type: string
+      enum: [submission, questions, questions_rfi, rfi_submission, questions_rfp]
+    TenderCase:
+      type: object
+      required: [id, title, source_type, bid_status, department, bid_manager, opportunity_owner, deadlines, signals, archived_at, outcome, notice, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        source_type:
+          $ref: '#/components/schemas/TenderSourceType'
+        bid_status:
+          $ref: '#/components/schemas/TenderBidStatus'
+        department:
+          description: The department that owns the case, or null.
+          oneOf:
+            - $ref: '#/components/schemas/Reference'
+            - type: 'null'
+        bid_manager:
+          description: Tilbudsansvarlig, or null.
+          oneOf:
+            - $ref: '#/components/schemas/Person'
+            - type: 'null'
+        opportunity_owner:
+          description: Mulighetseier, or null.
+          oneOf:
+            - $ref: '#/components/schemas/Person'
+            - type: 'null'
+        deadlines:
+          type: object
+          description: The case's deadlines; null where none is set. `submission` is the tender deadline.
+          required: [submission, questions, questions_rfi, rfi_submission, questions_rfp]
+          additionalProperties: false
+          properties:
+            submission:
+              oneOf:
+                - $ref: '#/components/schemas/Timestamp'
+                - type: 'null'
+            questions:
+              oneOf:
+                - $ref: '#/components/schemas/Timestamp'
+                - type: 'null'
+            questions_rfi:
+              oneOf:
+                - $ref: '#/components/schemas/Timestamp'
+                - type: 'null'
+            rfi_submission:
+              oneOf:
+                - $ref: '#/components/schemas/Timestamp'
+                - type: 'null'
+            questions_rfp:
+              oneOf:
+                - $ref: '#/components/schemas/Timestamp'
+                - type: 'null'
+        signals:
+          type: object
+          description: The same workflow signals the cockpit and the notifications use.
+          required: [is_active, deadlines_soon, deadline_soon_days, latest_activity_at]
+          additionalProperties: false
+          properties:
+            is_active:
+              type: boolean
+              description: Not archived, and in a status that is still being worked on.
+            deadlines_soon:
+              type: array
+              description: The deadlines from today to `deadline_soon_days` ahead, soonest first. Empty for a case that is not active.
+              items:
+                type: object
+                required: [type, at]
+                additionalProperties: false
+                properties:
+                  type:
+                    $ref: '#/components/schemas/TenderDeadlineType'
+                  at:
+                    $ref: '#/components/schemas/Timestamp'
+            deadline_soon_days:
+              type: integer
+            latest_activity_at:
+              oneOf:
+                - $ref: '#/components/schemas/Timestamp'
+                - type: 'null'
+              description: The last change to the case, phase comment or submission.
+        archived_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        outcome:
+          description: How the case ended, for an archived case; otherwise null.
+          oneOf:
+            - $ref: '#/components/schemas/TenderOutcome'
+            - type: 'null'
+        notice:
+          description: A fixed selection from the register record. Null for a private request.
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [source, external_id, buyer_name, cpv_code, notice_type, published_at]
+              additionalProperties: false
+              properties:
+                source:
+                  type: [string, 'null']
+                  description: The register, for example `doffin`.
+                external_id:
+                  type: [string, 'null']
+                  description: The register's id for the notice.
+                buyer_name:
+                  type: [string, 'null']
+                cpv_code:
+                  type: [string, 'null']
+                notice_type:
+                  type: [string, 'null']
+                  description: The notice type, when Procynia has imported the notice.
+                published_at:
+                  oneOf:
+                    - $ref: '#/components/schemas/Timestamp'
+                    - type: 'null'
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        updated_at:
+          $ref: '#/components/schemas/Timestamp'
+    TenderRequirementType:
+      type: string
+      enum: [mandatory, documentation, administrative, unspecified]
+    TenderRequirementReviewStatus:
+      type: string
+      enum: [pending, confirmed, rejected]
+    TenderRequirementWorkStatus:
+      type: string
+      enum: [not_started, in_progress, done]
+    TenderAnswerCoverage:
+      type: string
+      description: How far the Enterprise Wiki covers the requirement, from its Wiki answer.
+      enum: [full, partial, none]
+    TenderRequirement:
+      type: object
+      required: [id, identifier, requirement_type, review_status, work_status, assignee, coverage, has_answer_draft, source_document]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        identifier:
+          type: [string, 'null']
+          description: The requirement's identifier in the tender documents, for example `K-1.2`.
+        requirement_type:
+          $ref: '#/components/schemas/TenderRequirementType'
+        review_status:
+          $ref: '#/components/schemas/TenderRequirementReviewStatus'
+        work_status:
+          $ref: '#/components/schemas/TenderRequirementWorkStatus'
+        assignee:
+          description: Ansvarlig for the requirement, or null.
+          oneOf:
+            - $ref: '#/components/schemas/Person'
+            - type: 'null'
+        coverage:
+          description: Null when no answer has been made.
+          oneOf:
+            - $ref: '#/components/schemas/TenderAnswerCoverage'
+            - type: 'null'
+        has_answer_draft:
+          type: boolean
+          description: Whether an answer draft exists. The draft itself is not included.
+        source_document:
+          description: The tender document the requirement came from, by name, or null.
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [name]
+              additionalProperties: false
+              properties:
+                name:
+                  type: string

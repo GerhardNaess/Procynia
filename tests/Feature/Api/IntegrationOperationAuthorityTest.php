@@ -51,21 +51,23 @@ class IntegrationOperationAuthorityTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_the_catalog_is_closed_and_names_its_four_operations_only(): void
+    public function test_the_catalog_is_closed_and_names_its_five_operations_only(): void
     {
         $this->assertSame([
             self::OPERATION,
             ApiOperationCatalog::IMPROVEMENT_CASE_CREATE,
             ApiOperationCatalog::IMPROVEMENT_ACTION_CREATE,
             ApiOperationCatalog::WIKI_ASK,
+            ApiOperationCatalog::TENDER_READ,
         ], ApiOperationCatalog::all());
         $this->assertSame('risk', ApiOperationCatalog::module(self::OPERATION));
         $this->assertSame('improvements', ApiOperationCatalog::module(ApiOperationCatalog::IMPROVEMENT_CASE_CREATE));
         $this->assertSame('improvements', ApiOperationCatalog::module(ApiOperationCatalog::IMPROVEMENT_ACTION_CREATE));
         $this->assertSame('wiki', ApiOperationCatalog::module(ApiOperationCatalog::WIKI_ASK));
-        // Only «Spør Wiki» writes nothing, and only it needs no write role (D19).
+        $this->assertSame('tender', ApiOperationCatalog::module(ApiOperationCatalog::TENDER_READ));
+        // Only «Spør Wiki» and reading Anbud write nothing, and only they need no write role (D19, D23).
         $this->assertSame(
-            [ApiOperationCatalog::WIKI_ASK],
+            [ApiOperationCatalog::WIKI_ASK, ApiOperationCatalog::TENDER_READ],
             array_values(array_filter(ApiOperationCatalog::all(), fn (string $operation): bool => ! ApiOperationCatalog::requiresWriteRole($operation))),
         );
         $this->assertTrue(ApiOperationCatalog::requiresWriteRole('risk.edit'), 'An unknown operation is treated as a write.');

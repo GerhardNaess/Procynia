@@ -1,6 +1,6 @@
 # Eksternt API – beslutningsgrunnlag for fase 1
 
-**Status:** API-et leser i åtte moduler, har tre navngitte skriveoperasjoner (§20, §22) og «Spør Wiki» over publisert Wiki-kunnskap (§23, D18–D22). Bygget: autentisering, kundetildeling, feilformat, `GET /api/v1/me`, `GET /api/v1/risks` (§15), D13 med beskyttelse av integrasjonsidentiteter (§16), kontrollen 2026-10-24 (§17) `GET /api/v1/deviations` (§18) og `GET /api/v1/objectives` og `GET /api/v1/kpis` (§19). Mål og KPI venter på vurdering. Ingen flere moduler før den. Ekte Entra-, Azure- og Siggjo-testing er utsatt fordi miljøene ikke er tilgjengelige. Ingenting er satt i produksjon.
+**Status:** API-et leser i ni moduler, har tre navngitte skriveoperasjoner (§20, §22), «Spør Wiki» over publisert Wiki-kunnskap (§23, D18–D22) og lesing av anbudssaker og krav med operasjonen `tender.read` (§24, D23–D28). Bygget: autentisering, kundetildeling, feilformat, `GET /api/v1/me`, `GET /api/v1/risks` (§15), D13 med beskyttelse av integrasjonsidentiteter (§16), kontrollen 2026-10-24 (§17) `GET /api/v1/deviations` (§18) og `GET /api/v1/objectives` og `GET /api/v1/kpis` (§19). Mål og KPI venter på vurdering. Ingen flere moduler før den. Ekte Entra-, Azure- og Siggjo-testing er utsatt fordi miljøene ikke er tilgjengelige. Ingenting er satt i produksjon.
 **Dato:** 2026-10-23
 **Gren:** `feature/external-api-foundation`
 **Bygger på:** [`external-api-architecture.md`](external-api-architecture.md) (særlig §4, §5, §8.3, §9 og §15), [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §2n, [`operations/entra-sso.md`](operations/entra-sso.md), [`operations/security.md`](operations/security.md) §9 og [`AGENTS.md`](../AGENTS.md).
@@ -1244,3 +1244,15 @@ Nye: `ApiWikiReadTest`, `ApiWikiAskTest`. Endret: `ApiAiRefusalTest`, `ApiRouteC
 - Et ekte «Spør Wiki»-kall via API-et mot OpenAI på utviklingsstakken med testkunde (V2). Testene mocker modellen eller leverandøren.
 - Kapasitetstallene (nivåer og vekter) er foreløpige. Den harde grensen bruker dem som de er.
 
+## 24. Fase 7: Anbud via API (2026-10-24)
+
+Beslutningssaken for fase 7 ([`external-api-phase-7-tender-decisions.md`](external-api-phase-7-tender-decisions.md)) ble godkjent 2026-10-24 i henhold til anbefalingene. Beslutningene står der, og det som er bygget står i §6 der.
+
+- **D23 [BESLUTTET]:** lesing av Anbud er operasjonen `tender.read`, slått på per tildeling av System Owner. Den krever ikke skriverollen.
+- **D24 [BESLUTTET]:** egen lesevei for integrasjoner i `SavedNoticeAccessService`. Hele kunden, kunden fra tildelingen. Avdelingsavgrensning er utsatt.
+- **D25 [BESLUTTET]:** K16 uten migrering. Feltene er skjult ved serialisering, og API-et viser et fast utvalg.
+- **D26 [BESLUTTET]:** en integrasjon er aldri Bid Manager, og `resolvedBidRole()` er `viewer` for den. K4 er lukket for Anbud.
+- **D27 [BESLUTTET]:** D8 gjelder. Ingen kravtekst, svartekst, kommentarer eller filer.
+- **D28 [BESLUTTET]:** ANB-03–09 er utsatt, ANB-11 og ANB-12 eksponeres aldri, og AI er sperret (D11).
+
+Endepunkter: `GET /api/v1/tender/cases`, `GET /api/v1/tender/cases/{caseId}` og `GET /api/v1/tender/cases/{caseId}/requirements`.

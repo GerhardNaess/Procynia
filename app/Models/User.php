@@ -724,6 +724,11 @@ class User extends Authenticatable implements FilamentUser
 
     public function resolvedBidRole(): string
     {
+        // An integration reads; whatever its row carries, it never works on a case or decides (D26).
+        if ($this->isIntegration()) {
+            return self::BID_ROLE_VIEWER;
+        }
+
         $value = (string) ($this->getAttribute('bid_role') ?? '');
 
         return in_array($value, self::BID_ROLES, true)
@@ -733,7 +738,7 @@ class User extends Authenticatable implements FilamentUser
 
     public function isBidManager(): bool
     {
-        return $this->resolvedBidRole() === self::BID_ROLE_BID_MANAGER;
+        return ! $this->isIntegration() && $this->resolvedBidRole() === self::BID_ROLE_BID_MANAGER;
     }
 
     public function isSystemOwner(): bool

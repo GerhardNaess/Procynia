@@ -2805,6 +2805,7 @@ return [
                 'suppliers' => 'Supplier management',
                 'quality' => 'Quality',
                 'wiki' => 'Enterprise Wiki (published content)',
+                'tender' => 'Tender (all tender cases and requirements)',
             ],
             'granted_meta' => 'Access given :date by :name',
             'unknown_person' => 'unknown',
@@ -2821,12 +2822,13 @@ return [
             'saving' => 'Saving...',
             'identity_name' => 'Integration: :client',
             'operations_label' => 'Can use through the API',
-            'operations_hint' => 'Switch on only what the application needs. Registrations apply only in the business areas the integration can read, and the application must also hold the write role in Entra ID. Ask the Wiki answers from published content only and uses the customer\'s AI capacity.',
+            'operations_hint' => 'Switch on only what the application needs. Registrations apply only in the business areas the integration can read, and the application must also hold the write role in Entra ID. Ask the Wiki answers from published content only and uses the customer\'s AI capacity. Tender gives read access to all of the customer\'s tender cases and requirements, whatever the department, but never to requirement text, answers, comments or files.',
             'operations' => [
                 'risk_treatment_action_create' => 'Allow creating risk treatment actions',
                 'improvement_case_create' => 'Allow registering deviations and improvement proposals',
                 'improvement_action_create' => 'Allow creating actions on deviations and improvements',
                 'wiki_ask' => 'Allow Ask the Wiki (uses the customer\'s AI capacity)',
+                'tender_read' => 'Allow reading all tender cases and requirements (the whole tender portfolio)',
             ],
             'help_title' => 'Integrations',
             'help_steps' => [

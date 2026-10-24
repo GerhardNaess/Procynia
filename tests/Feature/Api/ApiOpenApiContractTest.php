@@ -23,6 +23,9 @@ use App\Models\QualityProcessBlueprint;
 use App\Models\QualityTool;
 use App\Models\Risk;
 use App\Models\RiskTreatmentAction;
+use App\Models\SavedNotice;
+use App\Models\SavedNoticeAiRequirement;
+use App\Models\SavedNoticeAiRequirementWikiAnswer;
 use App\Models\Supplier;
 use App\Models\SupplierControlRequirement;
 use App\Models\SupplierDocument;
@@ -31,6 +34,7 @@ use App\Models\SupplierRequirementEvaluation;
 use App\Services\Ai\Wiki\WikiQuestionAnswerAiClient;
 use App\Services\Api\ApiErrorResponder;
 use App\Services\Api\Presenters\QualityPresenter;
+use App\Services\Api\Presenters\TenderPresenter;
 use App\Services\Compliance\ComplianceAssessmentOverview;
 use App\Services\Compliance\ComplianceAttentionService;
 use App\Services\Compliance\ComplianceAuditAttentionService;
@@ -201,6 +205,14 @@ class ApiOpenApiContractTest extends TestCase
             'ManagementReviewDecisionStatus' => ManagementReviewDecision::STATUSES,
             'WikiPageType' => EnterpriseWikiPage::PAGE_TYPES,
             'WikiAnswerStatus' => WikiQuestionAnswerAiClient::STATUSES,
+            'TenderBidStatus' => SavedNotice::BID_STATUSES,
+            'TenderSourceType' => SavedNotice::SOURCE_TYPES,
+            'TenderOutcome' => SavedNotice::HISTORY_TYPES,
+            'TenderDeadlineType' => array_keys(TenderPresenter::DEADLINES),
+            'TenderRequirementType' => SavedNoticeAiRequirement::REQUIREMENT_TYPES,
+            'TenderRequirementReviewStatus' => SavedNoticeAiRequirement::REVIEW_STATUSES,
+            'TenderRequirementWorkStatus' => SavedNoticeAiRequirement::WORK_STATUSES,
+            'TenderAnswerCoverage' => SavedNoticeAiRequirementWikiAnswer::COVERAGE_STATUSES,
             // The keys of ApiAccessSummary::for() and the item types of ApiAttentionOverview.
             'ApiModule' => ['risk', 'deviations', 'objectives'],
             'AttentionItemType' => ['risk', 'deviation', 'improvement', 'objective', 'kpi', 'compliance_requirement', 'compliance_audit', 'supplier', 'quality_item'],

@@ -32,6 +32,13 @@ describe('what an integration can read', () => {
         );
     });
 
+    test('Anbud reads as the whole portfolio across the customer environment', () => {
+        assert.deepEqual(
+            integrationAccessLines({ tender: { entitled: true, readable: true, business_areas: null } }),
+            ['Anbud (alle anbudssaker og krav): hele kundemiljøet'],
+        );
+    });
+
     test('a module not ordered or not readable is left out', () => {
         assert.deepEqual(integrationAccessLines({ risk: { entitled: false, readable: false, business_areas: [] } }), []);
         assert.deepEqual(integrationAccessLines({ risk: { entitled: true, readable: false, business_areas: [] } }), []);

@@ -2809,6 +2809,7 @@ return [
                 'suppliers' => 'Leverandøroppfølging',
                 'quality' => 'Kvalitet',
                 'wiki' => 'Enterprise Wiki (publisert innhold)',
+                'tender' => 'Anbud (alle anbudssaker og krav)',
             ],
             'granted_meta' => 'Tilgang gitt :date av :name',
             'unknown_person' => 'ukjent',
@@ -2825,12 +2826,13 @@ return [
             'saving' => 'Lagrer...',
             'identity_name' => 'Integrasjon: :client',
             'operations_label' => 'Kan bruke gjennom API-et',
-            'operations_hint' => 'Slå bare på det applikasjonen trenger. Registreringer gjelder bare i fagområdene integrasjonen kan lese, og applikasjonen må i tillegg ha skriverollen i Entra ID. Spør Wiki svarer bare fra publisert innhold og bruker kundens AI-kapasitet.',
+            'operations_hint' => 'Slå bare på det applikasjonen trenger. Registreringer gjelder bare i fagområdene integrasjonen kan lese, og applikasjonen må i tillegg ha skriverollen i Entra ID. Spør Wiki svarer bare fra publisert innhold og bruker kundens AI-kapasitet. Anbud gir lesetilgang til alle kundens anbudssaker og krav, uansett avdeling, men aldri til kravtekst, svar, kommentarer eller filer.',
             'operations' => [
                 'risk_treatment_action_create' => 'Tillat opprettelse av risikotiltak',
                 'improvement_case_create' => 'Tillat registrering av avvik og forbedringsforslag',
                 'improvement_action_create' => 'Tillat opprettelse av tiltak på avvik og forbedringer',
                 'wiki_ask' => 'Tillat Spør Wiki (bruker kundens AI-kapasitet)',
+                'tender_read' => 'Tillat lesing av alle anbudssaker og krav (hele anbudsporteføljen)',
             ],
             'help_title' => 'Integrasjoner',
             'help_steps' => [

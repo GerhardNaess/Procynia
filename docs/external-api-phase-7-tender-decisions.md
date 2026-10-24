@@ -1,6 +1,6 @@
 # Eksternt API – beslutningssak for fase 7 (Anbud)
 
-**Status:** Til beslutning. Ingenting er implementert.
+**Status:** Godkjent 2026-10-24 i henhold til anbefalingene. ANB-01 og ANB-02 er levert lokalt (§6). Ikke i produksjon.
 **Dato:** 2026-10-24
 **Gren:** `feature/external-api-foundation`
 **Bygger på:** [`external-api-coverage-status.md`](external-api-coverage-status.md) (Anbud, fase 7, funn 2, 3, 6 og 28), [`external-api-phase-1-decisions.md`](external-api-phase-1-decisions.md) (D1, D2, D8, D11, D13, D19), [`external-api-architecture.md`](external-api-architecture.md) (K4, K8, K16, A46).
@@ -203,3 +203,38 @@ Nye klasser er bare en presentasjonsklasse per ressurs under `App\Services\Api\P
 - ANB-01 og ANB-02 er bygget med testene fra D24 og D26 og kontraktstesten fra D25.
 - `openapi.yaml` er utvidet uten ny versjon.
 - Funn 2, 3 og 28 i dekningsoversikten er lukket. Funn 8 her er ført inn som nytt funn der.
+
+---
+
+## 6. Levert (2026-10-24)
+
+D23–D28 ble godkjent i henhold til anbefalingene. Leveransen er avgrenset til ANB-01 og ANB-02. Det er ikke gjort datamigreringer, og det er ikke bygget nye generelle sikkerhetsmekanismer.
+
+### Endepunkter
+
+| Endepunkt | Innhold |
+|---|---|
+| `GET /api/v1/tender/cases` | Aktive saker, eller arkiverte med `archived=true`. Filter `bid_status`, markørpaginering. |
+| `GET /api/v1/tender/cases/{caseId}` | Én sak, arkivert eller ikke. Annen kunde eller ukjent gir 404. |
+| `GET /api/v1/tender/cases/{caseId}/requirements` | Sakens publiserte krav, metadata. Ikke paginert. Annen kunde eller ukjent sak gir 404. |
+
+Alle tre krever modulen `tender` og operasjonen `tender.read` for tildelingen. Uten operasjonen er svaret 403, uten modulen også 403.
+
+### Slik er beslutningene bygget
+
+- **D23:** `ApiOperationCatalog::TENDER_READ` (`tender.read`, `module = tender`, `writes = false`). Etiketten i Kundemiljø er «Tillat lesing av alle anbudssaker og krav (hele anbudsporteføljen)», og hjelpeteksten over avkrysningene sier at Anbud gjelder alle saker, uansett avdeling. `/me` og Kundemiljø har linjen `tender` som `customerWide`. Kundemiljø leser tillatelsen fra tildelingen, fordi den spørres utenfor en API-forespørsel. Endepunktene spør `IntegrationOperationAuthority`, som også kontrollerer klienten.
+- **D24:** `SavedNoticeAccessService::integrationMayRead()` og `integrationReadableQuery()`. Kunden er identitetens. `applyVisibility` er uendret. Krav lastes med `RequirementLoader::loadForCase()` bare for en sak som er funnet gjennom leseveien. `findIntegrationReadable()` ble ikke laget: kontrolleren trenger relasjonene på samme spørring, og bruker `integrationReadableQuery()->whereKey()`.
+- **D25:** `Notice::INTERNAL_WORKFLOW_FIELDS` er `$hidden`. **Funn under leveransen:** Filament fyller redigeringsskjemaet fra `attributesToArray()`, som respekterer `$hidden`. Uten tiltak ville skjemaet blitt tomt, og en lagring kunne ha tømt kommentaren. `EditNotice::mutateFormDataBeforeFill()` legger derfor `internal_status`, `internal_comment` og `assigned_to_user_id` tilbake. Visningssiden leser attributtene direkte og er uendret. Presentasjonen tar Doffin-utvalget fra saken (`source`, `external_id`, `buyer_name`, `cpv_code`, `publication_date`) og bare `notice_type` fra kunngjøringen.
+- **D26:** `isBidManager()` gir nei og `resolvedBidRole()` gir `viewer` for en integrasjon. Dermed gir `mayWork`, `mayCreateCase`, `canComment`, `canArchive` og `cockpitScopeQueryFor` nei eller ingen treff, og `authorizeWork` kaster unntak.
+- **D27:** Feltene er som vedtatt, med ett avvik. `answer_draft_coverage` hører til den nedlagte Kunnskapsbasen og leses ikke. Dekningen kommer fra kravets Wiki-svar (`coverage_status`), og `has_answer_draft` sier om Wiki-svaret har tekst. Personer vises som `{id, name}`, slik som i de andre modulene. Signalet `deadlines_soon` bruker fristene noen må handle på (`actionableDeadlinesWithin`), og er tomt for en sak som ikke er aktiv.
+- **D28:** Ingen andre Anbud-ruter. `ApiRouteContractTest` tillater `SavedNotice` bare i `TenderController`, og kontrollerer at den ikke arkiverer, skriver eller bruker personenes tilgangsveier.
+
+### Tester
+
+Nye: `ApiTenderReadTest` (kundeseparasjon, 404, operasjon og modul, inaktiv identitet, filtre og markør, feltutvalg og fravær av fritekst og K16-nøkler, D26, `/me`), `NoticeInternalWorkflowFieldsTest` (Filament-skjemaet). Endret: `ApiRouteContractTest`, `ApiOpenApiContractTest` (Anbud-enumene), `IntegrationOperationAuthorityTest`, `ApiCustomerGrantTest`, `ApiClientGrantAdministrationTest`, `integrationAccess.test.js`.
+
+### Gjenstår
+
+- Avdelingsavgrensning for integrasjoner (D24, utsatt).
+- ANB-03 (funn 31 i dekningsoversikten), ANB-04–09 (D28).
+- Det samme som for resten av API-et før produksjon: ekte Entra-token, staging og DPIA (D14). Kravtekst vurderes sammen med DPIA.
