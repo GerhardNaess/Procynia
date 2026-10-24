@@ -1,7 +1,9 @@
 <?php
 
 use App\Http\Controllers\Api\V1\DeviationController;
+use App\Http\Controllers\Api\V1\KpiController;
 use App\Http\Controllers\Api\V1\MeController;
+use App\Http\Controllers\Api\V1\ObjectiveController;
 use App\Http\Controllers\Api\V1\RiskController;
 use Illuminate\Support\Facades\Route;
 
@@ -19,4 +21,6 @@ Route::prefix('v1')
         Route::get('me', MeController::class)->name('me');
         Route::get('risks', [RiskController::class, 'index'])->name('risks.index');
         Route::get('deviations', [DeviationController::class, 'index'])->name('deviations.index');
+        Route::get('objectives', [ObjectiveController::class, 'index'])->name('objectives.index');
+        Route::get('kpis', [KpiController::class, 'index'])->name('kpis.index');
     });

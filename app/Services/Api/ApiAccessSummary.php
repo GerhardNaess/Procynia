@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\User;
 use App\Services\Improvements\ImprovementCaseAccessService;
 use App\Services\Modules\ModuleEntitlementService;
+use App\Services\Objectives\ObjectiveAccessService;
 use App\Services\Risk\RiskAccessService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -25,6 +26,7 @@ class ApiAccessSummary
         private readonly ModuleEntitlementService $entitlements,
         private readonly RiskAccessService $risks,
         private readonly ImprovementCaseAccessService $improvements,
+        private readonly ObjectiveAccessService $objectives,
     ) {}
 
     /**
@@ -45,6 +47,13 @@ class ApiAccessSummary
                 $this->entitlements->hasModule($customer, 'improvements'),
                 fn (): bool => $this->improvements->reachesAllAreas($identity, CustomerPermissionCatalog::IMPROVEMENT_VIEW),
                 fn (): EloquentCollection => $this->improvements->areasFor($identity, CustomerPermissionCatalog::IMPROVEMENT_VIEW),
+            ),
+            // GET /api/v1/objectives and GET /api/v1/kpis: Mål og KPI.
+            'objectives' => $this->module(
+                $this->entitlements->hasModule($customer, 'objectives') && $this->objectives->canOpenModule($identity),
+                $this->entitlements->hasModule($customer, 'objectives'),
+                fn (): bool => $this->objectives->reachesAllAreas($identity, CustomerPermissionCatalog::OBJECTIVE_VIEW),
+                fn (): EloquentCollection => $this->objectives->areasFor($identity, CustomerPermissionCatalog::OBJECTIVE_VIEW),
             ),
         ];
     }

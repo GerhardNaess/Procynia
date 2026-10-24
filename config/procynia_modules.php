@@ -152,6 +152,8 @@ return [
         // The external API. Only modules the API serves (ApiRouteContractTest).
         'api.v1.risks.' => 'risk',
         'api.v1.deviations.' => 'improvements',
+        'api.v1.objectives.' => 'objectives',
+        'api.v1.kpis.' => 'objectives',
     ],
 
 ];

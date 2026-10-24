@@ -2798,6 +2798,7 @@ return [
             'modules' => [
                 'risk' => 'Risk',
                 'deviations' => 'Deviations',
+                'objectives' => 'Objectives and KPIs',
             ],
             'granted_meta' => 'Access given :date by :name',
             'unknown_person' => 'unknown',

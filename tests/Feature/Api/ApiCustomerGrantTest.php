@@ -73,6 +73,7 @@ class ApiCustomerGrantTest extends TestCase
                 'modules' => [
                     'risk' => ['entitled' => true, 'readable' => true, 'business_areas' => 'all'],
                     'deviations' => ['entitled' => true, 'readable' => false, 'business_areas' => []],
+                    'objectives' => ['entitled' => true, 'readable' => false, 'business_areas' => []],
                 ],
             ],
             'meta' => [

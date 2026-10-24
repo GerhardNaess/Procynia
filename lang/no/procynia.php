@@ -2802,6 +2802,7 @@ return [
             'modules' => [
                 'risk' => 'Risiko',
                 'deviations' => 'Avvik',
+                'objectives' => 'Mål og KPI',
             ],
             'granted_meta' => 'Tilgang gitt :date av :name',
             'unknown_person' => 'ukjent',
