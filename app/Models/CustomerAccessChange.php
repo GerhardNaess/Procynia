@@ -22,6 +22,9 @@ class CustomerAccessChange extends Model
     /** Who can open and work on one tender case: per-case access, commercial owner, Bid Manager. */
     public const SUBJECT_SAVED_NOTICE = 'saved_notice';
 
+    /** A customer's grant of read access to a client application, and the integration's roles. */
+    public const SUBJECT_API_CLIENT_GRANT = 'api_client_grant';
+
     public const UPDATED_AT = null;
 
     protected $fillable = [

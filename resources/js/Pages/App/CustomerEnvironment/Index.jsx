@@ -11,6 +11,7 @@ import { useFocusFirstError } from '../../../Support/focusManagement';
 import { rowErrorId, trackRowAction, useRowActionError } from '../../../Support/rowActionError';
 import CustomerEnvironmentHeader from './CustomerEnvironmentHeader';
 import CustomerRolesPanel from './CustomerRolesPanel';
+import IntegrationsPanel from './IntegrationsPanel';
 import PermissionSection, { MATRIX } from './PermissionSection';
 import { BASE_SECTION_KEY, allOpen, countLabel, sectionKeys, toggleSection } from './permissionSections';
 
@@ -157,6 +158,7 @@ export default function CustomerEnvironmentIndex({
     canCreateDepartments,
     permissionSettings = null,
     customerRoles = null,
+    integrations = null,
     routes,
 }) {
     const { locale = 'nb-NO', translations = {}, flash = {} } = usePage().props;
@@ -170,7 +172,7 @@ export default function CustomerEnvironmentIndex({
     const [userDepartmentFilter, setUserDepartmentFilter] = useState('');
     const [userStatusFilter, setUserStatusFilter] = useState('all');
 
-    const validTabs = ['departments', 'users', ...(permissionSettings ? ['permissions'] : [])];
+    const validTabs = ['departments', 'users', ...(permissionSettings ? ['permissions'] : []), ...(integrations ? ['integrations'] : [])];
     const currentTab = validTabs.includes(activeTab) ? activeTab : 'departments';
     const departmentsTabUrl = `${routes.index}?tab=departments`;
     const usersTabUrl = `${routes.index}?tab=users`;
@@ -436,7 +438,7 @@ export default function CustomerEnvironmentIndex({
     return (
         <CustomerAppLayout title="Kundemiljø" showPageTitle={false}>
             <div className="space-y-7">
-                <CustomerEnvironmentHeader activeTab={currentTab} onChangeTab={changeTab} showPermissions={permissionSettings !== null} />
+                <CustomerEnvironmentHeader activeTab={currentTab} onChangeTab={changeTab} showPermissions={permissionSettings !== null} showIntegrations={integrations !== null} />
 
                 {currentTab === 'departments' ? (
                     <section className="space-y-5">
@@ -932,6 +934,10 @@ export default function CustomerEnvironmentIndex({
                             <div className="space-y-4">{baseSection}</div>
                         )}
                     </section>
+                ) : null}
+
+                {currentTab === 'integrations' && integrations ? (
+                    <IntegrationsPanel integrations={integrations} modal={EnvironmentModal} t={tce.integrations ?? {}} locale={locale} />
                 ) : null}
 
             </div>

@@ -3,12 +3,16 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\ApiClient;
+use App\Models\ApiClientCustomerGrant;
 use App\Models\BusinessArea;
 use App\Models\Customer;
 use App\Models\CustomerAccessChange;
 use App\Models\CustomerRole;
 use App\Models\Department;
 use App\Models\User;
+use App\Services\Api\ApiAccessSummary;
+use App\Services\Api\ApiClientGrantService;
 use App\Services\Security\CustomerAccessChangeRecorder;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
@@ -27,7 +31,7 @@ class CustomerEnvironmentController extends Controller
     public function index(Request $request): Response
     {
         [$actor, $customerId] = $this->customerBidManagerContext($request);
-        $activeTab = in_array($request->query('tab'), ['departments', 'users', 'permissions'], true)
+        $activeTab = in_array($request->query('tab'), ['departments', 'users', 'permissions', 'integrations'], true)
             ? (string) $request->query('tab')
             : 'departments';
 
@@ -79,6 +83,10 @@ class CustomerEnvironmentController extends Controller
             'customerRoles' => $actor->isSystemOwner()
                 ? $this->customerRolesPayload($customerId)
                 : null,
+            // Integrasjoner (D13): System Owner only, the same gate ApiClientGrantService applies.
+            'integrations' => app(ApiClientGrantService::class)->mayAdminister($actor)
+                ? $this->integrationsPayload($actor)
+                : null,
             'routes' => [
                 'index' => route('app.customer-environment.index'),
                 'departments_store' => route('app.departments.store'),
@@ -88,6 +96,68 @@ class CustomerEnvironmentController extends Controller
                 'roles_store' => route('app.customer-environment.roles.store'),
             ],
         ]);
+    }
+
+    /**
+     * Approved applications, the customer's active grants and the roles an integration can be given.
+     *
+     * Every enabled application is offered: an internal administrator approved it, and offering it
+     * grants nothing. A grant is shown with what its identity can actually read through the API
+     * (ApiAccessSummary), so the System Owner sees the effect of the roles, not only their names.
+     *
+     * @return array<string, mixed>
+     */
+    private function integrationsPayload(User $actor): array
+    {
+        $customerId = (int) $actor->customer_id;
+        $customer = Customer::query()->findOrFail($customerId);
+        $summary = app(ApiAccessSummary::class);
+
+        $grants = ApiClientCustomerGrant::query()
+            ->active()
+            ->where('customer_id', $customerId)
+            ->with(['client', 'integrationUser.customerRoles:id,name', 'grantedBy:id,name'])
+            ->orderBy('granted_at')
+            ->get();
+
+        $grantedClientIds = $grants->pluck('api_client_id')->map(fn (mixed $id): int => (int) $id)->all();
+
+        return [
+            'clients' => ApiClient::query()
+                ->where('is_enabled', true)
+                ->orderBy('name')
+                ->get()
+                ->map(fn (ApiClient $client): array => [
+                    'id' => (int) $client->id,
+                    'name' => $client->name,
+                    'description' => $client->description,
+                    'is_granted' => in_array((int) $client->id, $grantedClientIds, true),
+                ])
+                ->all(),
+            'grants' => $grants->map(fn (ApiClientCustomerGrant $grant): array => [
+                'id' => (int) $grant->id,
+                'client' => [
+                    'id' => (int) $grant->client->id,
+                    'name' => $grant->client->name,
+                    'is_enabled' => (bool) $grant->client->is_enabled,
+                ],
+                'granted_at' => $grant->granted_at?->toIso8601String(),
+                'granted_by_name' => $grant->grantedBy?->name,
+                'last_used_at' => $grant->last_used_at?->toIso8601String(),
+                'role_ids' => $grant->integrationUser->customerRoles->pluck('id')->map(fn (mixed $id): int => (int) $id)->sort()->values()->all(),
+                'access' => $summary->for($grant->integrationUser, $customer),
+                'update_url' => route('app.customer-environment.integrations.roles.update', ['grantId' => $grant->id]),
+                'revoke_url' => route('app.customer-environment.integrations.destroy', ['grantId' => $grant->id]),
+            ])->all(),
+            'roles' => CustomerRole::query()
+                ->where('customer_id', $customerId)
+                ->where('is_active', true)
+                ->orderBy('name')
+                ->get(['id', 'name'])
+                ->map(fn (CustomerRole $role): array => ['id' => (int) $role->id, 'name' => $role->name])
+                ->all(),
+            'store_url' => route('app.customer-environment.integrations.store'),
+        ];
     }
 
     public function updatePermissions(Request $request): RedirectResponse

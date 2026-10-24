@@ -39,6 +39,12 @@ class CustomerAccessChangeRecorder
 
     public const CASE_BID_MANAGER_CHANGED = 'case_bid_manager_changed';
 
+    public const API_GRANT_CREATED = 'api_grant_created';
+
+    public const API_GRANT_ROLES_CHANGED = 'api_grant_roles_changed';
+
+    public const API_GRANT_REVOKED = 'api_grant_revoked';
+
     /** @return array<string, mixed> */
     public function userSnapshot(User $user): array
     {

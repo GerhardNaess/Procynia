@@ -6,19 +6,20 @@ function classNames(...values) {
 }
 
 /**
- * Avdelinger | Brukere | Tilganger. Each one loads another view of the page, so this is navigation,
+ * Avdelinger | Brukere | Tilganger | Integrasjoner. Each one loads another view of the page, so this is navigation,
  * not an ARIA tab list: a named <nav> whose current view carries aria-current="page" (A11Y-027).
  * Before, the active view was only a violet background.
  */
-function SectionTabs({ activeTab, onChange, showPermissions = false, label }) {
+function SectionTabs({ activeTab, onChange, showPermissions = false, showIntegrations = false, integrationsLabel, label }) {
     const tabs = [
         { key: 'departments', label: 'Avdelinger' },
         { key: 'users', label: 'Brukere' },
         ...(showPermissions ? [{ key: 'permissions', label: 'Tilganger' }] : []),
+        ...(showIntegrations ? [{ key: 'integrations', label: integrationsLabel }] : []),
     ];
 
     return (
-        <nav aria-label={label} className="inline-flex rounded-2xl border border-slate-200 bg-white p-1 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+        <nav aria-label={label} className="inline-flex max-w-full flex-wrap gap-1 rounded-2xl border border-slate-200 bg-white p-1 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
             {tabs.map((tab) => {
                 const isActive = activeTab === tab.key;
 
@@ -43,10 +44,18 @@ function SectionTabs({ activeTab, onChange, showPermissions = false, label }) {
     );
 }
 
-export default function CustomerEnvironmentHeader({ activeTab, onChangeTab, showPermissions = false }) {
+export default function CustomerEnvironmentHeader({ activeTab, onChangeTab, showPermissions = false, showIntegrations = false }) {
     const { translations = {} } = usePage().props;
     const tce = translations?.customer_env ?? {};
     const a11y = translations?.a11y ?? {};
+    const ti = tce.integrations ?? {};
+    const integrationSteps = ti.help_steps ?? [
+        '1. Åpne Integrasjoner. Fanen vises bare for System Owner.',
+        '2. Under «Godkjente applikasjoner» velger du Gi tilgang ved applikasjonen.',
+        '3. Velg rollene integrasjonen skal ha, og trykk Gi tilgang. Bare leserettighetene i rollene gjelder, og bare i moduler dere har bestilt.',
+        '4. Under «Applikasjoner med tilgang» ser du hva integrasjonen kan lese. Bruk Endre roller for å endre det.',
+        '5. Bruk Trekk tilbake når applikasjonen ikke lenger skal ha tilgang. Den avvises ved neste kall.',
+    ];
 
     return (
         <>
@@ -99,6 +108,10 @@ export default function CustomerEnvironmentHeader({ activeTab, onChangeTab, show
                             ],
                         },
                         {
+                            title: ti.help_title ?? 'Integrasjoner',
+                            items: integrationSteps.map((step) => ({ text: step })),
+                        },
+                        {
                             title: tce.page_help_section_recommendation ?? 'Praktisk anbefaling',
                             items: [
                                 {
@@ -111,7 +124,7 @@ export default function CustomerEnvironmentHeader({ activeTab, onChangeTab, show
                 />
             </section>
 
-            <SectionTabs activeTab={activeTab} onChange={onChangeTab} showPermissions={showPermissions} label={a11y.environment_tabs ?? 'Kundemiljø'} />
+            <SectionTabs activeTab={activeTab} onChange={onChangeTab} showPermissions={showPermissions} showIntegrations={showIntegrations} integrationsLabel={ti.tab ?? 'Integrasjoner'} label={a11y.environment_tabs ?? 'Kundemiljø'} />
         </>
     );
 }

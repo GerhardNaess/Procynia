@@ -56,6 +56,12 @@ class ApiClientCustomerGrant extends Model
         return $this->belongsTo(User::class, 'integration_user_id')->withoutGlobalScope(HumanUsersScope::class);
     }
 
+    /** @return BelongsTo<User, $this> */
+    public function grantedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'granted_by_user_id');
+    }
+
     /** @param  Builder<self>  $query */
     public function scopeActive(Builder $query): void
     {

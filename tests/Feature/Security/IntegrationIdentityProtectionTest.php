@@ -250,6 +250,7 @@ class IntegrationIdentityProtectionTest extends TestCase
             'app/Models/Scopes/HumanUsersScope.php',
             'app/Models/User.php',
             'app/Models/ApiClientCustomerGrant.php',
+            'app/Services/Api/ApiClientGrantService.php',
         ];
         $found = [];
 

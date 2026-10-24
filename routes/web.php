@@ -10,6 +10,7 @@ use App\Http\Controllers\App\ComplianceLibraryController;
 use App\Http\Controllers\App\ComplianceRequirementController;
 use App\Http\Controllers\App\ComplianceSourceController;
 use App\Http\Controllers\App\CustomerEnvironmentController;
+use App\Http\Controllers\App\CustomerIntegrationController;
 use App\Http\Controllers\App\CustomerRoleController;
 use App\Http\Controllers\App\DashboardController;
 use App\Http\Controllers\App\DepartmentController;
@@ -612,6 +613,18 @@ Route::prefix('app')
             ->name('customer-environment.business-areas.update');
         Route::delete('/customer-environment/business-areas/{businessArea}', [BusinessAreaController::class, 'destroy'])
             ->name('customer-environment.business-areas.destroy');
+
+        // Integrasjoner (D13): the System Owner gives an approved client application read access to
+        // the customer, changes its roles and takes the access back. System Owner only, enforced in
+        // ApiClientGrantService.
+        Route::post('/customer-environment/integrations', [CustomerIntegrationController::class, 'store'])
+            ->name('customer-environment.integrations.store');
+        Route::put('/customer-environment/integrations/{grantId}/roles', [CustomerIntegrationController::class, 'updateRoles'])
+            ->whereNumber('grantId')
+            ->name('customer-environment.integrations.roles.update');
+        Route::delete('/customer-environment/integrations/{grantId}', [CustomerIntegrationController::class, 'destroy'])
+            ->whereNumber('grantId')
+            ->name('customer-environment.integrations.destroy');
         Route::get('/info-center', [InfoCenterController::class, 'index'])->name('info-center.index');
         Route::get('/ai', [AiController::class, 'index'])->name('ai.index');
         Route::get('/ai/{savedNotice}', [AiController::class, 'show'])->name('ai.show');
