@@ -2827,6 +2827,8 @@ return [
             'operations_hint' => 'Slå bare på det applikasjonen trenger. Det gjelder bare i fagområdene integrasjonen kan lese, og applikasjonen må i tillegg ha skriverollen i Entra ID.',
             'operations' => [
                 'risk_treatment_action_create' => 'Tillat opprettelse av risikotiltak',
+                'improvement_case_create' => 'Tillat registrering av avvik og forbedringsforslag',
+                'improvement_action_create' => 'Tillat opprettelse av tiltak på avvik og forbedringer',
             ],
             'help_title' => 'Integrasjoner',
             'help_steps' => [
@@ -6471,6 +6473,7 @@ return [
         ],
         'context_heading' => 'Kontekst',
         'reported_by' => 'Registrert av',
+        'registered_by_integration' => 'Integrasjonen :client',
         'reported_at' => 'Registrert',
         'start' => 'Start behandling',
         'close' => 'Lukk sak',
@@ -6588,6 +6591,8 @@ return [
             'intro' => 'Konkrete aktiviteter som skal gjøres, med ansvarlig og frist.',
             'empty' => 'Ingen tiltak er lagt inn ennå.',
             'create' => 'Nytt tiltak',
+            'registered_by' => 'Registrert av',
+            'registered_by_integration' => 'Integrasjonen :client',
             'create_heading' => 'Nytt tiltak',
             'edit' => 'Rediger',
             'edit_heading' => 'Rediger tiltak',

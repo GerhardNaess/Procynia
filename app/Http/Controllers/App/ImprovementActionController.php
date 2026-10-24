@@ -196,12 +196,7 @@ class ImprovementActionController extends Controller
      */
     private function validated(Request $request, User $user, ImprovementCase $case): array
     {
-        $validated = $request->validate([
-            'title' => ['required', 'string', 'max:255'],
-            'description' => ['nullable', 'string', 'max:10000'],
-            'owner_user_id' => ['required', 'integer'],
-            'due_date' => ['required', 'date_format:Y-m-d'],
-        ], $this->messages(), ImprovementValidationMessages::attributes());
+        $validated = $request->validate(ImprovementActionLifecycleService::rules(), $this->messages(), ImprovementValidationMessages::attributes());
 
         $owner = User::query()->where('customer_id', (int) $user->customer_id)->find((int) $validated['owner_user_id']);
 
@@ -211,14 +206,7 @@ class ImprovementActionController extends Controller
             ]);
         }
 
-        $description = trim((string) ($validated['description'] ?? ''));
-
-        return [
-            'title' => trim($validated['title']),
-            'description' => $description !== '' ? $description : null,
-            'owner_user_id' => (int) $owner->id,
-            'due_date' => $validated['due_date'],
-        ];
+        return ImprovementActionLifecycleService::fields($validated);
     }
 
     /** @return array<string, mixed> */

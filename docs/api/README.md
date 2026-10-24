@@ -11,7 +11,7 @@ Spesifikasjonen er skrevet for hånd og versjoneres sammen med koden. Den genere
 | Stier og metoder | `routes/api.php` |
 | Middleware-rekkefølge, tilgang og 403/404 | `bootstrap/app.php`, `app/Http/Middleware/Api/`, tilgangstjenestene (`RiskAccessService` m.fl.) |
 | Spørreparametere, grenser og validering | `$request->validate()` i `app/Http/Controllers/Api/V1/` |
-| Svarfelter | Presentasjonsklassene i `app/Services/Api/Presenters/`, `ApiAttentionOverview`, `ApiAccessSummary` og `MeController` / `RiskTreatmentActionController` |
+| Svarfelter | Presentasjonsklassene i `app/Services/Api/Presenters/`, `ApiAttentionOverview`, `ApiAccessSummary` og `MeController` / `RiskTreatmentActionController` / `ImprovementCaseRegistrationController` |
 | Konvolutt (`data`, `meta`) | `ApiResponse` |
 | Feilformat og feilkoder | `ApiErrorResponder` |
 | Paginering | `ApiCursor` |
@@ -33,7 +33,7 @@ Testen leser filen linje for linje, fordi prosjektet ikke har en YAML-parser. De
 - skjemaer på fire mellomrom under `components.schemas`;
 - hver enum på én linje: `enum: [a, b, c]`.
 
-Testen dekker ikke feltlistene i svarene. Feltene er låst av `assertExactJsonStructure` og `assertJsonPath` i lesetestene (`ApiRiskReadTest`, `ApiRiskDetailReadTest`, `ApiDeviationReadTest`, `ApiImprovementCaseReadTest`, `ApiObjectiveKpiReadTest`, `ApiObjectiveKpiDetailReadTest`, `ApiAttentionAndBusinessAreaReadTest`) og av `assertExactJson` i `ApiCustomerGrantTest` og `ApiRiskTreatmentActionCreateTest`. Når de endres, må spesifikasjonen endres for hånd. Kontrollen av ekte svar under fanger det som er glemt.
+Testen dekker ikke feltlistene i svarene. Feltene er låst av `assertExactJsonStructure` og `assertJsonPath` i lesetestene (`ApiRiskReadTest`, `ApiRiskDetailReadTest`, `ApiDeviationReadTest`, `ApiImprovementCaseReadTest`, `ApiObjectiveKpiReadTest`, `ApiObjectiveKpiDetailReadTest`, `ApiAttentionAndBusinessAreaReadTest`) og av `assertExactJson` i `ApiCustomerGrantTest`, `ApiRiskTreatmentActionCreateTest` og `ApiImprovementRegistrationTest`. Når de endres, må spesifikasjonen endres for hånd. Kontrollen av ekte svar under fanger det som er glemt.
 
 ```bash
 docker exec procynia-app php artisan test --filter='ApiOpenApiContractTest|ApiRouteContractTest'

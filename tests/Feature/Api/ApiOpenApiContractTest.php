@@ -99,8 +99,11 @@ class ApiOpenApiContractTest extends TestCase
         $writePaths = [];
 
         foreach ($this->apiRoutes() as $route) {
+            // By method and path: a path can be read with GET and written with POST.
             if (in_array('api.write', $route->gatherMiddleware(), true)) {
-                $writePaths[] = '/'.$route->uri();
+                foreach (array_diff($route->methods(), self::IMPLIED_METHODS) as $method) {
+                    $writePaths[] = strtolower($method).' /'.$route->uri();
+                }
             }
         }
 
@@ -110,7 +113,7 @@ class ApiOpenApiContractTest extends TestCase
 
             $this->assertStringContainsString("\$ref: '#/components/parameters/ProcyniaCustomer'", $block, "[{$label}] does not name Procynia-Customer.");
 
-            if (in_array('/api'.$operation['path'], $writePaths, true)) {
+            if (in_array($operation['method'].' /api'.$operation['path'], $writePaths, true)) {
                 $this->assertStringContainsString('entraApplicationToken: [Procynia.Read.All, Procynia.Write.All]', $block, "Write operation [{$label}] does not require Procynia.Write.All.");
             } else {
                 $this->assertStringNotContainsString('Procynia.Write.All', $block, "Read operation [{$label}] requires the write role.");

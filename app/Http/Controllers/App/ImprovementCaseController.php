@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\ApiClientCustomerGrant;
 use App\Models\BusinessArea;
 use App\Models\ImprovementAction;
 use App\Models\ImprovementActionStatusChange;
@@ -171,6 +172,11 @@ class ImprovementCaseController extends Controller
         $canVerify = $canClose && $active;
         $currentVerifications = $this->verifications->forActions($case->actions);
         $today = now()->startOfDay();
+        // A case or tiltak registered through the API names the application, read from the grants.
+        $integrationClients = ApiClientCustomerGrant::clientNamesFor(
+            (int) $case->customer_id,
+            $case->actions->pluck('created_by')->push($case->reported_by_user_id),
+        );
 
         return Inertia::render('App/Improvements/Show', [
             // «Lag kunnskapsartikkel»: the shared Wiki handoff (WikiKnowledgeHandoffService).
@@ -180,6 +186,7 @@ class ImprovementCaseController extends Controller
                 'cause_analysis' => $case->cause_analysis,
                 'occurred_at' => $case->occurred_at?->format('Y-m-d'),
                 'reported_by_name' => $case->reportedBy?->name,
+                'registered_by_integration' => $case->reported_by_user_id !== null ? ($integrationClients[(int) $case->reported_by_user_id] ?? null) : null,
                 'created_at' => $case->created_at?->toIso8601String(),
                 // The current ending, from the case itself — not inferred from the history.
                 'closed_at' => $case->closed_at?->toIso8601String(),
@@ -213,7 +220,9 @@ class ImprovementCaseController extends Controller
             'attention' => $this->attention->forCase($case),
             // The case was reached through visibleCases(); its tiltak carry no access of their own.
             'actions' => $case->actions
-                ->map(fn (ImprovementAction $action): array => $this->actionRow($action, $case, $today, $canManageActions, $canVerify, $currentVerifications[(int) $action->id] ?? null))
+                ->map(fn (ImprovementAction $action): array => $this->actionRow($action, $case, $today, $canManageActions, $canVerify, $currentVerifications[(int) $action->id] ?? null) + [
+                    'registered_by_integration' => $action->created_by !== null ? ($integrationClients[(int) $action->created_by] ?? null) : null,
+                ])
                 ->all(),
             // Who can be responsible for a tiltak: people who can read cases in the case's area.
             'action_owner_options' => $canManageActions

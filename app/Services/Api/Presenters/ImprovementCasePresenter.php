@@ -70,6 +70,17 @@ class ImprovementCasePresenter
     }
 
     /**
+     * A tiltak just added through the API, as it appears among the case's tiltak in detail(), with the
+     * case it belongs to. A new tiltak has no completion, so nothing to verify.
+     *
+     * @return array<string, mixed>
+     */
+    public function createdAction(ImprovementAction $action, ImprovementCase $case, CarbonImmutable $today): array
+    {
+        return ['case_id' => (int) $case->id] + $this->action($action, $case, $today, null);
+    }
+
+    /**
      * @param  list<string>  $attention
      * @return array<string, mixed>
      */

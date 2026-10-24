@@ -1,7 +1,7 @@
 # Procynia API – status og plan for full API-dekning
 
 **Sist oppdatert:** 2026-10-24
-**Grunnlag:** koden på grenen `feature/external-api-foundation` (fase 3 med D15–D17), `routes/api.php`, `routes/web.php` (kundefrontenden), domenetjenestene i `app/Services/`, registeret i `tests/Feature/Security/HumanDecisionContractTest.php` og arkitekturdokumentene [`external-api-architecture.md`](external-api-architecture.md), [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) og [`external-api-phase-1-decisions.md`](external-api-phase-1-decisions.md).
+**Grunnlag:** koden på grenen `feature/external-api-foundation` (fase 3 med D15–D17, og AVF-04 og AVF-05 i fase 4), `routes/api.php`, `routes/web.php` (kundefrontenden), domenetjenestene i `app/Services/`, registeret i `tests/Feature/Security/HumanDecisionContractTest.php` og arkitekturdokumentene [`external-api-architecture.md`](external-api-architecture.md), [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) og [`external-api-phase-1-decisions.md`](external-api-phase-1-decisions.md).
 **Faseplan:** vedtatt 2026-10-24 (del 1 «Vedtatt faseplan» og del 4).
 **Formål:** én samlet oversikt over hva som er ferdig, hva som mangler, rekkefølgen videre og beslutningene som gjenstår. Dokumentet er et styringsdokument. De tekniske detaljene og begrunnelsene står i arkitekturdokumentene.
 
@@ -15,11 +15,11 @@
 
 | | |
 |---|---|
-| **Prosjektstatus** | 🟧 **Delvis dekket.** API-fundamentet er bygget og testet lokalt. Sju av ni moduler har API-støtte. Lesingen i styringsmodulene er fullført lokalt i fase 2 og 3, etter beslutningene D15–D17. **Ingenting er i produksjon.** |
-| **API-operasjoner i dag** | **30 operasjoner:** 29 for lesing og 1 for skriving (se tabellen under). |
-| **Lokalt verifisert** | Ja. Alle 177 API-tester består (kjørt 2026-10-24, etter D15–D17). Siste fulle kjøring av PHP-suiten ga 8667 tester og 0 feil (2026-10-24, før OpenAPI og fase 2 og 3). |
+| **Prosjektstatus** | 🟧 **Delvis dekket.** API-fundamentet er bygget og testet lokalt. Sju av ni moduler har API-støtte. Lesingen i styringsmodulene er fullført lokalt i fase 2 og 3, etter beslutningene D15–D17. Fase 4 har levert registrering av avvik, forbedringsforslag og tiltak lokalt. **Ingenting er i produksjon.** |
+| **API-operasjoner i dag** | **34 operasjoner:** 29 for lesing og 5 for skriving (se tabellen under). Skrivingen går gjennom tre navngitte operasjoner som System Owner slår på per integrasjon. |
+| **Lokalt verifisert** | Ja. Alle 189 API-tester består (kjørt 2026-10-24, etter AVF-04 og AVF-05). Siste fulle kjøring av PHP-suiten ga 8667 tester og 0 feil (2026-10-24, før OpenAPI og fase 2 og 3). |
 | **Produksjonsklart** | **Nei.** Grenen er ikke flettet inn i `main`, migreringene er ikke kjørt i Azure, og API-et er ikke prøvd med et ekte token fra Microsoft Entra ID eller med Siggjo. |
-| **API-spesifikasjon** | 🟩 OpenAPI 3.1 for alle 30 operasjoner i [`api/openapi.yaml`](api/openapi.yaml), validert og låst mot rutene med en kontrakttest. 335 ekte svar fra API-testene er kontrollert mot skjemaene uten avvik (2026-10-24, etter fase 3). |
+| **API-spesifikasjon** | 🟩 OpenAPI 3.1 for alle 34 operasjoner i [`api/openapi.yaml`](api/openapi.yaml), validert og låst mot rutene med en kontrakttest. 335 ekte svar fra API-testene er kontrollert mot skjemaene uten avvik (2026-10-24, etter fase 3). |
 | **Neste milepæl** | **Pilotklar API på testkunde:** dagens seks operasjoner flettet inn, beskrevet i en API-spesifikasjon og prøvd med ekte Entra-token i staging (fase 1 under). |
 
 ### Implementerte API-operasjoner
@@ -56,6 +56,10 @@
 | 28 | Kontrollregister (`GET /api/v1/quality/controls`) | Lesing | Kvalitet | Ja | Nei |
 | 29 | Én KPI med prosessene den måler (`GET /api/v1/kpis/{id}`) | Lesing | Mål og KPI | Ja | Nei |
 | 30 | Ett kvalitetselement med godkjent prosessflyt (`GET /api/v1/quality/items/{id}`) | Lesing | Kvalitet | Ja | Nei |
+| 31 | Registrer avvik (`POST /api/v1/deviations`) | Skriving | Avvik og forbedringer | Ja | Nei |
+| 32 | Registrer forbedringsforslag (`POST /api/v1/improvements`) | Skriving | Avvik og forbedringer | Ja | Nei |
+| 33 | Opprett tiltak på et avvik (`POST /api/v1/deviations/{id}/actions`) | Skriving | Avvik og forbedringer | Ja | Nei |
+| 34 | Opprett tiltak på en forbedring (`POST /api/v1/improvements/{id}/actions`) | Skriving | Avvik og forbedringer | Ja | Nei |
 
 «Lokalt verifisert» betyr automatiske tester med simulerte Entra-tokens og testdata. Det betyr ikke at operasjonen er prøvd mot Microsoft, Azure eller Siggjo.
 
@@ -70,8 +74,8 @@
 | Sperre for menneskelige beslutninger | 🟩 Fullt dekket (lokalt) | Sperren i domenelaget og i databasen gjelder alle ni moduler. |
 | Sperre for AI-kall via API-et | 🟩 Fullt dekket (lokalt) | Ingen AI-kostnad kan utløses gjennom API-et i dag. |
 | Felles feilformat, logging, ratebegrensning | 🟩 Fullt dekket (lokalt) | |
-| Modell for navngitte skriveoperasjoner | 🟧 Delvis dekket | Modellen er generell. Katalogen har én operasjon. |
-| Beskyttelse mot dobbelregistrering (idempotens) | ⬜ Ikke startet | Et gjentatt skrivekall gir duplikat. Akseptert for den ene operasjonen. Må avklares før flere skriveoperasjoner. |
+| Modell for navngitte skriveoperasjoner | 🟧 Delvis dekket | Modellen er generell. Katalogen har tre operasjoner: `risk.treatment_action.create`, `improvement.case.create` og `improvement.action.create`. |
+| Beskyttelse mot dobbelregistrering (idempotens) | ⬜ Ikke startet | Et gjentatt skrivekall gir duplikat. Akseptert for de tre operasjonene, slik som for risikotiltak (funn 23). Ingen ny mekanisme er bygget. |
 | API-spesifikasjon (OpenAPI) | 🟩 Fullt dekket (lokalt) | [`api/openapi.yaml`](api/openapi.yaml) beskriver de seks operasjonene. Validert mot OpenAPI 3.1 med Redocly CLI. `ApiOpenApiContractTest` låser stier, metoder, app-roller, enums og feilkoder mot koden. Vedlikehold: [`api/README.md`](api/README.md). Ikke publisert til Siggjo ennå. |
 | Detaljvisning av enkeltposter (`/{id}`) | 🟩 Fullt dekket (lokalt) for de sju modulene med API | Kvalitet viser bare godkjent prosessflyt (D15). |
 | Samlet oppmerksomhetsliste | 🟩 Fullt dekket (lokalt) for modulene med oppmerksomhetstjeneste | `GET /api/v1/attention` for Risiko, Avvik og forbedringer, Mål og KPI, Etterlevelse og revisjon, Leverandøroppfølging og Kvalitet. Ledelsens gjennomgang har ingen oppmerksomhetstjeneste. `controls_without_activity` er utelatt (D17). |
@@ -84,7 +88,7 @@
 |---|---|---|---|---|
 | Risiko | 🟧 Delvis dekket | Register, én risiko med kontroller og prosesser, oppmerksomhet | Opprett tiltak | Alle A-funksjoner er levert lokalt. Ikke produksjonsklar. Registrering av risiko (fase 4). |
 | Mål og KPI | 🟧 Delvis dekket | Mål, ett mål med KPI-er, KPI-er, én KPI med prosesser, full målehistorikk, oppmerksomhet | – | Alle A-funksjoner er levert lokalt. Ikke produksjonsklar. |
-| Avvik og forbedringer | 🟧 Delvis dekket | Avvik, forbedringer, én sak med tiltak, oppmerksomhet | – | Registrering av avvik og tiltak (AVF-04, AVF-05, fase 4) |
+| Avvik og forbedringer | 🟧 Delvis dekket | Avvik, forbedringer, én sak med tiltak, oppmerksomhet | Registrer avvik eller forbedringsforslag, opprett tiltak (navngitte operasjoner) | Alle A-funksjoner er levert lokalt. Ikke produksjonsklar. |
 | Kvalitet | 🟧 Delvis dekket | Register, kontroller, ett element med godkjent prosessflyt, oppmerksomhet | – | Alle A-funksjoner er levert lokalt. Ikke produksjonsklar. |
 | Etterlevelse og revisjon | 🟧 Delvis dekket | Kravregister, status, revisjoner, kravbibliotek, oppmerksomhet | – | Alle A-funksjoner er levert lokalt. Ikke produksjonsklar. |
 | Leverandøroppfølging | 🟧 Delvis dekket | Register, én leverandør, kontrollkrav, oppmerksomhet | – | Alle A-funksjoner er levert lokalt. Ikke produksjonsklar. |
@@ -100,24 +104,21 @@ Grunnlaget er de 117 funksjonene i del 3: **32 A-funksjoner, 51 B-funksjoner og 
 
 | Status | Betydning | A | B | C | Sum |
 |---|---|---|---|---|---|
-| 🟩 **Implementert** | Endepunktet finnes og er verifisert lokalt. Ikke i produksjon. | 30 | 1 | – | 31 |
-| 🟦 **Planlagt** | Har en fase i den vedtatte planen og kan bygges uten ny beslutning. | 2 | – | – | 2 |
+| 🟩 **Implementert** | Endepunktet finnes og er verifisert lokalt. Ikke i produksjon. | 32 | 1 | – | 33 |
+| 🟦 **Planlagt** | Har en fase i den vedtatte planen og kan bygges uten ny beslutning. | – | – | – | – |
 | 🟥 **Blokkert** | Har en fase, men kan ikke startes eller fullføres før en navngitt beslutning eller hindring er løst. | – | 42 | – | 42 |
 | ⬛ **Ikke anbefalt** | Ikke planlagt. Tas bare opp igjen etter egen beslutning. | – | 8 | – | 8 |
 | ⛔ **Utenfor API-et** | Formell menneskelig beslutning. Kan aldri utføres av en integrasjon og teller ikke som manglende. | – | – | 34 | 34 |
 | **Sum** | | **32** | **51** | **34** | **117** |
 
-**Implementert (30 A-funksjoner og 1 B-funksjon):** RIS-01–04, MOK-01–06, AVF-01–03, FEL-01–03, ETR-01–05, LEV-01–03, LDG-01–03, KVA-01, KVA-03 og KVA-04, og B-funksjonen KVA-02.
+**Implementert (32 A-funksjoner og 1 B-funksjon):** RIS-01–04, MOK-01–06, AVF-01–05, FEL-01–03, ETR-01–05, LEV-01–03, LDG-01–03, KVA-01, KVA-03 og KVA-04, og B-funksjonen KVA-02.
 
 - Fase 2 leverte RIS-03, MOK-03, MOK-04, resten av MOK-05, AVF-02, AVF-03, FEL-02 og resten av FEL-03.
 - Fase 3 leverte ETR-01–05, LEV-01–03, LDG-01–03, KVA-01 og KVA-03, og utvidet FEL-02.
 - Etter D15–D17 er RIS-02, MOK-06, KVA-04 og KVA-02 fullført (2026-10-24).
+- Fase 4 leverte AVF-04 og AVF-05 (2026-10-24). Alle 32 A-funksjoner er nå implementert lokalt.
 
-**Planlagt (2 A-funksjoner):**
-
-| Fase | Funksjoner | Antall |
-|---|---|---|
-| 4 | AVF-04, AVF-05 (etter fellesforutsetningene idempotens, opphavsvisning og varselregel) | 2 |
+**Planlagt:** ingen. AVF-04 og AVF-05 er levert (fase 4). Fellesforutsetningene ble avgjort slik: ingen idempotens (som for risikotiltak), opphavet vises i Avvik og forbedringer, og varslene følger webgrensesnittets regel (funn 23–25).
 
 **Blokkert (42 B-funksjoner):** alle B-funksjoner som har en fase, unntatt KVA-02. Hindringen står i kolonnen «Avhengigheter» i del 3, og de samlede beslutningene står i «Viktigste avhengigheter og beslutninger» under. Hele Anbud-modulen er blokkert (funn 2, 3 og 6 i del 5, og K16).
 
@@ -132,7 +133,7 @@ Faseplanen ble vedtatt 2026-10-24. Endringer i rekkefølge eller innhold krever 
 | **1** | Gjøre dagens API produksjonsklart for pilot | Fundamentet | 🟧 Påbegynt. OpenAPI-spesifikasjonen er ferdig. Entra, staging og V4 venter på Advania og Siggjo. |
 | **2** | Fullføre lesing i modulene som er påbegynt | Risiko, Mål og KPI, Avvik og forbedringer | 🟩 Fullført lokalt 2026-10-24. RIS-02 ble fullført etter D15. Ikke produksjonsklar. |
 | **3** | Lesing i resten av styringsmodulene | Etterlevelse og revisjon, Leverandøroppfølging, Ledelsens gjennomgang, Kvalitet | 🟩 Fullført lokalt 2026-10-24, med restpunktene løst etter D15–D17. Ikke produksjonsklar. |
-| **4** | Avgrensede registreringer (utkast og forslag) | Styringsmodulene | 🟥 Blokkert av fellesforutsetningene og beslutning per operasjon |
+| **4** | Avgrensede registreringer (utkast og forslag) | Styringsmodulene | 🟧 Påbegynt. AVF-04 og AVF-05 levert lokalt 2026-10-24. Andre registreringer (for eksempel RIS-05) krever beslutning per operasjon. |
 | **5** | Tilgang på vegne av en person | Mine oppgaver, personlige dashboards | 🟥 Blokkert av D2 |
 | **6** | Wiki gjennom den felles kunnskapskjernen | Enterprise Wiki | 🟥 Blokkert av Wiki-arkitekturbeslutning, A23 og S4 |
 | **7** | Anbud | Anbud | 🟥 Blokkert av K16, `isBidManager()`, avdelingsomfang og A46 |
@@ -148,7 +149,7 @@ Faseplanen ble vedtatt 2026-10-24. Endringer i rekkefølge eller innhold krever 
 | 4 | Fase 3: lesing i Etterlevelse og revisjon, Leverandøroppfølging, Ledelsens gjennomgang og Kvalitet | 3 | Ja | 🟧 Levert lokalt 2026-10-24. 13 av 15 funksjoner er ferdige. MOK-06 og KVA-04 er delvis levert (funn 17). |
 | – | Merge etter V1–V3, Entra-registrering, Siggjos identitet, staging og V4 | 1 | Nei | 🟥 Venter på produkteier, Advania og Siggjo. Løper parallelt. |
 
-Etter fase 2 er de tre modulene fullt dekket **for lesing**. Full A-dekning i disse modulene krever også MOK-06 (fase 3) og AVF-04 og AVF-05 (fase 4).
+Etter fase 2 er de tre modulene fullt dekket **for lesing**. Med MOK-06 (fase 3) og AVF-04 og AVF-05 (fase 4) har de nå alle A-funksjoner lokalt.
 
 Detaljer står i del 4.
 
@@ -160,7 +161,7 @@ Detaljer står i del 4.
 | 2 | Merge av `feature/external-api-foundation` til `main`, med de åpne verifiseringene V1–V3 | Fase 1 | Produkteier |
 | 3 | DPIA og databehandleravtaler (D14) | Ekte kundedata i Siggjo | Produkteier / juridisk |
 | 4 | WAF eller API Management (D12) | Første kunde med ekte data | Produkteier / drift |
-| 5 | Idempotens og visning av opphav i alle moduler | Fase 4 (flere skriveoperasjoner) | Arkitektur |
+| 5 | Idempotens og visning av opphav i alle moduler | Fase 4 (flere skriveoperasjoner). For AVF-04 og AVF-05: ingen idempotens, opphav vist i Avvik og forbedringer (funn 23 og 24). | Arkitektur |
 | 6 | Hvilke registreringer agenter skal få gjøre, én operasjon om gangen | Fase 4 | Produkteier |
 | 7 | B6 og B7: skal agenter kunne laste opp kildedokumenter eller registrere KPI-målinger? I dag er svaret nei. | Fase 4 | Produkteier |
 | 8 | Om agentutløst AI-arbeid er tillatt, og hvordan kostnaden begrenses (S4) | Fase 4 og 6 | Produkteier |
@@ -191,7 +192,7 @@ Kompleksitet: **Lav** = gjenbruk av en eksisterende tjeneste og presentasjon. **
 |---|---|---|---|---|---|---|---|
 | **Risiko** | Risikoregister, én risiko med vurderinger, tiltak og kontroller, oppmerksomhet, registrering av tiltak | Register og én risiko med vurderingshistorikk, tiltak, aksept av restrisiko, Kvalitet-koblinger og oppmerksomhetskoder | Opprett tiltak (navngitt operasjon) | Mulig registrering av ny risiko (fase 4). | Vurdering, aksept av restrisiko og sletting er menneskelige beslutninger. Fagområdene styrer synligheten. | Lav–middels | 2, 4 |
 | **Mål og KPI** | Mål, KPI-er, måloppnåelse, målehistorikk, oppmerksomhet | Mål, ett mål med KPI-er, KPI-er med siste 24 målinger, full målehistorikk, oppmerksomhetskoder | – | Ingen A-funksjon | Målinger, avslutning og sletting er menneskelige beslutninger (B7). Fagområdene styrer synligheten. | Lav | 2 |
-| **Avvik og forbedringer** | Avvik, forbedringsforslag, tiltak, effektverifisering, registrering av avvik | Avvik og forbedringer hver for seg, én sak med tiltak og effektverifisering, oppmerksomhetskoder | – | Registrering av avvik og tiltak (fase 4) | Lukking, effektverifisering og sletting er menneskelige beslutninger. Avvikstitler kan inneholde særlige kategorier av personopplysninger. | Lav–middels | 2, 4 |
+| **Avvik og forbedringer** | Avvik, forbedringsforslag, tiltak, effektverifisering, registrering av avvik | Avvik og forbedringer hver for seg, én sak med tiltak og effektverifisering, oppmerksomhetskoder | Registrer avvik eller forbedringsforslag, opprett tiltak (navngitte operasjoner) | Ingen A-funksjon | Lukking, effektverifisering og sletting er menneskelige beslutninger. Avvikstitler kan inneholde særlige kategorier av personopplysninger. | Lav–middels | 2, 4 |
 | **Kvalitet** | Prosesser, rutiner, kontroller, evidens, godkjent prosessflyt, oppmerksomhet | Register, kontroller med evidens og verktøy, ett element med relasjoner, publisering og godkjent prosessflyt (D15), oppmerksomhet | – | Ingen A-funksjon. `controls_without_activity` er utelatt (D17). | Godkjenning, innføring av AI-forslag og sletting er menneskelige beslutninger. AI-forslagene er sperret (A23, D11). Prosessflyt krever versjonskontroll (`base_hash`) ved skriving. | Middels–høy | 3 |
 | **Etterlevelse og revisjon** | Kravregister, etterlevelsesstatus per standard, revisjoner og funn, oppmerksomhet | Kravregister, status per kilde, revisjoner med scope, kontrollhandlinger og funn, kravbibliotek, oppmerksomhet | – | Ingen A-funksjon. Kvalitet-konteksten (prosesser og kontroller) er utelatt. | Vurdering, relevans og **hele revisjonsløpet** (også opprettelse) er menneskelige beslutninger. Modulen krever eksplisitt tildeling. | Middels | 3 |
 | **Leverandøroppfølging** | Leverandørregister, kritikalitet, kontrollstatus, oppfølgingsplan | Register, én leverandør med krav, aktsomhet, oppfølgingsplan og koblinger, kontrollkrav, oppmerksomhet | – | Ingen A-funksjon | Registrering, kritikalitet, livsløp, vurderinger og kontrollarbeid er menneskelige beslutninger. Krever eksplisitt tildeling. Dokumentfiler skannes ikke i dag. | Middels | 3 |
@@ -233,7 +234,7 @@ Kompleksitet: **Lav** = gjenbruk av en eksisterende tjeneste og presentasjon. **
 |---|---|---|---|---|
 | Risiko | 4 | 4 | 5 | 3 |
 | Mål og KPI | 6 | 6 | 4 | 3 |
-| Avvik og forbedringer | 5 | 3 | 4 | 3 |
+| Avvik og forbedringer | 5 | 5 | 4 | 3 |
 | Kvalitet | 3 | 3 (+ KVA-02, B) | 7 | 4 |
 | Etterlevelse og revisjon | 5 | 5 | 4 | 4 |
 | Leverandøroppfølging | 3 | 3 | 5 | 5 |
@@ -241,7 +242,7 @@ Kompleksitet: **Lav** = gjenbruk av en eksisterende tjeneste og presentasjon. **
 | Enterprise Wiki | 0 | 0 | 5 | 8 |
 | Anbud | 0 | 0 | 10 | 2 |
 | Felles | 3 | 3 | 3 | 0 |
-| **Sum** | **32** | **30** | **51** | **34** |
+| **Sum** | **32** | **32** | **51** | **34** |
 
 Kartleggingen dekker 311 webruter i de ni modulene (68 lesende, 243 skrivende) og 35 felles ruter (blant annet Kundemiljø, brukere, varsler, fakturering og Hjem). Ruter som bare viser et skjema, er ikke egne funksjoner.
 
@@ -293,8 +294,8 @@ Tilgang: `ImprovementCaseAccessService` (`visibleCases`, `findVisible`) med fago
 | AVF-01 | Les avviksregister | `visibleCases` (type avvik), `ImprovementAttentionService::findingsForCases` | `GET /api/v1/deviations` | Implementert | Ja | A | – | Ferdig |
 | AVF-02 | Les forbedringsforslag | `visibleCases` (type forbedring) | `GET /api/v1/improvements` | Implementert | Ja (lesing) | A | Samme feltvalg, filtre og tilgang som avvik | Ferdig |
 | AVF-03 | Les én sak med tiltak og effektverifisering | `visibleCases` (sakens type), `ImprovementActionVerificationResolver::forActions` | `GET /api/v1/deviations/{caseId}`, `GET /api/v1/improvements/{caseId}` | Implementert | Ja (lesing) | A | Uten fritekst, notater og hvem som fullførte eller verifiserte (D8) | Ferdig |
-| AVF-04 | Registrer avvik eller forbedringsforslag (opprettes som «Åpen») | `ImprovementCaseCreator::create` | – | – | Nei | A | Ny navngitt operasjon. Opphavsvisning (S2) og idempotens. Arkitekturen anbefaler dette som første forslagstype (§10.1). | 4 |
-| AVF-05 | Opprett tiltak på en sak | `ImprovementActionLifecycleService::create` | – | – | Nei | A | Samme mønster som risikotiltak. Ansvarlig valideres delvis i kontrolleren og må samles i tjenesten. | 4 |
+| AVF-04 | Registrer avvik eller forbedringsforslag (opprettes som «Åpen») | `ImprovementCaseCreator::create` | `POST /api/v1/deviations`, `POST /api/v1/improvements` | Implementert | Ja (operasjonen `improvement.case.create`) | A | Ingen idempotens. Opphavet vises på saksiden. Beskrivelsen skrives, men leses aldri tilbake. Ekte Entra-rolle `Procynia.Write.All` gjenstår. | Ferdig |
+| AVF-05 | Opprett tiltak på en sak | `ImprovementActionLifecycleService::create` | `POST /api/v1/deviations/{caseId}/actions`, `POST /api/v1/improvements/{caseId}/actions` | Implementert | Ja (operasjonen `improvement.action.create`) | A | Samme mønster som risikotiltak. Tjenesten validerer ansvarlig selv. Feltreglene ligger i tjenesten (`rules()`, `fields()`). Ingen idempotens. | Ferdig |
 | AVF-06 | Endre sak, årsaksanalyse eller starte arbeid | `ImprovementCaseCreator::update`/`updateCause`, `ImprovementCaseLifecycleService::start` | – | – | Nei | B | S1 | 4 |
 | AVF-07 | Endre, start, fullfør, avbryt, gjenåpne eller slett tiltak | `ImprovementActionLifecycleService::*` | – | – | Nei | B | S1 | 4 |
 | AVF-08 | Koble sak til prosess | `ImprovementCaseQualityContextService::syncProcess` | – | – | Nei | B | Fase 3 | 4 |
@@ -480,7 +481,8 @@ Prinsipper: bruk eksisterende domenetjenester og tilgangstjenester, gjenbruk mø
 | **Leveranser** | Felles forutsetninger først: idempotens for skrivekall, opphavsvisning («Registrert av integrasjonen …») i alle moduler som får skriving (S2), og en regel for varsler (S6). Deretter én navngitt operasjon om gangen, i anbefalt rekkefølge: AVF-04 (registrer avvik), AVF-05 (tiltak på sak), RIS-05 (registrer risiko). Andre B-funksjoner bare etter egen beslutning. |
 | **Avhengigheter** | Produkteier beslutter hver operasjon. B6 og B7 tas eventuelt opp igjen. Eventuell generisk forslagsmodell (arkitektur §10.1). |
 | **Kompleksitet** | Middels per operasjon, høy for fellesforutsetningene |
-| **Ferdig når** | Hver vedtatte operasjon står i `ApiOperationCatalog`, kan slås på av System Owner, er idempotent, viser opphav og er dekket av tester. Ingen C-funksjon er berørt. |
+| **Ferdig når** | Hver vedtatte operasjon står i `ApiOperationCatalog`, kan slås på av System Owner, viser opphav og er dekket av tester. Ingen C-funksjon er berørt. Idempotens: ikke bygget, akseptert per operasjon (funn 23). |
+| **Status** | AVF-04 og AVF-05 levert lokalt 2026-10-24 (`external-api-phase-1-decisions.md` §22). |
 
 ### Fase 5 – Tilgang på vegne av en person
 
@@ -530,7 +532,7 @@ Prinsipper: bruk eksisterende domenetjenester og tilgangstjenester, gjenbruk mø
 
 ## Del 5 – Funn fra denne gjennomgangen
 
-Kontrollert i koden 2026-10-24. Funn 1, 13 og 17 er løst (se radene). Funn 13–16 kom fra fase 2 og funn 17–22 fra fase 3.
+Kontrollert i koden 2026-10-24. Funn 1, 13 og 17 er løst (se radene). Funn 13–16 kom fra fase 2, funn 17–22 fra fase 3 og funn 23–26 fra fase 4.
 
 | # | Funn | Betydning | Hører til |
 |---|---|---|---|
@@ -556,3 +558,7 @@ Kontrollert i koden 2026-10-24. Funn 1, 13 og 17 er løst (se radene). Funn 13�
 | 20 | **Etterlevelse: oppmerksomhetstjenesten gir `not_assessed` for et bibliotekskrav med åpen relevans,** mens Etterlevelsesvurdering grupperer det som `relevance_open`. API-et speiler begge tjenestene uendret: `attention` følger `ComplianceAttentionService`, og `compliance.group` følger `ComplianceAssessmentOverview`. | Kan virke motstridende for klienten. Beskrevet i spesifikasjonen. | Dokumentasjon |
 | 21 | **Kundemiljø → Integrasjoner viser fire nye linjer, og Avvik-linjen heter nå «Avvik og forbedringer».** Linjene kommer fra samme oppsummering som `/me`. Moduler uten fagområder vises som «hele kundemiljøet» og har `business_areas: null` i `/me`. | Synlig endring for System Owner, i tråd med hva integrasjonen faktisk kan lese. | – |
 | 22 | **Organisasjonsnummer er med i leverandørregisteret.** Det er et offentlig identifikator-felt, men for enkeltpersonforetak kan det peke på en person. | Tas med i DPIA (D14). | Personvern |
+| 23 | **AVF-04 og AVF-05 er ikke idempotente.** Fase 4-planen satte idempotens som fellesforutsetning. Oppdraget for fase 4 sa «ingen nye generelle mekanismer eller databaser», og en idempotensnøkkel krever en ny tabell. Operasjonene følger derfor samme vedtak som risikotiltak (§20): et gjentatt kall gir en ny sak eller et nytt tiltak. | Klienter må ikke prøve skrivekall på nytt automatisk. Må avgjøres av produkteier før flere skriveoperasjoner, eller før bruksmønsteret gjør duplikater til et problem. | Fase 4 |
+| 24 | **Opphavet vises bare i Avvik og forbedringer.** Saksiden viser «Registrert av: Integrasjonen …» for en sak, og ved tiltak som en integrasjon har registrert. Navnet leses fra tildelingen (`ApiClientCustomerGrant::clientNamesFor`), som risikosiden nå også bruker. Statushistorikk, varsler og andre moduler som viser saken (for eksempel Ledelsens gjennomgang) viser fortsatt ingen avsender. | Ingen feil, fordi integrasjonen bare registrerer. Andre steder må vurderes hvis integrasjoner får flere operasjoner. | Fase 4 |
+| 25 | **Varsler følger webgrensesnittets regel.** Den ansvarlige får det vanlige varselet om tildeling (`AssignmentObserver`), med integrasjonen som `assigned_by_user_id`, akkurat som for risikotiltak. Det er ikke laget en egen varselregel for integrasjoner (S6). | System Owner bestemmer hvem som kan få varsler fra en integrasjon gjennom hvilke fagområder den kan lese. | Fase 4 |
+| 26 | **Beskrivelsen er fritekst som skrives, men aldri leses tilbake.** Domeneregelen krever beskrivelse på en sak. API-et tar den imot og lagrer den, men svarene inneholder den ikke (D8). | Integrasjonen kan ikke kontrollere hva den skrev. Tas med i DPIA (D14), fordi avvik kan inneholde særlige kategorier av personopplysninger. | Personvern |

@@ -1,6 +1,6 @@
 # Eksternt API – beslutningsgrunnlag for fase 1
 
-**Status:** API fase 1 er **lesebasert**. Bygget: autentisering, kundetildeling, feilformat, `GET /api/v1/me`, `GET /api/v1/risks` (§15), D13 med beskyttelse av integrasjonsidentiteter (§16), kontrollen 2026-10-24 (§17) `GET /api/v1/deviations` (§18) og `GET /api/v1/objectives` og `GET /api/v1/kpis` (§19). Mål og KPI venter på vurdering. Ingen flere moduler før den. Ekte Entra-, Azure- og Siggjo-testing er utsatt fordi miljøene ikke er tilgjengelige. Ingenting er satt i produksjon.
+**Status:** API-et leser i sju moduler og har tre navngitte skriveoperasjoner (§20, §22). Bygget: autentisering, kundetildeling, feilformat, `GET /api/v1/me`, `GET /api/v1/risks` (§15), D13 med beskyttelse av integrasjonsidentiteter (§16), kontrollen 2026-10-24 (§17) `GET /api/v1/deviations` (§18) og `GET /api/v1/objectives` og `GET /api/v1/kpis` (§19). Mål og KPI venter på vurdering. Ingen flere moduler før den. Ekte Entra-, Azure- og Siggjo-testing er utsatt fordi miljøene ikke er tilgjengelige. Ingenting er satt i produksjon.
 **Dato:** 2026-10-23
 **Gren:** `feature/external-api-foundation`
 **Bygger på:** [`external-api-architecture.md`](external-api-architecture.md) (særlig §4, §5, §8.3, §9 og §15), [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §2n, [`operations/entra-sso.md`](operations/entra-sso.md), [`operations/security.md`](operations/security.md) §9 og [`AGENTS.md`](../AGENTS.md).
@@ -1090,3 +1090,73 @@ Ingen ny API-operasjon er bygget som følge av beslutningene, og faseplanen er u
   - For en prosess gir den den godkjente flyten (felt, noder uten beskrivelse, kanter) og kontrollene som er plassert på godkjente aktiviteter.
   - For en kontroll gir den plasseringene i godkjente flyter.
   - Arbeidsversjonen, `has_unpublished_changes` og hvem som godkjente, er aldri med.
+
+## 22. Fase 4: registrering av avvik, forbedringsforslag og tiltak (2026-10-24)
+
+AVF-04 og AVF-05 fra dekningsmatrisen, bygget som to nye navngitte operasjoner i den eksisterende modellen (§20). Ingen ny tabell, ingen ny mekanisme, ingen migrering.
+
+### Avgjørelser
+
+- **To operasjoner, én per funksjon:** `improvement.case.create` (AVF-04) og `improvement.action.create` (AVF-05). Modulen er `improvements`. System Owner slår dem på hver for seg i Kundemiljø → Integrasjoner. Avkrysningene vises av seg selv, fordi listen kommer fra katalogen: **Tillat registrering av avvik og forbedringsforslag** og **Tillat opprettelse av tiltak på avvik og forbedringer**.
+- **Typen kommer fra stien**, som ved lesing: `POST /deviations` registrerer et avvik, `POST /improvements` et forbedringsforslag. Én operasjon dekker begge, fordi AVF-04 er én funksjon.
+- **Feltnavnene følger lesingen:** `occurred_on` og `due_on`, ikke webskjemaets `occurred_at` og `due_date`. Reglene er de samme (`ImprovementCaseCreator::rules()`, `ImprovementActionLifecycleService::rules()`).
+- **Svaret er det klienten kan lese:** en ny sak returneres som `GET /deviations/{id}` (eller `/improvements/{id}`) viser den. Et nytt tiltak returneres som det vises blant sakens tiltak, med `case_id`.
+- **Ikke idempotent**, som risikotiltak (§20). Fase 4-planen hadde idempotens som fellesforutsetning, men oppdraget utelukket nye generelle mekanismer og databaser. Se funn 23 i statusdokumentet.
+- **Varsler:** den vanlige tildelingsregelen (`AssignmentObserver`). Den ansvarlige får varselet om ny sak eller nytt tiltak, med integrasjonen som `assigned_by_user_id`. Ingen egen regel for integrasjoner (S6).
+
+### Tilgang
+
+`ImprovementCaseAccessService` har tre nye regler. Domenetjenestene spør selv, så reglene gjelder uansett inngang:
+
+| Regel | Person (uendret) | Integrasjon |
+|---|---|---|
+| `canRegister()` – kan registrere i det hele tatt | `improvement.edit` i minst ett fagområde | `improvement.view` i minst ett fagområde **og** operasjonen `improvement.case.create` |
+| `canRegisterIn($areaId)` – i dette fagområdet | `improvement.edit` der | `improvement.view` der **og** operasjonen |
+| `canCreateAction($case)` – tiltak på denne saken | `canEdit()` | `canView()` **og** operasjonen `improvement.action.create` |
+
+- `ImprovementCaseCreator::create()` spør `canRegisterIn()` (422 på `business_area_id`). Det gjelder også overføringene fra revisjonsfunn, leverandør og Ledelsens gjennomgang, med samme svar for personer som før.
+- `ImprovementActionLifecycleService::create()` spør `canCreateAction()` på den låste saken (403).
+- Alt annet er uendret og nekter integrasjoner: endre sak og årsak (`canEdit`), start, alle andre tiltaksendringer, og de menneskelige beslutningene lukk, avbryt, gjenåpne, slett og effektverifisering (`HumanDecisionGuard`).
+- Utenfor en API-forespørsel skriver en integrasjon ingenting (`IntegrationOperationAuthority`).
+
+### `POST /api/v1/deviations` og `POST /api/v1/improvements`
+
+| Felt | Regel |
+|---|---|
+| `title` | påkrevd, maks 255 |
+| `description` | påkrevd, maks 10 000. Lagres, men leses aldri tilbake (D8). |
+| `business_area_id` | påkrevd. Et fagområde der integrasjonen har `improvement.view`, ellers 422. |
+| `owner_user_id` | påkrevd. Aktiv person i kunden som kan lese saker i fagområdet, ellers 422. |
+| `occurred_on` | valgfri, ikke etter i dag. Bare for avvik. Ignoreres for forbedringer. |
+| `due_on` | valgfri, `YYYY-MM-DD` |
+
+Saken opprettes med status `open`. `reported_by_user_id`, `created_by` og `updated_by` er integrasjonsidentiteten. 403 når skriverollen eller operasjonen mangler. 201 med saken.
+
+### `POST /api/v1/deviations/{caseId}/actions` og `POST /api/v1/improvements/{caseId}/actions`
+
+| Felt | Regel |
+|---|---|
+| `title` | påkrevd, maks 255 |
+| `description` | valgfri, maks 10 000. Tom lagres som ingen. Leses aldri tilbake. |
+| `owner_user_id` | påkrevd. Aktiv person som kan lese saker i sakens fagområde, ellers 422. |
+| `due_on` | påkrevd, `YYYY-MM-DD` |
+
+Saken finnes gjennom `visibleCases()` og stiens type. En sak av den andre typen, en annen kundes sak eller en sak utenfor fagområdene gir 404. En lukket eller avbrutt sak gir 422, som på saksiden. Tiltaket opprettes som `planned`.
+
+### Opphav
+
+Saksiden viser «Registrert av: Integrasjonen <applikasjon>» for en sak og ved et tiltak som en integrasjon har registrert. Navnet leses fra tildelingen med `ApiClientCustomerGrant::clientNamesFor()`, som risikosiden nå også bruker. Brukertabellen leses ikke forbi `HumanUsersScope`.
+
+### Andre endringer
+
+- `ImprovementActionLifecycleService::rules()` og `fields()` holder feltreglene og normaliseringen for tiltak. Webskjemaet bruker dem, uten endret oppførsel.
+- `ApiOpenApiContractTest` skiller nå lese- og skriveoperasjoner på metode og sti, fordi `/deviations` og `/improvements` har både `GET` og `POST`.
+- Spesifikasjonen har fire nye operasjoner og skjemaene `ImprovementCaseCreate`, `ImprovementActionCreate` og `ImprovementActionCreated`. `ImprovementAction` er delt i `ImprovementActionFields`, uten endring i det som sendes.
+
+### Tester
+
+Ny: `ApiImprovementRegistrationTest` (12 tester). Endret: `ApiRouteContractTest`, `ApiOpenApiContractTest`, `IntegrationOperationAuthorityTest`, `ApiClientGrantAdministrationTest`, `ApiDeviationReadTest`, `ApiImprovementCaseReadTest`. De to siste forventet 405 på `POST` til samlingen. Uten skriverollen er svaret nå 403.
+
+### Gjenstår før produksjon
+
+Som §20: app-rollen `Procynia.Write.All` i Entra, et ekte token mot Procynia, og at System Owner hos testkunden slår operasjonene på.

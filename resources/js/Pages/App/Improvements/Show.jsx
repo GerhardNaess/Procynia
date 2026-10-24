@@ -322,7 +322,11 @@ export default function ImprovementShow() {
                     <dl className="mt-4 grid gap-4 sm:grid-cols-3">
                         <div>
                             <dt className={TERM}>{tr.reported_by ?? 'Registrert av'}</dt>
-                            <dd className={VALUE}>{who(item.reported_by_name)}</dd>
+                            <dd className={VALUE}>
+                                {item.registered_by_integration
+                                    ? (tr.registered_by_integration ?? 'Integrasjonen :client').replace(':client', item.registered_by_integration)
+                                    : who(item.reported_by_name)}
+                            </dd>
                         </div>
                         <div>
                             <dt className={TERM}>{tr.reported_at ?? 'Registrert'}</dt>

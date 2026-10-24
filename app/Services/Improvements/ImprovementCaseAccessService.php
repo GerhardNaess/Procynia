@@ -5,8 +5,10 @@ namespace App\Services\Improvements;
 use App\Models\BusinessArea;
 use App\Models\ImprovementCase;
 use App\Models\User;
+use App\Services\Api\IntegrationOperationAuthority;
 use App\Services\Permissions\BusinessAreaGrants;
 use App\Services\Permissions\CustomerPermissionService;
+use App\Support\ApiOperationCatalog;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -36,6 +38,7 @@ class ImprovementCaseAccessService
     public function __construct(
         private readonly CustomerPermissionService $permissions,
         private readonly BusinessAreaGrants $grants,
+        private readonly IntegrationOperationAuthority $operations,
     ) {}
 
     /**
@@ -149,6 +152,53 @@ class ImprovementCaseAccessService
     public function canEdit(User $user, ImprovementCase $case): bool
     {
         return $this->canView($user, $case) && $this->can($user, CustomerPermissionCatalog::IMPROVEMENT_EDIT, $case);
+    }
+
+    /**
+     * Registering a case in this area of the actor's own customer. A person needs improvement.edit
+     * there, as always. An integration never holds improvement.edit; it may register a case — and
+     * only that — with improvement.view in the area and the operation its customer's System Owner
+     * switched on for the grant (IntegrationOperationAuthority, which also requires the write app
+     * role on an API request). Changing the case afterwards stays canEdit().
+     */
+    public function canRegisterIn(User $user, int $areaId): bool
+    {
+        if ($user->isIntegration()) {
+            return $this->canInArea($user, CustomerPermissionCatalog::IMPROVEMENT_VIEW, (int) $user->customer_id, $areaId)
+                && $this->operations->allows($user, ApiOperationCatalog::IMPROVEMENT_CASE_CREATE);
+        }
+
+        return $this->canInArea($user, CustomerPermissionCatalog::IMPROVEMENT_EDIT, (int) $user->customer_id, $areaId);
+    }
+
+    /**
+     * Whether the user may register a case in any area at all — the gate before the area is asked.
+     * For an integration, the operation must be allowed for its grant; otherwise a 403, not a 422
+     * on the fagområde.
+     */
+    public function canRegister(User $user): bool
+    {
+        $key = $user->isIntegration() ? CustomerPermissionCatalog::IMPROVEMENT_VIEW : CustomerPermissionCatalog::IMPROVEMENT_EDIT;
+
+        return $this->canOpenModule($user)
+            && $this->areaIdsFor($user, $key) !== []
+            && (! $user->isIntegration() || $this->operations->allows($user, ApiOperationCatalog::IMPROVEMENT_CASE_CREATE));
+    }
+
+    /**
+     * Adding a tiltak to the case. A person needs canEdit(), as for all work on the case's tiltak. An
+     * integration may add one — and only that — when it can read the case and the System Owner
+     * switched the operation on for its grant. Editing, starting, completing, cancelling, reopening or
+     * deleting a tiltak stays canEdit(), and verifying it canClose(): an integration passes neither.
+     */
+    public function canCreateAction(User $user, ImprovementCase $case): bool
+    {
+        if ($user->isIntegration()) {
+            return $this->canView($user, $case)
+                && $this->operations->allows($user, ApiOperationCatalog::IMPROVEMENT_ACTION_CREATE);
+        }
+
+        return $this->canEdit($user, $case);
     }
 
     /**

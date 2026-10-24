@@ -449,6 +449,69 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+    post:
+      tags: [Deviations and improvements]
+      operationId: createDeviation
+      summary: Register an avvik
+      description: |
+        Write operation `improvement.case.create`. Registers an avvik in a fagområde through the
+        same domain service, rules and responsible-person check as «Registrer» in Avvik og
+        forbedringer. The case is created open (`status: open`), with the integration as the one
+        who registered it; the case page shows which integration registered it. The responsible
+        person is notified as from the web application. `occurred_on` (hendelsesdato) is accepted.
+
+        Requires, in this order of checking (after the token and the customer grant):
+
+        1. The customer has ordered the Avvik og forbedringer module (403).
+        2. The app role `Procynia.Write.All` in the token (403).
+        3. The integration identity has `improvement.view` in at least one fagområde, and the
+           customer's System Owner has switched on `improvement.case.create` for the grant (403).
+        4. A valid body (422). `business_area_id` must be one of the identity's fagområder with
+           `improvement.view`; any other id, of this or another customer, is 422 on that field.
+
+        The answer is the case as `GET /v1/deviations/{caseId}` shows it. The description is written but, like all free
+        text, never read back. Not idempotent: the same request twice registers two cases. The case
+        cannot be changed, started, closed, cancelled, reopened or deleted through the API.
+      security:
+        - entraApplicationToken: [Procynia.Read.All, Procynia.Write.All]
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImprovementCaseCreate'
+      responses:
+        '201':
+          description: The case was registered.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ImprovementCaseDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /v1/deviations/{caseId}:
     get:
       tags: [Deviations and improvements]
@@ -487,6 +550,76 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/deviations/{caseId}/actions:
+    post:
+      tags: [Deviations and improvements]
+      operationId: createDeviationAction
+      summary: Add a tiltak to an avvik
+      description: |
+        Write operation `improvement.action.create`. Adds a planned tiltak (`status: planned`) to
+        the avvik through the same domain service, rules and responsible-person check as «Nytt
+        tiltak» on the case page. The responsible person is notified as from the web application,
+        and the case page shows which integration registered the tiltak. Nothing else on the case
+        changes.
+
+        Requires, in this order of checking (after the token and the customer grant):
+
+        1. The customer has ordered the Avvik og forbedringer module (403).
+        2. The app role `Procynia.Write.All` in the token (403).
+        3. The integration identity has `improvement.view` (403).
+        4. The avvik is visible to the identity: same customer and one of its fagområder. A
+           forbedring, any other case, or one that does not exist is 404.
+        5. The customer's System Owner has switched on `improvement.action.create` for the grant
+           (403).
+        6. A valid body, and the case is open or in progress (422). A closed or cancelled case
+           takes no tiltak until a person reopens it.
+
+        The description is written but never read back. Not idempotent: the same request twice
+        adds two tiltak. The tiltak cannot be changed, started, completed, cancelled, reopened,
+        deleted or verified through the API.
+      security:
+        - entraApplicationToken: [Procynia.Read.All, Procynia.Write.All]
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/CaseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImprovementActionCreate'
+      responses:
+        '201':
+          description: The tiltak was added.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ImprovementActionCreated'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -544,6 +677,69 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+    post:
+      tags: [Deviations and improvements]
+      operationId: createImprovement
+      summary: Register an forbedringsforslag
+      description: |
+        Write operation `improvement.case.create`. Registers an forbedringsforslag (improvement proposal) in a fagområde through the
+        same domain service, rules and responsible-person check as «Registrer» in Avvik og
+        forbedringer. The case is created open (`status: open`), with the integration as the one
+        who registered it; the case page shows which integration registered it. The responsible
+        person is notified as from the web application. `occurred_on` is not accepted: a forbedring has no hendelsesdato.
+
+        Requires, in this order of checking (after the token and the customer grant):
+
+        1. The customer has ordered the Avvik og forbedringer module (403).
+        2. The app role `Procynia.Write.All` in the token (403).
+        3. The integration identity has `improvement.view` in at least one fagområde, and the
+           customer's System Owner has switched on `improvement.case.create` for the grant (403).
+        4. A valid body (422). `business_area_id` must be one of the identity's fagområder with
+           `improvement.view`; any other id, of this or another customer, is 422 on that field.
+
+        The answer is the case as `GET /v1/improvements/{caseId}` shows it. The description is written but, like all free
+        text, never read back. Not idempotent: the same request twice registers two cases. The case
+        cannot be changed, started, closed, cancelled, reopened or deleted through the API.
+      security:
+        - entraApplicationToken: [Procynia.Read.All, Procynia.Write.All]
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImprovementCaseCreate'
+      responses:
+        '201':
+          description: The case was registered.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ImprovementCaseDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /v1/improvements/{caseId}:
     get:
       tags: [Deviations and improvements]
@@ -581,6 +777,76 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/improvements/{caseId}/actions:
+    post:
+      tags: [Deviations and improvements]
+      operationId: createImprovementAction
+      summary: Add a tiltak to an forbedring
+      description: |
+        Write operation `improvement.action.create`. Adds a planned tiltak (`status: planned`) to
+        the forbedring through the same domain service, rules and responsible-person check as «Nytt
+        tiltak» on the case page. The responsible person is notified as from the web application,
+        and the case page shows which integration registered the tiltak. Nothing else on the case
+        changes.
+
+        Requires, in this order of checking (after the token and the customer grant):
+
+        1. The customer has ordered the Avvik og forbedringer module (403).
+        2. The app role `Procynia.Write.All` in the token (403).
+        3. The integration identity has `improvement.view` (403).
+        4. The forbedring is visible to the identity: same customer and one of its fagområder. A
+           avvik, any other case, or one that does not exist is 404.
+        5. The customer's System Owner has switched on `improvement.action.create` for the grant
+           (403).
+        6. A valid body, and the case is open or in progress (422). A closed or cancelled case
+           takes no tiltak until a person reopens it.
+
+        The description is written but never read back. Not idempotent: the same request twice
+        adds two tiltak. The tiltak cannot be changed, started, completed, cancelled, reopened,
+        deleted or verified through the API.
+      security:
+        - entraApplicationToken: [Procynia.Read.All, Procynia.Write.All]
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/CaseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImprovementActionCreate'
+      responses:
+        '201':
+          description: The tiltak was added.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ImprovementActionCreated'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -2591,9 +2857,13 @@ components:
       type: string
       enum: [effective, not_effective]
     ImprovementAction:
+      allOf:
+        - $ref: '#/components/schemas/ImprovementActionFields'
+      unevaluatedProperties: false
+    ImprovementActionFields:
       type: object
+      description: The fields of a tiltak, shared by ImprovementAction and ImprovementActionCreated.
       required: [id, title, status, owner, due_on, is_overdue, completed_at, verification]
-      additionalProperties: false
       properties:
         id:
           type: integer
@@ -2650,6 +2920,83 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Timestamp'
             - type: 'null'
+
+    ImprovementCaseCreate:
+      type: object
+      description: |
+        The only fields accepted. Any other field (for example `type`, `status` or
+        `cause_analysis`) is ignored and never written; the type is the path's.
+      required: [title, description, business_area_id, owner_user_id]
+      properties:
+        title:
+          type: string
+          maxLength: 255
+          description: Leading and trailing whitespace is removed.
+        description:
+          type: string
+          maxLength: 10000
+          description: What happened or what is proposed. Written, never read back through the API.
+        business_area_id:
+          type: integer
+          description: |
+            The case's fagområde: one where the identity has `improvement.view`. Anything else is
+            422.
+        owner_user_id:
+          type: integer
+          description: |
+            The responsible person: an active user of the same customer who can read cases in the
+            fagområde (`improvement.view`). Not the integration identity. Anyone else is 422.
+        occurred_on:
+          type: [string, 'null']
+          format: date
+          description: When it happened (hendelsesdato), `YYYY-MM-DD`, not after today. Avvik only; ignored on `/v1/improvements`.
+        due_on:
+          type: [string, 'null']
+          format: date
+          description: The frist, `YYYY-MM-DD`.
+      example:
+        title: Varer mottatt uten sertifikat
+        description: Leveransen 12. oktober manglet samsvarssertifikat.
+        business_area_id: 12
+        owner_user_id: 1234
+        occurred_on: '2026-10-12'
+        due_on: '2026-11-15'
+    ImprovementActionCreate:
+      type: object
+      description: The only fields accepted. Any other field (for example `status` or `completion_note`) is ignored and never written.
+      required: [title, owner_user_id, due_on]
+      properties:
+        title:
+          type: string
+          maxLength: 255
+          description: Leading and trailing whitespace is removed.
+        description:
+          type: [string, 'null']
+          maxLength: 10000
+          description: Written, never read back through the API. Blank is stored as none.
+        owner_user_id:
+          type: integer
+          description: |
+            The responsible person: an active user of the same customer who can read cases in the
+            case's fagområde. Not the integration identity. Anyone else is 422.
+        due_on:
+          type: string
+          format: date
+          description: The frist, `YYYY-MM-DD`.
+      example:
+        title: Krev sertifikat før mottak
+        owner_user_id: 1234
+        due_on: '2026-11-01'
+    ImprovementActionCreated:
+      description: The tiltak as it appears among the case's tiltak, with the case it belongs to. Always planned, with no completion.
+      allOf:
+        - $ref: '#/components/schemas/ImprovementActionFields'
+        - type: object
+          required: [case_id]
+          properties:
+            case_id:
+              type: integer
+      unevaluatedProperties: false
 
     ObjectiveStatus:
       type: string

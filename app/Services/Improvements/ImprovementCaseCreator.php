@@ -15,9 +15,11 @@ use Illuminate\Validation\ValidationException;
  * Registering an avvik or a forbedring — the one place a case comes into being, whether someone
  * registers it in Avvik og forbedringer or a revisjonsfunn is handed off to it.
  *
- * The fields and their rules are the same for both: rules(). create() checks that the person may
- * edit in *the chosen* fagområde — not merely somewhere — and that the responsible person can read
- * cases there, and then writes the case open, reported by the person registering it. Both checks
+ * The fields and their rules are the same for both: rules(). create() checks that the actor may
+ * register in *the chosen* fagområde — not merely somewhere — and that the responsible person can
+ * read cases there, and then writes the case open, reported by the one registering it. A person
+ * registers with improvement.edit; an integration through the API only, with the operation its
+ * System Owner allowed (ImprovementCaseAccessService::canRegisterIn). Both checks
  * answer with a 422 on the field: whether the id names an area of another customer, one outside the
  * person's scope or nothing at all, the answer is the same.
  *
@@ -58,7 +60,7 @@ class ImprovementCaseCreator
     {
         $areaId = (int) $validated['business_area_id'];
 
-        $this->assertCanEditIn($actor, $areaId);
+        $this->assertCanRegisterIn($actor, $areaId);
         $this->assertValidOwner($actor, (int) $validated['owner_user_id'], $areaId);
 
         return ImprovementCase::query()->create($this->fields($validated) + [
@@ -133,6 +135,19 @@ class ImprovementCaseCreator
         }
 
         return $locked;
+    }
+
+    /**
+     * Registering in this area (ImprovementCaseAccessService::canRegisterIn): improvement.edit for a
+     * person, the allowed API operation for an integration. A 422 on business_area_id otherwise.
+     */
+    public function assertCanRegisterIn(User $actor, int $areaId): void
+    {
+        if (! $this->access->canRegisterIn($actor, $areaId)) {
+            throw ValidationException::withMessages([
+                'business_area_id' => __('procynia.improvements.validation.area_not_allowed'),
+            ]);
+        }
     }
 
     public function assertCanEditIn(User $actor, int $areaId): void

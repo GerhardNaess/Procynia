@@ -408,6 +408,14 @@ function ActionCard({ action, base, panel, openPanel, closePanel, onStart, onDel
                         {action.owner_name ?? <span className="font-semibold text-amber-800">{t.no_owner ?? 'Mangler ansvarlig'}</span>}
                     </dd>
                 </div>
+                {action.registered_by_integration && (
+                    <div>
+                        <dt className={TERM}>{t.registered_by ?? 'Registrert av'}</dt>
+                        <dd className={VALUE} data-testid="improvement-action-origin">
+                            {(t.registered_by_integration ?? 'Integrasjonen :client').replace(':client', action.registered_by_integration)}
+                        </dd>
+                    </div>
+                )}
                 <div>
                     <dt className={TERM}>{t.field_due_date ?? 'Frist'}</dt>
                     <dd className={VALUE} data-testid="improvement-action-due-date">

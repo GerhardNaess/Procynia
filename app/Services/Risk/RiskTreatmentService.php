@@ -61,12 +61,7 @@ class RiskTreatmentService
 
         // A tiltak registered through the API names the application. Read from the grants, which
         // name the integration identity; the users table is not read for it.
-        $integrationClients = ApiClientCustomerGrant::query()
-            ->where('customer_id', $risk->customer_id)
-            ->whereIn('integration_user_id', $actions->pluck('created_by')->filter()->unique()->values()->all() ?: [0])
-            ->with('client:id,name')
-            ->get()
-            ->mapWithKeys(fn (ApiClientCustomerGrant $grant): array => [(int) $grant->integration_user_id => $grant->client?->name]);
+        $integrationClients = ApiClientCustomerGrant::clientNamesFor((int) $risk->customer_id, $actions->pluck('created_by'));
 
         return $actions
             ->sortBy(fn (RiskTreatmentAction $action): array => $action->isOpen()

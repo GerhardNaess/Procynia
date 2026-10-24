@@ -2823,6 +2823,8 @@ return [
             'operations_hint' => 'Switch on only what the application needs. It applies only in the business areas the integration can read, and the application must also hold the write role in Entra ID.',
             'operations' => [
                 'risk_treatment_action_create' => 'Allow creating risk treatment actions',
+                'improvement_case_create' => 'Allow registering deviations and improvement proposals',
+                'improvement_action_create' => 'Allow creating actions on deviations and improvements',
             ],
             'help_title' => 'Integrations',
             'help_steps' => [
@@ -6467,6 +6469,7 @@ return [
         ],
         'context_heading' => 'Context',
         'reported_by' => 'Registered by',
+        'registered_by_integration' => 'The integration :client',
         'reported_at' => 'Registered',
         'start' => 'Start handling',
         'close' => 'Close case',
@@ -6584,6 +6587,8 @@ return [
             'intro' => 'Concrete activities to be carried out, with an owner and a due date.',
             'empty' => 'No actions have been added yet.',
             'create' => 'New action',
+            'registered_by' => 'Registered by',
+            'registered_by_integration' => 'The integration :client',
             'create_heading' => 'New action',
             'edit' => 'Edit',
             'edit_heading' => 'Edit action',

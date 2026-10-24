@@ -51,13 +51,23 @@ class IntegrationOperationAuthorityTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_the_catalog_is_closed_and_names_the_risk_treatment_operation_only(): void
+    public function test_the_catalog_is_closed_and_names_its_three_operations_only(): void
     {
-        $this->assertSame([self::OPERATION], ApiOperationCatalog::all());
+        $this->assertSame([
+            self::OPERATION,
+            ApiOperationCatalog::IMPROVEMENT_CASE_CREATE,
+            ApiOperationCatalog::IMPROVEMENT_ACTION_CREATE,
+        ], ApiOperationCatalog::all());
         $this->assertSame('risk', ApiOperationCatalog::module(self::OPERATION));
+        $this->assertSame('improvements', ApiOperationCatalog::module(ApiOperationCatalog::IMPROVEMENT_CASE_CREATE));
+        $this->assertSame('improvements', ApiOperationCatalog::module(ApiOperationCatalog::IMPROVEMENT_ACTION_CREATE));
+        $this->assertFalse(ApiOperationCatalog::exists('improvement.edit'));
         $this->assertFalse(ApiOperationCatalog::exists('risk.edit'));
         $this->assertNull(ApiOperationCatalog::module('risk.edit'));
-        $this->assertNotSame(ApiOperationCatalog::labelKey(self::OPERATION), __((string) ApiOperationCatalog::labelKey(self::OPERATION)));
+
+        foreach (ApiOperationCatalog::all() as $operation) {
+            $this->assertNotSame(ApiOperationCatalog::labelKey($operation), __((string) ApiOperationCatalog::labelKey($operation)));
+        }
     }
 
     public function test_an_allowed_operation_passes_when_every_condition_holds(): void

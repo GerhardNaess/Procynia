@@ -307,9 +307,10 @@ class ApiDeviationReadTest extends TestCase
         $this->get('/api/v1/deviations', $headers)->assertOk();
 
         foreach (['post', 'put', 'patch', 'delete'] as $method) {
-            $this->{$method.'Json'}('/api/v1/deviations', ['title' => 'Endret'], $headers)
-                ->assertStatus(405)
-                ->assertJsonPath('error.code', 'method_not_allowed');
+            // POST /deviations registers an avvik (AVF-04): refused without the write app role.
+            $method === 'post'
+                ? $this->postJson('/api/v1/deviations', ['title' => 'Endret'], $headers)->assertForbidden()->assertJsonPath('error.code', 'forbidden')
+                : $this->{$method.'Json'}('/api/v1/deviations', ['title' => 'Endret'], $headers)->assertStatus(405)->assertJsonPath('error.code', 'method_not_allowed');
 
             // GET /deviations/{id} reads one avvik; nothing else is accepted there.
             $this->{$method.'Json'}("/api/v1/deviations/{$case->id}", ['closing_note' => 'Lukket av maskin'], $headers)

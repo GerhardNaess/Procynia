@@ -42,8 +42,9 @@ use Illuminate\Validation\ValidationException;
  *
  * AUTHORIZATION. verify() is a human decision about the outcome, not the work: it checks
  * HumanDecisionGuard (IMPROVEMENT_CLOSE) and improvement.close in the case's area itself, on the
- * locked case (phase 0 step 10). The other writes check improvement.edit in the case's area
- * themselves, the same way, and the owner with ImprovementCaseAccessService::isValidOwner().
+ * locked case (phase 0 step 10). create() checks canCreateAction() — improvement.edit for a person,
+ * the allowed API operation for an integration — and the other writes improvement.edit in the case's
+ * area, the same way; the owner always with ImprovementCaseAccessService::isValidOwner().
  */
 class ImprovementActionLifecycleService
 {
@@ -53,12 +54,48 @@ class ImprovementActionLifecycleService
     ) {}
 
     /**
+     * The fields of Nytt tiltak and Rediger, as a form or the API sends them. One set of rules for
+     * every entry point; fields() turns the result into what create() and update() take. Status is
+     * not among them: a tiltak is created planned and moves only through the lifecycle actions.
+     *
+     * @return array<string, list<string>>
+     */
+    public static function rules(): array
+    {
+        return [
+            'title' => ['required', 'string', 'max:255'],
+            'description' => ['nullable', 'string', 'max:10000'],
+            'owner_user_id' => ['required', 'integer'],
+            'due_date' => ['required', 'date_format:Y-m-d'],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated  validated with rules()
+     * @return array{title: string, description: ?string, owner_user_id: int, due_date: string}
+     */
+    public static function fields(array $validated): array
+    {
+        $description = trim((string) ($validated['description'] ?? ''));
+
+        return [
+            'title' => trim((string) $validated['title']),
+            'description' => $description !== '' ? $description : null,
+            'owner_user_id' => (int) $validated['owner_user_id'],
+            'due_date' => (string) $validated['due_date'],
+        ];
+    }
+
+    /**
+     * A new, planned tiltak. ImprovementCaseAccessService::canCreateAction(), asked of the locked case:
+     * improvement.edit for a person, the allowed API operation for an integration.
+     *
      * @param  array{title: string, description: ?string, owner_user_id: int, due_date: string}  $fields
      */
     public function create(ImprovementCase $case, User $actor, array $fields): ImprovementAction
     {
         return DB::transaction(function () use ($case, $actor, $fields): ImprovementAction {
-            $locked = $this->lockActiveCase($case, 'title', $this->mayEdit($actor));
+            $locked = $this->lockActiveCase($case, 'title', fn (ImprovementCase $locked): bool => $this->access->canCreateAction($actor, $locked));
             $this->assertValidOwner($locked, (int) $fields['owner_user_id']);
 
             return ImprovementAction::query()->create($fields + [

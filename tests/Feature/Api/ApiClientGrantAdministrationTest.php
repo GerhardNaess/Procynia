@@ -465,7 +465,11 @@ class ApiClientGrantAdministrationTest extends TestCase
             ->get('/app/customer-environment?tab=integrations')
             ->assertOk()
             ->assertInertia(fn ($page) => $page
-                ->where('integrations.operations', [['key' => ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE, 'label' => 'Tillat opprettelse av risikotiltak']])
+                ->where('integrations.operations', [
+                    ['key' => ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE, 'label' => 'Tillat opprettelse av risikotiltak'],
+                    ['key' => ApiOperationCatalog::IMPROVEMENT_CASE_CREATE, 'label' => 'Tillat registrering av avvik og forbedringsforslag'],
+                    ['key' => ApiOperationCatalog::IMPROVEMENT_ACTION_CREATE, 'label' => 'Tillat opprettelse av tiltak på avvik og forbedringer'],
+                ])
                 ->where('integrations.grants.0.allowed_operations', [ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE])
                 ->where('integrations.grants.0.operations_url', route('app.customer-environment.integrations.operations.update', ['grantId' => $grant->id])));
     }

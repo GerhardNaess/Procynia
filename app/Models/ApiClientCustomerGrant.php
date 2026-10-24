@@ -71,6 +71,32 @@ class ApiClientCustomerGrant extends Model
         return in_array($operation, (array) ($this->allowed_operations ?? []), true);
     }
 
+    /**
+     * The application behind each integration identity among these user ids, for showing who
+     * registered a record through the API («Registrert av integrasjonen …»). Read from the grants,
+     * revoked ones included, so the origin stays after access is withdrawn; the users table is not
+     * read for it. Ids that are no integration of the customer are absent.
+     *
+     * @param  iterable<int|string|null>  $userIds
+     * @return array<int, ?string> integration user id => application name
+     */
+    public static function clientNamesFor(int $customerId, iterable $userIds): array
+    {
+        $ids = collect($userIds)->filter()->map(fn (mixed $id): int => (int) $id)->unique()->values()->all();
+
+        if ($ids === []) {
+            return [];
+        }
+
+        return self::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('integration_user_id', $ids)
+            ->with('client:id,name')
+            ->get()
+            ->mapWithKeys(fn (self $grant): array => [(int) $grant->integration_user_id => $grant->client?->name])
+            ->all();
+    }
+
     /** @param  Builder<self>  $query */
     public function scopeActive(Builder $query): void
     {

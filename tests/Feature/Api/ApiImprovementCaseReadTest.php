@@ -297,7 +297,10 @@ class ApiImprovementCaseReadTest extends TestCase
 
         foreach (['post', 'put', 'patch', 'delete'] as $method) {
             foreach (['/api/v1/improvements', "/api/v1/improvements/{$improvement->id}"] as $url) {
-                $this->{$method.'Json'}($url, ['status' => 'closed'], $headers)->assertStatus(405)->assertJsonPath('error.code', 'method_not_allowed');
+                // POST /improvements registers a forbedringsforslag (AVF-04): refused without the write app role.
+                $method === 'post' && $url === '/api/v1/improvements'
+                    ? $this->postJson($url, ['status' => 'closed'], $headers)->assertForbidden()->assertJsonPath('error.code', 'forbidden')
+                    : $this->{$method.'Json'}($url, ['status' => 'closed'], $headers)->assertStatus(405)->assertJsonPath('error.code', 'method_not_allowed');
             }
         }
 

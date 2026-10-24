@@ -32,6 +32,10 @@ class ApiRouteContractTest extends TestCase
     /** The write routes, by name, with the one method each accepts. Extend deliberately. */
     private const WRITE_ROUTES = [
         'api.v1.risks.treatment-actions.store' => 'POST',
+        'api.v1.deviations.store' => 'POST',
+        'api.v1.deviations.actions.store' => 'POST',
+        'api.v1.improvements.store' => 'POST',
+        'api.v1.improvements.actions.store' => 'POST',
     ];
 
     /**

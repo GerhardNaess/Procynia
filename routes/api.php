@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\Compliance\ComplianceFrameworkController;
 use App\Http\Controllers\Api\V1\Compliance\ComplianceRequirementController;
 use App\Http\Controllers\Api\V1\Compliance\ComplianceStatusController;
 use App\Http\Controllers\Api\V1\DeviationController;
+use App\Http\Controllers\Api\V1\ImprovementCaseRegistrationController;
 use App\Http\Controllers\Api\V1\ImprovementController;
 use App\Http\Controllers\Api\V1\KpiController;
 use App\Http\Controllers\Api\V1\ManagementReviewController;
@@ -16,6 +17,7 @@ use App\Http\Controllers\Api\V1\QualityController;
 use App\Http\Controllers\Api\V1\RiskController;
 use App\Http\Controllers\Api\V1\RiskTreatmentActionController;
 use App\Http\Controllers\Api\V1\SupplierController;
+use App\Models\ImprovementCase;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -36,7 +38,7 @@ Route::prefix('v1')
         Route::get('business-areas', BusinessAreaController::class)->name('business-areas');
         Route::get('risks', [RiskController::class, 'index'])->name('risks.index');
         Route::get('risks/{riskId}', [RiskController::class, 'show'])->whereNumber('riskId')->name('risks.show');
-        // The one write route: needs the write app role on top, and the operation allowed for the grant.
+        // Write routes need the write app role on top, and the operation allowed for the grant.
         Route::post('risks/{riskId}/treatment-actions', [RiskTreatmentActionController::class, 'store'])
             ->whereNumber('riskId')
             ->middleware('api.write')
@@ -45,6 +47,18 @@ Route::prefix('v1')
         Route::get('deviations/{caseId}', [DeviationController::class, 'show'])->whereNumber('caseId')->name('deviations.show');
         Route::get('improvements', [ImprovementController::class, 'index'])->name('improvements.index');
         Route::get('improvements/{caseId}', [ImprovementController::class, 'show'])->whereNumber('caseId')->name('improvements.show');
+        // Registering a case or a tiltak in Avvik og forbedringer; the type is the path's.
+        foreach (['deviations' => ImprovementCase::TYPE_DEVIATION, 'improvements' => ImprovementCase::TYPE_IMPROVEMENT] as $path => $type) {
+            Route::post($path, [ImprovementCaseRegistrationController::class, 'store'])
+                ->defaults('type', $type)
+                ->middleware('api.write')
+                ->name("{$path}.store");
+            Route::post("{$path}/{caseId}/actions", [ImprovementCaseRegistrationController::class, 'storeAction'])
+                ->whereNumber('caseId')
+                ->defaults('type', $type)
+                ->middleware('api.write')
+                ->name("{$path}.actions.store");
+        }
         Route::get('objectives', [ObjectiveController::class, 'index'])->name('objectives.index');
         Route::get('objectives/{objectiveId}', [ObjectiveController::class, 'show'])->whereNumber('objectiveId')->name('objectives.show');
         Route::get('kpis', [KpiController::class, 'index'])->name('kpis.index');
