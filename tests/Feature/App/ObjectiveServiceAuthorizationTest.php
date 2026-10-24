@@ -93,15 +93,12 @@ class ObjectiveServiceAuthorizationTest extends TestCase
      * Register work is not a human decision: an integration holding objective.edit does it too.
      * Closing, retiring and reopening are (A39) — ObjectiveLifecycleDecisionTest.
      */
-    public function test_an_integration_with_objective_edit_does_the_register_work(): void
+    public function test_an_integration_with_objective_edit_only_reads(): void
     {
+        // An integration holds read keys only (D13): objective.edit on its role buys nothing.
         $case = $this->case();
 
-        foreach ($this->work($case, $case['integration'], handOff: false, lifecycle: false) as $write) {
-            $write();
-        }
-
-        $this->assertWritten($case, $case['integration'], lifecycle: false);
+        $this->assertEveryWriteRefused($case, $case['integration'], 'integration');
     }
 
     /** Each lacks exactly what the work needs; nothing is written. */

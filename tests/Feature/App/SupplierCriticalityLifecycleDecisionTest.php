@@ -159,9 +159,8 @@ class SupplierCriticalityLifecycleDecisionTest extends TestCase
     public function test_register_work_never_changes_status_or_criticality(): void
     {
         $world = $this->world();
+        // A person with supplier.edit: an integration does no register work at all (D13).
         $integration = $this->supplierUser($world['customer'], [CustomerPermissionCatalog::SUPPLIER_EDIT]);
-        $integration->forceFill(['role' => User::ROLE_INTEGRATION])->save();
-        $integration = $integration->fresh();
 
         $registered = app(SupplierRegistration::class)->register($integration, $this->fields($integration, 'Ny AS'), Supplier::STATUS_ONBOARDING, null);
         $this->assertSame([Supplier::STATUS_ONBOARDING, null], [$registered->status, $registered->criticality]);

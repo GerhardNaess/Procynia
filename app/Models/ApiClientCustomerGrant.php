@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\HumanUsersScope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -51,7 +52,8 @@ class ApiClientCustomerGrant extends Model
     /** @return BelongsTo<User, $this> */
     public function integrationUser(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'integration_user_id');
+        // The one relation that reads an integration identity; every other read of users leaves it out.
+        return $this->belongsTo(User::class, 'integration_user_id')->withoutGlobalScope(HumanUsersScope::class);
     }
 
     /** @param  Builder<self>  $query */

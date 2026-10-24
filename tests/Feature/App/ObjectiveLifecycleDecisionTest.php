@@ -162,7 +162,8 @@ class ObjectiveLifecycleDecisionTest extends TestCase
     public function test_register_work_never_changes_a_status(): void
     {
         $case = $this->case();
-        $integration = $case['integration'];
+        // A person with objective.edit: an integration does no register work at all (D13).
+        $integration = $case['editor'];
 
         app(ObjectiveRegistration::class)->update($integration, $case['open'], [
             'title' => 'Endret', 'description' => null, 'business_area_id' => (int) $case['area']->id,

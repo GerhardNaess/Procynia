@@ -89,11 +89,11 @@ class ObjectiveHumanDecisionTest extends TestCase
         $this->assertFalse($access->canMeasure($integration, $case['objective']));
         $this->assertFalse($access->canDelete($integration, $case['objective']));
 
-        // Keys a machine may hold reach its fagområder as before.
-        foreach ([CustomerPermissionCatalog::OBJECTIVE_VIEW, CustomerPermissionCatalog::OBJECTIVE_EDIT] as $key) {
-            $this->assertTrue($access->can($integration, $key, $case['objective']), $key);
-            $this->assertTrue($access->reachesAllAreas($integration, $key), $key);
-        }
+        // An integration reads, and nothing else (D13).
+        $this->assertTrue($access->can($integration, CustomerPermissionCatalog::OBJECTIVE_VIEW, $case['objective']));
+        $this->assertTrue($access->reachesAllAreas($integration, CustomerPermissionCatalog::OBJECTIVE_VIEW));
+        $this->assertFalse($access->can($integration, CustomerPermissionCatalog::OBJECTIVE_EDIT, $case['objective']));
+        $this->assertSame([], $access->areaIdsFor($integration, CustomerPermissionCatalog::OBJECTIVE_EDIT));
 
         // The same role makes a person a full decider.
         $this->assertTrue($access->canMeasure($case['decider'], $case['objective']));

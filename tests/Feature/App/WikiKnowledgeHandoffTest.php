@@ -200,18 +200,24 @@ class WikiKnowledgeHandoffTest extends TestCase
      * so an integration may hand over. It never becomes the source's document owner: that is a
      * person's responsibility (docs/external-api-architecture.md §4.3).
      */
-    public function test_an_integration_hands_over_but_never_owns_the_source(): void
+    public function test_an_integration_neither_hands_over_nor_owns_a_source(): void
     {
+        // An integration holds read keys only (D13). Handing knowledge over is a proposal path the
+        // external API does not offer yet; widening it is CustomerPermissionCatalog::integrationPermissions().
         $customer = $this->customer();
         $integration = $this->member($customer, [CustomerPermissionCatalog::WIKI_KNOWLEDGE_HANDOFF]);
         $integration->forceFill(['role' => User::ROLE_INTEGRATION])->save();
 
-        $result = app(WikiKnowledgeHandoffService::class)->deposit(
-            (int) $customer->id, $integration->fresh(), 'quality', 'quality_item', 1, 'Maskinforslag', 'Et forslag fra en integrasjon.',
-        );
+        try {
+            app(WikiKnowledgeHandoffService::class)->deposit(
+                (int) $customer->id, $integration->fresh(), 'quality', 'quality_item', 1, 'Maskinforslag', 'Et forslag fra en integrasjon.',
+            );
+            $this->fail('An integration handed knowledge over.');
+        } catch (AuthorizationException) {
+            $this->addToAssertionCount(1);
+        }
 
-        $this->assertNull($result['document']->owner_user_id, 'an integration is never a document owner');
-        $this->assertSame((int) $integration->id, (int) $result['document']->uploaded_by_user_id);
+        $this->assertFalse($integration->fresh()->canBeEnterpriseWikiDocumentOwner(), 'an integration is never a document owner');
         $this->assertSame(0, EnterpriseWikiPage::query()->where('customer_id', $customer->id)->count(), 'nothing is published');
     }
 

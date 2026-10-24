@@ -65,13 +65,21 @@ class ComplianceServiceAuthorizationTest extends TestCase
     }
 
     /** An editor — and an integration holding compliance.edit — does the register work. */
-    public function test_an_editor_and_an_integration_with_compliance_edit_do_the_register_work(): void
+    public function test_an_editor_does_the_register_work_and_an_integration_with_compliance_edit_does_not(): void
     {
         $world = $this->world();
         $integration = $this->editorWithQuality($world['customer']);
         $integration->forceFill(['role' => User::ROLE_INTEGRATION])->save();
 
-        foreach (['editor' => $world['editor'], 'integration' => $integration->fresh()] as $who => $actor) {
+        // An integration holds read keys only (D13).
+        try {
+            app(ComplianceRequirementService::class)->create($integration->fresh(), $this->fields($world, 'Nytt krav (integration)'));
+            $this->fail('An integration created a requirement.');
+        } catch (AuthorizationException) {
+            $this->assertSame(0, ComplianceRequirement::query()->where('title', 'Nytt krav (integration)')->count());
+        }
+
+        foreach (['editor' => $world['editor']] as $who => $actor) {
             $created = app(ComplianceRequirementService::class)->create($actor, $this->fields($world, "Nytt krav ({$who})"));
             $this->assertSame((int) $actor->id, (int) $created->created_by, $who);
             app(ComplianceRequirementLifecycleService::class)->retire($created, $actor, 'Erstattet.');

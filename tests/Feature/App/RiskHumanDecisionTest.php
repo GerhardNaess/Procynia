@@ -86,10 +86,14 @@ class RiskHumanDecisionTest extends TestCase
             $this->assertFalse($access->reachesAllAreas($integration, $key), $key);
         }
 
-        // Keys a machine may hold reach its fagområder as before.
-        foreach ([CustomerPermissionCatalog::RISK_VIEW, CustomerPermissionCatalog::RISK_CREATE, CustomerPermissionCatalog::RISK_EDIT] as $key) {
-            $this->assertTrue($access->can($integration, $key, $case['risk']), $key);
-            $this->assertTrue($access->reachesAllAreas($integration, $key), $key);
+        // An integration reads, and nothing else (D13): risk.view reaches its fagområder,
+        // risk.create and risk.edit do not, whatever its role holds.
+        $this->assertTrue($access->can($integration, CustomerPermissionCatalog::RISK_VIEW, $case['risk']));
+        $this->assertTrue($access->reachesAllAreas($integration, CustomerPermissionCatalog::RISK_VIEW));
+
+        foreach ([CustomerPermissionCatalog::RISK_CREATE, CustomerPermissionCatalog::RISK_EDIT] as $key) {
+            $this->assertFalse($access->can($integration, $key, $case['risk']), $key);
+            $this->assertSame([], $access->areaIdsFor($integration, $key), $key);
         }
 
         // The same role makes a person a full decider.

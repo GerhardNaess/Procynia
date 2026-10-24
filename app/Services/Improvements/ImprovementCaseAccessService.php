@@ -194,6 +194,7 @@ class ImprovementCaseAccessService
     public function isValidOwner(?User $owner, int $customerId, int $areaId): bool
     {
         return $owner instanceof User
+            && ! $owner->isIntegration()
             && (bool) $owner->is_active
             && (int) $owner->customer_id === $customerId
             && $this->canInArea($owner, CustomerPermissionCatalog::IMPROVEMENT_VIEW, $customerId, $areaId);
@@ -236,7 +237,7 @@ class ImprovementCaseAccessService
      */
     private function withheldFromIntegration(User $user, string $permissionKey): bool
     {
-        return $user->isIntegration() && CustomerPermissionCatalog::isHumanOnly($permissionKey);
+        return $user->isIntegration() && ! CustomerPermissionCatalog::mayBeHeldByIntegration($permissionKey);
     }
 
     private function isImprovementPermission(string $permissionKey): bool

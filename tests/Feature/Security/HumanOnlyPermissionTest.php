@@ -59,9 +59,11 @@ class HumanOnlyPermissionTest extends TestCase
         $integration = $this->userWithEveryPermission($customer, User::ROLE_INTEGRATION);
         $permissions = app(CustomerPermissionService::class);
 
+        // An integration holds the read keys and nothing else (D13) — every human-only key falls
+        // outside them.
         foreach (CustomerPermissionCatalog::all() as $key) {
             $this->assertSame(
-                ! CustomerPermissionCatalog::isHumanOnly($key),
+                CustomerPermissionCatalog::mayBeHeldByIntegration($key),
                 $permissions->has($integration, $key),
                 $key,
             );
@@ -70,7 +72,8 @@ class HumanOnlyPermissionTest extends TestCase
         $effective = $permissions->effectivePermissions($integration);
         $this->assertSame([], array_values(array_intersect($effective, CustomerPermissionCatalog::humanOnlyPermissions())));
         $this->assertContains(CustomerPermissionCatalog::WIKI_VIEW, $effective);
-        $this->assertContains(CustomerPermissionCatalog::QUALITY_EDIT, $effective);
+        $this->assertNotContains(CustomerPermissionCatalog::QUALITY_EDIT, $effective);
+        $this->assertSame([], array_values(array_intersect(CustomerPermissionCatalog::integrationPermissions(), CustomerPermissionCatalog::humanOnlyPermissions())));
     }
 
     public function test_a_person_with_the_same_grants_keeps_every_key(): void

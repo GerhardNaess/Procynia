@@ -70,15 +70,22 @@ class ManagementReviewServiceAccessTest extends TestCase
     }
 
     /** Not a human decision: an integration with management_review.edit edits a draft. */
-    public function test_an_integration_with_management_review_edit_may_edit_a_draft(): void
+    public function test_an_integration_with_management_review_edit_only_reads(): void
     {
+        // An integration holds read keys only (D13): management_review.edit buys nothing.
         $world = $this->world();
         $integration = $this->mrReader($world['customer'], [CustomerPermissionCatalog::MANAGEMENT_REVIEW_EDIT]);
         $integration->forceFill(['role' => User::ROLE_INTEGRATION])->save();
+        $conclusion = $world['review']->fresh()->conclusion;
 
-        app(ManagementReviewService::class)->updateConclusion($integration->fresh(), $world['review'], 'Fra integrasjon.');
+        try {
+            app(ManagementReviewService::class)->updateConclusion($integration->fresh(), $world['review'], 'Fra integrasjon.');
+            $this->fail('An integration edited a draft review.');
+        } catch (AuthorizationException) {
+            $this->addToAssertionCount(1);
+        }
 
-        $this->assertSame('Fra integrasjon.', $world['review']->fresh()->conclusion);
+        $this->assertSame($conclusion, $world['review']->fresh()->conclusion);
     }
 
     public function test_every_write_is_refused_in_the_service_without_edit_in_the_customer(): void

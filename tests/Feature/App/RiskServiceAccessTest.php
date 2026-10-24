@@ -11,6 +11,7 @@ use App\Models\Risk;
 use App\Models\RiskTreatmentAction;
 use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
+use App\Services\Risk\RiskAccessService;
 use App\Services\Risk\RiskControlService;
 use App\Services\Risk\RiskCreator;
 use App\Services\Risk\RiskQualityContextService;
@@ -69,16 +70,28 @@ class RiskServiceAccessTest extends TestCase
     }
 
     /** Not a human decision: an integration with risk.edit in the area edits a risk and its tiltak. */
-    public function test_an_integration_with_risk_edit_may_edit(): void
+    public function test_an_integration_with_risk_edit_only_reads(): void
     {
+        // An integration holds read keys only (D13): risk.edit on its role buys nothing.
         $case = $this->case();
         $integration = $this->person($case['customer'], [CustomerPermissionCatalog::RISK_VIEW, CustomerPermissionCatalog::RISK_EDIT], [$case['area']], User::ROLE_INTEGRATION);
+        $title = $case['risk']->title;
 
-        app(RiskCreator::class)->update($integration, $case['risk'], $this->fields($case, ['title' => 'Strømbrudd i datasenter']));
-        app(RiskTreatmentService::class)->create($integration, $case['risk'], $this->tiltak($case));
+        foreach ([
+            fn () => app(RiskCreator::class)->update($integration, $case['risk'], $this->fields($case, ['title' => 'Strømbrudd i datasenter'])),
+            fn () => app(RiskTreatmentService::class)->create($integration, $case['risk'], $this->tiltak($case)),
+        ] as $write) {
+            try {
+                $write();
+                $this->fail('An integration wrote to a risk.');
+            } catch (AuthorizationException) {
+                $this->addToAssertionCount(1);
+            }
+        }
 
-        $this->assertSame('Strømbrudd i datasenter', $case['risk']->fresh()->title);
-        $this->assertSame(2, RiskTreatmentAction::query()->where('risk_id', $case['risk']->id)->count(), 'the fixture\'s tiltak and the new one');
+        $this->assertSame($title, $case['risk']->fresh()->title);
+        $this->assertSame(1, RiskTreatmentAction::query()->where('risk_id', $case['risk']->id)->count(), 'only the fixture\'s tiltak');
+        $this->assertTrue(app(RiskAccessService::class)->can($integration, CustomerPermissionCatalog::RISK_VIEW, $case['risk']));
     }
 
     public function test_every_write_is_refused_in_the_service_without_risk_edit_in_the_area(): void

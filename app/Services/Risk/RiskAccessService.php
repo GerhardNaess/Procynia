@@ -158,7 +158,8 @@ class RiskAccessService
 
     /**
      * Changing what the risk is or holds — its fields and status, its tiltak, its links to Kvalitet.
-     * Not a human-only decision: an integration with risk.edit may. The services that write ask
+     * Not a human-only decision, but an integration never holds risk.edit: it only reads
+     * (CustomerPermissionCatalog::integrationPermissions()). The services that write ask
      * this themselves, so the rule is the same from every entry point.
      */
     public function canEdit(User $user, Risk $risk): bool
@@ -213,7 +214,7 @@ class RiskAccessService
      */
     private function withheldFromIntegration(User $user, string $permissionKey): bool
     {
-        return $user->isIntegration() && CustomerPermissionCatalog::isHumanOnly($permissionKey);
+        return $user->isIntegration() && ! CustomerPermissionCatalog::mayBeHeldByIntegration($permissionKey);
     }
 
     private function isRiskPermission(string $permissionKey): bool

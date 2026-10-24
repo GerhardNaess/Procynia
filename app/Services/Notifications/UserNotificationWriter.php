@@ -11,8 +11,9 @@ use Illuminate\Support\Facades\DB;
  *
  * It holds the rules every one of them had restated, so a new module cannot forget one:
  *
- *  - The recipient must be an active user of the customer the notification is about. A notification
- *    is a disclosure, so this is the isolation boundary — a row that fails it is never written, and
+ *  - The recipient must be an active person (never an integration identity) of the customer the
+ *    notification is about. A notification is a disclosure, so this is the isolation boundary — a
+ *    row that fails it is never written, and
  *    no target_url can point across a customer.
  *  - The actor is never told about their own action.
  *  - dedupe_key makes the insert idempotent: a retry, a second click or a re-run sweep writes
@@ -49,8 +50,10 @@ class UserNotificationWriter
     ): bool {
         $recipient = is_int($recipient) ? User::query()->find($recipient) : $recipient;
 
+        // A notification is for a person. An integration identity is never one, whoever names it.
         if (! $recipient instanceof User
             || ! $recipient->is_active
+            || $recipient->isIntegration()
             || (int) $recipient->customer_id !== $customerId) {
             return false;
         }

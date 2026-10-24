@@ -322,6 +322,33 @@ final class CustomerPermissionCatalog
         ];
     }
 
+    /**
+     * The only permissions an integration identity can hold: reading, module by module. Whatever
+     * roles a System Owner gives it, CustomerPermissionService and the fagområde services keep
+     * nothing else, so an integration never exceeds read access (D13, external API phase 1). Every
+     * human-only permission falls outside this list.
+     *
+     * @return list<string>
+     */
+    public static function integrationPermissions(): array
+    {
+        return [
+            self::QUALITY_VIEW,
+            self::WIKI_VIEW,
+            self::RISK_VIEW,
+            self::OBJECTIVE_VIEW,
+            self::IMPROVEMENT_VIEW,
+            self::COMPLIANCE_VIEW,
+            self::SUPPLIER_VIEW,
+            self::MANAGEMENT_REVIEW_VIEW,
+        ];
+    }
+
+    public static function mayBeHeldByIntegration(string $permissionKey): bool
+    {
+        return in_array($permissionKey, self::integrationPermissions(), true);
+    }
+
     public static function isHumanOnly(string $permissionKey): bool
     {
         return in_array($permissionKey, self::humanOnlyPermissions(), true);

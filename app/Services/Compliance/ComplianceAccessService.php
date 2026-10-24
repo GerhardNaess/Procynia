@@ -186,6 +186,7 @@ class ComplianceAccessService
     public function isValidOwner(?User $owner, int $customerId): bool
     {
         return $owner instanceof User
+            && ! $owner->isIntegration()
             && (bool) $owner->is_active
             && (int) $owner->customer_id === $customerId
             && $this->canOpenModule($owner);

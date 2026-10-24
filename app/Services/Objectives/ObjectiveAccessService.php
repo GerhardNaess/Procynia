@@ -237,7 +237,7 @@ class ObjectiveAccessService
      */
     private function withheldFromIntegration(User $user, string $permissionKey): bool
     {
-        return $user->isIntegration() && CustomerPermissionCatalog::isHumanOnly($permissionKey);
+        return $user->isIntegration() && ! CustomerPermissionCatalog::mayBeHeldByIntegration($permissionKey);
     }
 
     private function isObjectivePermission(string $permissionKey): bool

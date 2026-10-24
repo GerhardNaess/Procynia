@@ -3,12 +3,15 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Models\Scopes\HumanUsersScope;
 use App\Support\CustomerContext;
 use Database\Factories\UserFactory;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Attributes\ScopedBy;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -35,6 +38,7 @@ use Illuminate\Notifications\Notifiable;
     'preferred_language_id',
 ])]
 #[Hidden(['password', 'remember_token'])]
+#[ScopedBy([HumanUsersScope::class])]
 class User extends Authenticatable implements FilamentUser
 {
     /** @use HasFactory<UserFactory> */
@@ -49,8 +53,9 @@ class User extends Authenticatable implements FilamentUser
     /**
      * A machine identity acting for one customer through the external API (one per client and
      * customer). Never a person: it cannot sign in, and it never takes a decision reserved for a
-     * human (CustomerPermissionCatalog::humanOnlyPermissions(), HumanDecisionGuard). No account of
-     * this kind can be created yet — see docs/external-api-architecture.md §4.
+     * human (CustomerPermissionCatalog::humanOnlyPermissions(), HumanDecisionGuard). An account of
+     * this kind is created only by a customer grant (ApiClientGrantService) and is left out of every
+     * ordinary read of users (HumanUsersScope) — see docs/external-api-architecture.md §4.
      */
     public const ROLE_INTEGRATION = 'integration';
 
@@ -329,6 +334,36 @@ class User extends Authenticatable implements FilamentUser
         return $this->role === self::ROLE_INTEGRATION;
     }
 
+    /**
+     * The integration identities, which every other read of users leaves out (HumanUsersScope).
+     *
+     * @return Builder<self>
+     */
+    public static function integrationIdentities(): Builder
+    {
+        return static::query()
+            ->withoutGlobalScope(HumanUsersScope::class)
+            ->where('role', self::ROLE_INTEGRATION);
+    }
+
+    /**
+     * The anbud role matrix (Tilganger) for this user. Never for an integration: whatever bid_role
+     * or flag its row carries, the matrix speaks of people (docs/external-api-architecture.md §4.4).
+     */
+    private function tenderMatrixAllows(Customer $customer, string $permission): bool
+    {
+        return ! $this->isIntegration()
+            && $customer->roleHasPermission($this->resolvedBidRole(), $permission, $this->isQa(), $this->isWikiApprover());
+    }
+
+    /**
+     * Mail goes to people. An integration's address is synthetic and never routed.
+     */
+    public function routeNotificationForMail(): ?string
+    {
+        return $this->isIntegration() ? null : $this->email;
+    }
+
     public function canManageUsers(): bool
     {
         return $this->isSuperAdmin() || $this->isCustomerAdmin();
@@ -346,7 +381,7 @@ class User extends Authenticatable implements FilamentUser
             return false;
         }
 
-        if (! $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_CREATE_USERS, $this->isQa(), $this->isWikiApprover())) {
+        if (! $this->tenderMatrixAllows($customer, Customer::PERMISSION_CREATE_USERS)) {
             return false;
         }
 
@@ -387,7 +422,7 @@ class User extends Authenticatable implements FilamentUser
         $customer = $this->customer;
 
         return $customer !== null
-            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_VIEW_ALL_CASES, $this->isQa(), $this->isWikiApprover());
+            && $this->tenderMatrixAllows($customer, Customer::PERMISSION_VIEW_ALL_CASES);
     }
 
     /**
@@ -404,7 +439,7 @@ class User extends Authenticatable implements FilamentUser
         $customer = $this->customer;
 
         return $customer !== null
-            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_DECIDE_BID_REQUIREMENTS, $this->isQa(), $this->isWikiApprover());
+            && $this->tenderMatrixAllows($customer, Customer::PERMISSION_DECIDE_BID_REQUIREMENTS);
     }
 
     /**
@@ -422,7 +457,7 @@ class User extends Authenticatable implements FilamentUser
         $customer = $this->customer;
 
         return $customer !== null
-            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_APPROVE_WIKI_CLAIMS, $this->isQa(), $this->isWikiApprover());
+            && $this->tenderMatrixAllows($customer, Customer::PERMISSION_APPROVE_WIKI_CLAIMS);
     }
 
     /**
@@ -466,7 +501,7 @@ class User extends Authenticatable implements FilamentUser
         $customer = $this->customer;
 
         return $customer !== null
-            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_APPROVE_WIKI_PAGES, $this->isQa(), $this->isWikiApprover());
+            && $this->tenderMatrixAllows($customer, Customer::PERMISSION_APPROVE_WIKI_PAGES);
     }
 
     /**
@@ -582,7 +617,7 @@ class User extends Authenticatable implements FilamentUser
         $customer = $this->customer;
 
         return $customer !== null
-            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER, $this->isQa(), $this->isWikiApprover());
+            && $this->tenderMatrixAllows($customer, Customer::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER);
     }
 
     public function canAssignEnterpriseWikiDocumentOwner(): bool
@@ -594,7 +629,7 @@ class User extends Authenticatable implements FilamentUser
         $customer = $this->customer;
 
         return $customer !== null
-            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER, $this->isQa(), $this->isWikiApprover());
+            && $this->tenderMatrixAllows($customer, Customer::PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER);
     }
 
     /**
@@ -703,7 +738,7 @@ class User extends Authenticatable implements FilamentUser
 
     public function isSystemOwner(): bool
     {
-        return $this->resolvedBidRole() === self::BID_ROLE_SYSTEM_OWNER;
+        return ! $this->isIntegration() && $this->resolvedBidRole() === self::BID_ROLE_SYSTEM_OWNER;
     }
 
     /**
@@ -713,7 +748,7 @@ class User extends Authenticatable implements FilamentUser
      */
     public function isQa(): bool
     {
-        return (bool) $this->is_qa;
+        return ! $this->isIntegration() && (bool) $this->is_qa;
     }
 
     /**
@@ -733,7 +768,7 @@ class User extends Authenticatable implements FilamentUser
 
     public function isWikiApprover(): bool
     {
-        return (bool) $this->is_wiki_approver;
+        return ! $this->isIntegration() && (bool) $this->is_wiki_approver;
     }
 
     public function resolvedBidManagerScope(): ?string

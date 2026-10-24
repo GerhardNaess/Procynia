@@ -86,15 +86,20 @@ class QualityHumanDecisionTest extends TestCase
     }
 
     /** Editing is not deciding: a machine with quality.edit may still save a draft by hand. */
-    public function test_an_integration_may_edit_a_draft_but_never_adopt_approve_or_delete(): void
+    public function test_an_integration_neither_edits_a_draft_nor_adopts_approves_or_deletes(): void
     {
         $world = $this->world();
         $integration = $this->member($world['customer']);
         $integration->forceFill(['role' => User::ROLE_INTEGRATION])->save();
         $integration->customerRoles()->attach($world['role']->id, ['customer_id' => $world['customer']->id]);
 
-        $draft = app(QualityProcessBlueprintService::class)->store((int) $world['customer']->id, $world['process'], $this->flow('Maskinens utkast'), QualityProcessBlueprint::SOURCE_MANUAL, $integration->fresh(), basedOn: QualityFlowVersion::of($world['process']));
-        $this->assertSame(QualityProcessBlueprint::STATUS_DRAFT, $draft->status);
+        // An integration holds read keys only (D13): quality.edit on its role buys nothing.
+        try {
+            app(QualityProcessBlueprintService::class)->store((int) $world['customer']->id, $world['process'], $this->flow('Maskinens utkast'), QualityProcessBlueprint::SOURCE_MANUAL, $integration->fresh(), basedOn: QualityFlowVersion::of($world['process']));
+            $this->fail('An integration saved a process flow draft.');
+        } catch (AuthorizationException) {
+            $this->addToAssertionCount(1);
+        }
 
         $this->assertEveryDecisionRefused($world, $integration->fresh(), HumanDecisionRefused::class);
     }

@@ -75,10 +75,12 @@ class CustomerPermissionService
      */
     public function effectivePermissions(User $user): array
     {
+        // An integration reads, and nothing else: its roles count only for the read keys, which
+        // also leaves out every human-only key.
         if ($user->isIntegration()) {
             return array_values(array_filter(
                 $this->permissionsFromRoles($user),
-                fn (string $key): bool => ! CustomerPermissionCatalog::isHumanOnly($key),
+                fn (string $key): bool => CustomerPermissionCatalog::mayBeHeldByIntegration($key),
             ));
         }
 
@@ -103,8 +105,8 @@ class CustomerPermissionService
         }
 
         // Before the System Owner short-circuit: no bid_role an integration carries can buy back a
-        // decision reserved for a person.
-        if ($user->isIntegration() && CustomerPermissionCatalog::isHumanOnly($permissionKey)) {
+        // decision reserved for a person, or anything beyond reading.
+        if ($user->isIntegration() && ! CustomerPermissionCatalog::mayBeHeldByIntegration($permissionKey)) {
             return false;
         }
 

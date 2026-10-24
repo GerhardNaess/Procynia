@@ -65,28 +65,32 @@ class SupplierServiceAuthorizationTest extends TestCase
      * may register a supplier Under vurdering and Ikke vurdert, correct its master data and keep its
      * documentation. Criticality and the lifecycle are a person's (A36, SupplierCriticalityLifecycleDecisionTest).
      */
-    public function test_an_editor_and_an_integration_with_supplier_edit_keep_the_register(): void
+    public function test_an_editor_keeps_the_register_and_an_integration_with_supplier_edit_does_not(): void
     {
-        foreach (['person' => false, 'integration' => true] as $who => $integration) {
-            $world = $this->world();
-            $editor = $this->supplierUser($world['customer'], [CustomerPermissionCatalog::SUPPLIER_EDIT]);
+        $world = $this->world();
+        $integration = $this->supplierUser($world['customer'], [CustomerPermissionCatalog::SUPPLIER_EDIT]);
+        $integration->forceFill(['role' => User::ROLE_INTEGRATION])->save();
 
-            if ($integration) {
-                $editor->forceFill(['role' => User::ROLE_INTEGRATION])->save();
-                $editor = $editor->fresh();
-            }
-
-            $registered = app(SupplierRegistration::class)->register($editor, $this->fields($editor, 'Ny AS'), Supplier::STATUS_ONBOARDING, null);
-            $this->assertSame((int) $world['customer']->id, (int) $registered->customer_id, $who);
-
-            DB::transaction(fn () => app(SupplierRegistration::class)->update($editor, $registered, $this->fields($editor, 'Nytt navn AS')));
-            app(SupplierProfileService::class)->save($registered->fresh(), $editor, SupplierProfileService::answers(['uses_subcontractors' => 'yes']), null);
-            $document = app(SupplierDocumentService::class)->create($registered->fresh(), $editor, ['document_type' => 'certificate', 'title' => 'Avtale']);
-            app(SupplierDocumentService::class)->delete($document, $editor);
-
-            $this->assertSame(['Nytt navn AS', Supplier::STATUS_ONBOARDING, null], [$registered->fresh()->name, $registered->fresh()->status, $registered->fresh()->criticality], $who);
-            $this->assertSame(0, SupplierDocument::query()->where('supplier_id', $registered->id)->count(), $who);
+        try {
+            app(SupplierRegistration::class)->register($integration->fresh(), $this->fields($integration, 'Maskin AS'), Supplier::STATUS_ONBOARDING, null);
+            $this->fail('An integration registered a supplier.');
+        } catch (AuthorizationException) {
+            $this->assertSame(0, Supplier::query()->where('name', 'Maskin AS')->count());
         }
+
+        $who = 'person';
+        $editor = $this->supplierUser($world['customer'], [CustomerPermissionCatalog::SUPPLIER_EDIT]);
+
+        $registered = app(SupplierRegistration::class)->register($editor, $this->fields($editor, 'Ny AS'), Supplier::STATUS_ONBOARDING, null);
+        $this->assertSame((int) $world['customer']->id, (int) $registered->customer_id, $who);
+
+        DB::transaction(fn () => app(SupplierRegistration::class)->update($editor, $registered, $this->fields($editor, 'Nytt navn AS')));
+        app(SupplierProfileService::class)->save($registered->fresh(), $editor, SupplierProfileService::answers(['uses_subcontractors' => 'yes']), null);
+        $document = app(SupplierDocumentService::class)->create($registered->fresh(), $editor, ['document_type' => 'certificate', 'title' => 'Avtale']);
+        app(SupplierDocumentService::class)->delete($document, $editor);
+
+        $this->assertSame(['Nytt navn AS', Supplier::STATUS_ONBOARDING, null], [$registered->fresh()->name, $registered->fresh()->status, $registered->fresh()->criticality], $who);
+        $this->assertSame(0, SupplierDocument::query()->where('supplier_id', $registered->id)->count(), $who);
     }
 
     /** Without supplier.edit — reading only, or assess, assure or delete alone — nothing is written. */

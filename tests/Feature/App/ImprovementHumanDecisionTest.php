@@ -86,10 +86,9 @@ class ImprovementHumanDecisionTest extends TestCase
             $this->assertTrue($access->can($decider, $key, $case), $key);
         }
 
-        // Keys a machine may hold reach its fagområder as before.
-        foreach ([CustomerPermissionCatalog::IMPROVEMENT_VIEW, CustomerPermissionCatalog::IMPROVEMENT_EDIT] as $key) {
-            $this->assertTrue($access->can($integration, $key, $case), $key);
-        }
+        // An integration reads, and nothing else (D13).
+        $this->assertTrue($access->can($integration, CustomerPermissionCatalog::IMPROVEMENT_VIEW, $case));
+        $this->assertFalse($access->can($integration, CustomerPermissionCatalog::IMPROVEMENT_EDIT, $case));
     }
 
     /** A person with improvement.close and .delete in the area takes every decision, through the services. */

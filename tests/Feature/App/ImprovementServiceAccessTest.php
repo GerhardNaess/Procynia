@@ -76,17 +76,29 @@ class ImprovementServiceAccessTest extends TestCase
     }
 
     /** Not a human decision: an integration with improvement.edit in the area works a case. */
-    public function test_an_integration_with_improvement_edit_may_work_a_case(): void
+    public function test_an_integration_with_improvement_edit_only_reads(): void
     {
+        // An integration holds read keys only (D13): improvement.edit on its role buys nothing.
         $world = $this->world();
         $integration = $this->editor($world['customer'], $world['area']);
         $integration->forceFill(['role' => User::ROLE_INTEGRATION])->save();
+        $cause = $world['case']->fresh()->cause_analysis;
+        $actions = ImprovementAction::query()->where('improvement_case_id', $world['case']->id)->count();
 
-        app(ImprovementCaseCreator::class)->updateCause($integration->fresh(), $world['case'], 'Fra integrasjon.');
-        app(ImprovementActionLifecycleService::class)->create($world['case'], $integration->fresh(), $this->fields($world['editor']));
+        foreach ([
+            fn () => app(ImprovementCaseCreator::class)->updateCause($integration->fresh(), $world['case'], 'Fra integrasjon.'),
+            fn () => app(ImprovementActionLifecycleService::class)->create($world['case'], $integration->fresh(), $this->fields($world['editor'])),
+        ] as $write) {
+            try {
+                $write();
+                $this->fail('An integration worked a case.');
+            } catch (AuthorizationException) {
+                $this->addToAssertionCount(1);
+            }
+        }
 
-        $this->assertSame('Fra integrasjon.', $world['case']->fresh()->cause_analysis);
-        $this->assertSame(2, ImprovementAction::query()->where('improvement_case_id', $world['case']->id)->count());
+        $this->assertSame($cause, $world['case']->fresh()->cause_analysis);
+        $this->assertSame($actions, ImprovementAction::query()->where('improvement_case_id', $world['case']->id)->count());
     }
 
     public function test_every_write_is_refused_in_the_service_without_improvement_edit_in_the_area(): void
