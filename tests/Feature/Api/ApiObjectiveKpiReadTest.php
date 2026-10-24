@@ -489,9 +489,16 @@ class ApiObjectiveKpiReadTest extends TestCase
                     ->assertJsonPath('error.code', 'method_not_allowed');
             }
 
+            // GET reads one objective and one KPI's history there; nothing else is accepted.
+            foreach (["objectives/{$objective->id}", "kpis/{$kpi->id}/measurements"] as $path) {
+                $this->{$method.'Json'}("/api/v1/{$path}", ['value' => '1', 'period' => '2026-09'], $headers)
+                    ->assertStatus(405)
+                    ->assertJsonPath('error.code', 'method_not_allowed');
+            }
+
             foreach ([
-                "objectives/{$objective->id}", "objectives/{$objective->id}/close", "objectives/{$objective->id}/reopen",
-                "objectives/{$objective->id}/kpis", "kpis/{$kpi->id}", "kpis/{$kpi->id}/measurements", "kpis/{$kpi->id}/retire",
+                "objectives/{$objective->id}/close", "objectives/{$objective->id}/reopen",
+                "objectives/{$objective->id}/kpis", "kpis/{$kpi->id}", "kpis/{$kpi->id}/retire",
             ] as $path) {
                 $this->{$method.'Json'}("/api/v1/{$path}", ['value' => '1', 'period' => '2026-09'], $headers)->assertNotFound();
             }

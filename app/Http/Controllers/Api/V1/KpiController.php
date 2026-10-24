@@ -11,6 +11,7 @@ use App\Services\Api\Presenters\KpiPresenter;
 use App\Services\Objectives\ObjectiveAccessService;
 use Carbon\CarbonImmutable;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -22,6 +23,9 @@ use Illuminate\Validation\Rule;
  * The list is ObjectiveAccessService::visibleKpis() for the identity: the KPIs of the objectives it
  * may read, and nothing else. A KPI has no fagområde of its own, so business_area_id filters on its
  * objective's. Filters and the cursor narrow that list and cannot widen it.
+ *
+ * GET /api/v1/kpis/{kpiId}/measurements is one visible KPI's whole målehistorikk: a KPI of another
+ * customer, under an objective the identity cannot read, or not there at all is the same 404.
  */
 class KpiController extends Controller
 {
@@ -88,5 +92,25 @@ class KpiController extends Controller
                 'next_cursor' => $found->count() > $limit ? ApiCursor::encode((int) $page->last()->id) : null,
             ],
         );
+    }
+
+    public function measurements(
+        ApiRequestContext $context,
+        ObjectiveAccessService $access,
+        KpiPresenter $presenter,
+        int $kpiId,
+    ): JsonResponse {
+        $actor = $context->actor;
+
+        if (! $access->canOpenModule($actor)) {
+            throw new AuthorizationException;
+        }
+
+        $kpi = $access->visibleKpis($actor)->whereKey($kpiId)->first()
+            ?? throw (new ModelNotFoundException)->setModel(Kpi::class);
+        $history = $presenter->history($kpi);
+        $context->rows = count($history);
+
+        return ApiResponse::ok($history, $context);
     }
 }

@@ -14,7 +14,8 @@ use Illuminate\Database\Eloquent\Collection;
  * A mål as the external API presents it: structured fields only (D8).
  *
  * In: identifiers, title, status, fagområde, ansvarlig, måldato, when it was closed, its KPIs
- * counted (all, active, on target, needing attention) and its own attention codes. Out: beskrivelse,
+ * counted (all, active, on target, needing attention) and its own attention codes. The detail adds
+ * its KPIs as GET /api/v1/kpis presents them (KpiPresenter). Out: beskrivelse,
  * avslutningsnotat, who closed it, the status history, process context and web routes.
  *
  * Nothing is judged here. «On target» is KpiPresenter::indicator() — the register's «2 av 3 KPI-er
@@ -28,6 +29,18 @@ class ObjectivePresenter
         private readonly KpiMeasurementResolver $resolver,
         private readonly ObjectiveAttentionService $attention,
     ) {}
+
+    /**
+     * One objective with its KPIs.
+     *
+     * @param  Objective  $objective  already reached through ObjectiveAccessService::findVisible(), with businessArea and owner loaded
+     * @param  list<array<string, mixed>>  $kpis  its KPIs, from KpiPresenter::rows()
+     * @return array<string, mixed>
+     */
+    public function detail(Objective $objective, CarbonImmutable $today, array $kpis): array
+    {
+        return $this->rows(new Collection([$objective]), $today)[0] + ['kpi_list' => $kpis];
+    }
 
     /**
      * @param  Collection<int, Objective>  $objectives  already reached through ObjectiveAccessService::visibleObjectives(),

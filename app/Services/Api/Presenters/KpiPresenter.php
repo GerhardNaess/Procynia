@@ -26,6 +26,9 @@ use Illuminate\Support\Collection as SupportCollection;
  * Numbers are exact decimal strings without trailing zeros («99.5»), never floats, and never
  * formatted for a language.
  *
+ * The full history of one KPI (history()) is the same measured periods, every one of them, in the
+ * same fields.
+ *
  * Nothing is judged here. Which measurement counts is KpiMeasurementResolver's; the result now is
  * the KPI page's (the latest current measurement against today's målverdi); each measured period is
  * judged against the målverdi it was registered with, as Målehistorikk does; the attention codes are
@@ -109,22 +112,51 @@ class KpiPresenter
             'reporting_grace_days' => (int) $kpi->reporting_grace_days,
             'latest_measurement' => $latest !== null ? $this->measurement($latest) : null,
             'result' => $this->page->currentResult($kpi, $latest),
-            'measurements' => collect($current)
-                ->sortBy([
-                    fn (KpiMeasurement $a, KpiMeasurement $b): int => $a->period_end <=> $b->period_end,
-                    fn (KpiMeasurement $a, KpiMeasurement $b): int => $a->period_start <=> $b->period_start,
-                ])
-                ->take(-self::MEASUREMENT_PERIODS)
-                ->map(fn (KpiMeasurement $measurement): array => $this->measurement($measurement) + [
-                    // Against the målverdi that applied when it was registered — not today's.
-                    'result' => $this->policy->evaluate($measurement->snapshotTarget(), $measurement->value),
-                ])
-                ->values()
-                ->all(),
+            'measurements' => $this->measuredPeriods($current, self::MEASUREMENT_PERIODS),
             'attention' => $attention,
             'created_at' => $kpi->created_at?->utc()->toIso8601ZuluString(),
             'updated_at' => $kpi->updated_at?->utc()->toIso8601ZuluString(),
         ];
+    }
+
+    /**
+     * Målehistorikk for one KPI: every measured period, oldest first, each with its current
+     * measurement only — superseded and withdrawn rows do not count, as in the KPI rows.
+     *
+     * @param  Kpi  $kpi  already reached through ObjectiveAccessService::visibleKpis()
+     * @return list<array{period_start: string, period_end: string, value: ?string, recorded_at: ?string, result: string}>
+     */
+    public function history(Kpi $kpi): array
+    {
+        $measurements = KpiMeasurement::query()
+            ->where('kpi_id', $kpi->id)
+            ->where('customer_id', $kpi->customer_id)
+            ->whereNull('withdrawn_at')
+            ->get();
+
+        return $this->measuredPeriods($this->resolver->currentByPeriod($measurements), null);
+    }
+
+    /**
+     * The measured periods, oldest first — the latest $periods of them when given — each judged
+     * against the målverdi that applied when it was registered, not today's.
+     *
+     * @param  iterable<KpiMeasurement>  $current  one current measurement per period
+     * @return list<array{period_start: string, period_end: string, value: ?string, recorded_at: ?string, result: string}>
+     */
+    private function measuredPeriods(iterable $current, ?int $periods): array
+    {
+        $sorted = collect($current)->sortBy([
+            fn (KpiMeasurement $a, KpiMeasurement $b): int => $a->period_end <=> $b->period_end,
+            fn (KpiMeasurement $a, KpiMeasurement $b): int => $a->period_start <=> $b->period_start,
+        ]);
+
+        return ($periods !== null ? $sorted->take(-$periods) : $sorted)
+            ->map(fn (KpiMeasurement $measurement): array => $this->measurement($measurement) + [
+                'result' => $this->policy->evaluate($measurement->snapshotTarget(), $measurement->value),
+            ])
+            ->values()
+            ->all();
     }
 
     /** @return array{period_start: string, period_end: string, value: ?string, recorded_at: ?string} */

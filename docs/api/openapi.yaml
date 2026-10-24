@@ -539,6 +539,53 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /v1/objectives/{objectiveId}:
+    get:
+      tags: [Objectives and KPIs]
+      operationId: getObjective
+      summary: One objective (mål) with its KPIs
+      description: |
+        One objective the integration identity may read, with the fields of the register and its
+        KPIs as `GET /v1/kpis` presents them. An objective of another customer, outside the
+        identity's fagområder, or one that does not exist is 404.
+
+        Not included: the process context in Kvalitet, which becomes available when Kvalitet can be
+        read through the API.
+
+        Requires the Mål og KPI module and `objective.view`.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/ObjectiveId'
+      responses:
+        '200':
+          description: The objective.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ObjectiveDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /v1/kpis:
     get:
       tags: [Objectives and KPIs]
@@ -599,6 +646,56 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/kpis/{kpiId}/measurements:
+    get:
+      tags: [Objectives and KPIs]
+      operationId: listKpiMeasurements
+      summary: The whole measurement history (målehistorikk) of one KPI
+      description: |
+        Every measured period of one KPI the integration identity may read, oldest first, with the
+        current measurement of each period — beyond the latest 24 that `GET /v1/kpis` carries.
+        Superseded (corrected) and withdrawn measurements are never included. Each period is judged
+        against the målverdi that applied when it was registered.
+
+        The history of one KPI is returned whole, without pagination. A KPI under an objective of
+        another customer or outside the identity's fagområder, or one that does not exist, is 404.
+
+        Requires the Mål og KPI module and `objective.view`.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/KpiId'
+      responses:
+        '200':
+          description: The measured periods, oldest first.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/KpiMeasuredPeriod'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -669,6 +766,22 @@ components:
       schema:
         type: string
         enum: ['true', 'false']
+    ObjectiveId:
+      name: objectiveId
+      in: path
+      required: true
+      description: The objective's id.
+      schema:
+        type: integer
+        minimum: 0
+    KpiId:
+      name: kpiId
+      in: path
+      required: true
+      description: The KPI's id.
+      schema:
+        type: integer
+        minimum: 0
     BusinessAreaId:
       name: business_area_id
       in: query
@@ -1440,12 +1553,29 @@ components:
       description: The objective's own reasons. A KPI's reasons are counted in `kpis.needing_attention`, never listed here.
       enum: [target_date_passed, owner_missing]
     Objective:
-      type: object
       description: |
         A mål, structured fields only. Not included: beskrivelse, avslutningsnotat, who closed it,
         the status history and the process context.
+      allOf:
+        - $ref: '#/components/schemas/ObjectiveFields'
+      unevaluatedProperties: false
+    ObjectiveDetail:
+      description: A mål with its KPIs.
+      allOf:
+        - $ref: '#/components/schemas/ObjectiveFields'
+        - type: object
+          required: [kpi_list]
+          properties:
+            kpi_list:
+              type: array
+              description: Its KPIs, by id, as `GET /v1/kpis` presents them.
+              items:
+                $ref: '#/components/schemas/Kpi'
+      unevaluatedProperties: false
+    ObjectiveFields:
+      type: object
+      description: The fields of a mål in the register, shared by Objective and ObjectiveDetail.
       required: [id, title, status, business_area, owner, target_date, closed_at, kpis, attention, created_at, updated_at]
-      additionalProperties: false
       properties:
         id:
           type: integer
@@ -1659,7 +1789,7 @@ components:
         measurements:
           type: array
           maxItems: 24
-          description: The latest 24 measured periods, oldest first, one current measurement per period.
+          description: The latest 24 measured periods, oldest first, one current measurement per period. The whole history is `GET /v1/kpis/{kpiId}/measurements`.
           items:
             $ref: '#/components/schemas/KpiMeasuredPeriod'
         attention:

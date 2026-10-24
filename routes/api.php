@@ -34,5 +34,7 @@ Route::prefix('v1')
         Route::get('improvements', [ImprovementController::class, 'index'])->name('improvements.index');
         Route::get('improvements/{caseId}', [ImprovementController::class, 'show'])->whereNumber('caseId')->name('improvements.show');
         Route::get('objectives', [ObjectiveController::class, 'index'])->name('objectives.index');
+        Route::get('objectives/{objectiveId}', [ObjectiveController::class, 'show'])->whereNumber('objectiveId')->name('objectives.show');
         Route::get('kpis', [KpiController::class, 'index'])->name('kpis.index');
+        Route::get('kpis/{kpiId}/measurements', [KpiController::class, 'measurements'])->whereNumber('kpiId')->name('kpis.measurements');
     });
