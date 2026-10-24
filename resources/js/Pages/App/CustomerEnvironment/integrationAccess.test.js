@@ -17,6 +17,17 @@ describe('what an integration can read', () => {
         );
     });
 
+    test('every module the API serves has a Norwegian label', () => {
+        assert.deepEqual(
+            integrationAccessLines({
+                risk: { entitled: true, readable: true, business_areas: 'all' },
+                deviations: { entitled: true, readable: true, business_areas: 'all' },
+                objectives: { entitled: true, readable: true, business_areas: [{ id: 3, name: 'Salg' }] },
+            }),
+            ['Risiko: alle fagområder', 'Avvik: alle fagområder', 'Mål og KPI: Salg'],
+        );
+    });
+
     test('a module not ordered or not readable is left out', () => {
         assert.deepEqual(integrationAccessLines({ risk: { entitled: false, readable: false, business_areas: [] } }), []);
         assert.deepEqual(integrationAccessLines({ risk: { entitled: true, readable: false, business_areas: [] } }), []);
