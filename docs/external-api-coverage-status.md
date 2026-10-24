@@ -61,7 +61,7 @@ Til sammen er 37 B-funksjoner blokkert. 8 B-funksjoner er ikke anbefalt, og de 3
 
 | # | Tiltak | Kreves før | Hvem |
 |---|---|---|---|
-| 1 | Gjennomføre verifiseringene V1–V3 (V1 godkjent og den lokale delen av V3 gjennomført 2026-10-24, se `external-api-phase-1-decisions.md` §11.1. V2 er ikke kjørt), kjøre hele PHP-suiten som merge-kontroll (siste fulle kjøring var før fase 2) og flette grenen inn i `main` | Pilot | Produkteier |
+| 1 | Gjennomføre verifiseringene V1–V3 (V1 godkjent og den lokale delen av V3 gjennomført 2026-10-24, se `external-api-phase-1-decisions.md` §11.1. V2 ble kjørt 2026-10-24 og stoppet på test 4, se §11.2. Feilen i AI-vurderingen av anbudskrav må rettes, og V2 må fullføres), kjøre hele PHP-suiten som merge-kontroll (siste fulle kjøring var før fase 2) og flette grenen inn i `main` | Pilot | Produkteier |
 | 2 | Kjøre migreringene i staging og senere i Azure-produksjon | Pilot | Drift |
 | 3 | Registrere «Procynia API» i Entra med app-rollene `Procynia.Read.All` og `Procynia.Write.All` | Pilot | Advania |
 | 4 | Registrere Siggjos identitet, gi den tilgang hos en testkunde og slå på bare de navngitte operasjonene som skal brukes (`wiki.ask` krever at kunden har definert AI-kapasitet) | Pilot | Advania / System Owner hos testkunden |
@@ -72,12 +72,12 @@ Til sammen er 37 B-funksjoner blokkert. 8 B-funksjoner er ikke anbefalt, og de 3
 
 ### Verifisering V1–V4 (status 2026-10-24)
 
-Kravene står i [`external-api-phase-1-decisions.md`](external-api-phase-1-decisions.md) §11, og resultatene står i §11.1.
+Kravene står i [`external-api-phase-1-decisions.md`](external-api-phase-1-decisions.md) §11, og resultatene står i §11.1 (V1 og V3) og §11.2 (V2).
 
 | # | Hva | Status | Gjenstår | Ekstern avhengighet |
 |---|---|---|---|---|
 | V1 | Redis-testene | 🟩 Godkjent. 3 av 3 bestått mot en egen Redis med passord, ingen hoppet over. | Ingenting | Ingen |
-| V2 | Ekte AI-kall og Wiki-kjøring med køarbeidere | ⬜ Ikke startet | Hele kjøringen på utviklingsstakken med egen testkunde, etter omstart av `queue-*`-arbeiderne | Eksplisitt godkjenning før ekte OpenAI-kall |
+| V2 | Ekte AI-kall og Wiki-kjøring med køarbeidere | 🟥 Stoppet 2026-10-24 (§11.2). Test 1–3 bestått: Wiki-kjøring til publisert side via tildelt kontrollør, «Overfør til Wiki» og kravsvar. Test 4 (AI-vurdering i Anbud) feilet for alle fullt dekkede krav. Test 5–6 er ikke kjørt. 106 kall, 4,88 NOK, ingen `unattributed`. | Rette V2-F1 i `RequirementWikiAssessmentAiClient`. Deretter kjøres test 4–6 på nytt med eksplisitt godkjenning. | Eksplisitt godkjenning før ekte OpenAI-kall |
 | V3 | Migreringer, triggere og deploy | 🟧 Lokal verifisering fullført: migrering, `down()`, triggerkatalog og datakontroll på lokale databaser | Datakontroll mot en kopi av produksjonsdata, migrering, triggerkontroll, `down()` og røyktest i staging, og produksjonsdeploy i vedlikeholdsvindu | Azure staging og produksjon, drift |
 | V4 | Integrasjons- og sikkerhetstester med ekte Entra | ⬜ Ikke startet. De automatiske API-testene med simulerte tokens består lokalt. | Sjekklisten med ekte token i staging: gyldig token, feil `aud`, annen tenant, fremmed app, deaktivert klient, trukket tildeling og kunde uten tildeling | Entra-registrering (Advania), Siggjos identitet og staging |
 
