@@ -34,8 +34,11 @@ class ApiRouteContractTest extends TestCase
         'api.v1.risks.treatment-actions.store' => 'POST',
     ];
 
-    /** Routes that describe the caller and need no module. */
-    private const MODULE_FREE = ['api.v1.me'];
+    /**
+     * Routes that need no module: they describe the caller, or span the served modules and include
+     * each only where the identity may read it (ApiAccessSummary).
+     */
+    private const MODULE_FREE = ['api.v1.me', 'api.v1.attention', 'api.v1.business-areas'];
 
     /** Classes behind A23 (Quality AI proposals, «Spør Wiki») and A46 (archive with outcome). */
     private const FORBIDDEN_REFERENCES = [

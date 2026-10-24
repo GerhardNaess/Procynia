@@ -126,6 +126,95 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /v1/attention:
+    get:
+      tags: [Common]
+      operationId: getAttention
+      summary: What needs following up, across modules
+      description: |
+        Every record the integration identity may read that needs attention now, across Risiko,
+        Avvik og forbedringer and Mål og KPI, with the reasons as codes. Each module's own rules
+        decide, over the same set as its register's «Trenger oppmerksomhet»: risks that are not
+        closed, active avvik and forbedringer, active objectives and their active KPIs. The codes
+        are the same as on the records' own rows.
+
+        A module the customer has not ordered, or the identity may not read, is `false` under
+        `modules` and contributes no items. This route needs no module and is returned whole,
+        without pagination: risks, then avvik, forbedringer, objectives and KPIs, each by id.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+      responses:
+        '200':
+          description: What needs attention.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AttentionOverview'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/business-areas:
+    get:
+      tags: [Common]
+      operationId: listBusinessAreas
+      summary: The fagområder the caller reads in
+      description: |
+        The customer's fagområder (business areas) the integration identity reads in, with the
+        modules it reads them in: the reference data for `business_area` on every record and for
+        the `business_area_id` filters. Where `/v1/me` says `"all"`, the areas are listed here.
+        An area the identity reaches in no readable module is not listed. Ordered by name.
+
+        This route needs no module and is returned whole, without pagination.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+      responses:
+        '200':
+          description: The fagområder.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BusinessArea'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /v1/risks:
     get:
       tags: [Risk]
@@ -1108,6 +1197,80 @@ components:
                     type: integer
                   name:
                     type: string
+
+    ApiModule:
+      type: string
+      description: A module the API serves, by the key `/v1/me` uses. `deviations` covers both avvik and forbedringer.
+      enum: [risk, deviations, objectives]
+    AttentionItemType:
+      type: string
+      enum: [risk, deviation, improvement, objective, kpi]
+    AttentionOverview:
+      type: object
+      required: [modules, items]
+      additionalProperties: false
+      properties:
+        modules:
+          type: object
+          description: Per module, whether the identity reads it. A module that is `false` contributes no items.
+          required: [risk, deviations, objectives]
+          additionalProperties: false
+          properties:
+            risk:
+              type: boolean
+            deviations:
+              type: boolean
+            objectives:
+              type: boolean
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttentionItem'
+    AttentionItem:
+      type: object
+      required: [type, id, title, objective_id, business_area, attention]
+      additionalProperties: false
+      properties:
+        type:
+          $ref: '#/components/schemas/AttentionItemType'
+        id:
+          type: integer
+          description: The record's id in its own endpoints.
+        title:
+          type: string
+          description: Written by people. May contain personal data, in avvik most of all.
+        objective_id:
+          type: [integer, 'null']
+          description: A KPI's objective. Null for every other type.
+        business_area:
+          $ref: '#/components/schemas/Reference'
+          description: The record's fagområde (a KPI's is its objective's).
+        attention:
+          type: array
+          description: The codes of the record's own module, in that module's order.
+          minItems: 1
+          items:
+            anyOf:
+              - $ref: '#/components/schemas/RiskAttentionCode'
+              - $ref: '#/components/schemas/ImprovementAttentionCode'
+              - $ref: '#/components/schemas/ObjectiveAttentionCode'
+              - $ref: '#/components/schemas/KpiAttentionCode'
+    BusinessArea:
+      type: object
+      description: A fagområde. Its description is not included.
+      required: [id, name, modules]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        modules:
+          type: array
+          description: The modules the identity reads in this fagområde.
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ApiModule'
 
     RiskStatus:
       type: string

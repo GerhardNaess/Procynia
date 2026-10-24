@@ -59,6 +59,42 @@ class ApiAccessSummary
     }
 
     /**
+     * The fagområder the identity reads in, with the modules it reads them in — the same modules,
+     * rules and areas as for(), with «all» spelled out as the customer's areas. An area the identity
+     * reaches in no module the API serves is not listed. Ordered by name, then id.
+     *
+     * @return list<array{id: int, name: string, modules: list<string>}>
+     */
+    public function readableAreas(User $identity, Customer $customer): array
+    {
+        $sources = [
+            'risk' => fn (): EloquentCollection => $this->risks->areasFor($identity, CustomerPermissionCatalog::RISK_VIEW),
+            'deviations' => fn (): EloquentCollection => $this->improvements->areasFor($identity, CustomerPermissionCatalog::IMPROVEMENT_VIEW),
+            'objectives' => fn (): EloquentCollection => $this->objectives->areasFor($identity, CustomerPermissionCatalog::OBJECTIVE_VIEW),
+        ];
+        $summary = $this->for($identity, $customer);
+        $areas = [];
+
+        foreach ($sources as $module => $areasFor) {
+            if (! $summary[$module]['readable']) {
+                continue;
+            }
+
+            foreach ($areasFor() as $area) {
+                // The access services already keep to the identity's customer; checked again here.
+                if ((int) $area->customer_id !== (int) $customer->id) {
+                    continue;
+                }
+
+                $areas[(int) $area->id] ??= ['id' => (int) $area->id, 'name' => $area->name, 'modules' => []];
+                $areas[(int) $area->id]['modules'][] = $module;
+            }
+        }
+
+        return collect($areas)->sortBy([['name', 'asc'], ['id', 'asc']])->values()->all();
+    }
+
+    /**
      * @param  callable(): bool  $reachesAll
      * @param  callable(): EloquentCollection<int, BusinessArea>  $areas
      * @return array{entitled: bool, readable: bool, business_areas: 'all'|list<array{id: int, name: string}>}

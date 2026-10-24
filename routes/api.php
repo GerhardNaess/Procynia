@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\Api\V1\AttentionController;
+use App\Http\Controllers\Api\V1\BusinessAreaController;
 use App\Http\Controllers\Api\V1\DeviationController;
 use App\Http\Controllers\Api\V1\ImprovementController;
 use App\Http\Controllers\Api\V1\KpiController;
@@ -22,6 +24,9 @@ Route::prefix('v1')
     ->middleware(['api.log', 'api.client', 'api.customer', 'customer.module'])
     ->group(function (): void {
         Route::get('me', MeController::class)->name('me');
+        // Across the served modules; each module is included only where the identity may read it.
+        Route::get('attention', AttentionController::class)->name('attention');
+        Route::get('business-areas', BusinessAreaController::class)->name('business-areas');
         Route::get('risks', [RiskController::class, 'index'])->name('risks.index');
         Route::get('risks/{riskId}', [RiskController::class, 'show'])->whereNumber('riskId')->name('risks.show');
         // The one write route: needs the write app role on top, and the operation allowed for the grant.

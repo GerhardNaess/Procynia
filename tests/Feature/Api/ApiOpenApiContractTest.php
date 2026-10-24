@@ -121,6 +121,9 @@ class ApiOpenApiContractTest extends TestCase
             'KpiCurrentResult' => [...KpiTargetPolicy::RESULTS, KpiPagePresenter::NOT_MEASURED],
             'KpiAttentionCode' => [ObjectiveAttentionService::KPI_OFF_TARGET, ObjectiveAttentionService::MEASUREMENT_MISSING],
             'ErrorCode' => array_keys(ApiErrorResponder::MESSAGES),
+            // The keys of ApiAccessSummary::for() and the item types of ApiAttentionOverview.
+            'ApiModule' => ['risk', 'deviations', 'objectives'],
+            'AttentionItemType' => ['risk', 'deviation', 'improvement', 'objective', 'kpi'],
         ];
 
         foreach ($expected as $schema => $values) {
