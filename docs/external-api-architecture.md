@@ -707,5 +707,5 @@ Beslutningsgrunnlag med anbefalinger, alternativer og konsekvenser for punktene 
 5. Siggjo-dataflyt: A, B eller begge (§9.2). Kopiering krever DPIA og databehandleravtale.
 6. Generisk forslagsmodell (§10.1).
 7. API Management eller WAF foran API-et (K14).
-8. Hvem som kan registrere API-klienter, og kommersiell pakking (§12).
+8. ~~Hvem som kan registrere API-klienter (§12).~~ Besluttet 2026-10-24 (D13): interne administratorer registrerer, kundens System Owner gir tildeling. Se [`external-api-phase-1-decisions.md`](external-api-phase-1-decisions.md) §16. Kommersiell pakking er fortsatt åpen.
 9. Om en vektorindeks over Wiki-innhold hos Siggjo skal tillates (K13). Utgangspunktet er nei.

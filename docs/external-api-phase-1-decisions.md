@@ -1,6 +1,6 @@
 # Eksternt API – beslutningsgrunnlag for fase 1
 
-**Status:** Første leveranse er bygget 2026-10-23 (§15): autentisering, kundetildeling, feilformat, `GET /api/v1/me` og `GET /api/v1/risks`. D13 er fortsatt åpen, og administrasjonen av klienter og tildelinger er derfor ikke bygget. Øvrige endepunkter venter på vurdering.
+**Status:** Første leveranse er bygget 2026-10-23 (§15): autentisering, kundetildeling, feilformat, `GET /api/v1/me` og `GET /api/v1/risks`. D13 er besluttet og gjennomført 2026-10-24 sammen med beskyttelsen av integrasjonsidentiteter (§16). Øvrige endepunkter venter på vurdering. Ingenting er satt i produksjon.
 **Dato:** 2026-10-23
 **Gren:** `feature/external-api-foundation`
 **Bygger på:** [`external-api-architecture.md`](external-api-architecture.md) (særlig §4, §5, §8.3, §9 og §15), [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §2n, [`operations/entra-sso.md`](operations/entra-sso.md), [`operations/security.md`](operations/security.md) §9 og [`AGENTS.md`](../AGENTS.md).
@@ -429,7 +429,103 @@ Migreringer: `2026_10_23_000015_create_api_clients_table`, `2026_10_23_000016_cr
 
 ### Åpent
 
-- **D13 – hvem som registrerer klienter og gir tildelinger.** Ingen vei oppretter `api_clients`, integrasjonsidentiteter eller tildelinger. Det betyr også at menneske-sperren i arkitektur §4.3 (eier- og kontrollørvalg, varsler, lisenstelling, «Brukere») ikke er bygget. Den må komme sammen med administrasjonen, før en integrasjonsidentitet kan opprettes i et ekte miljø. Integrasjonsidentiteten kan allerede ikke logge inn, ikke bruke kundefrontenden og ikke ta beslutninger (testet).
-- **Observasjon, innlogging:** `EntraOidcClient::validateIdToken` leser nøkler med `JWK::parseKeySet()` uten standardalgoritme, så en nøkkel uten `alg` avvises. API-et oppgir RS256 selv. Om Microsofts JWKS for innloggingen har `alg`, er ikke verifisert. Uendret oppførsel.
+- **D13** er besluttet og gjennomført 2026-10-24, se §16.
+- **Observasjon, innlogging:** se §16, «Entra: `alg` i Microsofts nøkkelliste». Verifisert, og det krever egen retting.
 - V1–V4 (§11) gjelder fortsatt.
+
+---
+
+## 16. D13 og beskyttelse av integrasjonsidentiteter (2026-10-24)
+
+### D13 – besluttet ansvarsmodell
+
+1. Interne Procynia-plattformadministratorer registrerer, aktiverer og deaktiverer klientapplikasjoner i Filament.
+2. Kundens System Owner gir og trekker tilbake tilgangen til en godkjent applikasjon for egen kunde.
+3. System Owner bestemmer moduler og leserettigheter gjennom kundens egne roller, innenfor det kunden har.
+4. En klientregistrering gir aldri tilgang til kundedata.
+5. Alle tildelinger og endringer kontrolleres mot riktig kunde og registreres med aktør og tidspunkt.
+6. En deaktivert klient eller tilbakekalt tildeling avvises ved neste kall.
+
+### Klientadministrasjon (punkt 1, 4, 5, 6)
+
+- **Filament → Kunder → API-klienter:** registrere, endre navn og beskrivelse, aktivere og deaktivere. Ingen sletting.
+- **Kontrollen ligger i tjenesten** (`ApiClientAdministration`), ikke i skjermene. Den krever en aktiv intern administrator som handler interaktivt, ikke via API-kanalen. Filament-sidene skriver bare gjennom tjenesten.
+- **Entra-identiteten er fast etter registrering.** Applikasjons-ID og tenant kan ikke endres, fordi tildelingene er gitt til akkurat den applikasjonen. En annen applikasjon er en ny klient.
+- **Revisjonsspor:** `api_client_changes` (`registered`, `changed`, `enabled`, `disabled`) med aktør, før og etter. Databasen nekter endring og sletting.
+- Deaktivering virker ved neste kall. Kundenes tildelinger beholdes.
+
+### Kundetildeling (punkt 2, 3, 5, 6)
+
+- **Kundemiljø → Integrasjoner**, synlig bare for System Owner. Fanen viser godkjente applikasjoner, applikasjoner med tilgang, rollene og hva integrasjonen faktisk kan lese gjennom API-et (samme oppsummering som `GET /api/v1/me`).
+- **Gi tilgang** oppretter tildelingen og integrasjonsidentiteten, og gir den rollene System Owner velger blant kundens aktive roller. **Endre roller** endrer dem. **Trekk tilbake** setter `revoked_at`, deaktiverer identiteten og beholder tildelingen som historikk. Tilgang kan gis på nytt, med en ny identitet.
+- **Kontrollen ligger i tjenesten** (`ApiClientGrantService`). Den krever kundens egen aktive System Owner som handler interaktivt. Kunden er alltid System Ownerens egen, aldri en kunde fra forespørselen. En annen kundes tildeling eller rolle finnes ikke (404 eller valideringsfeil).
+- **Revisjonsspor:** `customer_access_changes` med emnetypen `api_client_grant` (`api_grant_created`, `api_grant_roles_changed`, `api_grant_revoked`), med aktør, før og etter.
+- **Bare godkjente applikasjoner:** en deaktivert eller ukjent applikasjon kan ikke tildeles, og en applikasjon har høyst én aktiv tildeling per kunde.
+
+### Rettighetene kan ikke overstige lesing og kundens moduler
+
+- **En integrasjon har bare leserettigheter.** `CustomerPermissionCatalog::integrationPermissions()` er `*.view`-nøklene. `CustomerPermissionService` og fagområdetjenestene (Risiko, Mål og KPI, Avvik) gir en integrasjon ingenting annet, uansett hvilke roller den får. Alle menneskeforbeholdte rettigheter ligger utenfor.
+- **Endring fra fase 0:** før kunne en integrasjon med en rettighet som ikke er menneskeforbeholdt (for eksempel `risk.edit`, `quality.edit`, `wiki.knowledge.handoff`), skrive gjennom tjenestene. Nå kan den ikke det. 14 tester som festet den gamle regelen, er skrevet om. Skal integrasjoner senere kunne foreslå (fase 4), er det denne ene listen som utvides, bevisst.
+- **Moduler:** API-ruten sjekker kundens modulpakke (`EnsureModuleIsEnabled`). En rolle med `risk.view` hos en kunde uten Risiko gir ingenting, og `/me` viser modulen som ikke bestilt.
+
+### Integrasjonsidentiteter behandles aldri som mennesker (arkitektur §4.3)
+
+| Krav | Hvordan |
+|---|---|
+| Kan ikke logge inn | `HumanUsersScope` holder identiteten utenfor all Eloquent-lesing av brukere: passord, sesjon og Entra-kobling finner den ikke. I tillegg nekter `canAccessCustomerFrontend()` og `canAccessPanel()`. |
+| Vises ikke som ansatt og kan ikke velges som eier eller godkjenner | Samme scope: velgere, «Brukere», eiervalidering og relasjoner. De fire `isValidOwner()`-kontrollene nekter den også når de får raden direkte. Brukerskjermene gir 404. |
+| Ingen personvarsler | `UserNotificationWriter` nekter integrasjonsmottakere. `routeNotificationForMail()` gir `null`, så ingen e-post sendes. |
+| Teller ikke som lisens | Lisenstellingen teller bare `customer_admin` og `user`, og scopet utelater den uansett. |
+| Ingen menneskelige beslutningsrettigheter | Bare leserettigheter (over). `isSystemOwner()`, `isQa()`, `isWikiApprover()` og hele anbudsmatrisen er usanne for en integrasjon, uansett hva raden sier. Vakten og databasetriggerne fra fase 0 gjelder fortsatt. |
+| Rettighetsendringer følger kundens tilgangskontroll | Bare gjennom Kundemiljø → Integrasjoner (System Owner), registrert i `customer_access_changes`. «Brukere» når ikke identiteten. |
+
+Bare integrasjonens egen administrasjon leser forbi scopet: `User::integrationIdentities()`, `ApiClientCustomerGrant::integrationUser()` og `ApiClientGrantService`. En strukturell test nekter alle andre steder.
+
+### Endringer i brukeropplevelsen
+
+- **Ny fane Kundemiljø → Integrasjoner** for System Owner, med hjelpetekst i sidens PageHelp (steg for steg). Andre roller ser ingen endring.
+- **Ny side i Filament:** Kunder → API-klienter, for interne administratorer.
+- Ingen andre skjermer eller arbeidsflyter er endret for personer.
+
+### Migreringer
+
+- `2026_10_24_000001_create_api_client_changes_table`: revisjonsspor for klienter, med trigger som nekter endring og sletting.
+- `2026_10_24_000002_record_api_client_grant_changes`: tillater emnetypen `api_client_grant` i `customer_access_changes`. `down()` beholder den utvidede kontrollen så lenge slike rader finnes, som `2026_10_23_000012`.
+
+Ingen klienter eller tildelinger er opprettet i utviklings- eller produksjonsmiljøet. E2E-specen oppretter sin egen applikasjon og rolle i det isolerte E2E-miljøet og fjerner dem etterpå.
+
+### Tester (2026-10-24)
+
+- **Nye PHP-tester:** `IntegrationIdentityProtectionTest` (7), `ApiClientAdministrationTest` (9), `ApiClientGrantAdministrationTest` (9). De dekker blant annet at bare interne administratorer registrerer klienter, at en System Owner bare kan tildele for egen kunde, at ingen får tilgang uten aktiv tildeling, at rettighetene ikke går ut over lesing og kundens moduler, at tilbakekalling og deaktivering stopper neste kall, at integrasjonsidentiteter ikke behandles som ansatte, at kundeseparasjonen holder når én klient har flere kunder, og at reglene holder også ved direkte tjenestekall.
+- **Mutasjonssjekker** (alle fanget, og koden er gjenopprettet): scopet fjernet, den gamle rettighetsregelen gjeninnført, kontrollen fjernet i `register()`, System Owner-kravet fjernet, og kundegrensen på tildelingen fjernet.
+- **Hele PHP-suiten:** 8663 tester, 3 hoppet over (Redis, fra før). To feil var testfiksturer med håndlagde SQLite-skjemaer som manglet `users.role` og tildelingstabellen. Fiksturene er rettet, og de fire berørte testfilene består (49). Suiten er ikke kjørt i sin helhet på nytt etter rettingen.
+- **JS:** 2134 av 2134.
+- **E2E** (isolert miljø): `customer-integrations.spec.js` (ny), Kundemiljø-specene, innlogging, navigasjon, admin-tilgjengelighet og to Risiko-reiser. Den fjerde fanen gjorde fanelinja bredere enn en telefon. Fanelinja bryter nå over flere linjer, og alle berørte specer består.
+
+### Entra: `alg` i Microsofts nøkkelliste
+
+**Verifisert 2026-10-24** mot Microsofts offentlige nøkkelliste (`https://login.microsoftonline.com/common/discovery/v2.0/keys` og en tenant-spesifikk liste):
+
+- Nøklene har feltene `kty`, `use`, `kid`, `x5t`, `n`, `e`, `x5c`, `issuer` og `cloud_instance_name`. **De har ikke `alg`.** Algoritmen står bare i tokenets header (`RS256`). Microsofts dokumentasjon er ikke gjennomgått; funnet bygger på den faktiske listen.
+- `firebase/php-jwt` 7.1 krever en algoritme per nøkkel. `JWK::parseKeySet($jwks)` uten standardalgoritme kaster `UnexpectedValueException: JWK must contain an "alg" parameter` på den faktiske listen. Med `JWK::parseKeySet($jwks, 'RS256')` leses alle nøklene.
+
+**Konsekvens:** `EntraOidcClient::validateIdToken()` (vanlig innlogging med Entra) bruker `parseKeySet($jwks)` uten standardalgoritme og vil avvise **hvert** ekte ID-token. Entra-innlogging virker derfor ikke mot Microsoft i dag. Testene fanget det ikke, fordi de enten erstatter OIDC-klienten eller bruker en nøkkelliste med `alg`.
+
+**Det krever egen retting.** Den er ikke gjort i denne runden:
+
+- Rettingen er å oppgi `'RS256'` som standardalgoritme, slik API-et gjør. Det svekker ikke signaturvalideringen: biblioteket krever fortsatt at tokenets `alg` er lik nøkkelens, så bare RS256-signerte tokens godtas, og `none` og HMAC avvises.
+- Rettingen bør komme med en test som bruker en nøkkelliste uten `alg` (som Microsofts).
+- API-et påvirkes ikke. `EntraAccessTokenValidator` oppgir RS256 selv, og testene bruker allerede en nøkkelliste uten `alg`.
+
+### Gjenstår for testing med ekte Entra-token fra Siggjo
+
+Dette kan ikke testes uten Siggjos og Advanias registreringer:
+
+1. **App-registrering i Entra** for «Procynia API»: App ID URI, app-rollen `Procynia.Read.All` og `accessTokenAcceptedVersion: 2` i manifestet.
+2. **Konfigurasjon i staging:** `API_ENTRA_AUDIENCES` med API-appens klient-ID (v2-tokens har klient-ID-en som `aud`, ikke App ID URI-en).
+3. **Siggjos identitet:** managed identity eller app-registrering i Advanias tenant, med rolletildeling `Procynia.Read.All`. Registreres i Filament med applikasjons-ID og tenant-ID.
+4. **Tildeling** i Kundemiljø → Integrasjoner hos en testkunde, med en lese-rolle.
+5. **Verifisere på et ekte token:** `ver` er `2.0`, `iss` er `https://login.microsoftonline.com/{tid}/v2.0`, `azp` er Siggjos applikasjons-ID, `roles` inneholder `Procynia.Read.All`, og det finnes ingen `scp`. Kontroller også `idtyp` og `azpacr`. Avklar om `azpacr = 2` skal kreves (D5).
+6. **Negative prøver i staging (V4):** feil `aud`, token fra en annen tenant, fremmed app med samme rolle, deaktivert klient, tilbakekalt tildeling og `Procynia-Customer` for en kunde uten tildeling.
+7. **Nøkkelrotasjon:** at en ny `kid` fra Microsoft blir godtatt innen cache-tiden (1 time).
 
