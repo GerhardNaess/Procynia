@@ -76,6 +76,8 @@ class ApiCustomerGrantTest extends TestCase
                     'objectives' => ['entitled' => true, 'readable' => false, 'business_areas' => []],
                     // Customer-wide: no fagområder at all, so null rather than a list.
                     'management_review' => ['entitled' => true, 'readable' => false, 'business_areas' => null],
+                    // The customer has not ordered Etterlevelse og revisjon.
+                    'compliance' => ['entitled' => false, 'readable' => false, 'business_areas' => null],
                 ],
             ],
             'meta' => [

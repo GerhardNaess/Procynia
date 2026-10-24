@@ -80,12 +80,12 @@ class ApiAttentionAndBusinessAreaReadTest extends TestCase
 
         $response->assertOk();
         $response->assertExactJsonStructure([
-            'data' => ['modules' => ['risk', 'deviations', 'objectives'], 'items' => ['*' => ['type', 'id', 'title', 'objective_id', 'business_area', 'attention']]],
+            'data' => ['modules' => ['risk', 'deviations', 'objectives', 'compliance'], 'items' => ['*' => ['type', 'id', 'title', 'objective_id', 'business_area', 'attention']]],
             'meta' => ['as_of', 'request_id'],
         ]);
         $area = ['id' => $drift->id, 'name' => 'Drift'];
         $response->assertJsonPath('data', [
-            'modules' => ['risk' => true, 'deviations' => true, 'objectives' => true],
+            'modules' => ['risk' => true, 'deviations' => true, 'objectives' => true, 'compliance' => false],
             'items' => [
                 ['type' => 'risk', 'id' => $unassessed->id, 'title' => 'Ikke vurdert', 'objective_id' => null, 'business_area' => $area, 'attention' => ['not_assessed']],
                 ['type' => 'deviation', 'id' => $overdueCase->id, 'title' => 'Avvik over frist', 'objective_id' => null, 'business_area' => $area, 'attention' => ['case_overdue']],
@@ -120,7 +120,7 @@ class ApiAttentionAndBusinessAreaReadTest extends TestCase
 
         $this->get('/api/v1/attention', $this->asCustomer($this->accessToken(), $customer))
             ->assertOk()
-            ->assertJsonPath('data.modules', ['risk' => true, 'deviations' => false, 'objectives' => false])
+            ->assertJsonPath('data.modules', ['risk' => true, 'deviations' => false, 'objectives' => false, 'compliance' => false])
             ->assertJsonPath('data.items.*.id', [$risk->id]);
 
         // A customer without the modules: nothing readable, still a 200 for the module-free route.
@@ -130,7 +130,7 @@ class ApiAttentionAndBusinessAreaReadTest extends TestCase
 
         $this->get('/api/v1/attention', $this->asCustomer($this->accessToken(), $withoutModules))
             ->assertOk()
-            ->assertJsonPath('data', ['modules' => ['risk' => false, 'deviations' => false, 'objectives' => false], 'items' => []]);
+            ->assertJsonPath('data', ['modules' => ['risk' => false, 'deviations' => false, 'objectives' => false, 'compliance' => false], 'items' => []]);
         $this->get('/api/v1/business-areas', $this->asCustomer($this->accessToken(), $withoutModules))
             ->assertOk()
             ->assertJsonPath('data', []);

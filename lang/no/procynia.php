@@ -2805,6 +2805,7 @@ return [
                 'deviations' => 'Avvik og forbedringer',
                 'objectives' => 'Mål og KPI',
                 'management_review' => 'Ledelsens gjennomgang',
+                'compliance' => 'Etterlevelse og revisjon',
             ],
             'granted_meta' => 'Tilgang gitt :date av :name',
             'unknown_person' => 'ukjent',

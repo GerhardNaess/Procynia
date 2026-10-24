@@ -8,6 +8,7 @@ const MODULE_LABELS = {
     deviations: 'Avvik og forbedringer',
     objectives: 'Mål og KPI',
     management_review: 'Ledelsens gjennomgang',
+    compliance: 'Etterlevelse og revisjon',
 };
 
 export function integrationAccessLines(access = {}, t = {}) {

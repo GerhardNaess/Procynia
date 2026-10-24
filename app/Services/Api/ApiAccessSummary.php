@@ -5,6 +5,7 @@ namespace App\Services\Api;
 use App\Models\BusinessArea;
 use App\Models\Customer;
 use App\Models\User;
+use App\Services\Compliance\ComplianceAccessService;
 use App\Services\Improvements\ImprovementCaseAccessService;
 use App\Services\ManagementReview\ManagementReviewAccessService;
 use App\Services\Modules\ModuleEntitlementService;
@@ -29,6 +30,7 @@ class ApiAccessSummary
         private readonly ImprovementCaseAccessService $improvements,
         private readonly ObjectiveAccessService $objectives,
         private readonly ManagementReviewAccessService $managementReviews,
+        private readonly ComplianceAccessService $compliance,
     ) {}
 
     /**
@@ -61,6 +63,11 @@ class ApiAccessSummary
             'management_review' => $this->customerWide(
                 $this->entitlements->hasModule($customer, 'management_review') && $this->managementReviews->canOpenModule($identity),
                 $this->entitlements->hasModule($customer, 'management_review'),
+            ),
+            // GET /api/v1/compliance/…: Etterlevelse og revisjon. Customer-wide, an explicit-grant domain.
+            'compliance' => $this->customerWide(
+                $this->compliance->canReadFromAnotherModule($identity),
+                $this->entitlements->hasModule($customer, 'compliance'),
             ),
         ];
     }

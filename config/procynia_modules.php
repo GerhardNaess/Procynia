@@ -156,6 +156,7 @@ return [
         'api.v1.objectives.' => 'objectives',
         'api.v1.kpis.' => 'objectives',
         'api.v1.management-reviews.' => 'management_review',
+        'api.v1.compliance.' => 'compliance',
     ],
 
 ];

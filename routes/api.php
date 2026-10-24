@@ -2,6 +2,10 @@
 
 use App\Http\Controllers\Api\V1\AttentionController;
 use App\Http\Controllers\Api\V1\BusinessAreaController;
+use App\Http\Controllers\Api\V1\Compliance\ComplianceAuditController;
+use App\Http\Controllers\Api\V1\Compliance\ComplianceFrameworkController;
+use App\Http\Controllers\Api\V1\Compliance\ComplianceRequirementController;
+use App\Http\Controllers\Api\V1\Compliance\ComplianceStatusController;
 use App\Http\Controllers\Api\V1\DeviationController;
 use App\Http\Controllers\Api\V1\ImprovementController;
 use App\Http\Controllers\Api\V1\KpiController;
@@ -45,4 +49,11 @@ Route::prefix('v1')
         Route::get('kpis/{kpiId}/measurements', [KpiController::class, 'measurements'])->whereNumber('kpiId')->name('kpis.measurements');
         Route::get('management-reviews', [ManagementReviewController::class, 'index'])->name('management-reviews.index');
         Route::get('management-reviews/{reviewId}', [ManagementReviewController::class, 'show'])->whereNumber('reviewId')->name('management-reviews.show');
+        Route::get('compliance/requirements', [ComplianceRequirementController::class, 'index'])->name('compliance.requirements.index');
+        Route::get('compliance/requirements/{requirementId}', [ComplianceRequirementController::class, 'show'])->whereNumber('requirementId')->name('compliance.requirements.show');
+        Route::get('compliance/status', ComplianceStatusController::class)->name('compliance.status');
+        Route::get('compliance/audits', [ComplianceAuditController::class, 'index'])->name('compliance.audits.index');
+        Route::get('compliance/audits/{auditId}', [ComplianceAuditController::class, 'show'])->whereNumber('auditId')->name('compliance.audits.show');
+        Route::get('compliance/frameworks', [ComplianceFrameworkController::class, 'index'])->name('compliance.frameworks.index');
+        Route::get('compliance/frameworks/{frameworkId}', [ComplianceFrameworkController::class, 'show'])->whereNumber('frameworkId')->name('compliance.frameworks.show');
     });

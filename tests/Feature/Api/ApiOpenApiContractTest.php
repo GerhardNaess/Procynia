@@ -2,6 +2,12 @@
 
 namespace Tests\Feature\Api;
 
+use App\Models\ComplianceAssessment;
+use App\Models\ComplianceAudit;
+use App\Models\ComplianceAuditFinding;
+use App\Models\ComplianceFrameworkNode;
+use App\Models\ComplianceRequirement;
+use App\Models\ComplianceSource;
 use App\Models\ImprovementAction;
 use App\Models\ImprovementActionVerification;
 use App\Models\ImprovementCase;
@@ -12,6 +18,10 @@ use App\Models\Objective;
 use App\Models\Risk;
 use App\Models\RiskTreatmentAction;
 use App\Services\Api\ApiErrorResponder;
+use App\Services\Compliance\ComplianceAssessmentOverview;
+use App\Services\Compliance\ComplianceAttentionService;
+use App\Services\Compliance\ComplianceAuditAttentionService;
+use App\Services\Compliance\ComplianceStatusResolver;
 use App\Services\Improvements\ImprovementAttentionService;
 use App\Services\ManagementReview\ManagementReviewSectionCatalog as ReviewSections;
 use App\Services\Objectives\KpiTarget;
@@ -124,6 +134,19 @@ class ApiOpenApiContractTest extends TestCase
             'KpiCurrentResult' => [...KpiTargetPolicy::RESULTS, KpiPagePresenter::NOT_MEASURED],
             'KpiAttentionCode' => [ObjectiveAttentionService::KPI_OFF_TARGET, ObjectiveAttentionService::MEASUREMENT_MISSING],
             'ErrorCode' => array_keys(ApiErrorResponder::MESSAGES),
+            'ComplianceRequirementStatus' => ComplianceRequirement::STATUSES,
+            'ComplianceApplicability' => ComplianceRequirement::APPLICABILITIES,
+            'ComplianceAssessmentResult' => ComplianceAssessment::RESULTS,
+            'ComplianceResult' => [...ComplianceAssessment::RESULTS, ComplianceStatusResolver::STATUS_NOT_ASSESSED],
+            'ComplianceOverviewGroup' => [...ComplianceAssessmentOverview::ASSESSABLE, ComplianceAssessmentOverview::NOT_APPLICABLE, ComplianceAssessmentOverview::RELEVANCE_OPEN],
+            'ComplianceRequirementAttentionCode' => ComplianceAttentionService::REASONS,
+            'ComplianceSourceKind' => ComplianceSource::KINDS,
+            'ComplianceAuditStatus' => ComplianceAudit::STATUSES,
+            'ComplianceAuditType' => ComplianceAudit::TYPES,
+            'ComplianceAuditAttentionCode' => ComplianceAuditAttentionService::REASONS,
+            'ComplianceFindingType' => ComplianceAuditFinding::TYPES,
+            'ComplianceRelevance' => [ComplianceRequirement::APPLICABILITY_APPLIES, ComplianceAssessmentOverview::NOT_APPLICABLE, ComplianceAssessmentOverview::RELEVANCE_OPEN],
+            'ComplianceFrameworkNodeKind' => [ComplianceFrameworkNode::KIND_SECTION, ComplianceFrameworkNode::KIND_REQUIREMENT],
             'ManagementReviewStatus' => ManagementReview::STATUSES,
             'ManagementReviewJudgement' => ManagementReview::JUDGEMENTS,
             'ManagementReviewSectionType' => [ReviewSections::TYPE_OWN, ReviewSections::TYPE_MANUAL, ReviewSections::TYPE_MODULE],
@@ -133,7 +156,7 @@ class ApiOpenApiContractTest extends TestCase
             'ManagementReviewDecisionStatus' => ManagementReviewDecision::STATUSES,
             // The keys of ApiAccessSummary::for() and the item types of ApiAttentionOverview.
             'ApiModule' => ['risk', 'deviations', 'objectives'],
-            'AttentionItemType' => ['risk', 'deviation', 'improvement', 'objective', 'kpi'],
+            'AttentionItemType' => ['risk', 'deviation', 'improvement', 'objective', 'kpi', 'compliance_requirement', 'compliance_audit'],
         ];
 
         foreach ($expected as $schema => $values) {

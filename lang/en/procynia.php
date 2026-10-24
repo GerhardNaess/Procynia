@@ -2801,6 +2801,7 @@ return [
                 'deviations' => 'Deviations and improvements',
                 'objectives' => 'Objectives and KPIs',
                 'management_review' => 'Management review',
+                'compliance' => 'Compliance and audit',
             ],
             'granted_meta' => 'Access given :date by :name',
             'unknown_person' => 'unknown',

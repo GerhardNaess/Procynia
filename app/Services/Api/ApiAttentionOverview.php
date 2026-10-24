@@ -2,11 +2,16 @@
 
 namespace App\Services\Api;
 
+use App\Models\ComplianceAudit;
+use App\Models\ComplianceRequirement;
 use App\Models\Customer;
 use App\Models\ImprovementCase;
 use App\Models\Objective;
 use App\Models\Risk;
 use App\Models\User;
+use App\Services\Compliance\ComplianceAccessService;
+use App\Services\Compliance\ComplianceAttentionService;
+use App\Services\Compliance\ComplianceAuditAttentionService;
 use App\Services\Improvements\ImprovementAttentionService;
 use App\Services\Improvements\ImprovementCaseAccessService;
 use App\Services\Objectives\ObjectiveAccessService;
@@ -38,11 +43,14 @@ class ApiAttentionOverview
         private readonly ImprovementAttentionService $caseAttention,
         private readonly ObjectiveAccessService $objectives,
         private readonly ObjectiveAttentionService $objectiveAttention,
+        private readonly ComplianceAccessService $compliance,
+        private readonly ComplianceAttentionService $requirementAttention,
+        private readonly ComplianceAuditAttentionService $auditAttention,
     ) {}
 
     /**
      * @return array{
-     *     modules: array{risk: bool, deviations: bool, objectives: bool},
+     *     modules: array{risk: bool, deviations: bool, objectives: bool, compliance: bool},
      *     items: list<array<string, mixed>>
      * }
      */
@@ -53,6 +61,7 @@ class ApiAttentionOverview
             'risk' => $summary['risk']['readable'],
             'deviations' => $summary['deviations']['readable'],
             'objectives' => $summary['objectives']['readable'],
+            'compliance' => $summary['compliance']['readable'],
         ];
 
         return [
@@ -61,6 +70,7 @@ class ApiAttentionOverview
                 ...($readable['risk'] ? $this->risks($identity, $today) : []),
                 ...($readable['deviations'] ? $this->cases($identity, $today) : []),
                 ...($readable['objectives'] ? $this->objectives($identity, $today) : []),
+                ...($readable['compliance'] ? $this->compliance($identity, $today) : []),
             ],
         ];
     }
@@ -177,19 +187,55 @@ class ApiAttentionOverview
     }
 
     /**
-     * One record needing attention. objective_id is a KPI's objective, null for anything else.
+     * Requirements, then audits — ComplianceAttentionService and ComplianceAuditAttentionService
+     * over the active requirements and the audits that are not cancelled, the sets the register and
+     * Ledelsens gjennomgang use. Neither has a fagområde.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function compliance(User $identity, CarbonImmutable $today): array
+    {
+        $requirements = $this->compliance->visibleRequirements($identity)
+            ->where('compliance_requirements.status', ComplianceRequirement::STATUS_ACTIVE)
+            ->orderBy('compliance_requirements.id')
+            ->get(['compliance_requirements.*']);
+        $audits = $this->compliance->visibleAudits($identity)
+            ->where('compliance_audits.status', '!=', ComplianceAudit::STATUS_CANCELLED)
+            ->orderBy('compliance_audits.id')
+            ->get(['compliance_audits.*']);
+        $requirementReasons = $this->requirementAttention->reasonsForRequirements($requirements, null, $today);
+        $auditReasons = $this->auditAttention->reasonsForAudits($audits, $today);
+        $items = [];
+
+        foreach ($requirements as $requirement) {
+            if (($requirementReasons[(int) $requirement->id] ?? []) !== []) {
+                $items[] = $this->item('compliance_requirement', (int) $requirement->id, $requirement->title, null, null, $requirementReasons[(int) $requirement->id]);
+            }
+        }
+
+        foreach ($audits as $audit) {
+            if (($auditReasons[(int) $audit->id] ?? []) !== []) {
+                $items[] = $this->item('compliance_audit', (int) $audit->id, $audit->title, null, null, $auditReasons[(int) $audit->id]);
+            }
+        }
+
+        return $items;
+    }
+
+    /**
+     * One record needing attention. business_area is null for a module without fagområder. objective_id is a KPI's objective, null for anything else.
      *
      * @param  list<string>  $codes
-     * @return array{type: string, id: int, title: string, objective_id: ?int, business_area: array{id: int, name: ?string}, attention: list<string>}
+     * @return array{type: string, id: int, title: string, objective_id: ?int, business_area: array{id: int, name: ?string}|null, attention: list<string>}
      */
-    private function item(string $type, int $id, string $title, int $areaId, ?string $areaName, array $codes, ?int $objectiveId = null): array
+    private function item(string $type, int $id, string $title, ?int $areaId, ?string $areaName, array $codes, ?int $objectiveId = null): array
     {
         return [
             'type' => $type,
             'id' => $id,
             'title' => $title,
             'objective_id' => $objectiveId,
-            'business_area' => ['id' => $areaId, 'name' => $areaName],
+            'business_area' => $areaId !== null ? ['id' => $areaId, 'name' => $areaName] : null,
             'attention' => $codes,
         ];
     }

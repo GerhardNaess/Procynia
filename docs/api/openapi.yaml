@@ -84,6 +84,8 @@ tags:
     description: Mål og KPI.
   - name: Management review
     description: Ledelsens gjennomgang.
+  - name: Compliance and audit
+    description: Etterlevelse og revisjon — kravregister, status, revisjoner and Kravbiblioteket.
 
 paths:
   /v1/me:
@@ -135,14 +137,16 @@ paths:
       summary: What needs following up, across modules
       description: |
         Every record the integration identity may read that needs attention now, across Risiko,
-        Avvik og forbedringer and Mål og KPI, with the reasons as codes. Each module's own rules
-        decide, over the same set as its register's «Trenger oppmerksomhet»: risks that are not
-        closed, active avvik and forbedringer, active objectives and their active KPIs. The codes
-        are the same as on the records' own rows.
+        Avvik og forbedringer, Mål og KPI and Etterlevelse og revisjon, with the reasons as codes.
+        Each module's own rules decide, over the same set as its register's «Trenger
+        oppmerksomhet»: risks that are not closed, active avvik and forbedringer, active
+        objectives and their active KPIs, active requirements and audits that are not cancelled.
+        The codes are the same as on the records' own rows.
 
         A module the customer has not ordered, or the identity may not read, is `false` under
         `modules` and contributes no items. This route needs no module and is returned whole,
-        without pagination: risks, then avvik, forbedringer, objectives and KPIs, each by id.
+        without pagination: risks, then avvik, forbedringer, objectives, KPIs, requirements and
+        audits, each by id.
       parameters:
         - $ref: '#/components/parameters/ProcyniaCustomer'
       responses:
@@ -893,6 +897,326 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /v1/compliance/requirements:
+    get:
+      tags: [Compliance and audit]
+      operationId: listComplianceRequirements
+      summary: The kravregister
+      description: |
+        The requirements of the customer's register, with their source, relevance, ansvarlig,
+        compliance status and attention codes. The register is customer-wide; there are no
+        fagområder.
+
+        Requires the Etterlevelse og revisjon module and `compliance.view`. Etterlevelse is an explicit-grant domain: the identity holds the permission only through a role the System Owner gave it.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/ComplianceRequirementStatusFilter'
+        - $ref: '#/components/parameters/ComplianceSourceId'
+        - $ref: '#/components/parameters/ComplianceApplicabilityFilter'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of requirements.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ComplianceRequirement'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/compliance/requirements/{requirementId}:
+    get:
+      tags: [Compliance and audit]
+      operationId: getComplianceRequirement
+      summary: One requirement with its assessment history
+      description: |
+        One requirement with the fields of the register and every assessment (result and time),
+        newest first. A requirement of another customer, or one that does not exist, is 404.
+
+        Not included: the requirement text, the relevance rationale, the assessments' rationale and
+        documentation, who assessed, the status history and the Kvalitet context.
+
+        Requires the Etterlevelse og revisjon module and `compliance.view`. Etterlevelse is an explicit-grant domain: the identity holds the permission only through a role the System Owner gave it.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/RequirementId'
+      responses:
+        '200':
+          description: The requirement.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ComplianceRequirementDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/compliance/status:
+    get:
+      tags: [Compliance and audit]
+      operationId: getComplianceStatus
+      summary: Compliance status, in total and per source
+      description: |
+        Where the active requirements stand, in total and per source or standard: the counts of
+        Etterlevelsesvurdering, by the same groups.
+
+        Requires the Etterlevelse og revisjon module and `compliance.view`. Etterlevelse is an explicit-grant domain: the identity holds the permission only through a role the System Owner gave it.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+      responses:
+        '200':
+          description: The status.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ComplianceStatus'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/compliance/audits:
+    get:
+      tags: [Compliance and audit]
+      operationId: listComplianceAudits
+      summary: The revisjoner
+      description: |
+        The customer's audits, with type, status, ansvarlig, planned dates, the size of their scope
+        and their attention codes. Reading only: the whole audit process is a human decision.
+
+        Requires the Etterlevelse og revisjon module and `compliance.view`. Etterlevelse is an explicit-grant domain: the identity holds the permission only through a role the System Owner gave it.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/ComplianceAuditStatusFilter'
+        - $ref: '#/components/parameters/ComplianceAuditTypeFilter'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of audits.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ComplianceAudit'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/compliance/audits/{auditId}:
+    get:
+      tags: [Compliance and audit]
+      operationId: getComplianceAudit
+      summary: One audit with scope, kontrollhandlinger and findings
+      description: |
+        One audit with the requirements in its scope, its kontrollhandlinger (checks) and its
+        findings, and how they link. A finding handed off to Avvik og forbedringer names its case
+        only when the identity may read that case there. An audit of another customer, or one that
+        does not exist, is 404.
+
+        Not included: purpose, scope description, conclusion, the auditor's name, observations,
+        evidence, finding descriptions, who handed off, the status history and the Kvalitet context
+        (processes and controls).
+
+        Requires the Etterlevelse og revisjon module and `compliance.view`. Etterlevelse is an explicit-grant domain: the identity holds the permission only through a role the System Owner gave it.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/AuditId'
+      responses:
+        '200':
+          description: The audit.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ComplianceAuditDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/compliance/frameworks:
+    get:
+      tags: [Compliance and audit]
+      operationId: listComplianceFrameworks
+      summary: Kravbiblioteket
+      description: |
+        The standards in Procynia's requirement library, and for each whether the customer has
+        activated it. The library is the same for every customer.
+
+        Requires the Etterlevelse og revisjon module and `compliance.view`. Etterlevelse is an explicit-grant domain: the identity holds the permission only through a role the System Owner gave it.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+      responses:
+        '200':
+          description: The standards.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ComplianceFramework'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/compliance/frameworks/{frameworkId}:
+    get:
+      tags: [Compliance and audit]
+      operationId: getComplianceFramework
+      summary: One standard with its chapters and requirements
+      description: |
+        One standard's tree of chapters and requirements, in the standard's order, with the
+        customer's register entry for each requirement when it has activated the standard. Withdrawn
+        nodes are left out unless the customer still has a requirement on one. The library's
+        descriptions and guidance are not included.
+
+        Requires the Etterlevelse og revisjon module and `compliance.view`. Etterlevelse is an explicit-grant domain: the identity holds the permission only through a role the System Owner gave it.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/FrameworkId'
+      responses:
+        '200':
+          description: The standard.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ComplianceFrameworkDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
 components:
   securitySchemes:
     entraApplicationToken:
@@ -987,6 +1311,66 @@ components:
       description: Only reviews with this status.
       schema:
         $ref: '#/components/schemas/ManagementReviewStatus'
+    RequirementId:
+      name: requirementId
+      in: path
+      required: true
+      description: The requirement's id.
+      schema:
+        type: integer
+        minimum: 0
+    AuditId:
+      name: auditId
+      in: path
+      required: true
+      description: The audit's id.
+      schema:
+        type: integer
+        minimum: 0
+    FrameworkId:
+      name: frameworkId
+      in: path
+      required: true
+      description: The standard's id.
+      schema:
+        type: integer
+        minimum: 0
+    ComplianceRequirementStatusFilter:
+      name: status
+      in: query
+      required: false
+      description: Only requirements with this status.
+      schema:
+        $ref: '#/components/schemas/ComplianceRequirementStatus'
+    ComplianceSourceId:
+      name: source_id
+      in: query
+      required: false
+      description: Only requirements of this source. A source the caller cannot see gives an empty list.
+      schema:
+        type: integer
+        minimum: 1
+    ComplianceApplicabilityFilter:
+      name: applicability
+      in: query
+      required: false
+      description: Only library requirements with this relevance (Relevans or Kontrollvalg).
+      schema:
+        $ref: '#/components/schemas/ComplianceApplicability'
+    ComplianceAuditStatusFilter:
+      name: status
+      in: query
+      required: false
+      description: Only audits with this status.
+      schema:
+        $ref: '#/components/schemas/ComplianceAuditStatus'
+    ComplianceAuditTypeFilter:
+      name: audit_type
+      in: query
+      required: false
+      description: Only audits of this type.
+      schema:
+        $ref: '#/components/schemas/ComplianceAuditType'
     BusinessAreaId:
       name: business_area_id
       in: query
@@ -1273,7 +1657,7 @@ components:
         modules:
           type: object
           description: The modules this API serves, by the key of their endpoints.
-          required: [risk, deviations, objectives, management_review]
+          required: [risk, deviations, objectives, management_review, compliance]
           additionalProperties: false
           properties:
             risk:
@@ -1288,6 +1672,9 @@ components:
             management_review:
               $ref: '#/components/schemas/ModuleAccess'
               description: Ledelsens gjennomgang — `GET /v1/management-reviews`. Customer-wide, so `business_areas` is null.
+            compliance:
+              $ref: '#/components/schemas/ModuleAccess'
+              description: Etterlevelse og revisjon — `GET /v1/compliance/…`. Customer-wide, so `business_areas` is null.
     ModuleAccess:
       type: object
       required: [entitled, readable, business_areas]
@@ -1325,7 +1712,7 @@ components:
       enum: [risk, deviations, objectives]
     AttentionItemType:
       type: string
-      enum: [risk, deviation, improvement, objective, kpi]
+      enum: [risk, deviation, improvement, objective, kpi, compliance_requirement, compliance_audit]
     AttentionOverview:
       type: object
       required: [modules, items]
@@ -1334,7 +1721,7 @@ components:
         modules:
           type: object
           description: Per module, whether the identity reads it. A module that is `false` contributes no items.
-          required: [risk, deviations, objectives]
+          required: [risk, deviations, objectives, compliance]
           additionalProperties: false
           properties:
             risk:
@@ -1342,6 +1729,8 @@ components:
             deviations:
               type: boolean
             objectives:
+              type: boolean
+            compliance:
               type: boolean
         items:
           type: array
@@ -1364,8 +1753,10 @@ components:
           type: [integer, 'null']
           description: A KPI's objective. Null for every other type.
         business_area:
-          $ref: '#/components/schemas/Reference'
-          description: The record's fagområde (a KPI's is its objective's).
+          description: The record's fagområde (a KPI's is its objective's). Null in a module without fagområder.
+          oneOf:
+            - $ref: '#/components/schemas/Reference'
+            - type: 'null'
         attention:
           type: array
           description: The codes of the record's own module, in that module's order.
@@ -1376,6 +1767,8 @@ components:
               - $ref: '#/components/schemas/ImprovementAttentionCode'
               - $ref: '#/components/schemas/ObjectiveAttentionCode'
               - $ref: '#/components/schemas/KpiAttentionCode'
+              - $ref: '#/components/schemas/ComplianceRequirementAttentionCode'
+              - $ref: '#/components/schemas/ComplianceAuditAttentionCode'
     BusinessArea:
       type: object
       description: A fagområde. Its description is not included.
@@ -2289,3 +2682,439 @@ components:
                   type: [string, 'null']
                   format: date
             - type: 'null'
+
+    ComplianceRequirementStatus:
+      type: string
+      enum: [active, retired]
+    ComplianceApplicability:
+      type: string
+      description: A library requirement's relevance — for an Annex A control its Kontrollvalg (applies = Inkludert, not_applicable = Utelatt).
+      enum: [applies, not_applicable, not_assessed]
+    ComplianceResult:
+      type: string
+      description: The latest assessment's result, not_applicable for a library requirement found not relevant, or not_assessed.
+      enum: [compliant, partially_compliant, non_compliant, not_applicable, not_assessed]
+    ComplianceAssessmentResult:
+      type: string
+      enum: [compliant, partially_compliant, non_compliant, not_applicable]
+    ComplianceOverviewGroup:
+      type: string
+      description: Etterlevelsesvurdering's group. relevance_open is a library requirement whose relevance is not yet decided.
+      enum: [compliant, partially_compliant, non_compliant, not_assessed, not_applicable, relevance_open]
+    ComplianceRequirementAttentionCode:
+      type: string
+      description: Why an active, relevant requirement needs attention, in this order.
+      enum: [not_assessed, non_compliant, partially_compliant, review_overdue]
+    ComplianceSourceKind:
+      type: string
+      enum: [standard, law, contract, internal, other]
+    ComplianceSource:
+      type: object
+      required: [id, label, kind, from_library]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        label:
+          type: string
+          description: For example «ISO 27001:2022» for an activated standard, otherwise «Name (version)».
+        kind:
+          $ref: '#/components/schemas/ComplianceSourceKind'
+        from_library:
+          type: boolean
+          description: Activated from Kravbiblioteket.
+    ComplianceRequirement:
+      description: A requirement in the register, without the requirement text and the relevance rationale.
+      allOf:
+        - $ref: '#/components/schemas/ComplianceRequirementFields'
+      unevaluatedProperties: false
+    ComplianceRequirementFields:
+      type: object
+      required: [id, reference, title, status, source, from_library, is_control, applicability, owner, review_interval_months, compliance, attention, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+        reference:
+          type: [string, 'null']
+          description: The clause or reference, for example `A.5.15`.
+        title:
+          type: string
+        status:
+          $ref: '#/components/schemas/ComplianceRequirementStatus'
+        source:
+          oneOf:
+            - $ref: '#/components/schemas/ComplianceSource'
+            - type: 'null'
+        from_library:
+          type: boolean
+        is_control:
+          type: boolean
+          description: An Annex A control.
+        applicability:
+          description: Relevans for a library requirement; null for one registered by hand.
+          oneOf:
+            - $ref: '#/components/schemas/ComplianceApplicability'
+            - type: 'null'
+        owner:
+          oneOf:
+            - $ref: '#/components/schemas/Person'
+            - type: 'null'
+        review_interval_months:
+          description: How often it is to be assessed again, or null.
+          oneOf:
+            - type: integer
+              enum: [1, 3, 6, 12]
+            - type: 'null'
+        compliance:
+          type: object
+          required: [status, group, last_assessed_at, next_review_on, is_overdue, changed_since_assessment]
+          additionalProperties: false
+          properties:
+            status:
+              $ref: '#/components/schemas/ComplianceResult'
+            group:
+              $ref: '#/components/schemas/ComplianceOverviewGroup'
+            last_assessed_at:
+              oneOf:
+                - $ref: '#/components/schemas/Timestamp'
+                - type: 'null'
+            next_review_on:
+              type: [string, 'null']
+              format: date
+            is_overdue:
+              type: boolean
+              description: Today is after next_review_on.
+            changed_since_assessment:
+              type: boolean
+              description: The requirement or its source has changed since the latest assessment.
+        attention:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComplianceRequirementAttentionCode'
+        created_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        updated_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    ComplianceRequirementDetail:
+      allOf:
+        - $ref: '#/components/schemas/ComplianceRequirementFields'
+        - type: object
+          required: [assessments]
+          properties:
+            assessments:
+              type: array
+              description: Every assessment, newest first. Not who assessed, nor the rationale.
+              items:
+                type: object
+                required: [id, result, assessed_at]
+                additionalProperties: false
+                properties:
+                  id:
+                    type: integer
+                  result:
+                    $ref: '#/components/schemas/ComplianceAssessmentResult'
+                  assessed_at:
+                    oneOf:
+                      - $ref: '#/components/schemas/Timestamp'
+                      - type: 'null'
+      unevaluatedProperties: false
+    ComplianceStats:
+      type: object
+      description: |
+        Etterlevelsesvurdering's counts. assessable is compliant + partially_compliant +
+        non_compliant + not_assessed; assessed excludes not_assessed; overdue counts assessable
+        requirements past their review date.
+      required: [assessable, assessed, compliant, partially_compliant, non_compliant, not_assessed, overdue, not_applicable, relevance_open]
+      additionalProperties: false
+      properties:
+        assessable:
+          type: integer
+        assessed:
+          type: integer
+        compliant:
+          type: integer
+        partially_compliant:
+          type: integer
+        non_compliant:
+          type: integer
+        not_assessed:
+          type: integer
+        overdue:
+          type: integer
+        not_applicable:
+          type: integer
+        relevance_open:
+          type: integer
+    ComplianceStatus:
+      type: object
+      required: [total, per_source]
+      additionalProperties: false
+      properties:
+        total:
+          $ref: '#/components/schemas/ComplianceStats'
+        per_source:
+          type: array
+          description: One row per source with active requirements, by name.
+          items:
+            type: object
+            required: [source, stats]
+            additionalProperties: false
+            properties:
+              source:
+                $ref: '#/components/schemas/ComplianceSource'
+              stats:
+                $ref: '#/components/schemas/ComplianceStats'
+    ComplianceAuditStatus:
+      type: string
+      enum: [planned, in_progress, completed, cancelled]
+    ComplianceAuditType:
+      type: string
+      enum: [internal, external]
+    ComplianceAuditAttentionCode:
+      type: string
+      description: overdue (planned or in progress past its planned end date); nonconformity_without_follow_up (completed, with a nonconformity not handed off).
+      enum: [overdue, nonconformity_without_follow_up]
+    ComplianceFindingType:
+      type: string
+      enum: [nonconformity, observation, opportunity]
+    ComplianceRelevance:
+      type: string
+      enum: [applies, not_applicable, relevance_open]
+    ComplianceAudit:
+      description: An audit, without its purpose, scope description, conclusion and the auditor's name.
+      allOf:
+        - $ref: '#/components/schemas/ComplianceAuditFields'
+      unevaluatedProperties: false
+    ComplianceAuditFields:
+      type: object
+      required: [id, title, audit_type, status, responsible, planned_start_date, planned_end_date, counts, attention, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        audit_type:
+          $ref: '#/components/schemas/ComplianceAuditType'
+        status:
+          $ref: '#/components/schemas/ComplianceAuditStatus'
+        responsible:
+          oneOf:
+            - $ref: '#/components/schemas/Person'
+            - type: 'null'
+        planned_start_date:
+          type: [string, 'null']
+          format: date
+        planned_end_date:
+          type: [string, 'null']
+          format: date
+        counts:
+          type: object
+          required: [requirements, checks, findings]
+          additionalProperties: false
+          properties:
+            requirements:
+              type: integer
+              description: Requirements in scope.
+            checks:
+              type: integer
+              description: Kontrollhandlinger.
+            findings:
+              type: integer
+        attention:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComplianceAuditAttentionCode'
+        created_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        updated_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    ComplianceAuditDetail:
+      allOf:
+        - $ref: '#/components/schemas/ComplianceAuditFields'
+        - type: object
+          required: [requirements, checks, findings]
+          properties:
+            requirements:
+              type: array
+              description: The requirements in scope, in the register's order.
+              items:
+                type: object
+                required: [id, reference, title, status, relevance, is_control, source_id, check_count, finding_count]
+                additionalProperties: false
+                properties:
+                  id:
+                    type: integer
+                  reference:
+                    type: [string, 'null']
+                  title:
+                    type: string
+                  status:
+                    $ref: '#/components/schemas/ComplianceRequirementStatus'
+                  relevance:
+                    $ref: '#/components/schemas/ComplianceRelevance'
+                  is_control:
+                    type: boolean
+                  source_id:
+                    type: integer
+                  check_count:
+                    type: integer
+                  finding_count:
+                    type: integer
+            checks:
+              type: array
+              description: The kontrollhandlinger, in the order recorded. Their observations and evidence are not included.
+              items:
+                type: object
+                required: [id, title, requirement_ids, finding_ids]
+                additionalProperties: false
+                properties:
+                  id:
+                    type: integer
+                  title:
+                    type: string
+                  requirement_ids:
+                    type: array
+                    items:
+                      type: integer
+                  finding_ids:
+                    type: array
+                    items:
+                      type: integer
+            findings:
+              type: array
+              description: The findings, in the order recorded. Their descriptions are not included.
+              items:
+                type: object
+                required: [id, finding_type, title, requirement_id, check_id, improvement_type, handed_off, handed_off_at, improvement_case_id]
+                additionalProperties: false
+                properties:
+                  id:
+                    type: integer
+                  finding_type:
+                    $ref: '#/components/schemas/ComplianceFindingType'
+                  title:
+                    type: string
+                    description: Written by people. May contain personal data.
+                  requirement_id:
+                    type: [integer, 'null']
+                  check_id:
+                    type: [integer, 'null']
+                  improvement_type:
+                    description: What a hand-off to Avvik og forbedringer becomes, or null.
+                    oneOf:
+                      - type: string
+                        enum: [deviation, improvement]
+                      - type: 'null'
+                  handed_off:
+                    type: boolean
+                  handed_off_at:
+                    oneOf:
+                      - $ref: '#/components/schemas/Timestamp'
+                      - type: 'null'
+                  improvement_case_id:
+                    type: [integer, 'null']
+                    description: The case, when the identity may read it in Avvik og forbedringer. Null otherwise, even when handed off.
+      unevaluatedProperties: false
+    ComplianceFramework:
+      type: object
+      required: [id, key, reference, edition, label, name, content_verified, source_id, requirement_count, has_controls]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        key:
+          type: string
+          description: For example `iso9001:2015`.
+        reference:
+          type: string
+        edition:
+          type: [string, 'null']
+        label:
+          type: string
+        name:
+          type: string
+        content_verified:
+          type: boolean
+          description: Whether the library's content has been checked against the standard.
+        source_id:
+          type: [integer, 'null']
+          description: The customer's source for the standard when activated, otherwise null.
+        requirement_count:
+          type: integer
+        has_controls:
+          type: boolean
+    ComplianceFrameworkDetail:
+      type: object
+      required: [id, key, reference, edition, label, name, content_verified, source_id, requirement_count, has_controls, nodes]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        key:
+          type: string
+        reference:
+          type: string
+        edition:
+          type: [string, 'null']
+        label:
+          type: string
+        name:
+          type: string
+        content_verified:
+          type: boolean
+        source_id:
+          type: [integer, 'null']
+        requirement_count:
+          type: integer
+        has_controls:
+          type: boolean
+        nodes:
+          type: array
+          description: The chapters and requirements, flat in the standard's order; nest them by parent_id.
+          items:
+            $ref: '#/components/schemas/ComplianceFrameworkNode'
+    ComplianceFrameworkNodeKind:
+      type: string
+      enum: [section, requirement]
+    ComplianceFrameworkNode:
+      type: object
+      required: [id, parent_id, clause, kind, depth, title, requirement_type, applicability_rule, withdrawn, requirement_id]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        parent_id:
+          type: [integer, 'null']
+        clause:
+          type: [string, 'null']
+        kind:
+          $ref: '#/components/schemas/ComplianceFrameworkNodeKind'
+        depth:
+          type: integer
+        title:
+          type: string
+        requirement_type:
+          description: A requirement's type; null for a section.
+          oneOf:
+            - type: string
+              enum: [activity, leadership, documented_information, control]
+            - type: 'null'
+        applicability_rule:
+          description: mandatory, conditional (may be not relevant) or control (Annex A); null for a section.
+          oneOf:
+            - type: string
+              enum: [mandatory, conditional, control]
+            - type: 'null'
+        withdrawn:
+          type: boolean
+        requirement_id:
+          type: [integer, 'null']
+          description: The customer's requirement for this node, when it has activated the standard.
