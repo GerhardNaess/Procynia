@@ -2,6 +2,7 @@
 
 namespace App\Rules;
 
+use App\Models\Scopes\HumanUsersScope;
 use App\Models\User;
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
@@ -24,7 +25,10 @@ final class UniqueUserEmail implements ValidationRule
             return;
         }
 
+        // Uniqueness is about the table, not about people: an integration identity's address is
+        // taken too, or the database's own unique index would answer instead of this rule.
         $taken = User::query()
+            ->withoutGlobalScope(HumanUsersScope::class)
             ->whereRaw('lower(email) = ?', [User::normalizeEmail($value)])
             ->when($this->ignoreUserId !== null, fn ($query) => $query->whereKeyNot($this->ignoreUserId))
             ->exists();

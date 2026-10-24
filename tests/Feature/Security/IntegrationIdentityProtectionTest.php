@@ -8,6 +8,7 @@ use App\Models\Risk;
 use App\Models\User;
 use App\Models\UserIdentity;
 use App\Models\UserNotification;
+use App\Rules\UniqueUserEmail;
 use App\Services\Auth\EntraIdentityResolver;
 use App\Services\Billing\BillingEntitlementService;
 use App\Services\Compliance\ComplianceAccessService;
@@ -16,15 +17,19 @@ use App\Services\ManagementReview\ManagementReviewAccessService;
 use App\Services\Notifications\UserNotificationWriter;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Services\Risk\RiskCreator;
+use App\Services\Security\CustomerAccessChangeRecorder;
+use App\Services\Security\HumanDecisionGuard;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
+use Illuminate\Queue\SerializesAndRestoresModelIdentifiers;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Tests\Concerns\CreatesApiCustomerGrants;
@@ -251,6 +256,8 @@ class IntegrationIdentityProtectionTest extends TestCase
             'app/Models/User.php',
             'app/Models/ApiClientCustomerGrant.php',
             'app/Services/Api/ApiClientGrantService.php',
+            // Uniqueness of an address covers every row of the table.
+            'app/Rules/UniqueUserEmail.php',
         ];
         $found = [];
 
@@ -275,6 +282,51 @@ class IntegrationIdentityProtectionTest extends TestCase
         }
 
         $this->assertSame([], $found, 'Only the integration administration may read integration identities.');
+    }
+
+    public function test_history_and_services_that_must_identify_it_still_do(): void
+    {
+        $customer = $this->apiCustomer();
+        $identity = $this->integrationIdentity($customer);
+        $role = $this->giveRole($identity, [CustomerPermissionCatalog::RISK_VIEW]);
+
+        // The access trail's snapshot reads the row past the scope (fresh()).
+        $snapshot = app(CustomerAccessChangeRecorder::class)->userSnapshot($identity);
+        $this->assertSame(User::ROLE_INTEGRATION, $snapshot['role']);
+        $this->assertSame([$role->id], $snapshot['customer_role_ids']);
+
+        // A queued job that carries it restores it: the job's model identifier is resolved past
+        // global scopes (SerializesModels → SerializesAndRestoresModelIdentifiers).
+        $roundTrip = new class
+        {
+            use SerializesAndRestoresModelIdentifiers;
+
+            public function __invoke(User $user): User
+            {
+                return $this->getRestoredPropertyValue(unserialize(serialize($this->getSerializedPropertyValue($user))));
+            }
+        };
+        $restored = (object) ['actor' => $roundTrip($identity)];
+        $this->assertSame($identity->id, $restored->actor->id);
+        $this->assertTrue($restored->actor->isIntegration());
+
+        // Its own administration and the guard know it for what it is.
+        $this->assertSame($identity->id, User::integrationIdentities()->find($identity->id)?->id);
+        $this->assertFalse(app(HumanDecisionGuard::class)->allows($identity));
+
+        // The database still refuses it as a decider, whatever the application layer does.
+        $this->assertSame(1, (int) DB::selectOne("SELECT count(*) AS n FROM users WHERE id = ? AND role = 'integration'", [$identity->id])->n);
+    }
+
+    public function test_its_address_counts_as_taken_for_a_new_person(): void
+    {
+        $customer = $this->apiCustomer();
+        $identity = $this->integrationIdentity($customer);
+
+        $validator = Validator::make(['email' => strtoupper($identity->email)], ['email' => [new UniqueUserEmail]]);
+
+        $this->assertTrue($validator->fails());
+        $this->assertTrue(Validator::make(['email' => 'ny.person@kunde.no'], ['email' => [new UniqueUserEmail]])->passes());
     }
 
     private function person(Customer $customer, string $role = User::ROLE_USER, string $bidRole = User::BID_ROLE_CONTRIBUTOR): User
