@@ -324,7 +324,7 @@ Kjørt på `feature/external-api-foundation` etter fase 7. Hele PHP-suiten ble i
 | # | Status | Resultat |
 |---|---|---|
 | V1 | 🟩 **Godkjent** | 3 av 3 Redis-tester bestått, ingen hoppet over (9 av 9 i filen). Kjørt mot en egen `redis:7-alpine` med tilfeldig passord på stakkens nettverk, ikke mot utviklingsstakkens Redis. Instansen var tom etter kjøringen og er fjernet. |
-| V2 | 🟥 **Stoppet** | Kjørt 2026-10-24, se §11.2. Test 1–3 bestått. Test 4 feilet (V2-F1), og test 5–6 er ikke kjørt. V2-F1 og V2-F2 er rettet. Test 4–6 gjenstår. |
+| V2 | 🟩 **Godkjent** | Kjørt 2026-10-24, se §11.2. Alle seks tester er fullført. Test 4 ble kjørt på nytt etter rettelsen av V2-F1 og V2-F2 (2fac7339). 128 kall og 5,08 NOK, ingen `unattributed`. Observasjonene V2-O1 til V2-O5 er åpne. |
 | V3 | 🟧 **Lokal del gjennomført** | Staging og produksjon gjenstår. |
 
 **V1 – avvik i testen, rettet.** Testen koblet alltid til `redis` uten passord. Den kunne derfor bare hoppe over («NOAUTH»), aldri bestå mot en Redis med passord. Den leser nå `REDIS_RUNTIME_TEST_HOST`, `REDIS_RUNTIME_TEST_PORT` og `REDIS_RUNTIME_TEST_PASSWORD`. Uten disse er oppførselen uendret. Kontrollprøve: med feil passord hopper de tre testene over. «Ingen hoppet over» må derfor alltid leses i resultatet. Slik kjøres V1 på nytt:
@@ -352,7 +352,7 @@ Begge kontrolldatabasene er slettet.
 **Observasjon (ikke endret):** utviklingsdatabasen har én rad i `migrations` uten fil, `2026_10_01_000004_create_quality_process_definitions_table` (batch 15). Den har aldri vært committet, og tabellen finnes ikke. Raden er en lokal rest og gjelder ikke Azure.
 
 **Krever eksterne miljøer eller eksplisitt start:**
-- **V2:** eksplisitt start av ekte OpenAI-kall, med egen testkunde og to personer (innsender og tildelt kontrollør). De sju `queue-*`-arbeiderne kjører kode som er eldre enn de siste committene og må startes på nytt først.
+- **V2:** gjennomført og godkjent 2026-10-24, se §11.2.
 - **V3 (1):** datakontrollen mot en kopi av produksjonsdata, også delen «avgjort rad uten aktør».
 - **V3 (2)–(5):** migrering, triggerkontroll, `down()` og røyktest i staging.
 - **V3 (6):** produksjonsdeploy i vedlikeholdsvindu med backup.
@@ -362,23 +362,24 @@ Begge kontrolldatabasene er slettet.
 
 Godkjent av produkteier og kjørt på utviklingsstakken hos kunde 2 «E2E Test Customer», med syntetiske testdata og `AI_CUSTOMER_CAPACITY_ENFORCEMENT=enforce`. Hardgrensen var 60 NOK per dag og måned. Alle `queue-*`-arbeiderne var startet på nytt etter siste commit. Handlingene ble utført over HTTP gjennom de vanlige kontrollerne, med innlogging via `/login`: user 2 (System Owner) som innsender og user 3 (Wiki-godkjenner og QA) som tildelt kontrollør.
 
-**Resultat: stoppet etter test 4 på grunn av en vesentlig feil (V2-F1).** Test 5 og 6 er ikke kjørt.
+**Resultat: godkjent.** Første kjøring stoppet ved test 4 på grunn av V2-F1. Etter rettelsen i 2fac7339 ble test 4–6 kjørt samme dag (andre runde, id 1115–1136). Test 1–3 ble ikke gjentatt. Alle seks er fullført.
 
 | # | Test | Resultat |
 |---|---|---|
 | 1 | Wiki-kjøring fra dokument 1355 til publisert side | 🟩 Kjøring 1407: 44 kall, 3,19 NOK. Den endte `escalated` med to funn «Strengere enn kilden» («skal ikke» der kilden sier «bør aldri»). User 2 rettet teksten i side 3027 og 3028 og sendte de tre sidene (3027, 3028 og 3029) til user 3. User 2 fikk 403 da de prøvde å godkjenne selv. User 3 godkjente. Godkjenningsgrensen stoppet 3028 (409) på en åpen kildepåstand med svekket plikt (påstand 845, se V2-O1). Den ble rettet etter «Trekk tilbake», og siden ble godkjent. Alle tre sidene er publisert: `owner_user_id` 2, `submitted_by_user_id` 2, `reviewer_user_id` 3 og `reviewed_by_user_id` 3. |
 | 2 | «Overfør til Wiki» fra avvikssak 680 | 🟩 Dokument 1356 (`uploaded_by_user_id` 2) og kjøring 1408: `completed`, QA `passed`, 0 funn, 22 kall inkludert fem verifiseringer av kildelinjene fra sak 680. To utkast (3030 og 3031) eies av user 2 og venter på vanlig gjennomgang. |
 | 3 | Kravsvar i anbudssak 93 | 🟩 User 2 godkjente K-1 til K-4 (`approved_by_user_id` 2). Fire svar ble generert, alle med `generated_by_user_id` 2: K-1 til K-3 `full` og K-4 `partial` (se V2-O2). 22 kall, 0,28 NOK. |
-| 4 | AI-vurdering av kravene | 🟥 Fire vurderingskall lyktes hos OpenAI. K-4 ble `completed` med `missing`, slik testen forventet. K-1 til K-3 ble lagret som `failed` (V2-F1). Brukeren fikk ingen synlig melding (V2-F2). |
-| 5 | AI-forslag i Kvalitet, prosess 27 | ⬜ Ikke kjørt (stoppet) |
-| 6 | «Spør Wiki» mot publisert kunnskap | ⬜ Ikke kjørt (stoppet) |
+| 4 | AI-vurdering av kravene | 🟩 Første runde: K-1 til K-3 ble `failed` (V2-F1), og K-4 ble `completed`/`missing`. Andre runde, etter rettelsen: alle fire ble `completed`, med `assessed_by_user_id` 2 og flash «Krav analysert.». K-1 til K-3 ble `covered`, med risiko `low` og tom `missing_information`, som er F1-tilfellet. K-4 ble `missing` med risiko `high` og «Dokumentasjon på garantert responstid for kritiske hendelser utenom ordinær arbeidstid.». Andre runde brukte 18 kall og 0,1472 NOK. |
+| 5 | AI-forslag i Kvalitet, prosess 27 | 🟩 User 2 ba om et steg som sjekker leverandørgodkjenning etter «Kontroller bestillingen». Forslaget er sammenhengende: et beslutningssteg «Er leverandøren godkjent?» hos Innkjøper, «Ja» til sikkerhetskontrollen og «Nei» til Leder. Forslaget er ikke godtatt, og blåkopi 19 er uendret (utkast, `manual`), siden et forslag aldri lagres av seg selv. Ett kall (`quality.propose_process_change`, `resource_id` 27), 0,0098 NOK. Se V2-O4. |
+| 6 | «Spør Wiki» mot publisert kunnskap | 🟩 Via nettsiden som user 3: «Når skal det gjennomføres en full etterhendelsesgjennomgang, og hvem eier gjennomgangen?». Svaret ble `answered` med to sitater fra den publiserte siden 3027 («Når en gjennomgang skal gjennomføres» og «Roller i gjennomgangen»), 3 sider brukt. Tre kall (`wiki.navigation_plan`, `wiki.ask.retrieval_plan` og `wiki.ask.answer`), alle med `user_id` 3 og korrelasjons-id, til sammen 0,0360 NOK. Se V2-O5. |
 
 **Akseptansekriteriene for test 1–4:**
 - Beslutningskolonnene har menneskelig aktør: ja. Se tabellen. Ingen beslutning ble tatt av system eller integrasjon.
 - Ingen `unattributed` i AI-bruksloggen: ja. Alle 106 kall (id 1009–1114) har `attribution = customer`, kunde 2 og user 2. Alle har `status = success`, kjent pris og `capacity_verdict = allow`. Ingen kall gjaldt andre kunder, og ingen køjobber feilet.
-- «Alle fullført uten feil»: nei, på grunn av test 4.
+- «Alle fullført uten feil»: ja, etter rettelsen av V2-F1. Første runde av test 4 feilet og er dokumentert.
+- Andre runde: alle 22 kall (id 1115–1136) har `attribution = customer` og kunde 2: 19 med user 2 (test 4–5) og 3 med user 3 (test 6). Alle lyktes, har kjent pris og `capacity_verdict = allow`. Ingen køjobber feilet, og ingen kall gjaldt andre kunder.
 
-**Faktisk forbruk:** 106 kall og 4,8838 NOK, med 32,86 NOK reservert underveis. Det tilsvarer 8 % av dagsgrensen. Wiki-kjøringene og overføringen (test 1–2): 66 kall og 4,45 NOK. Av dette gikk 1,90 til sidegenerering, 1,26 til maintainer-beslutningen, 0,71 til lenker og 0,59 til påstandsverifisering. Anbud (test 3–4): 40 kall og 0,43 NOK, inkludert 8 `wiki.navigation_plan`.
+**Faktisk forbruk:** 106 kall og 4,8838 NOK, med 32,86 NOK reservert underveis. Det tilsvarer 8 % av dagsgrensen. Wiki-kjøringene og overføringen (test 1–2): 66 kall og 4,45 NOK. Av dette gikk 1,90 til sidegenerering, 1,26 til maintainer-beslutningen, 0,71 til lenker og 0,59 til påstandsverifisering. Anbud (test 3–4): 40 kall og 0,43 NOK, inkludert 8 `wiki.navigation_plan`. **Andre runde (test 4–6):** 22 kall og 0,1930 NOK. **V2 totalt:** 128 kall og 5,0768 NOK, i tillegg til de to utilsiktede uttrekkskallene fra forberedelsen (0,0287 NOK). Kunde 2 hadde etter andre runde brukt om lag 5,1 NOK i dag og 18,0 NOK denne måneden av 60, og 52 av 600 enheter før andre runde.
 
 **Funn:**
 - **V2-F1 (vesentlig, i koden siden e8ec9179, 2026-07-25, også i `main`) – rettet:** `RequirementWikiAssessmentAiClient` ber modellen sette `missing_information` til `""` når dekningen er `covered` og ingenting mangler. `normalize()` krevde derimot en ikke-tom verdi (`requiredString`) og kastet `RuntimeException`. Et fullt dekket krav kunne derfor aldri få en fullført vurdering. Feilen ble gjenskapt uten AI-kall. **Rettelse:** tom eller blank `missing_information` godtas nå bare ved `covered`, og lagres som `""`. Ved `partial` og `missing` kreves fortsatt tekst. En verdi som mangler eller ikke er en streng avvises alltid. Saksvisningen viser «—» når feltet er tomt.
@@ -387,13 +388,15 @@ Godkjent av produkteier og kjørt på utviklingsstakken hos kunde 2 «E2E Test C
 - **V2-O1 (observasjon):** Kjøringer viste «Alle QA-funnene er nå behandlet, og kjøringen krever ingen videre oppfølging», men godkjenningen av 3028 ble stoppet av påstand 845 (`unsupported_generated_content`, `modality_mismatch`). Den sto ikke i funnlisten. Godkjenningsgrensen hadde rett. Funnlisten og grensen bruker ikke samme utvalg.
 - **V2-O2 (observasjon):** K-4 (garantert responstid utenom arbeidstid) var forberedt som tilfellet uten dekning. Svaret ble `partial`, fordi én seksjon om etterhendelsesgjennomgang var forankret. Seksjonen om selve responstiden er merket «Beste praksis – ikke dokumentert i Wiki», er uten støttende sider og har de manglende punktene listet. Ingen frist er funnet opp. Svaret følger scenario 2 i `answering-strategy.md`, og regelen om at utledet innhold aldri presenteres som dokumentbelagt er ikke brutt.
 - **V2-O3 (observasjon):** en manuell rettelse lagrer blokken som `human_authored`, uten kildepåstand og uten ny verifisering. Det er riktig etter modellen, men leseren ser ikke lenger at den rettede setningen har kildegrunnlag.
+- **V2-O4 (observasjon, test 5):** instruksen sa at Leder skulle vurdere *før* sikkerhetskontrollen. Forslaget sender «Nei» til «Godkjenn bestillingen endelig», som går rett til slutt, så sikkerhetskontrollen blir hoppet over på den grenen. Instruksen var åpen, fordi det ikke finnes noe eget vurderingssteg for Leder. Forslaget ble derfor ikke godtatt, og flyten er uendret. Valideringen sjekker at flyten henger sammen, men ikke om en kontroll blir hoppet over.
+- **V2-O5 (observasjon, test 6):** kilden og sitatet sier at kriteriene «anbefales som utløsende», mens svaret sier at gjennomgangen «skal gjennomføres når». Det er den samme normative skjerpingen som påstandsverifiseringen fanget i test 1 (V2-O1). «Spør Wiki» har ingen tilsvarende kontroll av svaret. Sitatene er korrekte og viser den riktige ordlyden.
 - **«Spør Wiki» via API-et** (§23, «Gjenstår») kan ikke prøves lokalt uten et ekte Entra-token. Test 6 var planlagt via nettsiden. API-varianten hører til V4.
 
 **Avvik under forberedelsen:** da testdokumentet ble lastet opp til anbudssak 93, ble kravuttrekk startet automatisk (`createQueuedRunForDocument`). Det ga to utilsiktede OpenAI-kall (`tender.requirement_extraction.document`, id 1007 og 1008, kunde 2, til sammen 0,0287 NOK) før V2 var godkjent. Kallene var tilskrevet kunden og innenfor grensen, men de var ikke godkjent på forhånd. Tiltak: ved senere forberedelse av anbudssaker legges kravene inn manuelt og dokumentene lastes opp uten uttrekk. Ellers må opplasting regnes som et AI-kall.
 
-**Etter kjøringen:** `AI_CUSTOMER_CAPACITY_ENFORCEMENT` er satt tilbake til `observe`, og alle `queue-*`-arbeiderne og planleggeren er startet på nytt (alle viser `observe`). Grensene hos kunde 2 (60 NOK og 600 enheter) og testdataene er beholdt. Køene var tomme, og ingen kall sto igjen som `started`.
+**Etter kjøringen:** `AI_CUSTOMER_CAPACITY_ENFORCEMENT` er satt tilbake til `observe`, og alle `queue-*`-arbeiderne og planleggeren er startet på nytt (alle viser `observe`). Grensene hos kunde 2 (60 NOK og 600 enheter) og testdataene er beholdt. Køene var tomme, og ingen kall sto igjen som `started`. **Etter andre runde:** `enforce` var satt på igjen under test 4–6, og alle `queue-*`-arbeiderne og planleggeren ble startet på nytt med rettet kode før kjøringen. Etterpå ble verdien satt tilbake til `observe`, og alle ble startet på nytt (alle viser `observe` og er friske). Køene er tomme, og ingen kall står igjen som `started`.
 
-**Før V2 kan godkjennes:** V2-F1 og V2-F2 er rettet (se over). Kjør test 4 på nytt mot sak 93, og test 5 og 6, med ny eksplisitt godkjenning. Kravene K-1 til K-4 er allerede godkjent. Test 1–3 trenger ikke gjentas. Arbeiderne må startes på nytt før kjøringen, og enforce må settes på igjen.
+**Status:** V2 er godkjent lokalt. Observasjonene V2-O1 til V2-O5 er ikke rettet og blokkerer ikke V2. De er produktspørsmål som bør vurderes separat.
 
 ---
 
