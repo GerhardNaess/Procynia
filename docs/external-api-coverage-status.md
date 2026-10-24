@@ -61,7 +61,7 @@ Til sammen er 37 B-funksjoner blokkert. 8 B-funksjoner er ikke anbefalt, og de 3
 
 | # | Tiltak | Kreves før | Hvem |
 |---|---|---|---|
-| 1 | Gjennomføre verifiseringene V1–V3, kjøre hele PHP-suiten som merge-kontroll (siste fulle kjøring var før fase 2) og flette grenen inn i `main` | Pilot | Produkteier |
+| 1 | Gjennomføre verifiseringene V1–V3 (V1 godkjent og den lokale delen av V3 gjennomført 2026-10-24, se `external-api-phase-1-decisions.md` §11.1. V2 er ikke kjørt), kjøre hele PHP-suiten som merge-kontroll (siste fulle kjøring var før fase 2) og flette grenen inn i `main` | Pilot | Produkteier |
 | 2 | Kjøre migreringene i staging og senere i Azure-produksjon | Pilot | Drift |
 | 3 | Registrere «Procynia API» i Entra med app-rollene `Procynia.Read.All` og `Procynia.Write.All` | Pilot | Advania |
 | 4 | Registrere Siggjos identitet, gi den tilgang hos en testkunde og slå på bare de navngitte operasjonene som skal brukes (`wiki.ask` krever at kunden har definert AI-kapasitet) | Pilot | Advania / System Owner hos testkunden |

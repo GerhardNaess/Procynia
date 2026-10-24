@@ -317,6 +317,46 @@ Fase 0 er godkjent uten disse. Ingen av dem blokkerer at fase 1 bygges. Alle må
 
 V1–V3 hører til fase 0 og kan gjøres parallelt med bygging av fase 1. V4 hører til API-et. API-et eksponeres ikke mot en kunde med ekte data før V1–V4 og D14 er oppfylt.
 
+### 11.1 Lokal gjennomføring av V1–V3 (2026-10-24)
+
+Kjørt på `feature/external-api-foundation` etter fase 7. Hele PHP-suiten ble ikke kjørt, og ingenting ble flettet inn.
+
+| # | Status | Resultat |
+|---|---|---|
+| V1 | 🟩 **Godkjent** | 3 av 3 Redis-tester bestått, ingen hoppet over (9 av 9 i filen). Kjørt mot en egen `redis:7-alpine` med tilfeldig passord på stakkens nettverk, ikke mot utviklingsstakkens Redis. Instansen var tom etter kjøringen og er fjernet. |
+| V2 | ⬜ **Ikke kjørt** | Krever ekte OpenAI-kall og må startes eksplisitt (se over). Kan gjøres lokalt. |
+| V3 | 🟧 **Lokal del gjennomført** | Staging og produksjon gjenstår. |
+
+**V1 – avvik i testen, rettet.** Testen koblet alltid til `redis` uten passord. Den kunne derfor bare hoppe over («NOAUTH»), aldri bestå mot en Redis med passord. Den leser nå `REDIS_RUNTIME_TEST_HOST`, `REDIS_RUNTIME_TEST_PORT` og `REDIS_RUNTIME_TEST_PASSWORD`. Uten disse er oppførselen uendret. Kontrollprøve: med feil passord hopper de tre testene over. «Ingen hoppet over» må derfor alltid leses i resultatet. Slik kjøres V1 på nytt:
+
+```bash
+PW=$(openssl rand -hex 16)
+docker run -d --rm --name procynia-v1-redis --network procynia_default redis:7-alpine redis-server --requirepass "$PW"
+docker exec -e REDIS_RUNTIME_TEST_HOST=procynia-v1-redis -e REDIS_RUNTIME_TEST_PASSWORD="$PW" procynia-app php artisan test tests/Feature/Azure/RedisRuntimeContractTest.php
+docker stop procynia-v1-redis
+```
+
+**V3 – det som er kontrollert lokalt:**
+
+| V3-punkt | Lokalt | Resultat |
+|---|---|---|
+| (1) Datakontrollen fra steg 19 | Utviklingsdatabasen og `procynia_e2e`, med skrivebeskyttet transaksjon | Ingen integrasjonsbrukere. Ingen integrasjonsaktør i noen av de 44 beslutningskolonnene i 36 tabeller (listen i migrering 000014). Delen om «avgjort rad uten aktør» ble ikke gjentatt. |
+| (2) Migreringene | Ny, tom database | Alle 398 migreringer kjørt uten feil. Dette gjelder også de 30 på grenen som ikke finnes i `main` (2026_10_22_000001 til 2026_10_24_000003, med fase 0-migreringene 000005–000014 og de fem API-migreringene). |
+| (3) Triggere og funksjoner i katalogen | Ny database mot utviklingsdatabasen, `procynia_test` og `procynia_e2e` | 97 triggere og 58 funksjoner, med identisk definisjon i alle fire. `HumanDecisionActorTriggerTest`: 4 av 4 bestått. |
+| (4) `down()` | Tilbakerulling av de 30 migreringene på grenen | Ingen feil. Skjemaet etterpå (`pg_dump -s`) er identisk med en database bygget bare fra de 368 migreringene i `main`. Ny migrering gir et skjema som er identisk med første kjøring. |
+| (5) Røyktest av beslutningsflytene | Ikke kjørt | Hører til staging. Lokalt dekket av E2E-reisene i §2m i fase 0-planen (2026-10-23). |
+| (6) Produksjon i vedlikeholdsvindu | Ikke aktuelt lokalt | – |
+
+Begge kontrolldatabasene er slettet.
+
+**Observasjon (ikke endret):** utviklingsdatabasen har én rad i `migrations` uten fil, `2026_10_01_000004_create_quality_process_definitions_table` (batch 15). Den har aldri vært committet, og tabellen finnes ikke. Raden er en lokal rest og gjelder ikke Azure.
+
+**Krever eksterne miljøer eller eksplisitt start:**
+- **V2:** eksplisitt start av ekte OpenAI-kall, med egen testkunde og to personer (innsender og tildelt kontrollør). De sju `queue-*`-arbeiderne kjører kode som er eldre enn de siste committene og må startes på nytt først.
+- **V3 (1):** datakontrollen mot en kopi av produksjonsdata, også delen «avgjort rad uten aktør».
+- **V3 (2)–(5):** migrering, triggerkontroll, `down()` og røyktest i staging.
+- **V3 (6):** produksjonsdeploy i vedlikeholdsvindu med backup.
+
 ---
 
 ## 12. Eksisterende kode som gjenbrukes

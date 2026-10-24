@@ -322,14 +322,16 @@ class RedisRuntimeContractTest extends TestCase
      */
     private function useRealRedisOnDatabaseZero(): void
     {
+        // V1 (external-api-phase-1-decisions.md §11) runs these against a separate, password-protected
+        // Redis instead of the development stack's database 0. Unset, the behaviour is unchanged.
         foreach (['default', 'cache'] as $connection) {
             Config::set("database.redis.{$connection}", [
                 'url' => null,
-                'host' => 'redis',
-                'port' => 6379,
+                'host' => env('REDIS_RUNTIME_TEST_HOST', 'redis'),
+                'port' => (int) env('REDIS_RUNTIME_TEST_PORT', 6379),
                 'database' => 0,
                 'username' => null,
-                'password' => null,
+                'password' => env('REDIS_RUNTIME_TEST_PASSWORD'),
             ]);
         }
 
