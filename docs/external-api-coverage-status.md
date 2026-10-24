@@ -136,8 +136,8 @@ Faseplanen ble vedtatt 2026-10-24. Endringer i rekkefølge eller innhold krever 
 | **4** | Avgrensede registreringer (utkast og forslag) | Styringsmodulene | 🟧 Påbegynt. AVF-04 og AVF-05 levert lokalt 2026-10-24. Andre registreringer (for eksempel RIS-05) krever beslutning per operasjon. |
 | **5** | Tilgang på vegne av en person | Mine oppgaver, personlige dashboards | 🟥 Blokkert av D2. Kontrollert 2026-10-24: ingen av fasens funksjoner kan bygges før D2 er opphevet (funn 27). Ingenting er implementert. |
 | **6** | Wiki gjennom den felles kunnskapskjernen | Enterprise Wiki | 🟥 Blokkert av Wiki-arkitekturbeslutning, A23 og S4 |
-| **7** | Anbud | Anbud | 🟥 Blokkert av K16, `isBidManager()`, avdelingsomfang og A46 |
-| **8** | Kopi av data og agentlag | Siggjos datamodell, MCP | 🟥 Blokkert av D7 og D14 |
+| **7** | Anbud | Anbud | 🟥 Blokkert av K16, `isBidManager()`, avdelingsomfang og A46. Kontrollert 2026-10-24: ingen funksjon er godkjent, og hindrene står fortsatt i koden (funn 28). Ingenting er implementert. |
+| **8** | Kopi av data og agentlag | Siggjos datamodell, MCP | 🟥 Blokkert av D7 og D14. Kontrollert 2026-10-24: alternativ B er ikke valgt (D7), og MCP-laget er ikke besluttet (funn 29). Ingenting er implementert. |
 
 ### Vedtatt rekkefølge for de neste leveransene
 
@@ -518,6 +518,7 @@ Prinsipper: bruk eksisterende domenetjenester og tilgangstjenester, gjenbruk mø
 | **Avhengigheter** | Produkt- og arkitekturbeslutninger over |
 | **Kompleksitet** | Høy |
 | **Ferdig når** | ANB-01–03 er tilgjengelige med tester for avdelinger og kundeseparasjon, og alle hindre i «Anbud» under funn er lukket. |
+| **Status** | 🟥 Ikke startet. Kontrollert 2026-10-24: ANB-01–09 er B-funksjoner uten beslutning, ANB-10 er ikke anbefalt, og ANB-11–12 er C. Ingen kan bygges med dagens arkitektur (funn 28). |
 
 ### Fase 8 – Kopi av data og agentlag
 
@@ -529,12 +530,13 @@ Prinsipper: bruk eksisterende domenetjenester og tilgangstjenester, gjenbruk mø
 | **Avhengigheter** | D7 (alternativ B), D14 (DPIA), databehandleravtaler |
 | **Kompleksitet** | Høy |
 | **Ferdig når** | Rettighetsendringer og slettinger når Siggjo innen avtalt frist. Hvert MCP-verktøy svarer til ett API-endepunkt, og ingen verktøy tar beslutninger. |
+| **Status** | 🟥 Ikke startet. Kontrollert 2026-10-24: D7 valgte øyeblikksbilde uten tilgangsprojeksjon, så leveransene for alternativ B er ikke bestilt. MCP-laget er ikke besluttet som leveranse (funn 29). |
 
 ---
 
 ## Del 5 – Funn fra denne gjennomgangen
 
-Kontrollert i koden 2026-10-24. Funn 1, 13 og 17 er løst (se radene). Funn 13–16 kom fra fase 2, funn 17–22 fra fase 3, funn 23–26 fra fase 4 og funn 27 fra fase 5.
+Kontrollert i koden 2026-10-24. Funn 1, 13 og 17 er løst (se radene). Funn 13–16 kom fra fase 2, funn 17–22 fra fase 3, funn 23–26 fra fase 4, funn 27 fra fase 5 og funn 28–29 fra kontrollen av fase 7 og 8.
 
 | # | Funn | Betydning | Hører til |
 |---|---|---|---|
@@ -565,3 +567,5 @@ Kontrollert i koden 2026-10-24. Funn 1, 13 og 17 er løst (se radene). Funn 13�
 | 25 | **Varsler følger webgrensesnittets regel.** Den ansvarlige får det vanlige varselet om tildeling (`AssignmentObserver`), med integrasjonen som `assigned_by_user_id`, akkurat som for risikotiltak. Det er ikke laget en egen varselregel for integrasjoner (S6). | System Owner bestemmer hvem som kan få varsler fra en integrasjon gjennom hvilke fagområder den kan lese. | Fase 4 |
 | 26 | **Beskrivelsen er fritekst som skrives, men aldri leses tilbake.** Domeneregelen krever beskrivelse på en sak. API-et tar den imot og lagrer den, men svarene inneholder den ikke (D8). | Integrasjonen kan ikke kontrollere hva den skrev. Tas med i DPIA (D14), fordi avvik kan inneholde særlige kategorier av personopplysninger. | Personvern |
 | 27 | **Fase 5 er blokkert i sin helhet av D2.** FEL-04 (Mine oppgaver), FEL-05 (varsler) og LDG-06 (statusoppdatering på egne tiltak) gjelder en bestemt person og har ingen mening for en integrasjon i applikasjonsmodus. Delegert modus krever i tillegg en ny innloggingsvei (delegerte scopes i Entra, kobling `oid` → `user_identities`, on-behalf-of hos Siggjo), som er både en produktbeslutning og en ny generell sikkerhetsmekanisme. Ingen av delene er bygget, og `EntraAccessTokenValidator` avviser fortsatt delegerte tokens med 403. | Ingen kode er endret i fase 5. Fasen kan startes når produkteier har opphevet D2 og tatt stilling til FEL-05 og LDG-06 (avhengighet 14 i del 1). Verifisering krever også Entra-registreringen fra fase 1. | Fase 5 |
+| 28 | **Fase 7 er blokkert i sin helhet.** Ingen av Anbud-funksjonene er godkjent: ANB-01–09 er B-funksjoner, ANB-10 er ikke anbefalt, og ANB-11 og ANB-12 er C. Hindrene står fortsatt i koden: K16 (`internal_status`, `decision_by_user_id` og `assigned_to_user_id` ligger på den globale `Notice`), `User::isBidManager()` faller tilbake til `contributor` og sperrer ikke integrasjoner (funn 2), `SavedNoticeAccessService::applyVisibility` gir ingen treff for en integrasjon og har ingen `findVisible*`, og avdelingsomfanget for en integrasjon er ikke besluttet. Selv lesing (ANB-01–03) krever en ny lesevei og en beslutning om avdelinger. Retting av K16 er en datamodellendring med migrering av delte felt. | Ingen kode er endret i fase 7. Fasen kan startes når produkteier har besluttet avdelingsomfang og A46, og arkitekturen har godkjent rettingen av K16 og sperren i `isBidManager()` (avhengighet 10 i del 1). | Fase 7 |
+| 29 | **Fase 8 er blokkert i sin helhet.** Leveransene for kopi av data gjelder bare alternativ B, og D7 valgte øyeblikksbilde med kundebestemt publikum. Dashboards kan allerede hente øyeblikksbildet gjennom dagens leseendepunkter. MCP-laget er beskrevet i arkitekturen (§10.4), men er ikke besluttet som leveranse, og det vil være et nytt rammeverk. D14 (DPIA) gjelder før ekte kundedata går til Siggjo. | Ingen kode er endret i fase 8. Fasen krever en beslutning om alternativ B eller om MCP-laget. | Fase 8 |
