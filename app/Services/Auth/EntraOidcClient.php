@@ -8,6 +8,7 @@ use Firebase\JWT\JWT;
 use Illuminate\Support\Str;
 use League\OAuth2\Client\Provider\GenericProvider;
 use RuntimeException;
+use Throwable;
 
 /**
  * OpenID Connect Authorization Code Flow against Microsoft Entra ID.
@@ -26,6 +27,9 @@ use RuntimeException;
  */
 class EntraOidcClient
 {
+    /** The only signature algorithm Entra uses for these tokens, and the only one accepted. */
+    private const ALGORITHM = 'RS256';
+
     public function __construct(
         private readonly EntraConfig $config,
         private readonly EntraJwksProvider $jwks,
@@ -94,9 +98,19 @@ class EntraOidcClient
     {
         JWT::$leeway = $this->config->leewaySeconds();
 
+        // RS256 and nothing else, stated before any key is read. Microsoft's published keys carry no
+        // `alg` of their own, so the algorithm is named here: every key is parsed as an RS256 key,
+        // and the library still refuses a token whose header names any other algorithm — `none` and
+        // HMAC included.
+        $header = self::header($idToken);
+
+        if (($header['alg'] ?? null) !== self::ALGORITHM) {
+            throw new RuntimeException('The id_token is not signed with RS256.');
+        }
+
         // Signature. Throws on an unknown key id, a wrong signature or an expired token.
         $claims = (array) json_decode(
-            (string) json_encode(JWT::decode($idToken, JWK::parseKeySet($this->jwks->forTenant($provider->tenant_id)))),
+            (string) json_encode(JWT::decode($idToken, JWK::parseKeySet($this->jwks->forTenant($provider->tenant_id), self::ALGORITHM))),
             true,
         );
 
@@ -132,6 +146,24 @@ class EntraOidcClient
         }
 
         return $claims;
+    }
+
+    /**
+     * The token's header, unverified — only to refuse a wrong algorithm before any key is used.
+     *
+     * @return array<string, mixed>
+     */
+    private static function header(string $token): array
+    {
+        $segment = explode('.', $token)[0] ?? '';
+
+        try {
+            $header = json_decode(JWT::urlsafeB64Decode($segment), true, 8, JSON_THROW_ON_ERROR);
+        } catch (Throwable) {
+            throw new RuntimeException('The id_token header is not readable.');
+        }
+
+        return is_array($header) ? $header : [];
     }
 
     private function provider(IdentityProvider $provider): GenericProvider

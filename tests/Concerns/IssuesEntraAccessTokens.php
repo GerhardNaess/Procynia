@@ -61,9 +61,15 @@ trait IssuesEntraAccessTokens
      *
      * @param  array<string, mixed>  $claims
      */
-    protected function signedWithTestKey(array $claims): string
+    protected function signedWithTestKey(array $claims, string $kid = self::KEY_ID): string
     {
-        return JWT::encode($claims, self::testKey()['private'], 'RS256', self::KEY_ID);
+        return JWT::encode($claims, self::testKey()['private'], 'RS256', $kid);
+    }
+
+    /** The test key's private half, for signing with another algorithm. */
+    protected function privateKey(): string
+    {
+        return self::testKey()['private'];
     }
 
     protected function apiClient(array $overrides = []): ApiClient
