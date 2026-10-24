@@ -292,6 +292,13 @@ return [
             'read_role' => env('API_ENTRA_READ_ROLE', 'Procynia.Read.All'),
 
             /*
+             * The app role a token must also carry to call a write route. A ceiling only, like the
+             * read role: the operation itself must be switched on for the customer grant by the
+             * customer's System Owner (App\Support\ApiOperationCatalog).
+             */
+            'write_role' => env('API_ENTRA_WRITE_ROLE', 'Procynia.Write.All'),
+
+            /*
              * Clock skew allowed when validating `exp`/`nbf`, in seconds. Same as sign-in.
              */
             'leeway_seconds' => 60,

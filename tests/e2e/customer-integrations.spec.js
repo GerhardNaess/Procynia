@@ -8,7 +8,7 @@ const SUFFIX = Math.random().toString(36).slice(2, 8).padEnd(6, '0').toUpperCase
 
 /*
  * Kundemiljø → Integrasjoner (D13): the System Owner gives an application Procynia has approved
- * read access, changes its roles and takes the access back. The run brings its own application and
+ * read access, changes its roles and what it may register, and takes the access back. The run brings its own application and
  * read role (IntegrationsE2EFixture) and removes them afterwards.
  */
 let fixture = null;
@@ -47,6 +47,21 @@ test('a System Owner gives an approved application read access, changes its role
     await expect(grant).toContainText('Risiko: alle fagområder');
     await expect(grant).toContainText('Ikke brukt ennå');
     await expect(page.locator('li', { hasText: fixture.client }).getByText('Har tilgang')).toBeVisible();
+
+    // Write operations are off until switched on, and each tick saves at once.
+    const createActions = grant.getByRole('checkbox', { name: 'Tillat opprettelse av risikotiltak' });
+    await expect(createActions).not.toBeChecked();
+    // The box reflects the stored choice, so it changes when the server has saved it.
+    await createActions.click();
+    await expect(page.getByText('Det applikasjonen kan registrere, er endret.')).toBeVisible();
+    await expect(createActions).toBeChecked();
+    await expect(createActions).toBeEnabled();
+    await page.reload();
+    await expect(grant.getByRole('checkbox', { name: 'Tillat opprettelse av risikotiltak' })).toBeChecked();
+    await expectNoAxeViolations(page, 'main', 'Integrasjoner med registrering');
+    await grant.getByRole('checkbox', { name: 'Tillat opprettelse av risikotiltak' }).click();
+    await expect(grant.getByRole('checkbox', { name: 'Tillat opprettelse av risikotiltak' })).not.toBeChecked();
+    await expect(grant.getByRole('checkbox', { name: 'Tillat opprettelse av risikotiltak' })).toBeEnabled();
 
     // Endre roller: without a role it can read nothing.
     await grant.getByRole('button', { name: 'Endre roller' }).click();

@@ -9,6 +9,7 @@ use App\Models\CustomerRole;
 use App\Models\User;
 use App\Services\Security\CustomerAccessChangeRecorder;
 use App\Services\Security\HumanDecisionGuard;
+use App\Support\ApiOperationCatalog;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
@@ -30,6 +31,9 @@ use Illuminate\Validation\ValidationException;
  * only (CustomerPermissionCatalog::integrationPermissions()), the roles' fagområder, and only the
  * modules the customer has ordered. Revoking deactivates the identity, and the grant stays as
  * history; the application is refused on its next call.
+ *
+ * The System Owner may also switch named write operations on for a grant (ApiOperationCatalog).
+ * Roles never give one: they were chosen for reading. The choice is recorded like the roles.
  */
 class ApiClientGrantService
 {
@@ -120,6 +124,42 @@ class ApiClientGrantService
         });
     }
 
+    /**
+     * Which write operations the grant allows (ApiOperationCatalog). The whole list is replaced; an
+     * operation outside the catalog refuses the whole change. Switching one on gives nothing by
+     * itself — the token still needs the write app role, and the domain still applies its rules.
+     *
+     * @param  list<string>  $operations
+     */
+    public function updateOperations(?User $actor, int $grantId, array $operations): ApiClientCustomerGrant
+    {
+        $actor = $this->authorize($actor);
+
+        return DB::transaction(function () use ($actor, $grantId, $operations): ApiClientCustomerGrant {
+            $grant = $this->ownActiveGrant($actor, $grantId);
+            $requested = array_values(array_unique(array_map('strval', $operations)));
+
+            foreach ($requested as $operation) {
+                if (! ApiOperationCatalog::exists($operation)) {
+                    throw ValidationException::withMessages(['allowed_operations' => __('procynia.customer_env.integrations.errors.invalid_operations')]);
+                }
+            }
+
+            sort($requested);
+            $before = $this->snapshot($grant);
+
+            if ($before['allowed_operations'] === $requested) {
+                return $grant;
+            }
+
+            $grant->forceFill(['allowed_operations' => $requested])->save();
+
+            $this->record($actor, $grant, CustomerAccessChangeRecorder::API_GRANT_OPERATIONS_CHANGED, $before, $this->snapshot($grant));
+
+            return $grant;
+        });
+    }
+
     public function revoke(?User $actor, int $grantId): ApiClientCustomerGrant
     {
         $actor = $this->authorize($actor);
@@ -204,6 +244,7 @@ class ApiClientGrantService
             'api_client_id' => (int) $grant->api_client_id,
             'integration_user_id' => (int) $grant->integration_user_id,
             'customer_role_ids' => $identity->customerRoles()->pluck('customer_roles.id')->map(fn (mixed $id): int => (int) $id)->sort()->values()->all(),
+            'allowed_operations' => collect((array) ($grant->allowed_operations ?? []))->map(fn (mixed $op): string => (string) $op)->sort()->values()->all(),
             'active' => $grant->revoked_at === null,
             'identity_active' => (bool) $identity->is_active,
         ];

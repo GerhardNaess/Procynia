@@ -11,6 +11,9 @@ import { integrationAccessLines } from './integrationAccess';
  * the read rights in those roles count, and only for modules the customer has ordered. Each grant
  * shows what the integration can actually read, so the effect of the roles is visible, not only
  * their names. Revoking takes effect on the application's next call.
+ *
+ * Write operations are a separate, explicit choice per grant (ApiOperationCatalog): a role never
+ * gives one. Ticking one saves at once, like a switch.
  */
 function formatDateTime(value, locale) {
     if (!value) {
@@ -51,8 +54,47 @@ function RoleChoice({ roles, selected, onChange, t, error }) {
     );
 }
 
+function OperationChoice({ grant, operations, t }) {
+    const [saving, setSaving] = useState(false);
+    const allowed = grant.allowed_operations ?? [];
+    const hintId = `integration-operations-hint-${grant.id}`;
+
+    const toggle = (key) => {
+        const next = allowed.includes(key) ? allowed.filter((value) => value !== key) : [...allowed, key];
+
+        setSaving(true);
+        router.put(grant.operations_url, { allowed_operations: next }, {
+            preserveScroll: true,
+            onFinish: () => setSaving(false),
+        });
+    };
+
+    return (
+        <fieldset className="mt-4" aria-describedby={hintId}>
+            <legend className="text-base font-semibold text-slate-900">{t.operations_label ?? 'Kan registrere gjennom API-et'}</legend>
+            <p id={hintId} className="mt-1 text-base leading-6 text-slate-600">
+                {t.operations_hint ?? 'Slå bare på det applikasjonen trenger. Det gjelder bare i fagområdene integrasjonen kan lese, og applikasjonen må i tillegg ha skriverollen i Entra ID.'}
+            </p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {operations.map((operation) => (
+                    <label key={operation.key} className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-base text-slate-900">
+                        <input
+                            type="checkbox"
+                            checked={allowed.includes(operation.key)}
+                            disabled={saving}
+                            onChange={() => toggle(operation.key)}
+                            className="h-5 w-5 rounded border-field-border text-violet-600 focus:ring-violet-300"
+                        />
+                        {operation.label}
+                    </label>
+                ))}
+            </div>
+        </fieldset>
+    );
+}
+
 export default function IntegrationsPanel({ integrations, modal: Modal, t = {}, locale = 'nb-NO' }) {
-    const { clients = [], grants = [], roles = [], store_url: storeUrl } = integrations;
+    const { clients = [], grants = [], roles = [], operations = [], store_url: storeUrl } = integrations;
     const [dialog, setDialog] = useState({ mode: null, client: null, grant: null });
     const form = useForm({ api_client_id: null, customer_role_ids: [] });
     const [revoking, setRevoking] = useState(false);
@@ -108,7 +150,7 @@ export default function IntegrationsPanel({ integrations, modal: Modal, t = {}, 
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                 <h2 id="integrations-heading" className="text-xl font-semibold text-slate-950">{t.heading ?? 'Integrasjoner'}</h2>
                 <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">
-                    {t.intro ?? 'Gi applikasjoner som Procynia har godkjent, lesetilgang til kundens data gjennom API-et. En integrasjon får bare leserettighetene i rollene du velger, i modulene dere har bestilt. Den kan aldri endre, vurdere, godkjenne eller slette noe.'}
+                    {t.intro ?? 'Gi applikasjoner som Procynia har godkjent, lesetilgang til kundens data gjennom API-et. En integrasjon får bare leserettighetene i rollene du velger, i modulene dere har bestilt. Den kan bare registrere noe når du slår det på under «Kan registrere gjennom API-et», og den kan aldri vurdere, godkjenne, akseptere eller slette noe.'}
                 </p>
             </div>
 
@@ -180,6 +222,8 @@ export default function IntegrationsPanel({ integrations, modal: Modal, t = {}, 
                                             </dd>
                                         </div>
                                     </dl>
+
+                                    {operations.length > 0 ? <OperationChoice grant={grant} operations={operations} t={t} /> : null}
                                 </li>
                             );
                         })}

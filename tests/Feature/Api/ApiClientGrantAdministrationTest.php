@@ -14,6 +14,7 @@ use App\Services\Risk\RiskAccessService;
 use App\Services\Security\ActorChannel;
 use App\Services\Security\ApiActorChannel;
 use App\Services\Security\CustomerAccessChangeRecorder;
+use App\Support\ApiOperationCatalog;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -340,6 +341,133 @@ class ApiClientGrantAdministrationTest extends TestCase
             ->get('/app/customer-environment?tab=integrations')
             ->assertOk()
             ->assertInertia(fn ($page) => $page->where('integrations', null)->where('activeTab', 'integrations'));
+    }
+
+    public function test_a_system_owner_switches_a_write_operation_on_and_off_and_each_change_is_recorded(): void
+    {
+        $client = $this->apiClient();
+        $customer = $this->apiCustomer();
+        $owner = $this->systemOwner($customer);
+        $grant = app(ApiClientGrantService::class)->grant($owner, $client->id, []);
+        $this->assertSame([], $grant->fresh()->allowed_operations);
+        $url = "/app/customer-environment/integrations/{$grant->id}/operations";
+
+        $this->actingAs($owner)
+            ->put($url, ['allowed_operations' => [ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE]])
+            ->assertRedirect('/app/customer-environment?tab=integrations')
+            ->assertSessionHas('success');
+
+        $this->assertSame([ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE], $grant->fresh()->allowed_operations);
+        $on = CustomerAccessChange::query()->where('change_type', CustomerAccessChangeRecorder::API_GRANT_OPERATIONS_CHANGED)->sole();
+        $this->assertSame([$owner->id, $grant->id, (int) $customer->id], [(int) $on->actor_user_id, (int) $on->subject_id, (int) $on->customer_id]);
+        $this->assertSame([], $on->before['allowed_operations']);
+        $this->assertSame([ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE], $on->after['allowed_operations']);
+
+        // Saving the same choice again changes nothing and records nothing.
+        $this->actingAs($owner)->put($url, ['allowed_operations' => [ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE]])->assertRedirect();
+        $this->assertSame(1, CustomerAccessChange::query()->where('change_type', CustomerAccessChangeRecorder::API_GRANT_OPERATIONS_CHANGED)->count());
+
+        $this->actingAs($owner)->put($url, ['allowed_operations' => []])->assertRedirect();
+        $this->assertSame([], $grant->fresh()->allowed_operations);
+        $off = CustomerAccessChange::query()->where('change_type', CustomerAccessChangeRecorder::API_GRANT_OPERATIONS_CHANGED)->orderByDesc('id')->first();
+        $this->assertSame([ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE], $off->before['allowed_operations']);
+        $this->assertSame([], $off->after['allowed_operations']);
+
+        // Roles are untouched by an operation change, and the other way round.
+        $role = $this->role($customer, [CustomerPermissionCatalog::RISK_VIEW]);
+        app(ApiClientGrantService::class)->updateOperations($owner, $grant->id, [ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE]);
+        app(ApiClientGrantService::class)->updateRoles($owner, $grant->id, [$role->id]);
+        $this->assertSame([ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE], $grant->fresh()->allowed_operations);
+    }
+
+    public function test_only_catalogued_operations_can_be_allowed(): void
+    {
+        $client = $this->apiClient();
+        $customer = $this->apiCustomer();
+        $owner = $this->systemOwner($customer);
+        $grant = app(ApiClientGrantService::class)->grant($owner, $client->id, []);
+        $before = CustomerAccessChange::query()->count();
+
+        foreach ([['risk.edit'], [ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE, 'risk.accept'], ['wiki.approve']] as $operations) {
+            $this->actingAs($owner)
+                ->put("/app/customer-environment/integrations/{$grant->id}/operations", ['allowed_operations' => $operations])
+                ->assertSessionHasErrors('allowed_operations');
+        }
+
+        $this->assertSame([], $grant->fresh()->allowed_operations);
+        $this->assertSame($before, CustomerAccessChange::query()->count());
+    }
+
+    public function test_only_the_customers_own_system_owner_changes_write_operations(): void
+    {
+        $client = $this->apiClient();
+        $customer = $this->apiCustomer();
+        $other = $this->apiCustomer('Andre AS');
+        $grant = app(ApiClientGrantService::class)->grant($this->systemOwner($customer), $client->id, []);
+        $service = app(ApiClientGrantService::class);
+        $operations = [ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE];
+
+        foreach ([
+            'Bid Manager' => $this->person($customer, User::ROLE_CUSTOMER_ADMIN, User::BID_ROLE_BID_MANAGER),
+            'contributor' => $this->person($customer, User::ROLE_USER, User::BID_ROLE_CONTRIBUTOR),
+            'integration identity' => $grant->integrationUser,
+            'nobody' => null,
+        ] as $who => $actor) {
+            try {
+                $service->updateOperations($actor, $grant->id, $operations);
+                $this->fail("{$who} changed the write operations.");
+            } catch (AuthorizationException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+
+        $this->actingAs($this->person($customer, User::ROLE_USER, User::BID_ROLE_CONTRIBUTOR))
+            ->put("/app/customer-environment/integrations/{$grant->id}/operations", ['allowed_operations' => $operations])
+            ->assertForbidden();
+
+        // Another customer's System Owner does not find the grant.
+        $otherOwner = $this->systemOwner($other);
+
+        try {
+            $service->updateOperations($otherOwner, $grant->id, $operations);
+            $this->fail('A System Owner changed another customer\'s grant.');
+        } catch (ModelNotFoundException) {
+            $this->addToAssertionCount(1);
+        }
+
+        $this->actingAs($otherOwner)
+            ->put("/app/customer-environment/integrations/{$grant->id}/operations", ['allowed_operations' => $operations])
+            ->assertNotFound();
+
+        // Through the API channel, not even the System Owner.
+        $this->app->instance(ActorChannel::class, new ApiActorChannel);
+
+        try {
+            app(ApiClientGrantService::class)->updateOperations($this->systemOwner($customer), $grant->id, $operations);
+            $this->fail('An operation was switched on through the API channel.');
+        } catch (AuthorizationException) {
+            $this->addToAssertionCount(1);
+        }
+
+        $this->assertSame([], $grant->fresh()->allowed_operations);
+        $this->assertSame(0, CustomerAccessChange::query()->where('change_type', CustomerAccessChangeRecorder::API_GRANT_OPERATIONS_CHANGED)->count());
+    }
+
+    public function test_kundemiljo_offers_the_catalogued_operations_per_grant(): void
+    {
+        $client = $this->apiClient();
+        $customer = $this->apiCustomer();
+        $owner = $this->systemOwner($customer);
+        $grant = app(ApiClientGrantService::class)->grant($owner, $client->id, []);
+        app(ApiClientGrantService::class)->updateOperations($owner, $grant->id, [ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE]);
+
+        $this->actingAs($owner)
+            ->get('/app/customer-environment?tab=integrations')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->where('integrations.operations', [['key' => ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE, 'label' => 'Tillat opprettelse av risikotiltak']])
+                ->where('integrations.grants.0.allowed_operations', [ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE])
+                ->where('integrations.grants.0.operations_url', route('app.customer-environment.integrations.operations.update', ['grantId' => $grant->id])));
     }
 
     private function systemOwner(Customer $customer, array $overrides = []): User

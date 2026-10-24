@@ -9,7 +9,7 @@ use Illuminate\Http\Request;
 
 /**
  * Kundemiljø → Integrasjoner: the System Owner gives an approved application read access, changes
- * its roles, and takes the access back (D13). The rules — System Owner only, own customer only,
+ * its roles and the write operations it may perform, and takes the access back (D13). The rules — System Owner only, own customer only,
  * active roles only, recorded with actor and time — are ApiClientGrantService's; this only maps the
  * request onto it and back to the tab.
  */
@@ -44,6 +44,20 @@ class CustomerIntegrationController extends Controller
         $this->grants->updateRoles($request->user(), $grantId, $validated['customer_role_ids']);
 
         return $this->backToTab(__('procynia.customer_env.integrations.flash.roles_changed'));
+    }
+
+    public function updateOperations(Request $request, int $grantId): RedirectResponse
+    {
+        abort_unless($this->grants->mayAdminister($request->user()), 403);
+
+        $validated = $request->validate([
+            'allowed_operations' => ['present', 'array'],
+            'allowed_operations.*' => ['string'],
+        ]);
+
+        $this->grants->updateOperations($request->user(), $grantId, $validated['allowed_operations']);
+
+        return $this->backToTab(__('procynia.customer_env.integrations.flash.operations_changed'));
     }
 
     public function destroy(Request $request, int $grantId): RedirectResponse

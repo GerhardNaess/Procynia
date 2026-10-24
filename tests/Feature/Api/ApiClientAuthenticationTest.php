@@ -55,6 +55,7 @@ class ApiClientAuthenticationTest extends TestCase
                 'client_id' => $context->client?->id,
                 'mode' => $context->mode,
                 'channel_is_api' => app(ActorChannel::class)->isApi(),
+                'write_role' => $context->writeRole,
             ];
         });
     }
@@ -278,6 +279,27 @@ class ApiClientAuthenticationTest extends TestCase
         );
         $this->assertForbidden(
             $this->get('/api/_test/probe', $this->bearer($this->accessToken(['roles' => ['Procynia.Propose.All', 'Procynia.Read']]))),
+            'missing_app_role',
+        );
+    }
+
+    public function test_the_write_app_role_is_recorded_but_never_replaces_the_read_role(): void
+    {
+        $this->apiClient();
+
+        $this->get('/api/_test/probe', $this->bearer($this->accessToken()))
+            ->assertOk()
+            ->assertJsonPath('write_role', false);
+        $this->get('/api/_test/probe', $this->bearer($this->accessToken(['roles' => ['Procynia.Read.All', 'Procynia.Write.All']])))
+            ->assertOk()
+            ->assertJsonPath('write_role', true);
+        $this->get('/api/_test/probe', $this->bearer($this->accessToken(['roles' => ['Procynia.Read.All', 'Procynia.Write']])))
+            ->assertOk()
+            ->assertJsonPath('write_role', false);
+
+        // The write role alone is not a way in.
+        $this->assertForbidden(
+            $this->get('/api/_test/probe', $this->bearer($this->accessToken(['roles' => ['Procynia.Write.All']]))),
             'missing_app_role',
         );
     }

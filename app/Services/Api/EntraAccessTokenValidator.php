@@ -30,7 +30,8 @@ use UnexpectedValueException;
  *  5. From the verified claims: version 2.0, issuer of exactly that tenant, an accepted audience.
  *  6. The pair (azp, tid) is an enabled client. Both must match: in a multi-tenant API another
  *     tenant's application may carry the same app role, and only its home tenant tells them apart.
- *  7. Application mode: no `scp` (a delegated token), and the read app role.
+ *  7. Application mode: no `scp` (a delegated token), and the read app role. The write app role
+ *     is optional and only recorded; write routes require it (RequireApiWriteRole).
  *
  * Steps 1–6 are authentication (401). Step 7 is a known client asking for something it may not
  * have (403). The token decides only *that* the client may call the API; what it may read is
@@ -131,6 +132,7 @@ class EntraAccessTokenValidator
             $client,
             $tenantId,
             is_string($claims['oid'] ?? null) ? $claims['oid'] : null,
+            in_array((string) config('procynia.api.entra.write_role'), $roles, true),
         );
     }
 

@@ -4,6 +4,7 @@ use App\Http\Middleware\AddSecurityHeaders;
 use App\Http\Middleware\Api\AuthenticateApiClient;
 use App\Http\Middleware\Api\ForceJsonResponse;
 use App\Http\Middleware\Api\LogApiRequest;
+use App\Http\Middleware\Api\RequireApiWriteRole;
 use App\Http\Middleware\Api\ResolveApiCustomerGrant;
 use App\Http\Middleware\EnsureCustomerFrontendAccess;
 use App\Http\Middleware\EnsureHealthToken;
@@ -43,6 +44,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'api.log' => LogApiRequest::class,
             'api.client' => AuthenticateApiClient::class,
             'api.customer' => ResolveApiCustomerGrant::class,
+            'api.write' => RequireApiWriteRole::class,
         ]);
 
         $middleware->api(prepend: [

@@ -622,6 +622,9 @@ Route::prefix('app')
         Route::put('/customer-environment/integrations/{grantId}/roles', [CustomerIntegrationController::class, 'updateRoles'])
             ->whereNumber('grantId')
             ->name('customer-environment.integrations.roles.update');
+        Route::put('/customer-environment/integrations/{grantId}/operations', [CustomerIntegrationController::class, 'updateOperations'])
+            ->whereNumber('grantId')
+            ->name('customer-environment.integrations.operations.update');
         Route::delete('/customer-environment/integrations/{grantId}', [CustomerIntegrationController::class, 'destroy'])
             ->whereNumber('grantId')
             ->name('customer-environment.integrations.destroy');

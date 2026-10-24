@@ -87,6 +87,7 @@ trait CreatesCustomerAccessSqliteSchema
             $table->timestamp('revoked_at')->nullable();
             $table->unsignedBigInteger('revoked_by_user_id')->nullable();
             $table->timestamp('last_used_at')->nullable();
+            $table->json('allowed_operations')->default('[]');
             $table->timestamps();
         });
     }

@@ -54,7 +54,8 @@ export default function CustomerEnvironmentHeader({ activeTab, onChangeTab, show
         '2. Under «Godkjente applikasjoner» velger du Gi tilgang ved applikasjonen.',
         '3. Velg rollene integrasjonen skal ha, og trykk Gi tilgang. Bare leserettighetene i rollene gjelder, og bare i moduler dere har bestilt.',
         '4. Under «Applikasjoner med tilgang» ser du hva integrasjonen kan lese. Bruk Endre roller for å endre det.',
-        '5. Bruk Trekk tilbake når applikasjonen ikke lenger skal ha tilgang. Den avvises ved neste kall.',
+        '5. Under «Kan registrere gjennom API-et» krysser du av for det applikasjonen skal kunne registrere, for eksempel Tillat opprettelse av risikotiltak. Endringen lagres med en gang. Fjern krysset for å trekke tillatelsen tilbake.',
+        '6. Bruk Trekk tilbake når applikasjonen ikke lenger skal ha tilgang. Den avvises ved neste kall.',
     ];
 
     return (

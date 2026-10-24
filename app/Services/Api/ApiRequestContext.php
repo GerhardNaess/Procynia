@@ -24,14 +24,18 @@ final class ApiRequestContext
 
     public ?User $actor = null;
 
+    /** The token carries the write app role. Required by every write route, granting none. */
+    public bool $writeRole = false;
+
     /** How many records the response returned, when the endpoint says. */
     public ?int $rows = null;
 
     public function __construct(public readonly string $requestId) {}
 
-    public function authenticated(ApiClient $client): void
+    public function authenticated(ApiClient $client, bool $writeRole = false): void
     {
         $this->client = $client;
         $this->mode = self::MODE_APPLICATION;
+        $this->writeRole = $writeRole;
     }
 }

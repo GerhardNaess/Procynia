@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Services\Api\ApiAccessSummary;
 use App\Services\Api\ApiClientGrantService;
 use App\Services\Security\CustomerAccessChangeRecorder;
+use App\Support\ApiOperationCatalog;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Http\RedirectResponse;
@@ -146,6 +147,8 @@ class CustomerEnvironmentController extends Controller
                 'last_used_at' => $grant->last_used_at?->toIso8601String(),
                 'role_ids' => $grant->integrationUser->customerRoles->pluck('id')->map(fn (mixed $id): int => (int) $id)->sort()->values()->all(),
                 'access' => $summary->for($grant->integrationUser, $customer),
+                'allowed_operations' => array_values(array_filter((array) ($grant->allowed_operations ?? []), fn (mixed $op): bool => ApiOperationCatalog::exists((string) $op))),
+                'operations_url' => route('app.customer-environment.integrations.operations.update', ['grantId' => $grant->id]),
                 'update_url' => route('app.customer-environment.integrations.roles.update', ['grantId' => $grant->id]),
                 'revoke_url' => route('app.customer-environment.integrations.destroy', ['grantId' => $grant->id]),
             ])->all(),
@@ -156,6 +159,11 @@ class CustomerEnvironmentController extends Controller
                 ->get(['id', 'name'])
                 ->map(fn (CustomerRole $role): array => ['id' => (int) $role->id, 'name' => $role->name])
                 ->all(),
+            // The write operations a grant can be given, in the customer's language.
+            'operations' => array_map(fn (string $operation): array => [
+                'key' => $operation,
+                'label' => __((string) ApiOperationCatalog::labelKey($operation)),
+            ], ApiOperationCatalog::all()),
             'store_url' => route('app.customer-environment.integrations.store'),
         ];
     }

@@ -45,6 +45,8 @@ class CustomerAccessChangeRecorder
 
     public const API_GRANT_REVOKED = 'api_grant_revoked';
 
+    public const API_GRANT_OPERATIONS_CHANGED = 'api_grant_operations_changed';
+
     /** @return array<string, mixed> */
     public function userSnapshot(User $user): array
     {

@@ -12,5 +12,10 @@ final class ValidatedApplicationToken
         public readonly string $tenantId,
         /** The client's service principal (`oid`), for the log. */
         public readonly ?string $objectId,
+        /**
+         * The token carries the write app role (Procynia.Write.All). A ceiling only: it lets the
+         * client ask for a write operation, never grants one (IntegrationOperationAuthority).
+         */
+        public readonly bool $writeRole = false,
     ) {}
 }

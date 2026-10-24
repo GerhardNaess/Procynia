@@ -36,6 +36,7 @@ trait IssuesEntraAccessTokens
     {
         Config::set('procynia.api.entra.audiences', [self::API_AUDIENCE]);
         Config::set('procynia.api.entra.read_role', 'Procynia.Read.All');
+        Config::set('procynia.api.entra.write_role', 'Procynia.Write.All');
 
         Http::fake(['login.microsoftonline.com/*/discovery/v2.0/keys' => Http::response(['keys' => [$this->testJwk()]])]);
     }

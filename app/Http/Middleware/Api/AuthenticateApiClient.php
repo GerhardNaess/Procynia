@@ -40,7 +40,7 @@ class AuthenticateApiClient
             throw $refusal;
         }
 
-        app(ApiRequestContext::class)->authenticated($validated->client);
+        app(ApiRequestContext::class)->authenticated($validated->client, $validated->writeRole);
 
         return $next($request);
     }
