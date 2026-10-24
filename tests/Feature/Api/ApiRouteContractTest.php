@@ -13,8 +13,10 @@ use Tests\TestCase;
  * The shape every external API route must have, checked over the real route table
  * (docs/external-api-phase-1-decisions.md §5 and §9).
  *
- *  - Read-only: GET (and the HEAD Laravel adds) only. No route writes, decides or starts work —
- *    which is also what keeps A23 (AI work) and A46 («Flytt til historikk») unreachable.
+ *  - Read by default: GET (and the HEAD Laravel adds). The only exceptions are the named write
+ *    routes in WRITE_ROUTES, each a POST behind api.write that performs one catalogued operation
+ *    (ApiOperationCatalog). No route decides or starts work — which is also what keeps A23 (AI
+ *    work) and A46 («Flytt til historikk») unreachable.
  *  - The whole stack, in order, on every route: log, application, customer grant, module.
  *  - Only modules the API is meant to serve. Kvalitet, Wiki and Anbud are not among them.
  *  - No route model binding: a record is found through the access services, never by id alone.
@@ -26,6 +28,11 @@ class ApiRouteContractTest extends TestCase
 
     /** Modules the API may serve. Extend deliberately, with the module's own access tests. */
     private const SERVED_MODULES = ['risk', 'improvements', 'objectives'];
+
+    /** The write routes, by name, with the one method each accepts. Extend deliberately. */
+    private const WRITE_ROUTES = [
+        'api.v1.risks.treatment-actions.store' => 'POST',
+    ];
 
     /** Routes that describe the caller and need no module. */
     private const MODULE_FREE = ['api.v1.me'];
@@ -46,14 +53,31 @@ class ApiRouteContractTest extends TestCase
         $this->assertNotEmpty($this->apiRoutes());
     }
 
-    public function test_every_api_route_is_read_only(): void
+    public function test_every_api_route_reads_except_the_named_write_routes(): void
     {
+        $names = [];
+
         foreach ($this->apiRoutes() as $route) {
+            $name = (string) $route->getName();
+            $names[] = $name;
+
+            if (array_key_exists($name, self::WRITE_ROUTES)) {
+                $this->assertSame([self::WRITE_ROUTES[$name]], $route->methods(), "Write route [{$name}] accepts another method.");
+                $this->assertContains('api.write', $route->gatherMiddleware(), "Write route [{$name}] does not require the write app role.");
+
+                continue;
+            }
+
             $this->assertSame(
                 [],
                 array_values(array_diff($route->methods(), ['GET', 'HEAD'])),
                 "API route [{$route->uri()}] accepts more than GET.",
             );
+            $this->assertNotContains('api.write', $route->gatherMiddleware());
+        }
+
+        foreach (array_keys(self::WRITE_ROUTES) as $name) {
+            $this->assertContains($name, $names, "Write route [{$name}] is not registered.");
         }
     }
 

@@ -15,7 +15,7 @@ final class ApiResponse
      * @param  array<mixed>  $data
      * @param  array<string, mixed>  $meta
      */
-    public static function ok(array $data, ApiRequestContext $context, array $meta = []): JsonResponse
+    public static function ok(array $data, ApiRequestContext $context, array $meta = [], int $status = 200): JsonResponse
     {
         return new JsonResponse([
             'data' => $data,
@@ -23,6 +23,16 @@ final class ApiResponse
                 'as_of' => now()->utc()->toIso8601ZuluString(),
                 'request_id' => $context->requestId,
             ], $meta),
-        ]);
+        ], $status);
+    }
+
+    /**
+     * A record created by the request (201), in the same envelope.
+     *
+     * @param  array<mixed>  $data
+     */
+    public static function created(array $data, ApiRequestContext $context): JsonResponse
+    {
+        return self::ok($data, $context, [], 201);
     }
 }

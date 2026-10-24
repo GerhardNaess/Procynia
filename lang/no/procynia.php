@@ -7791,6 +7791,7 @@ return [
             'completed_on' => 'Fullført :date',
             'owner' => 'Ansvarlig: :name',
             'no_owner' => 'Ingen ansvarlig',
+            'registered_by_integration' => 'Registrert av integrasjonen :client',
             'outcome_note' => 'Resultat',
         ],
         'controls' => [

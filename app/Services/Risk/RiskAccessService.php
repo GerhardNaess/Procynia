@@ -5,8 +5,10 @@ namespace App\Services\Risk;
 use App\Models\BusinessArea;
 use App\Models\Risk;
 use App\Models\User;
+use App\Services\Api\IntegrationOperationAuthority;
 use App\Services\Permissions\BusinessAreaGrants;
 use App\Services\Permissions\CustomerPermissionService;
+use App\Support\ApiOperationCatalog;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
@@ -47,6 +49,7 @@ class RiskAccessService
     public function __construct(
         private readonly CustomerPermissionService $permissions,
         private readonly BusinessAreaGrants $grants,
+        private readonly IntegrationOperationAuthority $operations,
     ) {}
 
     /**
@@ -159,12 +162,42 @@ class RiskAccessService
     /**
      * Changing what the risk is or holds — its fields and status, its tiltak, its links to Kvalitet.
      * Not a human-only decision, but an integration never holds risk.edit: it only reads
-     * (CustomerPermissionCatalog::integrationPermissions()). The services that write ask
-     * this themselves, so the rule is the same from every entry point.
+     * (CustomerPermissionCatalog::integrationPermissions()), and the one write it can be allowed
+     * is canCreateTreatmentAction(). The services that write ask this themselves, so the rule is
+     * the same from every entry point.
      */
     public function canEdit(User $user, Risk $risk): bool
     {
         return $this->canDecide($user, CustomerPermissionCatalog::RISK_EDIT, $risk);
+    }
+
+    /**
+     * Creating a tiltak on the risk. A person needs risk.edit in its area, as for every other
+     * change to the risk. An integration never holds risk.edit; it may create a tiltak — and only
+     * that — with risk.view in the risk's area and the operation its customer's System Owner
+     * switched on for the grant (IntegrationOperationAuthority, which also requires the write app
+     * role on an API request). Editing, completing or reopening a tiltak stays canEdit().
+     */
+    public function canCreateTreatmentAction(User $user, Risk $risk): bool
+    {
+        if ($user->isIntegration()) {
+            return $this->can($user, CustomerPermissionCatalog::RISK_VIEW, $risk)
+                && $this->operations->allows($user, ApiOperationCatalog::RISK_TREATMENT_ACTION_CREATE);
+        }
+
+        return $this->canEdit($user, $risk);
+    }
+
+    /** canCreateTreatmentAction() as a refusal (403), for the risk as it is stored now. Returns it. */
+    public function assertCanCreateTreatmentAction(User $user, Risk $risk): Risk
+    {
+        $current = Risk::query()->whereKey($risk->id)->first();
+
+        if ($current === null || ! $this->canCreateTreatmentAction($user, $current)) {
+            throw new AuthorizationException('This user may not change this risk.');
+        }
+
+        return $current;
     }
 
     /**

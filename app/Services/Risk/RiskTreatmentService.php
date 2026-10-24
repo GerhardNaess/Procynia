@@ -2,6 +2,7 @@
 
 namespace App\Services\Risk;
 
+use App\Models\ApiClientCustomerGrant;
 use App\Models\Risk;
 use App\Models\RiskTreatmentAction;
 use App\Models\User;
@@ -12,10 +13,12 @@ use Illuminate\Validation\ValidationException;
 /**
  * Tiltak on a risk: create, edit, complete, reopen — and the rows the risk page shows.
  *
- * The caller has already reached the risk through RiskAccessService::visibleRisks() and checked
- * risk.edit in its area. Nothing here looks a risk up on its own, so a tiltak can never be the way
- * to a risk someone cannot see. Every write checks risk.edit in the risk's area again itself
- * (RiskAccessService::assertCanEdit), so the rule holds for every entry point (phase 0 step 9).
+ * The caller has already reached the risk through RiskAccessService::visibleRisks(). Nothing here
+ * looks a risk up on its own, so a tiltak can never be the way to a risk someone cannot see. Every
+ * write checks its rule in the risk's area again itself, so the rule holds for every entry point
+ * (phase 0 step 9): creating asks RiskAccessService::assertCanCreateTreatmentAction (risk.edit for
+ * a person; for an integration risk.view plus the allowed API operation), everything else
+ * assertCanEdit — which an integration never passes.
  *
  * The responsible person must be an active user of the risk's own customer who can read risks in
  * the risk's area: someone who cannot open the risk cannot be responsible for acting on it.
@@ -27,6 +30,21 @@ class RiskTreatmentService
     ) {}
 
     /**
+     * The fields of a tiltak as a form or the API sends them. One set of rules for every entry point.
+     *
+     * @return array<string, list<string>>
+     */
+    public static function rules(): array
+    {
+        return [
+            'title' => ['required', 'string', 'max:255'],
+            'owner_user_id' => ['required', 'integer'],
+            'due_at' => ['required', 'date_format:Y-m-d'],
+            'outcome_note' => ['nullable', 'string', 'max:5000'],
+        ];
+    }
+
+    /**
      * Open actions first, by deadline; completed ones beneath, most recently completed first.
      *
      * @return list<array<string, mixed>>
@@ -35,11 +53,22 @@ class RiskTreatmentService
     {
         $today = now();
 
-        return RiskTreatmentAction::query()
+        $actions = RiskTreatmentAction::query()
             ->where('risk_id', $risk->id)
             ->where('customer_id', $risk->customer_id)
             ->with('owner:id,name')
+            ->get();
+
+        // A tiltak registered through the API names the application. Read from the grants, which
+        // name the integration identity; the users table is not read for it.
+        $integrationClients = ApiClientCustomerGrant::query()
+            ->where('customer_id', $risk->customer_id)
+            ->whereIn('integration_user_id', $actions->pluck('created_by')->filter()->unique()->values()->all() ?: [0])
+            ->with('client:id,name')
             ->get()
+            ->mapWithKeys(fn (ApiClientCustomerGrant $grant): array => [(int) $grant->integration_user_id => $grant->client?->name]);
+
+        return $actions
             ->sortBy(fn (RiskTreatmentAction $action): array => $action->isOpen()
                 ? [0, $action->due_at?->toDateString() ?? '', $action->id]
                 : [1, -($action->completed_at?->getTimestamp() ?? 0), -$action->id])
@@ -54,6 +83,7 @@ class RiskTreatmentService
                 'completed_at' => $action->completed_at?->toIso8601String(),
                 'outcome_note' => $action->outcome_note,
                 'is_overdue' => $action->isOverdue($today),
+                'registered_by_integration' => $action->created_by !== null ? ($integrationClients[(int) $action->created_by] ?? null) : null,
             ])
             ->all();
     }
@@ -82,7 +112,7 @@ class RiskTreatmentService
     /** @param  array{title: string, owner_user_id: int|string, due_at: string, outcome_note?: ?string}  $data */
     public function create(User $actor, Risk $risk, array $data): RiskTreatmentAction
     {
-        $risk = $this->access->assertCanEdit($actor, $risk);
+        $risk = $this->access->assertCanCreateTreatmentAction($actor, $risk);
         $this->guardOwner($risk, (int) $data['owner_user_id']);
 
         return RiskTreatmentAction::query()->create([

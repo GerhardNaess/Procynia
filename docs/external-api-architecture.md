@@ -491,6 +491,8 @@ Procynia er fortsatt eneste kilde. Siggjos datamodell er en tilgangsstyrt *kopi*
 
 ## 10. Utvidelse: forslag, idempotens, sporbarhet og MCP (punkt 7)
 
+> **Status 2026-10-24:** Den første skriveoperasjonen er bygget, forenklet i forhold til dette avsnittet: navngitte operasjoner per kundetildeling (`ApiOperationCatalog`, `allowed_operations`), app-rollen `Procynia.Write.All` som tak, og `POST /api/v1/risks/{riskId}/treatment-actions` gjennom `RiskTreatmentService::create()`. Ingen `Idempotency-Key` og ingen `api_request_log` ennå; gjentatte kall kan gi duplikater. Se `external-api-phase-1-decisions.md` §20.
+
 ### 10.1 Forslag i stedet for beslutninger
 
 Agenter skal kunne *foreslå*, ikke *beslutte*. I prioritert rekkefølge:

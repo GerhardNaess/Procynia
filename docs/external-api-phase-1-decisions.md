@@ -535,7 +535,7 @@ Dette kan ikke testes uten Siggjos og Advanias registreringer:
 
 ### Rammer som gjelder
 
-- **API fase 1 er lesebasert.** Ingen API-rute skriver, og en integrasjon har bare leserettigheter (`*.view`), både i API-et og i domenetjenestene.
+- **API fase 1 er lesebasert.** Ingen API-rute skriver, og en integrasjon har bare leserettigheter (`*.view`), både i API-et og i domenetjenestene. *(Oppdatert 2026-10-24: én navngitt skriveoperasjon finnes nå, se §20. Leserettighetene er uendret.)*
 - **Avgrensede skriveoperasjoner er fortsatt et arkitekturmål.** Senere skal AI-agenter kunne registrere og foreslå, men aldri ta menneskelige beslutninger. Modellen står under. Ingenting er åpnet.
 - **Ekte Entra-, Azure- og Siggjo-testing er utsatt** fordi miljøene ikke er tilgjengelige. Det som gjenstår, står i §16 («Gjenstår for testing med ekte Entra-token fra Siggjo») og i V1–V4 (§11).
 - **Lokal testing fortsetter med simulerte tokens og isolerte testdata.** Testene signerer med et nøkkelpar laget i testen, nøkkellisten fra Microsoft er falsk, og E2E bruker egne data i det isolerte miljøet. Ingen test krever Entra, Azure eller produksjonsdata.
@@ -940,3 +940,93 @@ Vurderingen gjelder Mål og KPI, og også de eksisterende endepunktene for Risik
 - `result` og oppmerksomhet beregnes ved lesing, med dagens dato på serveren. Et øyeblikksbilde hos Siggjo er riktig per `meta.as_of`.
 - Prosess- og aktivitetskoblinger (Kvalitet) er ikke med.
 - **Utsatt:** ekte Entra-, Azure- og Siggjo-testing (§16, §17). Lokal testing fortsetter med simulerte tokens og isolerte data.
+
+---
+
+## 20. Første skriveoperasjon: risikotiltak (2026-10-24)
+
+Besluttet av brukeren 2026-10-24. Den enkleste sikre løsningen: en ekstern AI-agent kan lese som før og utføre én konkret skriveoperasjon gjennom en eksisterende domenetjeneste. Denne seksjonen erstatter anbefalingene i §17 punkt 1 der de er forskjellige: ingen `machineWritablePermissions()`, ingen `Idempotency-Key`, ingen `api_request_log`, og app-rollen heter `Procynia.Write.All`, ikke `Procynia.Propose.All`.
+
+### Modellen for operasjonstillatelser (generell)
+
+En integrasjon kan skrive bare gjennom en **navngitt operasjon**. Tre uavhengige betingelser må alle være oppfylt:
+
+| # | Betingelse | Hvor | Hvem bestemmer |
+|---|---|---|---|
+| 1 | Tokenet har app-rollen `Procynia.Write.All` (i tillegg til `Procynia.Read.All`) | `EntraAccessTokenValidator` → `ApiRequestContext::$writeRole`; `api.write` (`RequireApiWriteRole`) på skriveruter | Kundens Entra-administrator (tak, D4) |
+| 2 | Operasjonen er slått på for kundetildelingen | `api_client_customer_grants.allowed_operations` (jsonb, standard `[]`) | Kundens System Owner, Kundemiljø → Integrasjoner |
+| 3 | Domenets egne regler for posten | Domenets tilgangstjeneste (her `RiskAccessService`) og domenetjenesten | Kundens roller og fagområder, forretningsreglene |
+
+- **Katalogen** `App\Support\ApiOperationCatalog` er lukket. Den inneholder bare `risk.treatment_action.create`, med modulen (`risk`) og etiketten. En ny operasjon er en ny rad der, domenesjekken som spør etter den, og etiketten. Ingen ny tabell, ingen nye roller.
+- **Kontrollen** `App\Services\Api\IntegrationOperationAuthority::allows($actor, $operation)` spørres fra domenets tilgangstjeneste, ikke fra kontrolleren. Den leser alt på nytt og nekter når én betingelse mangler: aktiv integrasjonsidentitet; operasjonen finnes i katalogen; forespørselen kom gjennom API-et som denne identiteten med skriverollen; tildelingen er aktiv, for egen kunde, og klienten er aktivert og er den som kaller; operasjonen er slått på; kunden er aktiv og har modulen. **Utenfor en API-forespørsel skriver en integrasjon ingenting**, også ved direkte kall til domenetjenesten.
+- **Roller gir aldri en operasjon.** Rollene ble valgt for lesing. `CustomerPermissionCatalog::integrationPermissions()` er uendret (bare `*.view`), så en integrasjon har fortsatt aldri `risk.edit` eller en annen skrivenøkkel, uansett roller.
+- **Skillet mot ordinære brukere.** En person får `false` fra `IntegrationOperationAuthority` og bruker sine vanlige rettigheter, som kontrollen ikke leser. Ingen regel for personer er endret.
+- **Menneskelige beslutninger** er uendret: `HumanDecisionGuard` nekter fortsatt enhver integrasjon og enhver forespørsel på API-kanalen, og databasetriggerne (`human_decision_actor`) står. Ingen operasjon kan være en menneskelig beslutning.
+
+### Administrasjon
+
+- `ApiClientGrantService::updateOperations()` erstatter hele listen. Bare kundens egen System Owner, interaktivt, på egen kundes aktive tildeling (samme regel som roller og tilbaketrekking). En verdi utenfor katalogen avviser hele endringen (422). Uendret valg registrerer ingenting.
+- Hver endring er en rad i `customer_access_changes` med `change_type = api_grant_operations_changed`, aktør og før/etter (`allowed_operations` er nå med i øyeblikksbildet av tildelingen).
+- Kundemiljø → Integrasjoner viser under hver tildeling «Kan registrere gjennom API-et» med avkrysningen **Tillat opprettelse av risikotiltak**. Den lagres med en gang (`PUT /app/customer-environment/integrations/{grantId}/operations`). Innledningen og «Slik gjør du det» er oppdatert (no/en).
+
+### `POST /api/v1/risks/{riskId}/treatment-actions`
+
+Kontrolleren (`Api\V1\RiskTreatmentActionController`) gjør bare dette: finner risikoen med `RiskAccessService::findVisible()` (annen kunde, annet fagområde eller ukjent id gir 404), spør `canCreateTreatmentAction()` (403), validerer med de samme reglene som risikosiden (`RiskTreatmentService::rules()`), kaller `RiskTreatmentService::create()` og svarer.
+
+**Tilgang.** `RiskAccessService::canCreateTreatmentAction()`:
+- person: `risk.edit` i risikoens fagområde, som før;
+- integrasjon: `risk.view` i risikoens fagområde **og** `IntegrationOperationAuthority::allows(..., 'risk.treatment_action.create')`.
+
+`RiskTreatmentService::create()` spør `assertCanCreateTreatmentAction()` selv. `update()`, `complete()` og `reopen()` spør fortsatt `assertCanEdit()`, som en integrasjon aldri består. Det samme gjelder `RiskCreator::update()`, `RiskLifecycleService::delete()`, vurdering og aksept (de to siste også `HumanDecisionGuard`).
+
+**Forespørsel** (JSON). Bare disse feltene leses; andre felt ignoreres:
+
+| Felt | Regel |
+|---|---|
+| `title` | påkrevd, tekst, maks 255 |
+| `owner_user_id` | påkrevd, heltall; aktiv person i risikoens kunde som kan se risikoen (samme kontroll som risikosiden) |
+| `due_at` | påkrevd, `YYYY-MM-DD` |
+
+**Svar** `201 Created`:
+
+```json
+{
+  "data": {
+    "id": 812,
+    "risk_id": 41,
+    "title": "Reservestrøm i serverrommet",
+    "status": "open",
+    "owner": { "id": 17, "name": "Eva Eier" },
+    "due_at": "2026-12-01",
+    "created_at": "2026-10-24T09:12:03Z"
+  },
+  "meta": { "as_of": "2026-10-24T09:12:03Z", "request_id": "…" }
+}
+```
+
+Feil i felles format (A10): 401 (token), 403 (manglende skriverolle, operasjon ikke tillatt, tilbakekalt tildeling), 404 (risiko ikke synlig), 422 (`error.fields`, f.eks. `owner_user_id`).
+
+**Forretningsregler, uendret.** Tiltaket er et faktisk, åpent tiltak (`status = open`), ikke et utkast. `customer_id` er risikoens. `created_by` og `updated_by` er integrasjonsidentiteten. Ansvarlig valideres som på risikosiden, og varselet «Du er ansvarlig for tiltaket …» sendes som før (`AssignmentNotifier`, med `assigned_by_user_id` = integrasjonsidentiteten). Tiltak kan opprettes på en lukket risiko, som på risikosiden. En risiko med tiltak beskyttes mot sletting som før (B3). Risikoens felt, status, vurderinger og aksept endres ikke.
+
+**Opphav.** Risikosiden viser «Registrert av integrasjonen <applikasjon>» ved et tiltak som er opprettet av en integrasjon. Navnet leses fra tildelingen (`api_client_customer_grants` → `api_clients.name`) ved hjelp av `created_by`; brukertabellen leses ikke forbi `HumanUsersScope`. Ingen ny opphavstjeneste. Andre moduler er uendret.
+
+**Logging.** Den eksisterende logglinjen per forespørsel (D10) har klient, kunde, aktør, rute, metode, status og `rows = 1`. En nektet skriving uten skriverollen logges som `api_access_refused` med `reason = missing_write_role`.
+
+### Kjente begrensninger
+
+- **Duplikater.** Opprettelsen er **ikke idempotent**. Et gjentatt `POST` (for eksempel en klient som prøver igjen etter tidsavbrudd) oppretter et nytt tiltak. Det er en akseptert begrensning for denne første, kontrollerte operasjonen. Det finnes ingen `Idempotency-Key`, ingen idempotenstabell og ingen automatisk gjentakelse. Klienter bør ikke prøve skrivekall på nytt automatisk. Duplikatbeskyttelse vurderes separat dersom bruksmønsteret krever det.
+- Ingen endring, fullføring eller gjenåpning av tiltak via API-et, og ingen `outcome_note`.
+- Én operasjon. Ingen andre moduler har operasjoner.
+
+### Hva som er verifisert lokalt, og hva som gjenstår
+
+- **Lokalt, med simulerte Entra-tokens** (testnøkkel, falsk nøkkelliste): skriverollen, operasjonstillatelsen, tildeling, klient, kundeseparasjon, fagområder, validering, varsel, opphavsvisning, og at alle andre skriveveier er stengt.
+- **Gjenstår før produksjon:** app-rollen `Procynia.Write.All` må opprettes på API-registreringen i Entra og tildeles Siggjos tjenesteprinsipal, og et ekte token må verifiseres mot Procynia (sammen med §16 «Gjenstår for testing med ekte Entra-token fra Siggjo» og V1–V4 i §11). Migreringen må kjøres i Azure.
+
+### Migrering
+
+- `2026_10_24_000003_add_allowed_operations_to_api_client_customer_grants`: `jsonb allowed_operations NOT NULL DEFAULT '[]'`. Ingen andre databaseendringer.
+
+### Tester
+
+Se sluttrapporten for denne leveransen. Nye testfiler: `IntegrationOperationAuthorityTest`, `ApiRiskTreatmentActionCreateTest`; utvidet: `ApiClientGrantAdministrationTest`, `ApiClientAuthenticationTest`, `ApiRouteContractTest` (GET overalt, unntatt navngitte skriveruter bak `api.write`), `customer-integrations.spec.js`.

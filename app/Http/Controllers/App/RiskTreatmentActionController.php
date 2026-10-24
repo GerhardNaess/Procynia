@@ -94,12 +94,7 @@ class RiskTreatmentActionController extends Controller
     /** @return array{title: string, owner_user_id: int, due_at: string, outcome_note?: ?string} */
     private function validated(Request $request): array
     {
-        return $request->validate([
-            'title' => ['required', 'string', 'max:255'],
-            'owner_user_id' => ['required', 'integer'],
-            'due_at' => ['required', 'date_format:Y-m-d'],
-            'outcome_note' => ['nullable', 'string', 'max:5000'],
-        ], RiskValidationMessages::messages(), $this->attributes());
+        return $request->validate(RiskTreatmentService::rules(), RiskValidationMessages::messages(), $this->attributes());
     }
 
     /** @return array<string, string> */

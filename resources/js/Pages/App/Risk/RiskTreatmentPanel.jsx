@@ -94,6 +94,11 @@ export default function RiskTreatmentPanel({ riskId, actions, ownerOptions, canM
                                     ? (tt.owner ?? 'Ansvarlig: :name').replace(':name', action.owner_name)
                                     : (tt.no_owner ?? 'Ingen ansvarlig')}
                             </span>
+                            {action.registered_by_integration && (
+                                <span className="text-slate-600">
+                                    {(tt.registered_by_integration ?? 'Registrert av integrasjonen :client').replace(':client', action.registered_by_integration)}
+                                </span>
+                            )}
                             {! open && action.completed_at && (
                                 <span className="text-slate-600">
                                     {(tt.completed_on ?? 'Fullført :date').replace(':date', formatRiskDate(action.completed_at, locale))}

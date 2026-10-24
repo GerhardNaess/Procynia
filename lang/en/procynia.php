@@ -7787,6 +7787,7 @@ return [
             'completed_on' => 'Completed :date',
             'owner' => 'Responsible: :name',
             'no_owner' => 'No responsible person',
+            'registered_by_integration' => 'Registered by the integration :client',
             'outcome_note' => 'Outcome',
         ],
         'controls' => [
