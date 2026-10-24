@@ -19,6 +19,7 @@
 | **API-operasjoner i dag** | **6 operasjoner:** 5 for lesing og 1 for skriving (se tabellen under). |
 | **Lokalt verifisert** | Ja. Alle 129 API-tester består (kjørt 2026-10-24). Siste fulle kjøring av PHP-suiten ga 8667 tester og 0 feil (2026-10-24, før de siste leveransene). |
 | **Produksjonsklart** | **Nei.** Grenen er ikke flettet inn i `main`, migreringene er ikke kjørt i Azure, og API-et er ikke prøvd med et ekte token fra Microsoft Entra ID eller med Siggjo. |
+| **API-spesifikasjon** | 🟩 OpenAPI 3.1 for alle seks operasjoner i [`api/openapi.yaml`](api/openapi.yaml), validert og låst mot rutene med en kontrakttest (2026-10-24). |
 | **Neste milepæl** | **Pilotklar API på testkunde:** dagens seks operasjoner flettet inn, beskrevet i en API-spesifikasjon og prøvd med ekte Entra-token i staging (fase 1 under). |
 
 ### Implementerte API-operasjoner
@@ -47,7 +48,7 @@
 | Felles feilformat, logging, ratebegrensning | 🟩 Fullt dekket (lokalt) | |
 | Modell for navngitte skriveoperasjoner | 🟧 Delvis dekket | Modellen er generell. Katalogen har én operasjon. |
 | Beskyttelse mot dobbelregistrering (idempotens) | ⬜ Ikke startet | Et gjentatt skrivekall gir duplikat. Akseptert for den ene operasjonen. Må avklares før flere skriveoperasjoner. |
-| API-spesifikasjon (OpenAPI) | ⬜ Ikke startet | **Funn:** arkitekturen forutsetter en OpenAPI 3.1-spesifikasjon i repoet, men den finnes ikke. Siggjo og andre klienter mangler en formell kontrakt. |
+| API-spesifikasjon (OpenAPI) | 🟩 Fullt dekket (lokalt) | [`api/openapi.yaml`](api/openapi.yaml) beskriver de seks operasjonene. Validert mot OpenAPI 3.1 med Redocly CLI. `ApiOpenApiContractTest` låser stier, metoder, app-roller, enums og feilkoder mot koden. Vedlikehold: [`api/README.md`](api/README.md). Ikke publisert til Siggjo ennå. |
 | Detaljvisning av enkeltposter (`/{id}`) | ⬜ Ikke startet | Bare lister finnes. |
 | Samlet oppmerksomhetsliste | ⬜ Ikke startet | Byggesteinene finnes i alle styringsmodulene. |
 | Drift: WAF/API Management, Log Analytics-retensjon | ⬜ Ikke startet | Beslutning D12 tas før første kunde med ekte data. |
@@ -102,7 +103,7 @@ Faseplanen ble vedtatt 2026-10-24. Endringer i rekkefølge eller innhold krever 
 
 | Fase | Mål | Moduler | Status |
 |---|---|---|---|
-| **1** | Gjøre dagens API produksjonsklart for pilot | Fundamentet | 🟦 Planlagt. OpenAPI er neste leveranse. Entra, staging og V4 venter på Advania og Siggjo. |
+| **1** | Gjøre dagens API produksjonsklart for pilot | Fundamentet | 🟧 Påbegynt. OpenAPI-spesifikasjonen er ferdig. Entra, staging og V4 venter på Advania og Siggjo. |
 | **2** | Fullføre lesing i modulene som er påbegynt | Risiko, Mål og KPI, Avvik og forbedringer | 🟦 Planlagt. Starter etter OpenAPI-leveransen. |
 | **3** | Lesing i resten av styringsmodulene | Etterlevelse og revisjon, Leverandøroppfølging, Ledelsens gjennomgang, Kvalitet | 🟦 Planlagt. KVA-02 venter på beslutning. |
 | **4** | Avgrensede registreringer (utkast og forslag) | Styringsmodulene | 🟥 Blokkert av fellesforutsetningene og beslutning per operasjon |
@@ -116,8 +117,8 @@ Faseplanen ble vedtatt 2026-10-24. Endringer i rekkefølge eller innhold krever 
 | # | Leveranse | Fase | Kan gjøres lokalt | Status |
 |---|---|---|---|---|
 | 1 | Statusdokumentet med vedtatt faseplan (dette dokumentet) | – | Ja | 🟩 Ferdig |
-| 2 | **OpenAPI 3.1-spesifikasjon for de seks eksisterende operasjonene**, med kontraktstest mot rutene | 1 | Ja | 🟦 Neste leveranse. Ikke startet. |
-| 3 | Fase 2: fullføre API-dekningen for lesing i Risiko, Avvik og forbedringer og Mål og KPI | 2 | Ja | 🟦 Planlagt |
+| 2 | **OpenAPI 3.1-spesifikasjon for de seks eksisterende operasjonene**, med kontraktstest mot rutene | 1 | Ja | 🟩 Ferdig lokalt 2026-10-24 ([`api/openapi.yaml`](api/openapi.yaml)) |
+| 3 | Fase 2: fullføre API-dekningen for lesing i Risiko, Avvik og forbedringer og Mål og KPI | 2 | Ja | 🟦 Neste leveranse. Ikke startet. |
 | – | Merge etter V1–V3, Entra-registrering, Siggjos identitet, staging og V4 | 1 | Nei | 🟥 Venter på produkteier, Advania og Siggjo. Løper parallelt. |
 
 Etter fase 2 er de tre modulene fullt dekket **for lesing**. Full A-dekning i disse modulene krever også MOK-06 (fase 3) og AVF-04 og AVF-05 (fase 4).
@@ -144,7 +145,7 @@ Detaljer står i del 4.
 **Milepæl: «API klart for pilot på testkunde».** Den er nådd når:
 
 1. Dagens seks operasjoner er flettet inn i `main` etter V1–V3 (fase 0-verifiseringene).
-2. En OpenAPI-spesifikasjon beskriver de seks operasjonene, og en test sikrer at spesifikasjonen og rutene stemmer overens.
+2. En OpenAPI-spesifikasjon beskriver de seks operasjonene, og en test sikrer at spesifikasjonen og rutene stemmer overens. **Ferdig lokalt 2026-10-24.**
 3. «Procynia API» er registrert i Entra med rollene `Procynia.Read.All` og `Procynia.Write.All`. Siggjos identitet er registrert og har fått tilgang hos en testkunde.
 4. Sjekklisten V4 med ekte token er gjennomført og signert i staging.
 
@@ -413,7 +414,7 @@ Prinsipper: bruk eksisterende domenetjenester og tilgangstjenester, gjenbruk mø
 |---|---|
 | **Mål** | De seks operasjonene kan brukes av Siggjo mot en testkunde i staging. |
 | **Moduler** | Fundamentet, Risiko, Mål og KPI, Avvik og forbedringer |
-| **Leveranser** | OpenAPI 3.1-spesifikasjon for dagens operasjoner, med kontraktstest mot rutene (neste leveranse, gjøres lokalt). Merge til `main` etter V1–V3. Migreringene kjørt i staging. Entra-registrering med begge app-rollene. Siggjos identitet registrert og tildelt hos testkunden. |
+| **Leveranser** | OpenAPI 3.1-spesifikasjon for dagens operasjoner, med kontraktstest mot rutene (ferdig lokalt 2026-10-24). Merge til `main` etter V1–V3. Migreringene kjørt i staging. Entra-registrering med begge app-rollene. Siggjos identitet registrert og tildelt hos testkunden. |
 | **Avhengigheter** | Advania og Siggjo (Entra og staging). Produkteierens godkjenning av merge. |
 | **Kompleksitet** | Lav teknisk, høy ekstern avhengighet |
 | **Ferdig når** | V1–V4 er gjennomført og signert. Et ekte token fra Siggjo gir riktig svar på alle seks operasjoner, og de negative prøvene i V4 avvises. Spesifikasjonen er publisert til Siggjo. |
@@ -499,11 +500,11 @@ Prinsipper: bruk eksisterende domenetjenester og tilgangstjenester, gjenbruk mø
 
 ## Del 5 – Funn fra denne gjennomgangen
 
-Kontrollert i koden 2026-10-24. Ingen av funnene er rettet. Rapporten endrer ingen kode.
+Kontrollert i koden 2026-10-24. Bare funn 1 er løst (se raden). Rapporten endrer ingen kode.
 
 | # | Funn | Betydning | Hører til |
 |---|---|---|---|
-| 1 | **Ingen OpenAPI-spesifikasjon.** Arkitekturen (§8.4, §11.2 punkt 2) forutsetter en, men den finnes ikke. | Klientene mangler en formell kontrakt, og kontraktstesten mot spesifikasjonen mangler. | Fase 1 |
+| 1 | **Ingen OpenAPI-spesifikasjon.** Arkitekturen (§8.4, §11.2 punkt 2) forutsetter en, men den finnes ikke. **Løst 2026-10-24:** [`api/openapi.yaml`](api/openapi.yaml) og `ApiOpenApiContractTest`. | Klientene mangler en formell kontrakt, og kontraktstesten mot spesifikasjonen mangler. | Fase 1 |
 | 2 | **`User::isBidManager()` tar ikke hensyn til integrasjoner.** `resolvedBidRole()` faller fortsatt tilbake til `contributor` (arkitektur K4). `isSystemOwner()` og `isQa()` er sperret. Integrasjoner holdes i dag ute av Anbud bare av sperren for kundefrontenden. | Ingen feil i dag, men den må rettes før Anbud får API. | Fase 7 |
 | 3 | **K16 er ikke løst.** `internal_status`, `internal_comment`, `assigned_to_user_id` og `decision_by_user_id` ligger fortsatt på de globale `notices`. | Blokkerer Anbud-API. | Fase 7 |
 | 4 | **A23 er åpen.** Kvalitets AI-forslag tar ingen aktør og kontrollerer tilgang bare i kontrolleren. | Blokkerer AI-funksjoner i Kvalitet og «Spør Wiki». D11 holder dem sperret. | Fase 6 |
@@ -531,6 +532,7 @@ Når en ny API-operasjon er implementert:
    - **Delvis dekket:** minst én A-funksjon har API-støtte.
    - **Fullt dekket:** alle A-funksjoner har API-støtte, er verifisert og er produksjonsklare.
    - **Blokkert:** en kjent hindring stopper arbeidet.
-5. Oppdater «Sist oppdatert» og commit-referansen øverst.
+5. Beskriv operasjonen i [`api/openapi.yaml`](api/openapi.yaml) etter [`api/README.md`](api/README.md), og kjør `ApiOpenApiContractTest`.
+6. Oppdater «Sist oppdatert» og commit-referansen øverst.
 
 Prosentvis ferdigstillelse brukes ikke. Bruk antall A-funksjoner med API-støtte fra tabellen «Opptelling».
