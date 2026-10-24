@@ -290,7 +290,8 @@ class ApiRiskTreatmentActionCreateTest extends TestCase
         $this->putJson("/api/v1/risks/{$risk->id}/treatment-actions", [], $headers)->assertStatus(405);
         $this->deleteJson("/api/v1/risks/{$risk->id}/treatment-actions", [], $headers)->assertStatus(405);
         $this->postJson('/api/v1/risks', [], $headers)->assertStatus(405);
-        $this->patchJson("/api/v1/risks/{$risk->id}", [], $headers)->assertNotFound();
+        // GET /risks/{id} reads the risk; nothing else is accepted there.
+        $this->patchJson("/api/v1/risks/{$risk->id}", [], $headers)->assertStatus(405);
         $this->patchJson("/api/v1/risks/{$risk->id}/treatment-actions/{$action->id}", [], $headers)->assertNotFound();
         $this->postJson("/api/v1/risks/{$risk->id}/treatment-actions/{$action->id}/complete", [], $headers)->assertNotFound();
         $this->postJson("/api/v1/risks/{$risk->id}/assessments", [], $headers)->assertNotFound();
