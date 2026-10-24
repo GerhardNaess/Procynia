@@ -1,6 +1,6 @@
 # Eksternt API – beslutningsgrunnlag for fase 1
 
-**Status:** API fase 1 er **lesebasert**. Bygget: autentisering, kundetildeling, feilformat, `GET /api/v1/me`, `GET /api/v1/risks` (§15), D13 med beskyttelse av integrasjonsidentiteter (§16), kontrollen 2026-10-24 (§17) og `GET /api/v1/deviations` (§18). Mål og KPI venter på vurdering. Ekte Entra-, Azure- og Siggjo-testing er utsatt fordi miljøene ikke er tilgjengelige. Ingenting er satt i produksjon.
+**Status:** API fase 1 er **lesebasert**. Bygget: autentisering, kundetildeling, feilformat, `GET /api/v1/me`, `GET /api/v1/risks` (§15), D13 med beskyttelse av integrasjonsidentiteter (§16), kontrollen 2026-10-24 (§17) `GET /api/v1/deviations` (§18) og `GET /api/v1/objectives` og `GET /api/v1/kpis` (§19). Mål og KPI venter på vurdering. Ingen flere moduler før den. Ekte Entra-, Azure- og Siggjo-testing er utsatt fordi miljøene ikke er tilgjengelige. Ingenting er satt i produksjon.
 **Dato:** 2026-10-23
 **Gren:** `feature/external-api-foundation`
 **Bygger på:** [`external-api-architecture.md`](external-api-architecture.md) (særlig §4, §5, §8.3, §9 og §15), [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §2n, [`operations/entra-sso.md`](operations/entra-sso.md), [`operations/security.md`](operations/security.md) §9 og [`AGENTS.md`](../AGENTS.md).
@@ -720,3 +720,223 @@ Sortering: stigende `id`, stabil for markørsidene. Ugyldige verdier gir 422 `va
 - **Ikke kjørt:** hele PHP-suiten. Endringen er et nytt leseendepunkt og et tillegg i tilgangsoppsummeringen, og de relevante testene over dekker det.
 - **Gjenstår fortsatt:** ekte Entra-, Azure- og Siggjo-testing (§16, §17). Lokal testing fortsetter med simulerte tokens og isolerte data.
 
+---
+
+## 19. `GET /api/v1/objectives` og `GET /api/v1/kpis` – Mål og KPI (2026-10-24)
+
+### Beslutning: forbedringer får et eget endepunkt senere
+
+`GET /api/v1/deviations` gir fortsatt **bare avvik** (§18). Forbedringsforslag skal senere få et eget `GET /api/v1/improvements`, på samme modell (`ImprovementCase` med `type = improvement`) og samme tilgangskontroll (`ImprovementCaseAccessService::visibleCases()`, `improvement.view`, fagområder, modulen `improvements`). Det er **besluttet, men ikke bygget**. Når det bygges, gjelder samme feltvalg og samme vurdering av personopplysninger som for avvik (se under).
+
+### Kartlegging av Mål og KPI
+
+| Spørsmål | Svar i koden |
+|---|---|
+| Mål | `objectives`: tittel, beskrivelse, fagområde (påkrevd), ansvarlig (`owner_user_id`, kan bli `null` når brukeren slettes), måldato (valgfri), status og avslutning (`closed_at`, `closed_by_user_id`, `closing_note`). Historikk i `objective_status_changes`. |
+| Målstatus | `active`, `achieved` (Nådd), `not_achieved` (Ikke nådd), `cancelled` (Avbrutt). Endres bare gjennom `ObjectiveLifecycleService`. |
+| KPI og tilknytning | `kpis`: hører til nøyaktig ett mål (`objective_id`, sammensatt fremmednøkkel med kunden). En KPI har **ikke eget fagområde**: den arver målets. |
+| KPI-status | `active`, `retired` (Avsluttet). Historikk i `kpi_status_changes`. |
+| Ansvar | KPI-ens egen ansvarlig er valgfri. Uten den svarer målets ansvarlige for KPI-en (`Kpi::responsible()`), som presentasjon, aldri lagret. |
+| Målverdi | `target_min`, `target_max`, `tolerance` (eksakte desimaler). Måltypen (`at_least`, `at_most`, `range`, `exact`) lagres ikke, den avledes av grensene (`KpiTarget::type()`). Startverdi (`baseline_value`, `baseline_date`) når målverdien er satt som endring. |
+| Enhet | `percent`, `percent_change`, `count`, `number`, `currency` (med `currency_code`), `hours`, `days`. `unit_label` bare for antall og tall. |
+| Målinger og perioder | `kpi_measurements`: én rad per registrering, med periode (`period_start`, `period_end`), verdi og et øyeblikksbilde av målverdien. Retting = ny rad for samme periode. Tilbaketrekking med begrunnelse. Hvilken måling som teller, avgjøres bare av `KpiMeasurementResolver`. Frekvens: `weekly`, `monthly`, `quarterly`, `yearly` eller ingen, med `reporting_grace_days`. |
+| Måloppnåelse | `KpiTargetPolicy`: `on_target`, `attention`, `off_target`. Uten måling: `not_measured` (`KpiPresenter::NOT_MEASURED`). Registerets «2 av 3 KPI-er på mål» er `KpiPresenter::indicator()` over aktive KPI-er. |
+| Oppmerksomhet | `ObjectiveAttentionService`, fire regler: `kpi_off_target`, `measurement_missing` (KPI), `target_date_passed`, `owner_missing` (mål). Bare aktive KPI-er under aktive mål. Et KPI-funn gjør aldri målet til et funn. |
+| Lesetilgang | `objective.view` på en aktiv kunderolle, i rollens fagområder (eksplisitte eller «Alle»), via `BusinessAreaGrants`. `ObjectiveAccessService::visibleObjectives()` og `visibleKpis()` er eneste inngang. System Owner har ingen implisitte fagområder. En integrasjon har bare `objective.view` (§16): `objective.measure` og `objective.delete` holdes alltid tilbake. |
+| Modul | `objectives`, i pakkene `governance`, `iso` og `grc`. |
+
+### Datamodellvalg: målinger i KPI-listen
+
+Målingene returneres **i hver KPI-rad**, ikke gjennom et eget endepunkt:
+
+- `latest_measurement`: den siste målingen som teller.
+- `measurements`: den gjeldende målingen for **de siste 24 målte periodene**, eldste først. Det er det samme vinduet som «Utvikling over tid» på KPI-siden.
+
+Begrunnelse: et dashboard får mål, KPI-er, siste verdi, resultat og en tidsserie med to kall og én markør per liste. Ingen nestet paginering. Svaret er avgrenset: høyst 200 KPI-er × 24 punkter per side.
+
+Ikke med: rettede (erstattede) og tilbaketrukne rader, kommentarer, hvem som registrerte eller trakk tilbake og begrunnelsen for tilbaketrekking. Eldre perioder enn de 24 siste er ikke tilgjengelige i `v1`. Trengs hele historikken, er `GET /api/v1/kpis/{id}/measurements` (§7) en utvidelse uten brudd.
+
+Det beregnes ingen nye verdier og innføres ingen nye klassifiseringer. Alt kommer fra domeneklassene over.
+
+### Tilgangskrav
+
+Samme for begge endepunkter:
+
+1. Gyldig applikasjonstoken med `Procynia.Read.All` (§4).
+2. Aktiv tildeling for kunden i `Procynia-Customer` (§4, D6).
+3. Kunden har modulen Mål og KPI (`api.v1.objectives.` og `api.v1.kpis.` → `objectives`).
+4. Integrasjonsidentiteten har `objective.view` gjennom en aktiv rolle. Listene omfatter bare rollens fagområder. En KPI vises bare når målet vises.
+
+Mangler 1 gir 401. Mangler 2–4 gir 403 i felles feilformat (A10). En annen kundes data finnes ikke.
+
+### `GET /api/v1/objectives`
+
+```text
+GET /api/v1/objectives?status=active&business_area_id=7&limit=50&cursor=…
+Authorization: Bearer <Entra-token>
+Procynia-Customer: 42
+```
+
+| Parameter | Verdier | Merknad |
+|---|---|---|
+| `status` | `active`, `achieved`, `not_achieved`, `cancelled` | Valgfri |
+| `business_area_id` | heltall | Smalner bare inn. Et fagområde utenfor tilgangen, eller fra en annen kunde, gir tom liste. |
+| `limit` | 1–200, standard 50 | |
+| `cursor` | `meta.next_cursor` fra forrige side | Opak. Bærer bare siste id (`ApiCursor`). |
+
+```json
+{
+  "data": [
+    {
+      "id": 311,
+      "title": "Økt kundetilfredshet",
+      "status": "active",
+      "business_area": { "id": 7, "name": "Salg" },
+      "owner": { "id": 233, "name": "Eva Eier" },
+      "target_date": "2026-12-31",
+      "closed_at": null,
+      "kpis": { "total": 3, "active": 2, "on_target": 1, "needing_attention": 1 },
+      "attention": [],
+      "created_at": "2026-10-05T08:12:00Z",
+      "updated_at": "2026-10-14T13:40:11Z"
+    }
+  ],
+  "meta": { "as_of": "2026-10-24T07:00:00Z", "request_id": "01JB…", "limit": 50, "next_cursor": null }
+}
+```
+
+| Felt | Innhold |
+|---|---|
+| `id`, `title`, `status` | Målet. |
+| `business_area` | Fagområdet (id og navn). |
+| `owner` | Ansvarlig (id og navn), eller `null`. |
+| `target_date` | Måldato, eller `null` for et løpende mål. |
+| `closed_at` | Når målet ble lukket (UTC), eller `null`. |
+| `kpis.total` | Alle KPI-er under målet, avsluttede medregnet. |
+| `kpis.active`, `kpis.on_target` | Registerets «N av M KPI-er på mål»: aktive KPI-er, og hvor mange av dem som har siste måling på mål mot dagens målverdi. |
+| `kpis.needing_attention` | Antall KPI-er med funn i «Trenger oppmerksomhet». |
+| `attention` | Målets egne koder: `target_date_passed`, `owner_missing`. Tom for lukkede mål. |
+| `created_at`, `updated_at` | Tidspunkter (UTC). |
+
+**Ikke med:** beskrivelse, avslutningsnotat, hvem som lukket målet, statushistorikken, prosesskontekst og webruter.
+
+### `GET /api/v1/kpis`
+
+```text
+GET /api/v1/kpis?objective_id=311&status=active&business_area_id=7&limit=50&cursor=…
+```
+
+| Parameter | Verdier | Merknad |
+|---|---|---|
+| `objective_id` | heltall | Smalner inn til ett mål. Et mål utenfor tilgangen gir tom liste. |
+| `status` | `active`, `retired` | Valgfri |
+| `business_area_id` | heltall | Målets fagområde. Smalner bare inn. |
+| `limit`, `cursor` | Som over | Sortering: stigende `id`. |
+
+```json
+{
+  "data": [
+    {
+      "id": 902,
+      "objective_id": 311,
+      "business_area": { "id": 7, "name": "Salg" },
+      "title": "Oppetid kundeportal",
+      "status": "active",
+      "owner": { "id": 233, "name": "Eva Eier", "inherited": true },
+      "unit": "percent",
+      "unit_label": null,
+      "currency_code": null,
+      "target": { "type": "at_least", "min": "95", "max": null, "tolerance": "2" },
+      "baseline": null,
+      "frequency": "monthly",
+      "reporting_grace_days": 7,
+      "latest_measurement": {
+        "period_start": "2026-08-01", "period_end": "2026-08-31",
+        "value": "94", "recorded_at": "2026-09-03T09:00:00Z"
+      },
+      "result": "attention",
+      "measurements": [
+        { "period_start": "2026-07-01", "period_end": "2026-07-31", "value": "90", "recorded_at": "2026-08-02T10:00:00Z", "result": "on_target" },
+        { "period_start": "2026-08-01", "period_end": "2026-08-31", "value": "94", "recorded_at": "2026-09-03T09:00:00Z", "result": "on_target" }
+      ],
+      "attention": ["kpi_off_target", "measurement_missing"],
+      "created_at": "2026-07-01T00:00:00Z",
+      "updated_at": "2026-10-14T13:40:11Z"
+    }
+  ],
+  "meta": { "as_of": "2026-10-24T07:00:00Z", "request_id": "01JB…", "limit": 50, "next_cursor": null }
+}
+```
+
+| Felt | Innhold |
+|---|---|
+| `objective_id`, `business_area` | Målet KPI-en hører til, og målets fagområde. |
+| `owner` | Ansvarlig. `inherited: true` når KPI-en ikke har egen ansvarlig og målets ansvarlige svarer for den. `null` når ingen er satt. |
+| `unit`, `unit_label`, `currency_code` | Enheten som lagret. |
+| `target` | Måltype og grenser som eksakte desimalstrenger uten etterfølgende nuller. `tolerance` er rommet utenfor målet. |
+| `baseline` | Startverdi og dato når målverdien er satt som endring, ellers `null`. Endringsprosenten er ikke med, den kan avledes. |
+| `frequency`, `reporting_grace_days` | Målerytme og frist etter periodeslutt. `frequency: null` betyr ingen fast rytme. |
+| `latest_measurement` | Siste måling som teller, eller `null`. |
+| `result` | Siste måling mot **dagens** målverdi: `on_target`, `attention`, `off_target` eller `not_measured`. Samme som KPI-siden. |
+| `measurements[].result` | Hver periode mot målverdien **som gjaldt da den ble registrert**, som i Målehistorikk. Er målverdien skjerpet siden, kan samme verdi være `on_target` her og `attention` i `result`. Begge er riktige. |
+| `attention` | `kpi_off_target`, `measurement_missing`. Bare for aktive KPI-er under aktive mål. |
+
+Tall er strenger med eksakte desimaler, aldri flyttall og aldri formatert for et språk.
+
+**Ikke med:** beskrivelse, målingskommentarer, hvem som registrerte eller trakk tilbake, begrunnelse for tilbaketrekking, erstattede og tilbaketrukne rader, prosess- og aktivitetskoblinger og webruter.
+
+### Personopplysninger og fritekst
+
+Vurderingen gjelder Mål og KPI, og også de eksisterende endepunktene for Risiko og Avvik. Ingen av dem er bygget om nå.
+
+| Felt | Personopplysning? | Vurdering |
+|---|---|---|
+| Ansvarlig (`owner.id`, `owner.name`) | **Ja.** Navn på en ansatt i arbeidsrollen. | Nødvendig for formålet («hvem eier dette»). D8 tillater eier. Ingen e-post, ingen andre personer. Personer som registrerte, meldte, lukket eller trakk tilbake er utelatt i alle tre modulene. |
+| Titler (`title`) | **Kan inneholde.** Fritekst, kort, skrevet av kunden. | Mål og KPI: lav sannsynlighet («Økt kundetilfredshet»). Risiko: middels («Nøkkelperson slutter»). **Avvik: høyest.** En avvikstittel kan beskrive en hendelse med en navngitt person, og i verste fall helseopplysninger («Ansatt skadet i trapp»), som er en særlig kategori (personvernforordningen art. 9). Procynia kan ikke avgjøre teknisk om en tittel inneholder personopplysninger. |
+| `unit_label` | Svært lite sannsynlig | Kort enhetsnavn («saker»). |
+| Måleverdier | **Indirekte, i små enheter.** | Et tall er normalt aggregert. En KPI om for eksempel sykefravær i et team på tre kan likevel peke på enkeltpersoner. |
+| Fagområdenavn | Normalt ikke | Organisasjonsbegrep. |
+| Integrasjonsidentitetens navn (`/me`) | Nei | Navnet på integrasjonen, ikke en person. |
+
+**Før reelle kundedata brukes:**
+
+1. Databehandleravtalen med Siggjo skal behandle **ansvarliges navn og titler som personopplysninger**, og titler i Avvik som mulig bærer av særlige kategorier.
+2. Kunden skal informeres om at titler og ansvarlige sendes til integrasjonen, og få en kort skriveveiledning: titler beskriver saken, ikke personen. Det gjelder særlig Avvik.
+3. DPIA etter D14 dekker titler og navn, ikke bare fritekstfeltene som er utelatt.
+4. Krever en kunde det, er neste steg en innstilling per tildeling som utelater titler og navn (`title` og `owner.name` blir `null`, id-ene beholdes). Den er **ikke bygget**, og innføres ikke uten et konkret behov.
+
+### Andre endringer
+
+- `GET /api/v1/me` og Kundemiljø → Integrasjoner viser nå også `objectives` (bestilt, lesbar, fagområder). Linjen heter «Mål og KPI». Dette er et tillegg i `v1`, ikke et brudd.
+- `ApiRouteContractTest` tjener nå også modulen `objectives`.
+- **Ingen migreringer.**
+
+### Endringer i brukeropplevelsen
+
+- Kundemiljø → Integrasjoner viser «Mål og KPI: <fagområder>» for en integrasjon som har `objective.view`. Ingen andre synlige endringer. Mål og KPI-sidene er uendret.
+
+### Sikkerhet og tester
+
+- `ApiObjectiveKpiReadTest` har 13 tester med simulerte Entra-tokens og syntetiske data. De dekker:
+  - strukturerte felt og fravær av fritekst og andre personer enn ansvarlig;
+  - lukket mål;
+  - målinger: rettet måling, tilbaketrukket måling, resultat nå og ved registrering, oppmerksomhetskoder, og vinduet på 24 perioder;
+  - arvet og egen ansvarlig, og startverdi;
+  - fagområder, én applikasjon med flere kunder (filter, mål-id, markør og kunde uten tildeling) og `/me`;
+  - manglende `objective.view` og manglende modul (403);
+  - filtre, sider og ugyldige verdier (422);
+  - ingen skrive-, målings- eller beslutningsruter, ingen utgående kall bortsett fra nøkkellisten, og logglinjen.
+- **Mutasjonssjekker**, alle fanget: målene hentet uten `visibleObjectives`, KPI-ene hentet uten `visibleKpis`, kravet om `objective.view` fjernet, modulkartet fjernet, historikk vurdert mot dagens målverdi i stedet for øyeblikksbildet, og vinduet på 24 perioder fjernet.
+- **Kjørt:**
+  - PHP: hele `tests/Feature/Api` (109), alle `Objective*`- og `Kpi*`-testene i `tests/Feature/App`, `tests/Unit/Objectives`, `ObjectivePageHelpTranslationsTest`, `IntegrationIdentityProtectionTest`, `CustomerEnvironmentPageTest`, `CrossTenantIsolationTest`, `NavigationEntitlementMatrixTest` og `CustomerModuleEntitlementTest` (448). Til sammen 557 bestått.
+  - JS: hele suiten, 2135 av 2135. Én ny test for etiketten.
+  - E2E: `customer-integrations.spec.js` og `auth.spec.js`, 7 av 7.
+- **Ikke kjørt:** hele PHP-suiten. Endringen er to nye leseendepunkter og et tillegg i tilgangsoppsummeringen, og de relevante testene over dekker det. Siste fulle kjøring er fortsatt §17 (8667 tester, 0 feilet).
+
+### Begrensninger og utsatt testing
+
+- Bare lister. `GET /objectives/{id}` og `GET /kpis/{id}/measurements` (§7) er ikke bygget.
+- Målinger eldre enn de 24 siste periodene er ikke tilgjengelige.
+- `result` og oppmerksomhet beregnes ved lesing, med dagens dato på serveren. Et øyeblikksbilde hos Siggjo er riktig per `meta.as_of`.
+- Prosess- og aktivitetskoblinger (Kvalitet) er ikke med.
+- **Utsatt:** ekte Entra-, Azure- og Siggjo-testing (§16, §17). Lokal testing fortsetter med simulerte tokens og isolerte data.
