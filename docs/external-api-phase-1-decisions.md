@@ -1,6 +1,6 @@
 # Eksternt API – beslutningsgrunnlag for fase 1
 
-**Status:** API fase 1 er **lesebasert**. Første leveranse (§15) og D13 med beskyttelse av integrasjonsidentiteter (§16) er bygget. Kontrollen 2026-10-24 (§17) har rettet Entra-innloggingen og dokumentert hvordan skriving kan utvides senere. Øvrige endepunkter venter på vurdering. Ekte Entra-, Azure- og Siggjo-testing er utsatt fordi miljøene ikke er tilgjengelige. Ingenting er satt i produksjon.
+**Status:** API fase 1 er **lesebasert**. Bygget: autentisering, kundetildeling, feilformat, `GET /api/v1/me`, `GET /api/v1/risks` (§15), D13 med beskyttelse av integrasjonsidentiteter (§16), kontrollen 2026-10-24 (§17) og `GET /api/v1/deviations` (§18). Mål og KPI venter på vurdering. Ekte Entra-, Azure- og Siggjo-testing er utsatt fordi miljøene ikke er tilgjengelige. Ingenting er satt i produksjon.
 **Dato:** 2026-10-23
 **Gren:** `feature/external-api-foundation`
 **Bygger på:** [`external-api-architecture.md`](external-api-architecture.md) (særlig §4, §5, §8.3, §9 og §15), [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §2n, [`operations/entra-sso.md`](operations/entra-sso.md), [`operations/security.md`](operations/security.md) §9 og [`AGENTS.md`](../AGENTS.md).
@@ -616,4 +616,107 @@ Anbudsmatrisen (`User::tenderMatrixAllows()`) og System Owner, QA og Wiki-godkje
 
 - **Innlogging med Entra virker nå mot Microsofts faktiske nøkler.** Før feilet den alltid ved validering av ID-tokenet. Det er ennå ikke verifisert mot en ekte tenant. Innlogging med passord er uendret.
 - Ingen andre synlige endringer.
+
+---
+
+## 18. `GET /api/v1/deviations` – avvik (2026-10-24)
+
+### Kartlegging av Avvik og forbedringer
+
+| Spørsmål | Svar i koden |
+|---|---|
+| Kundeseparasjon | `ImprovementCaseAccessService::visibleCases()` filtrerer på aktørens `customer_id` og fagområdene aktøren når. En sak utenfor er fraværende (404 eller ikke listet), aldri «forbudt». |
+| Lesetilgang | `improvement.view` på en aktiv kunderolle, i rollens fagområder (eksplisitte eller «Alle»), via `BusinessAreaGrants`. System Owner har ingen implisitte fagområder. En integrasjon har bare lesenøkler (§16). |
+| Typer | Én modell for avvik og forbedringer (`ImprovementCase::type`: `deviation`, `improvement`). Endepunktet gir **bare avvik**. |
+| Status | `open`, `in_progress`, `closed`, `cancelled`. Endres bare gjennom `ImprovementCaseLifecycleService`, med historikk i `improvement_case_status_changes`. |
+| Alvorlighetsgrad | **Finnes ikke** i modulen. Ingen kolonne og ingen regel, så API-et viser ingen. |
+| Frister | `due_date` (frist) og `occurred_at` (hendelsesdato, bare for avvik). Fristen er passert fra dagen etter, og bare for aktive saker. |
+| Oppfølging | Tiltak (`ImprovementAction`, med status og frist) og effektverifisering. `ImprovementAttentionService` har seks faste regler for «Trenger oppmerksomhet». |
+| Gjenbrukt | `visibleCases()`, `canOpenModule()`, `ImprovementAttentionService::findingsForCases()`, tiltakstellingen fra registeret (`withCount`) og modulsperren (`route_modules`). |
+
+### Tilgangskrav
+
+1. Gyldig applikasjonstoken med `Procynia.Read.All` (§4).
+2. Aktiv tildeling for kunden i `Procynia-Customer` (§4, D6).
+3. Kunden har modulen Avvik og forbedringer (`api.v1.deviations.` → `improvements`). Den inngår i Basis.
+4. Integrasjonsidentiteten har `improvement.view` gjennom en aktiv rolle. Listen omfatter bare rollens fagområder.
+
+Mangler 1 gir 401. Mangler 2–4 gir 403 i felles feilformat (A10). En annen kundes data finnes ikke.
+
+### Forespørsel
+
+```text
+GET /api/v1/deviations?status=open&business_area_id=7&overdue=true&limit=50&cursor=…
+Authorization: Bearer <Entra-token>
+Procynia-Customer: 42
+```
+
+| Parameter | Verdier | Merknad |
+|---|---|---|
+| `status` | `open`, `in_progress`, `closed`, `cancelled` | Valgfri |
+| `business_area_id` | heltall | Smalner bare inn. Et fagområde utenfor tilgangen, eller fra en annen kunde, gir tom liste. |
+| `overdue` | `true`, `false` | `true`: aktiv sak med frist før dagens dato, samme regel som «Trenger oppmerksomhet». |
+| `limit` | 1–200, standard 50 | |
+| `cursor` | `meta.next_cursor` fra forrige side | Opak. Bærer bare siste id, aldri kunde eller filtre. |
+
+Sortering: stigende `id`, stabil for markørsidene. Ugyldige verdier gir 422 `validation_failed` med feltnavnet.
+
+### Svar
+
+```json
+{
+  "data": [
+    {
+      "id": 1093,
+      "title": "Feil i rutine for tilgangskontroll",
+      "status": "open",
+      "business_area": { "id": 7, "name": "Drift" },
+      "owner": { "id": 233, "name": "Eva Eier" },
+      "occurred_on": "2026-10-04",
+      "due_on": "2026-10-22",
+      "is_overdue": true,
+      "closed_at": null,
+      "follow_up": {
+        "actions_total": 2,
+        "actions_open": 2,
+        "attention": ["case_overdue", "action_overdue"]
+      },
+      "created_at": "2026-10-04T08:12:00Z",
+      "updated_at": "2026-10-20T13:40:11Z"
+    }
+  ],
+  "meta": { "as_of": "2026-10-24T07:00:00Z", "request_id": "01JB…", "limit": 50, "next_cursor": null }
+}
+```
+
+| Felt | Innhold |
+|---|---|
+| `id`, `title`, `status` | Saken. Tittelen er kort og registrert som overskrift. |
+| `business_area` | Fagområdet (id og navn). |
+| `owner` | Ansvarlig (id og navn), eller `null`. Som for Risiko (D8). |
+| `occurred_on`, `due_on` | Hendelsesdato og frist (dato), eller `null`. |
+| `is_overdue` | Fristen er passert og saken er aktiv. |
+| `closed_at` | Når saken ble lukket eller avbrutt (UTC), eller `null`. |
+| `follow_up.actions_total`, `actions_open` | Antall tiltak, og antall som er planlagt eller under arbeid. |
+| `follow_up.attention` | Koder fra «Trenger oppmerksomhet» for saken og tiltakene: `case_overdue`, `action_overdue`, `case_owner_missing`, `action_owner_missing`, `awaiting_verification`, `not_effective`. Tom for avsluttede saker. |
+| `created_at`, `updated_at` | Tidspunkter (UTC). |
+
+**Ikke med:** beskrivelse, årsaksanalyse, avslutningsnotat, tiltakenes tekst, effektvurderingens tekst, hvem som meldte og hvem som lukket saken, koblinger, dokumenter og webruter. Forbedringer er ikke med.
+
+### Andre endringer
+
+- `GET /api/v1/me` og Kundemiljø → Integrasjoner viser nå også `deviations` (bestilt, lesbar, fagområder) i tilgangsoppsummeringen. Dette er et tillegg i `v1`, ikke et brudd.
+- Markøren er felles for listene (`ApiCursor`, trukket ut av Risiko-endepunktet uten endret oppførsel).
+- Ingen migreringer.
+
+### Sikkerhet og tester
+
+- `ApiDeviationReadTest` har 11 tester med simulerte Entra-tokens og syntetiske data. De dekker strukturerte felt og fravær av fritekst og personer utover ansvarlig, at bare avvik vises, avsluttet sak, fagområder, én applikasjon med flere kunder (filter, markør og kunde uten tildeling), manglende `improvement.view` og manglende modul (403), filtre, sider, ugyldige verdier (422), ingen skrive- eller beslutningsruter, ingen utgående kall bortsett fra nøkkellisten, og logglinjen.
+- **Mutasjonssjekker**, alle fanget: kundegrensen fjernet (spørring uten `visibleCases`), kravet om `improvement.view` fjernet, avviksfilteret fjernet og modulkartet fjernet.
+- **Kjørt:**
+  - PHP: hele `tests/Feature/Api`, alle `Improvement*`-testene, `IntegrationIdentityProtectionTest`, `CustomerEnvironmentPageTest`, `CrossTenantIsolationTest`, `NavigationEntitlementMatrixTest` og `CustomerModuleEntitlementTest`, til sammen 291 bestått.
+  - JS: 2134 av 2134.
+  - E2E: `customer-integrations.spec.js` og `auth.spec.js`, 7 av 7.
+- **Ikke kjørt:** hele PHP-suiten. Endringen er et nytt leseendepunkt og et tillegg i tilgangsoppsummeringen, og de relevante testene over dekker det.
+- **Gjenstår fortsatt:** ekte Entra-, Azure- og Siggjo-testing (§16, §17). Lokal testing fortsetter med simulerte tokens og isolerte data.
 
