@@ -52,9 +52,9 @@ Forventet resultat: gyldig, med én advarsel (`info-license`). Lisensvilkårene 
 
 ## Kontroll av ekte svar mot skjemaene
 
-Ved en større endring kontrolleres ekte svar mot skjemaene i spesifikasjonen. Det ble gjort for alle operasjonene i fase 2 (2026-10-24), med 18 svar (200, 201, 401, 404 og 422) og ingen avvik. Fremgangsmåten krever ingen nye avhengigheter i prosjektet:
+Ved en større endring kontrolleres ekte svar mot skjemaene i spesifikasjonen. Det ble gjort etter fase 2 (18 svar) og etter fase 3 (335 svar fra 13 API-testklasser), begge ganger uten avvik (2026-10-24). Fremgangsmåten krever ingen nye avhengigheter i prosjektet:
 
-1. En midlertidig test i `tests/Feature/Api/` lager testdata som gir alle feltene, kaller hver operasjon og skriver `{method, path, status, body}` for hvert kall til en JSON-fil under `storage/app/`.
+1. Svarene samles fra de eksisterende API-testene. En midlertidig trait overstyrer `get()` og `postJson()` og skriver `{method, path, status, body}` for hvert API-kall til en JSON-fil under `storage/app/`. Banen er rutens mal (`$response->baseRequest->route()->uri()`). Én midlertidig underklasse per testklasse bruker traiten. Alternativt kan én midlertidig test lage testdata og kalle hver operasjon.
 2. Et lite Node-skript i scratch-katalogen kjører i Docker-bildet `node:22` med `ajv` (JSON Schema 2020-12), `ajv-formats` og `js-yaml`. Det slår opp svarskjemaet for sti, metode og status i spesifikasjonen og validerer hvert svar.
 3. Kontroller at skriptet faktisk avviser feil: legg til et felt, fjern et påkrevd felt og endre en type i en kopi av svarene.
 4. Slett den midlertidige testen og JSON-filen. Ingen av dem committes.
@@ -64,6 +64,9 @@ Ved en større endring kontrolleres ekte svar mot skjemaene i spesifikasjonen. D
 - **Liste og detalj deler felt:** `XFields` har feltene uten `additionalProperties`. Listeraden er `allOf: [XFields]`, detaljen er `allOf: [XFields, {de ekstra feltene}]`, og begge har `unevaluatedProperties: false`. Bruk ikke `additionalProperties: false` på et skjema som inngår i `allOf`, for da avvises detaljens ekstra felt.
 - **Lister uten paginering:** `GET /attention`, `GET /business-areas` og `GET /kpis/{id}/measurements` gir hele listen og har `Meta`, ikke `PageMeta`. Beskrivelsen må si det.
 - **Ruter uten modul:** `/me`, `/attention` og `/business-areas` står i `MODULE_FREE` i `ApiRouteContractTest`. De tar med hver modul bare der `ApiAccessSummary` sier at den er lesbar.
+- **Moduler uten fagområder:** Ledelsens gjennomgang, Etterlevelse og revisjon, Leverandøroppfølging og Kvalitet har `business_areas: null` i `/me`, og `business_area: null` på elementene i `/attention`.
+- **Data fra en annen modul:** en kobling til en annen modul (for eksempel Kvalitet-kontroller på en risiko) er `null`, ikke tom, når identiteten ikke kan lese den modulen. Da sies ingenting om den.
+- **Ny `GET /{id}`:** stien finnes da for alle metoder, og andre metoder gir 405 i stedet for 404. Kjør hele `tests/Feature/Api`, for flere tester sjekker dette.
 
 ## Når et nytt endepunkt utvikles
 

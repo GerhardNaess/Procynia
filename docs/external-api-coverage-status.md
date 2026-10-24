@@ -1,7 +1,7 @@
 # Procynia API – status og plan for full API-dekning
 
 **Sist oppdatert:** 2026-10-24
-**Grunnlag:** koden på grenen `feature/external-api-foundation` (commit `3db93474`, fase 2), `routes/api.php`, `routes/web.php` (kundefrontenden), domenetjenestene i `app/Services/`, registeret i `tests/Feature/Security/HumanDecisionContractTest.php` og arkitekturdokumentene [`external-api-architecture.md`](external-api-architecture.md), [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) og [`external-api-phase-1-decisions.md`](external-api-phase-1-decisions.md).
+**Grunnlag:** koden på grenen `feature/external-api-foundation` (commit `d71c50b4`, fase 3), `routes/api.php`, `routes/web.php` (kundefrontenden), domenetjenestene i `app/Services/`, registeret i `tests/Feature/Security/HumanDecisionContractTest.php` og arkitekturdokumentene [`external-api-architecture.md`](external-api-architecture.md), [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) og [`external-api-phase-1-decisions.md`](external-api-phase-1-decisions.md).
 **Faseplan:** vedtatt 2026-10-24 (del 1 «Vedtatt faseplan» og del 4).
 **Formål:** én samlet oversikt over hva som er ferdig, hva som mangler, rekkefølgen videre og beslutningene som gjenstår. Dokumentet er et styringsdokument. De tekniske detaljene og begrunnelsene står i arkitekturdokumentene.
 
@@ -15,11 +15,11 @@
 
 | | |
 |---|---|
-| **Prosjektstatus** | 🟧 **Delvis dekket.** API-fundamentet er bygget og testet lokalt. Tre av ni moduler har API-støtte, og lesingen i dem er levert i fase 2 med ett unntak (RIS-02, Kvalitet-koblingene). **Ingenting er i produksjon.** |
-| **API-operasjoner i dag** | **14 operasjoner:** 13 for lesing og 1 for skriving (se tabellen under). |
-| **Lokalt verifisert** | Ja. Alle 155 API-tester består (kjørt 2026-10-24, etter fase 2). Siste fulle kjøring av PHP-suiten ga 8667 tester og 0 feil (2026-10-24, før OpenAPI og fase 2). |
+| **Prosjektstatus** | 🟧 **Delvis dekket.** API-fundamentet er bygget og testet lokalt. Sju av ni moduler har API-støtte, og lesingen i styringsmodulene er levert i fase 2 og 3. Tre funksjoner er delvis levert fordi de venter på KVA-02 (funn 17). **Ingenting er i produksjon.** |
+| **API-operasjoner i dag** | **29 operasjoner:** 28 for lesing og 1 for skriving (se tabellen under). |
+| **Lokalt verifisert** | Ja. Alle 174 API-tester består (kjørt 2026-10-24, etter fase 3). Siste fulle kjøring av PHP-suiten ga 8667 tester og 0 feil (2026-10-24, før OpenAPI og fase 2 og 3). |
 | **Produksjonsklart** | **Nei.** Grenen er ikke flettet inn i `main`, migreringene er ikke kjørt i Azure, og API-et er ikke prøvd med et ekte token fra Microsoft Entra ID eller med Siggjo. |
-| **API-spesifikasjon** | 🟩 OpenAPI 3.1 for alle 14 operasjoner i [`api/openapi.yaml`](api/openapi.yaml), validert og låst mot rutene med en kontrakttest. Ekte svar fra alle operasjonene er kontrollert mot skjemaene (2026-10-24). |
+| **API-spesifikasjon** | 🟩 OpenAPI 3.1 for alle 29 operasjoner i [`api/openapi.yaml`](api/openapi.yaml), validert og låst mot rutene med en kontrakttest. 335 ekte svar fra API-testene er kontrollert mot skjemaene uten avvik (2026-10-24, etter fase 3). |
 | **Neste milepæl** | **Pilotklar API på testkunde:** dagens seks operasjoner flettet inn, beskrevet i en API-spesifikasjon og prøvd med ekte Entra-token i staging (fase 1 under). |
 
 ### Implementerte API-operasjoner
@@ -40,6 +40,21 @@
 | 12 | Full målehistorikk for én KPI (`GET /api/v1/kpis/{id}/measurements`) | Lesing | Mål og KPI | Ja | Nei |
 | 13 | Samlet oppmerksomhet (`GET /api/v1/attention`) | Lesing | Felles | Ja | Nei |
 | 14 | Fagområder (`GET /api/v1/business-areas`) | Lesing | Felles | Ja | Nei |
+| 15 | Ledelsens gjennomganger (`GET /api/v1/management-reviews`) | Lesing | Ledelsens gjennomgang | Ja | Nei |
+| 16 | Én gjennomgang med seksjoner, beslutninger og tiltak (`GET /api/v1/management-reviews/{id}`) | Lesing | Ledelsens gjennomgang | Ja | Nei |
+| 17 | Kravregister (`GET /api/v1/compliance/requirements`) | Lesing | Etterlevelse og revisjon | Ja | Nei |
+| 18 | Ett krav med vurderingshistorikk (`GET /api/v1/compliance/requirements/{id}`) | Lesing | Etterlevelse og revisjon | Ja | Nei |
+| 19 | Etterlevelsesstatus per kilde (`GET /api/v1/compliance/status`) | Lesing | Etterlevelse og revisjon | Ja | Nei |
+| 20 | Revisjoner (`GET /api/v1/compliance/audits`) | Lesing | Etterlevelse og revisjon | Ja | Nei |
+| 21 | Én revisjon med scope, kontrollhandlinger og funn (`GET /api/v1/compliance/audits/{id}`) | Lesing | Etterlevelse og revisjon | Ja | Nei |
+| 22 | Kravbiblioteket (`GET /api/v1/compliance/frameworks`) | Lesing | Etterlevelse og revisjon | Ja | Nei |
+| 23 | Én standard med kapitler og krav (`GET /api/v1/compliance/frameworks/{id}`) | Lesing | Etterlevelse og revisjon | Ja | Nei |
+| 24 | Leverandørregister (`GET /api/v1/suppliers`) | Lesing | Leverandøroppfølging | Ja | Nei |
+| 25 | Én leverandør med krav, aktsomhet, plan og koblinger (`GET /api/v1/suppliers/{id}`) | Lesing | Leverandøroppfølging | Ja | Nei |
+| 26 | Kontrollkrav (`GET /api/v1/suppliers/control-requirements`) | Lesing | Leverandøroppfølging | Ja | Nei |
+| 27 | Kvalitetsregister (`GET /api/v1/quality/items`) | Lesing | Kvalitet | Ja | Nei |
+| 28 | Kontrollregister (`GET /api/v1/quality/controls`) | Lesing | Kvalitet | Ja | Nei |
+| 29 | Én KPI med prosessene den måler (`GET /api/v1/kpis/{id}`) | Lesing | Mål og KPI | Ja | Nei |
 
 «Lokalt verifisert» betyr automatiske tester med simulerte Entra-tokens og testdata. Det betyr ikke at operasjonen er prøvd mot Microsoft, Azure eller Siggjo.
 
@@ -57,8 +72,8 @@
 | Modell for navngitte skriveoperasjoner | 🟧 Delvis dekket | Modellen er generell. Katalogen har én operasjon. |
 | Beskyttelse mot dobbelregistrering (idempotens) | ⬜ Ikke startet | Et gjentatt skrivekall gir duplikat. Akseptert for den ene operasjonen. Må avklares før flere skriveoperasjoner. |
 | API-spesifikasjon (OpenAPI) | 🟩 Fullt dekket (lokalt) | [`api/openapi.yaml`](api/openapi.yaml) beskriver de seks operasjonene. Validert mot OpenAPI 3.1 med Redocly CLI. `ApiOpenApiContractTest` låser stier, metoder, app-roller, enums og feilkoder mot koden. Vedlikehold: [`api/README.md`](api/README.md). Ikke publisert til Siggjo ennå. |
-| Detaljvisning av enkeltposter (`/{id}`) | 🟧 Delvis dekket | Finnes for Risiko, Avvik og forbedringer og Mål og KPI (fase 2). De andre modulene følger i fase 3. |
-| Samlet oppmerksomhetsliste | 🟧 Delvis dekket | `GET /api/v1/attention` for Risiko, Avvik og forbedringer og Mål og KPI. Utvides med modulene i fase 3. |
+| Detaljvisning av enkeltposter (`/{id}`) | 🟩 Fullt dekket (lokalt) for de sju modulene med API | Kvalitet har ingen detaljvisning: den viser prosessflyten (KVA-02). |
+| Samlet oppmerksomhetsliste | 🟧 Delvis dekket | `GET /api/v1/attention` for Risiko, Avvik og forbedringer, Mål og KPI, Etterlevelse og revisjon, Leverandøroppfølging og Kvalitet. Ledelsens gjennomgang har ingen oppmerksomhetstjeneste. Ett Kvalitet-funn venter på KVA-02. |
 | Drift: WAF/API Management, Log Analytics-retensjon | ⬜ Ikke startet | Beslutning D12 tas før første kunde med ekte data. |
 | Personvern: DPIA og databehandleravtaler | ⬜ Ikke startet | D14. Kreves før ekte kundedata går til Siggjo. Blokkerer ikke pilot med testdata. |
 
@@ -66,13 +81,13 @@
 
 | Modul | Status | Lesing i API | Skriving i API | Det viktigste som mangler |
 |---|---|---|---|---|
-| Risiko | 🟧 Delvis dekket | Register, én risiko, oppmerksomhet | Opprett tiltak | Kvalitet-koblingene i RIS-02 (blokkert, se funn 13), registrering av risiko |
-| Mål og KPI | 🟧 Delvis dekket | Mål, ett mål med KPI-er, KPI-er, full målehistorikk, oppmerksomhet | – | Kobling til prosess (MOK-06, fase 3) |
+| Risiko | 🟧 Delvis dekket | Register, én risiko med kontroller og prosesser, oppmerksomhet | Opprett tiltak | Aktivitetsnavn i RIS-02 (KVA-02, funn 17), registrering av risiko |
+| Mål og KPI | 🟧 Delvis dekket | Mål, ett mål med KPI-er, KPI-er, én KPI med prosesser, full målehistorikk, oppmerksomhet | – | Aktivitetsnavn i MOK-06 (KVA-02, funn 17) |
 | Avvik og forbedringer | 🟧 Delvis dekket | Avvik, forbedringer, én sak med tiltak, oppmerksomhet | – | Registrering av avvik og tiltak (AVF-04, AVF-05, fase 4) |
-| Kvalitet | ⬜ Ikke startet | – | – | Lesetjeneste for prosesser og kontroller |
-| Etterlevelse og revisjon | ⬜ Ikke startet | – | – | Kravstatus og revisjoner |
-| Leverandøroppfølging | ⬜ Ikke startet | – | – | Leverandørregister og kontrollstatus |
-| Ledelsens gjennomgang | ⬜ Ikke startet | – | – | Gjennomganger og oppfølging av tiltak |
+| Kvalitet | 🟧 Delvis dekket | Register, kontroller, oppmerksomhet (uten prosessflyt) | – | Alt som leses fra en prosessflyt (KVA-02, funn 17) |
+| Etterlevelse og revisjon | 🟧 Delvis dekket | Kravregister, status, revisjoner, kravbibliotek, oppmerksomhet | – | Alle A-funksjoner er levert lokalt. Ikke produksjonsklar. |
+| Leverandøroppfølging | 🟧 Delvis dekket | Register, én leverandør, kontrollkrav, oppmerksomhet | – | Alle A-funksjoner er levert lokalt. Ikke produksjonsklar. |
+| Ledelsens gjennomgang | 🟧 Delvis dekket | Gjennomganger, én gjennomgang med seksjoner, beslutninger og tiltak | – | Alle A-funksjoner er levert lokalt. Ikke produksjonsklar. |
 | Enterprise Wiki | ⬜ Ikke startet | – | – | Arkitekturbeslutning om lesing via den felles Wiki-kjernen |
 | Anbud | 🟥 Blokkert | – | – | Fire kjente hindre må løses først (se under) |
 
@@ -84,23 +99,26 @@ Grunnlaget er de 117 funksjonene i del 3: **32 A-funksjoner, 51 B-funksjoner og 
 
 | Status | Betydning | A | B | C | Sum |
 |---|---|---|---|---|---|
-| 🟩 **Implementert** | Endepunktet finnes og er verifisert lokalt. Ikke i produksjon. | 14 | – | – | 14 |
-| 🟦 **Planlagt** | Har en fase i den vedtatte planen og kan bygges uten ny beslutning. | 17 | – | – | 17 |
-| 🟥 **Blokkert** | Har en fase, men kan ikke startes eller fullføres før en navngitt beslutning eller hindring er løst. | 1 | 43 | – | 44 |
+| 🟩 **Implementert** | Endepunktet finnes og er verifisert lokalt. Ikke i produksjon. | 27 | – | – | 27 |
+| 🟦 **Planlagt** | Har en fase i den vedtatte planen og kan bygges uten ny beslutning. | 2 | – | – | 2 |
+| 🟥 **Blokkert** | Har en fase, men kan ikke startes eller fullføres før en navngitt beslutning eller hindring er løst. | 3 | 43 | – | 46 |
 | ⬛ **Ikke anbefalt** | Ikke planlagt. Tas bare opp igjen etter egen beslutning. | – | 8 | – | 8 |
 | ⛔ **Utenfor API-et** | Formell menneskelig beslutning. Kan aldri utføres av en integrasjon og teller ikke som manglende. | – | – | 34 | 34 |
 | **Sum** | | **32** | **51** | **34** | **117** |
 
-**Implementert (14):** RIS-01, RIS-03, RIS-04, MOK-01–05, AVF-01–03, FEL-01–03. Fase 2 leverte RIS-03, MOK-03, MOK-04, resten av MOK-05, AVF-02, AVF-03, FEL-02 og resten av FEL-03 (2026-10-24).
+**Implementert (27):** RIS-01, RIS-03, RIS-04, MOK-01–05, AVF-01–03, FEL-01–03, ETR-01–05, LEV-01–03, LDG-01–03, KVA-01 og KVA-03. Fase 2 leverte RIS-03, MOK-03, MOK-04, resten av MOK-05, AVF-02, AVF-03, FEL-02 og resten av FEL-03. Fase 3 leverte ETR-01–05, LEV-01–03, LDG-01–03, KVA-01 og KVA-03, og utvidet FEL-02 (2026-10-24).
 
-**Planlagt (17 A-funksjoner):**
+**Planlagt (2 A-funksjoner):**
 
 | Fase | Funksjoner | Antall |
 |---|---|---|
-| 3 | MOK-06, KVA-01, KVA-03, KVA-04, ETR-01–05, LEV-01–03, LDG-01–03 | 15 |
 | 4 | AVF-04, AVF-05 (etter fellesforutsetningene idempotens, opphavsvisning og varselregel) | 2 |
 
-**Blokkert (1 A-funksjon):** RIS-02 er delvis levert i fase 2 (`GET /api/v1/risks/{id}` med vurderinger, tiltak og aksept). Koblingene til Kvalitet (kontroller og prosesskontekst) er ikke levert, fordi Kvalitet ennå ikke kan leses gjennom API-et (funn 13).
+**Blokkert (3 A-funksjoner, alle delvis levert):** resten venter på beslutningen KVA-02 (funn 17).
+
+- **RIS-02:** `GET /api/v1/risks/{id}` har vurderinger, tiltak og aksept, og fra fase 3 kontroller og prosesser på prosessnivå. Aktivitetenes navn og roller mangler.
+- **MOK-06:** `GET /api/v1/kpis/{id}` har prosessene KPI-en måler, på prosessnivå. Aktivitetenes navn og roller mangler.
+- **KVA-04:** tre av fire Kvalitet-funn er levert. `controls_without_activity` mangler.
 
 **Blokkert (43 B-funksjoner):** alle B-funksjoner som har en fase. Hindringen står i kolonnen «Avhengigheter» i del 3, og de samlede beslutningene står i «Viktigste avhengigheter og beslutninger» under. Hele Anbud-modulen er blokkert (funn 2, 3 og 6 i del 5, og K16).
 
@@ -114,7 +132,7 @@ Faseplanen ble vedtatt 2026-10-24. Endringer i rekkefølge eller innhold krever 
 |---|---|---|---|
 | **1** | Gjøre dagens API produksjonsklart for pilot | Fundamentet | 🟧 Påbegynt. OpenAPI-spesifikasjonen er ferdig. Entra, staging og V4 venter på Advania og Siggjo. |
 | **2** | Fullføre lesing i modulene som er påbegynt | Risiko, Mål og KPI, Avvik og forbedringer | 🟧 Levert lokalt 2026-10-24, med ett unntak: Kvalitet-koblingene i RIS-02 er blokkert (funn 13). |
-| **3** | Lesing i resten av styringsmodulene | Etterlevelse og revisjon, Leverandøroppfølging, Ledelsens gjennomgang, Kvalitet | 🟦 Planlagt. KVA-02 venter på beslutning. |
+| **3** | Lesing i resten av styringsmodulene | Etterlevelse og revisjon, Leverandøroppfølging, Ledelsens gjennomgang, Kvalitet | 🟧 Levert lokalt 2026-10-24. Det som leses fra en prosessflyt venter på KVA-02 (funn 17). |
 | **4** | Avgrensede registreringer (utkast og forslag) | Styringsmodulene | 🟥 Blokkert av fellesforutsetningene og beslutning per operasjon |
 | **5** | Tilgang på vegne av en person | Mine oppgaver, personlige dashboards | 🟥 Blokkert av D2 |
 | **6** | Wiki gjennom den felles kunnskapskjernen | Enterprise Wiki | 🟥 Blokkert av Wiki-arkitekturbeslutning, A23 og S4 |
@@ -127,7 +145,8 @@ Faseplanen ble vedtatt 2026-10-24. Endringer i rekkefølge eller innhold krever 
 |---|---|---|---|---|
 | 1 | Statusdokumentet med vedtatt faseplan (dette dokumentet) | – | Ja | 🟩 Ferdig |
 | 2 | **OpenAPI 3.1-spesifikasjon for de seks eksisterende operasjonene**, med kontraktstest mot rutene | 1 | Ja | 🟩 Ferdig lokalt 2026-10-24 ([`api/openapi.yaml`](api/openapi.yaml)) |
-| 3 | Fase 2: fullføre API-dekningen for lesing i Risiko, Avvik og forbedringer og Mål og KPI | 2 | Ja | 🟧 Levert lokalt 2026-10-24. Åtte av ni funksjoner er ferdige. RIS-02 er delvis levert (funn 13). |
+| 3 | Fase 2: fullføre API-dekningen for lesing i Risiko, Avvik og forbedringer og Mål og KPI | 2 | Ja | 🟧 Levert lokalt 2026-10-24. Åtte av ni funksjoner er ferdige. RIS-02 er delvis levert (funn 17). |
+| 4 | Fase 3: lesing i Etterlevelse og revisjon, Leverandøroppfølging, Ledelsens gjennomgang og Kvalitet | 3 | Ja | 🟧 Levert lokalt 2026-10-24. 13 av 15 funksjoner er ferdige. MOK-06 og KVA-04 er delvis levert (funn 17). |
 | – | Merge etter V1–V3, Entra-registrering, Siggjos identitet, staging og V4 | 1 | Nei | 🟥 Venter på produkteier, Advania og Siggjo. Løper parallelt. |
 
 Etter fase 2 er de tre modulene fullt dekket **for lesing**. Full A-dekning i disse modulene krever også MOK-06 (fase 3) og AVF-04 og AVF-05 (fase 4).
@@ -148,6 +167,7 @@ Detaljer står i del 4.
 | 8 | Om agentutløst AI-arbeid er tillatt, og hvordan kostnaden begrenses (S4) | Fase 4 og 6 | Produkteier |
 | 9 | A23: Kvalitets AI-forslag og «Spør Wiki» må kontrollere tilgang i tjenesten | Fase 6 | Arkitektur |
 | 10 | Anbud: delte arbeidsflytfelt på kunngjøringer (K16), avdelingsomfang og A46 | Fase 7 | Produkteier / arkitektur |
+| 11 | KVA-02: skal API-et vise godkjent versjon av prosessflyten, arbeidsversjonen eller begge? | Resten av RIS-02, MOK-06 og KVA-04, og KVA-02 selv (funn 17) | Produkteier |
 
 ### Neste anbefalte milepæl
 
@@ -171,10 +191,10 @@ Kompleksitet: **Lav** = gjenbruk av en eksisterende tjeneste og presentasjon. **
 | **Risiko** | Risikoregister, én risiko med vurderinger, tiltak og kontroller, oppmerksomhet, registrering av tiltak | Register og én risiko med vurderingshistorikk, tiltak, aksept av restrisiko og oppmerksomhetskoder | Opprett tiltak (navngitt operasjon) | Koblinger til Kvalitet (blokkert, funn 13). Mulig registrering av ny risiko. | Vurdering, aksept av restrisiko og sletting er menneskelige beslutninger. Fagområdene styrer synligheten. | Lav–middels | 2, 4 |
 | **Mål og KPI** | Mål, KPI-er, måloppnåelse, målehistorikk, oppmerksomhet | Mål, ett mål med KPI-er, KPI-er med siste 24 målinger, full målehistorikk, oppmerksomhetskoder | – | Koblinger til prosess (fase 3) | Målinger, avslutning og sletting er menneskelige beslutninger (B7). Fagområdene styrer synligheten. | Lav | 2 |
 | **Avvik og forbedringer** | Avvik, forbedringsforslag, tiltak, effektverifisering, registrering av avvik | Avvik og forbedringer hver for seg, én sak med tiltak og effektverifisering, oppmerksomhetskoder | – | Registrering av avvik og tiltak (fase 4) | Lukking, effektverifisering og sletting er menneskelige beslutninger. Avvikstitler kan inneholde særlige kategorier av personopplysninger. | Lav–middels | 2, 4 |
-| **Kvalitet** | Prosesser, rutiner, kontroller, evidens, godkjent prosessflyt, oppmerksomhet | – | – | Alt. Det finnes ingen lesetjeneste: lesingen ligger i `QualityController`. | Godkjenning, innføring av AI-forslag og sletting er menneskelige beslutninger. AI-forslagene er sperret (A23, D11). Prosessflyt krever versjonskontroll (`base_hash`) ved skriving. | Middels–høy | 3 |
-| **Etterlevelse og revisjon** | Kravregister, etterlevelsesstatus per standard, revisjoner og funn, oppmerksomhet | – | – | Alt | Vurdering, relevans og **hele revisjonsløpet** (også opprettelse) er menneskelige beslutninger. Modulen krever eksplisitt tildeling. | Middels | 3 |
-| **Leverandøroppfølging** | Leverandørregister, kritikalitet, kontrollstatus, oppfølgingsplan | – | – | Alt | Registrering, kritikalitet, livsløp, vurderinger og kontrollarbeid er menneskelige beslutninger. Krever eksplisitt tildeling. Dokumentfiler skannes ikke i dag. | Middels | 3 |
-| **Ledelsens gjennomgang** | Gjennomganger, seksjoner, beslutninger og tiltak med status | – | – | Alt | Ferdigstilling og sletting er menneskelige beslutninger. Seksjoner fra andre moduler vises bare med tilgang til modulen. | Lav–middels (presentasjonsklassen finnes) | 3 |
+| **Kvalitet** | Prosesser, rutiner, kontroller, evidens, godkjent prosessflyt, oppmerksomhet | Register, kontroller med evidens og verktøy, oppmerksomhet (uten prosessflyt) | – | Alt som leses fra en prosessflyt: flyten, publiseringsstatus, plasseringer, aktivitetsnavn og ett oppmerksomhetsfunn (KVA-02, funn 17) | Godkjenning, innføring av AI-forslag og sletting er menneskelige beslutninger. AI-forslagene er sperret (A23, D11). Prosessflyt krever versjonskontroll (`base_hash`) ved skriving. | Middels–høy | 3 |
+| **Etterlevelse og revisjon** | Kravregister, etterlevelsesstatus per standard, revisjoner og funn, oppmerksomhet | Kravregister, status per kilde, revisjoner med scope, kontrollhandlinger og funn, kravbibliotek, oppmerksomhet | – | Ingen A-funksjon. Kvalitet-konteksten (prosesser og kontroller) er utelatt. | Vurdering, relevans og **hele revisjonsløpet** (også opprettelse) er menneskelige beslutninger. Modulen krever eksplisitt tildeling. | Middels | 3 |
+| **Leverandøroppfølging** | Leverandørregister, kritikalitet, kontrollstatus, oppfølgingsplan | Register, én leverandør med krav, aktsomhet, oppfølgingsplan og koblinger, kontrollkrav, oppmerksomhet | – | Ingen A-funksjon | Registrering, kritikalitet, livsløp, vurderinger og kontrollarbeid er menneskelige beslutninger. Krever eksplisitt tildeling. Dokumentfiler skannes ikke i dag. | Middels | 3 |
+| **Ledelsens gjennomgang** | Gjennomganger, seksjoner, beslutninger og tiltak med status | Gjennomganger, én gjennomgang med seksjoner, beslutninger og tiltak | – | Ingen A-funksjon. Grunnlagstallene og beslutningstekstene er utelatt (funn 19). | Ferdigstilling og sletting er menneskelige beslutninger. Seksjoner fra andre moduler vises bare med tilgang til modulen. | Lav–middels (presentasjonsklassen finnes) | 3 |
 | **Enterprise Wiki** | Lese publisert kunnskap, navigere, stille spørsmål, overføre kunnskap fra andre moduler | – | – | Alt | All redigering, godkjenning, kildeadministrasjon og alle kjøringer er menneskelige beslutninger. Lesing må gå gjennom den felles kunnskapskjernen og bare vise gjeldende innhold. «Spør Wiki» er sperret (A23). | Høy | 6 |
 | **Anbud** | Saker og cockpit, krav og svarstatus, frister, Go/No-go-grunnlag | – | – | Alt | Budstatus og godkjenning av krav er menneskelige beslutninger. Avdelingsbasert synlighet. De fleste skrivinger ligger i kontrollerne, ikke i tjenester. | Høy | 7 |
 
@@ -211,16 +231,16 @@ Kompleksitet: **Lav** = gjenbruk av en eksisterende tjeneste og presentasjon. **
 | Modul | A | – av dem implementert | B | C |
 |---|---|---|---|---|
 | Risiko | 4 | 3 (+1 delvis) | 5 | 3 |
-| Mål og KPI | 6 | 5 | 4 | 3 |
+| Mål og KPI | 6 | 5 (+1 delvis) | 4 | 3 |
 | Avvik og forbedringer | 5 | 3 | 4 | 3 |
-| Kvalitet | 3 | 0 | 7 | 4 |
-| Etterlevelse og revisjon | 5 | 0 | 4 | 4 |
-| Leverandøroppfølging | 3 | 0 | 5 | 5 |
-| Ledelsens gjennomgang | 3 | 0 | 4 | 2 |
+| Kvalitet | 3 | 2 (+1 delvis) | 7 | 4 |
+| Etterlevelse og revisjon | 5 | 5 | 4 | 4 |
+| Leverandøroppfølging | 3 | 3 | 5 | 5 |
+| Ledelsens gjennomgang | 3 | 3 | 4 | 2 |
 | Enterprise Wiki | 0 | 0 | 5 | 8 |
 | Anbud | 0 | 0 | 10 | 2 |
 | Felles | 3 | 3 | 3 | 0 |
-| **Sum** | **32** | **14 (+1 delvis)** | **51** | **34** |
+| **Sum** | **32** | **27 (+3 delvis)** | **51** | **34** |
 
 Kartleggingen dekker 311 webruter i de ni modulene (68 lesende, 243 skrivende) og 35 felles ruter (blant annet Kundemiljø, brukere, varsler, fakturering og Hjem). Ruter som bare viser et skjema, er ikke egne funksjoner.
 
@@ -231,7 +251,7 @@ Tilgang: `RiskAccessService` (`visibleRisks`, `findVisible`, `can*`) med fagomr�
 | ID | Funksjon | Domenetjeneste | API-endepunkt | API-status | Integrasjon i dag | Kat. | Avhengigheter | Fase |
 |---|---|---|---|---|---|---|---|---|
 | RIS-01 | Les risikoregister | `RiskAccessService::visibleRisks`, `RiskAssessment::latestForRisks`, `RiskScoringPolicy`, `RiskReviewSchedule` | `GET /api/v1/risks` | Implementert | Ja | A | – | Ferdig |
-| RIS-02 | Les én risiko: vurderingshistorikk, tiltak, aksept, kontroller, prosesskontekst | `findVisible`, `RiskTreatmentService::actionsFor`, `RiskAcceptanceService::decisionFor`, `RiskControlService::linkedControls`, `RiskQualityContextService::linkedContext` | `GET /api/v1/risks/{riskId}` | Delvis | Ja (lesing) | A | Vurderinger, tiltak og aksept er levert, uten fritekst og uten hvem som vurderte eller aksepterte (D8). **Kontroller og prosesskontekst er ikke levert:** Kvalitet kan ikke leses gjennom API-et ennå (funn 13). | 2 (Kvalitet-koblingene blokkert) |
+| RIS-02 | Les én risiko: vurderingshistorikk, tiltak, aksept, kontroller, prosesskontekst | `findVisible`, `RiskTreatmentService::actionsFor`, `RiskAcceptanceService::decisionFor`, `RiskControlService::linkedControls`, `RiskQualityContextService::linkedContext` | `GET /api/v1/risks/{riskId}` | Delvis | Ja (lesing) | A | Vurderinger, tiltak, aksept og (fra fase 3, med `quality.view`) kontroller og prosesser på prosessnivå er levert, uten fritekst og personer (D8). **Aktivitetenes navn og roller er ikke levert:** de leses fra en prosessflyt, og KVA-02 er ikke besluttet (funn 17). | 2–3 (aktivitetene blokkert av KVA-02) |
 | RIS-03 | Risikoens oppmerksomhet | `RiskAttentionService::findingsForRisks` | `attention` på risikoradene, `GET /api/v1/attention` | Implementert | Ja (lesing) | A | – | Ferdig |
 | RIS-04 | Opprett risikotiltak | `RiskTreatmentService::create` | `POST /api/v1/risks/{riskId}/treatment-actions` | Implementert | Ja (operasjonen `risk.treatment_action.create`) | A | Ingen idempotens. Ekte Entra-rolle `Procynia.Write.All` gjenstår. | Ferdig |
 | RIS-05 | Registrer ny risiko | `RiskCreator::create` | – | – | Nei | B | En registrert risiko er ikke et utkast (S1). Opphav og varsler (S2, S6). | 4 |
@@ -254,7 +274,7 @@ Tilgang: `ObjectiveAccessService` (`visibleObjectives`, `visibleKpis`, `findVisi
 | MOK-03 | Les ett mål i detalj | `findVisible`, `visibleKpis` | `GET /api/v1/objectives/{objectiveId}` (med KPI-ene) | Implementert | Ja (lesing) | A | – | Ferdig |
 | MOK-04 | Full målehistorikk for én KPI | `visibleKpis`, `KpiMeasurementResolver::currentByPeriod` | `GET /api/v1/kpis/{kpiId}/measurements` | Implementert | Ja (lesing) | A | Gjeldende måling per periode, uten erstattede og tilbaketrukne rader (som i KPI-listen). De to `KpiPresenter`-klassene er ikke samlet (funn 10). | Ferdig |
 | MOK-05 | Oppmerksomhet for mål og KPI | `ObjectiveAttentionService::findingsForObjectives` | Kodene på radene, `GET /api/v1/attention` | Implementert | Ja | A | – | Ferdig |
-| MOK-06 | KPI-ens kobling til prosess og aktivitet (lesing) | `KpiQualityContextService::linkedContext` | – | – | Ja (med `quality.view`) | A | Kvalitet (fase 3) | 3 |
+| MOK-06 | KPI-ens kobling til prosess og aktivitet (lesing) | `KpiQualityContextService::linkedContext` | `GET /api/v1/kpis/{kpiId}` (`processes`) | Delvis | Ja (med `quality.view`) | A | Prosessene KPI-en måler, på prosessnivå (hele prosessen, antall aktiviteter), med `quality.view`. Aktivitetenes navn og roller venter på KVA-02 (funn 17). | 3 (aktivitetene blokkert av KVA-02) |
 | MOK-07 | Opprett eller endre mål | `ObjectiveRegistration::create`/`update` | – | – | Nei | B | S1, S2 | 4 |
 | MOK-08 | Opprett eller endre KPI | `KpiRegistration::create`/`update` | – | – | Nei | B | S1, S2 | 4 |
 | MOK-09 | Koble KPI til prosess | `KpiQualityContextService::syncProcess` | – | – | Nei | B | Fase 3 | 4 |
@@ -288,10 +308,10 @@ Tilgang: `QualityAccessService` (`may`, `authorize`) for skriving. **Det finnes 
 
 | ID | Funksjon | Domenetjeneste | API-endepunkt | API-status | Integrasjon i dag | Kat. | Avhengigheter | Fase |
 |---|---|---|---|---|---|---|---|---|
-| KVA-01 | Les kvalitetsregister: prosesser, rutiner, kontroller, dokumenter | Ingen. Inline i `QualityController::index`. | – | – | Ja (`quality.view`) | A | En lesetjeneste og presentasjon må trekkes ut av kontrolleren | 3 |
+| KVA-01 | Les kvalitetsregister: prosesser, rutiner, kontroller, dokumenter | Ingen. Inline i `QualityController::index`. | `GET /api/v1/quality/items` | Implementert | Ja (`quality.view`) | A | Kundeavgrenset lesing under Kvalitets egen leseregel (`QualityProcessContextReader::canRead`). Uten publiseringsstatus (KVA-02). | Ferdig |
 | KVA-02 | Les ett element med prosessflyt, koblinger og publiseringsstatus | Inline i `QualityController::show`, `QualityProcessBlueprintService::publicationState`/`history` | – | – | Ja (lesing) | B | Beslutning: bare godkjent versjon, eller også arbeidsversjonen? | 3 |
-| KVA-03 | Les kontrollregister med evidens og verktøy | Inline, `QualityToolService::forControl` | – | – | Ja (lesing) | A | Som KVA-01. Nedlasting av filer holdes utenfor. | 3 |
-| KVA-04 | Kvalitetsoppmerksomhet | `QualityAttentionService::findings` (per kunde) | – | – | Ja (lesing) | A | Samlet `GET /attention` | 3 |
+| KVA-03 | Les kontrollregister med evidens og verktøy | Inline, `QualityToolService::forControl` | `GET /api/v1/quality/controls` | Implementert | Ja (lesing) | A | Frekvens, aktiv evidens (antall, siste) og verktøy. Uten plasseringer i prosessflyt (KVA-02), fritekst og filer. | Ferdig |
+| KVA-04 | Kvalitetsoppmerksomhet | `QualityAttentionService::findings` (per kunde) | Kodene på radene, `GET /api/v1/attention` | Delvis | Ja (lesing) | A | Tre av fire funn. `controls_without_activity` vurderes mot arbeidsversjonen av prosessflytene og venter på KVA-02 (funn 17). | 3 (ett funn blokkert av KVA-02) |
 | KVA-05 | Opprett eller endre element, steg, sjekkliste, kontrolldetaljer | `QualityItemService::createItem`/`updateItem`/`replace*` | – | – | Nei | B | S1. Hendelsesloggen (A20) dekker bare evidens. | 4 |
 | KVA-06 | Lagre prosessflyt manuelt | `QualityProcessBlueprintService::store` (`base_hash`) | – | – | Nei | B | S5 (samtidighet) | 4 |
 | KVA-07 | AI-forslag: tolk beskrivelse, avklar, foreslå endring | `QualityProcessFlowInterpreter::interpret`, `QualityProcessDescriptionClarifier::integrate`, `QualityProcessFlowChangeProposer::propose` | – | – | Nei (sperret) | B | **A23:** tjenestene tar ingen aktør og kontrollerer ikke tilgang selv. D11 sperrer AI på API-kanalen. | 6 eller senere |
@@ -309,11 +329,11 @@ Tilgang: `ComplianceAccessService` (`visibleRequirements`, `visibleSources`, `vi
 
 | ID | Funksjon | Domenetjeneste | API-endepunkt | API-status | Integrasjon i dag | Kat. | Avhengigheter | Fase |
 |---|---|---|---|---|---|---|---|---|
-| ETR-01 | Les kravregister og krav | `visibleRequirements`, `findVisibleRequirement`, `ComplianceRegisterGroups` | – | – | Ja (`compliance.view`) | A | Radene er inline. Presentasjonsklasse trengs. | 3 |
-| ETR-02 | Etterlevelsesstatus per kilde eller standard | `ComplianceStatusResolver::latestForRequirements`/`summarize`, `ComplianceAssessmentOverview` | – | – | Ja (lesing) | A | Aggregeringen er inline i `ComplianceAssessmentController::index` | 3 |
-| ETR-03 | Les revisjoner med scope, kontrollhandlinger og funn | `visibleAudits`, `findVisibleAudit` | – | – | Ja (lesing) | A | `ComplianceAuditController::row` er inline. Fritekst holdes utenfor (D8). | 3 |
-| ETR-04 | Les kravbibliotek og standarder | `ComplianceFrameworkPresenter` | – | – | Ja (lesing) | A | – | 3 |
-| ETR-05 | Oppmerksomhet for krav og revisjoner | `ComplianceAttentionService::reasonsForRequirements`, `ComplianceAuditAttentionService::reasonsForAudits` | – | – | Ja (lesing) | A | Ingen `overview(User)`. Må settes sammen som i `ComplianceSection`. | 3 |
+| ETR-01 | Les kravregister og krav | `visibleRequirements`, `findVisibleRequirement`, `ComplianceRegisterGroups` | `GET /api/v1/compliance/requirements`, `/{requirementId}` | Implementert | Ja (`compliance.view`) | A | Med vurderingshistorikk (resultat og tid). Uten kravtekst, begrunnelser og personer (D8). | Ferdig |
+| ETR-02 | Etterlevelsesstatus per kilde eller standard | `ComplianceStatusResolver::latestForRequirements`/`summarize`, `ComplianceAssessmentOverview` | `GET /api/v1/compliance/status` | Implementert | Ja (lesing) | A | Etterlevelsesvurderingens tall og grupper (`ComplianceAssessmentOverview`) | Ferdig |
+| ETR-03 | Les revisjoner med scope, kontrollhandlinger og funn | `visibleAudits`, `findVisibleAudit` | `GET /api/v1/compliance/audits`, `/{auditId}` | Implementert | Ja (lesing) | A | Scope, kontrollhandlinger og funn fra revisjonssidens egne tjenester. Uten fritekst, revisorens navn og Kvalitet-kontekst (D8). | Ferdig |
+| ETR-04 | Les kravbibliotek og standarder | `ComplianceFrameworkPresenter` | `GET /api/v1/compliance/frameworks`, `/{frameworkId}` | Implementert | Ja (lesing) | A | Uten bibliotekets beskrivelser og veiledning | Ferdig |
+| ETR-05 | Oppmerksomhet for krav og revisjoner | `ComplianceAttentionService::reasonsForRequirements`, `ComplianceAuditAttentionService::reasonsForAudits` | Kodene på radene, `GET /api/v1/attention` | Implementert | Ja (lesing) | A | Tjenestenes egne regler, også `not_assessed` for et bibliotekskrav med åpen relevans (funn 20) | Ferdig |
 | ETR-06 | Opprett, endre, sett utgått eller gjenåpne krav og kravkilder | `ComplianceRequirementService`, `ComplianceSourceService`, `ComplianceRequirementLifecycleService::retire`/`reopen` | – | – | Nei | B | S1 | 4 |
 | ETR-07 | Aktiver standard fra biblioteket | `ComplianceFrameworkActivationService::activate` | – | – | Nei | B | Påvirker hele kundens kravgrunnlag | Ikke anbefalt |
 | ETR-08 | Koble krav til prosess eller kontroll | `ComplianceQualityContextService::link*`/`unlink*` | – | – | Nei | B | Fase 3 | 4 |
@@ -329,9 +349,9 @@ Tilgang: `SupplierAccessService` (`visibleSuppliers`, `findVisibleSupplier`). Mo
 
 | ID | Funksjon | Domenetjeneste | API-endepunkt | API-status | Integrasjon i dag | Kat. | Avhengigheter | Fase |
 |---|---|---|---|---|---|---|---|---|
-| LEV-01 | Les leverandørregister med kritikalitet, status og kontrollstatus | `visibleSuppliers`, `SupplierAssuranceResolver::forSuppliers`, `SupplierAttentionService::findingsForSuppliers` | – | – | Ja (`supplier.view`) | A | Radene er inline. Kontaktopplysninger og notater holdes utenfor (D8). | 3 |
-| LEV-02 | Les én leverandør: krav, kontroller, aktsomhet, oppfølgingsplan, koblinger | `findVisibleSupplier`, `SupplierRequirementPayload`, `SupplierFollowUpPlan`, `SupplierDueDiligenceService::payload` | – | – | Ja (lesing) | A | Stor inline-presentasjon i `SupplierManagementController::show` | 3 |
-| LEV-03 | Les katalogen over kontrollkrav | `SupplierRequirementPayload::catalogue` | – | – | Ja (lesing) | A | – | 3 |
+| LEV-01 | Les leverandørregister med kritikalitet, status og kontrollstatus | `visibleSuppliers`, `SupplierAssuranceResolver::forSuppliers`, `SupplierAttentionService::findingsForSuppliers` | `GET /api/v1/suppliers` | Implementert | Ja (`supplier.view`) | A | Uten leveransebeskrivelse, kontaktopplysninger og notater (D8) | Ferdig |
+| LEV-02 | Les én leverandør: krav, kontroller, aktsomhet, oppfølgingsplan, koblinger | `findVisibleSupplier`, `SupplierRequirementPayload`, `SupplierFollowUpPlan`, `SupplierDueDiligenceService::payload` | `GET /api/v1/suppliers/{supplierId}` | Implementert | Ja (lesing) | A | Krav, kontrollstatus, aktsomhet, oppfølgingsplan og id-er for koblinger (null uten lesetilgang til modulen). Uten dokumenter, filer, fritekst og personer. | Ferdig |
+| LEV-03 | Les katalogen over kontrollkrav | `SupplierRequirementPayload::catalogue` | `GET /api/v1/suppliers/control-requirements` | Implementert | Ja (lesing) | A | – | Ferdig |
 | LEV-04 | Last ned dokumentfil | Inline: `PrivateFileStore`, `PrivateFileResponse` | – | – | Nei | B | Filene virusskannes ikke (`require_clean_scan=false`). Krever DPIA. | Ikke anbefalt nå |
 | LEV-05 | Endre leverandør eller leverandørprofil | `SupplierRegistration::update`, `SupplierProfileService::save` | – | – | Nei | B | S1, A37 | 4 |
 | LEV-06 | Registrer, endre eller forny dokumentasjon (med fil) | `SupplierDocumentService::*` | – | – | Nei | B | Filer og skanning | 4 eller senere |
@@ -349,9 +369,9 @@ Tilgang: `ManagementReviewAccessService` (`visibleReviews`, `findVisible`). Pres
 
 | ID | Funksjon | Domenetjeneste | API-endepunkt | API-status | Integrasjon i dag | Kat. | Avhengigheter | Fase |
 |---|---|---|---|---|---|---|---|---|
-| LDG-01 | Les gjennomganger (liste) | `visibleReviews` | – | – | Ja (`management_review.view`) | A | – | 3 |
-| LDG-02 | Les én gjennomgang med seksjoner | `ManagementReviewPresenter::show`, `ManagementReviewBasisService::live`/`snapshot` | – | – | Ja (lesing) | A | Seksjonene fra andre moduler vises bare med tilgang til modulen | 3 |
-| LDG-03 | Les beslutninger og tiltak med status | `ManagementReviewDecisionService` | – | – | Ja (lesing) | A | `openActions()` i registeret spør direkte på kunden, utenom `visibleReviews`, og kan ikke gjenbrukes uendret | 3 |
+| LDG-01 | Les gjennomganger (liste) | `visibleReviews` | `GET /api/v1/management-reviews` | Implementert | Ja (`management_review.view`) | A | – | Ferdig |
+| LDG-02 | Les én gjennomgang med seksjoner | `ManagementReviewPresenter::show`, `ManagementReviewBasisService::live`/`snapshot` | `GET /api/v1/management-reviews/{reviewId}` | Implementert | Ja (lesing) | A | Gjennomgangssidens egne porter (`ManagementReviewPresenter::show`). Seksjonenes tilstand og vurdering, uten grunnlagstallene og fritekst (funn 19). | Ferdig |
+| LDG-03 | Les beslutninger og tiltak med status | `ManagementReviewDecisionService` | `decision_list` i `GET /api/v1/management-reviews/{reviewId}` | Implementert | Ja (lesing) | A | Uten beslutningstekst (funn 19). `openActions()` er ikke gjenbrukt. | Ferdig |
 | LDG-04 | Rapport og PDF | `ManagementReviewReportBuilder::document` | – | – | Nei | B | Fil og fritekst (D8) | Ikke anbefalt nå |
 | LDG-05 | Opprett eller endre gjennomgang: seksjonsvurdering, konklusjon, deltakere, neste gjennomgang | `ManagementReviewService::*` | – | – | Nei | B | Innholdet er ledelsens egen vurdering | Ikke anbefalt |
 | LDG-06 | Beslutninger og tiltak: opprett, endre, status, ny ansvarlig, følg opp i Avvik | `ManagementReviewDecisionService::*` | – | – | Nei | B | Bare statusoppdatering fra ansvarlig kan være aktuelt, og bare i delegert modus | 5 |
@@ -403,7 +423,7 @@ Tilgang: `SavedNoticeAccessService` (`visibleQueryFor`, `manageableQueryFor`). D
 | ID | Funksjon | Domenetjeneste | API-endepunkt | API-status | Integrasjon i dag | Kat. | Avhengigheter | Fase |
 |---|---|---|---|---|---|---|---|---|
 | FEL-01 | Hvem er jeg, moduler, rettigheter og fagområder | `ApiAccessSummary` | `GET /api/v1/me` | Implementert | Ja | A | Utvides når nye moduler får API | Ferdig |
-| FEL-02 | Samlet oppmerksomhet på tvers av moduler | `RiskAttentionService`, `ObjectiveAttentionService`, `ImprovementAttentionService` (fase 2). `SupplierAttentionService::overview`, `ComplianceAttentionService`, `ComplianceAuditAttentionService`, `QualityAttentionService` kommer i fase 3. | `GET /api/v1/attention` | Implementert | Ja (lesing) | A | Bare moduler aktøren har tilgang til. Ledelsens gjennomgang har ingen egen oppmerksomhetstjeneste. | Ferdig for fase 2, utvides i 3 |
+| FEL-02 | Samlet oppmerksomhet på tvers av moduler | `RiskAttentionService`, `ObjectiveAttentionService`, `ImprovementAttentionService` (fase 2). `ComplianceAttentionService`, `ComplianceAuditAttentionService`, `SupplierAttentionService`, `QualityAttentionService` (fase 3). | `GET /api/v1/attention` | Implementert | Ja (lesing) | A | Bare moduler aktøren har tilgang til. Ledelsens gjennomgang har ingen egen oppmerksomhetstjeneste. | Ferdig (fase 2 og 3) |
 | FEL-03 | Fagområder (referansedata) | `ApiAccessSummary::readableAreas` | `GET /api/v1/business-areas` | Implementert | Ja | A | Samme regel som `/me`, med «alle» skrevet ut | Ferdig |
 | FEL-04 | Mine oppgaver | `MyTasksService::tasksFor` (ni `MyTaskSource`-er) | – | – | Nei | B | Delegert modus (D2). Gir ingen mening for en integrasjon. | 5 |
 | FEL-05 | Varsler (bjellen) | `UserNotificationService` | – | – | Nei | B | Personlig. Bare i delegert modus, om i det hele tatt. | 5 eller aldri |
@@ -509,7 +529,7 @@ Prinsipper: bruk eksisterende domenetjenester og tilgangstjenester, gjenbruk mø
 
 ## Del 5 – Funn fra denne gjennomgangen
 
-Kontrollert i koden 2026-10-24. Bare funn 1 er løst (se raden). Funn 13–16 kom fra fase 2.
+Kontrollert i koden 2026-10-24. Funn 1 er løst og funn 13 delvis løst (se radene). Funn 13–16 kom fra fase 2 og funn 17–22 fra fase 3.
 
 | # | Funn | Betydning | Hører til |
 |---|---|---|---|
@@ -525,7 +545,13 @@ Kontrollert i koden 2026-10-24. Bare funn 1 er løst (se raden). Funn 13–16 ko
 | 10 | **To `KpiPresenter`-klasser**, én for web og én for API. | Risiko for at web og API glir fra hverandre (arkitektur §8.2). | Fase 2 |
 | 11 | **Statuslinjen i `external-api-phase-1-decisions.md`** sier at «Mål og KPI venter på vurdering» og nevner ikke skriveoperasjonen i §20. | Dokumentet er utdatert øverst. | Dokumentasjon |
 | 12 | **K18 er løst.** `wiki.knowledge.handoff` er en egen rettighet i katalogen. Kunnskapsoverføring er bevisst uten menneskesperre, fordi resultatet går til menneskelig godkjenning i Wiki. | Ingen. Gjelder som forutsetning for WIK-05. | – |
-| 13 | **RIS-02: Kvalitet-koblingene er ikke levert.** Risikoens kontroller og prosesskontekst er Kvalitets data. Kvalitet er ikke en modul API-et betjener (`ApiRouteContractTest`), feltvalget for Kvalitet er ikke vurdert, og KVA-02 (godkjent versjon eller arbeidsversjon) er ikke besluttet. Fase 2 skulle ikke endre Kvalitet. | RIS-02 er delvis levert. Koblingene kan leveres sammen med MOK-06 når Kvalitet kan leses (fase 3). | Fase 3 |
+| 13 | **RIS-02: Kvalitet-koblingene er ikke levert.** **Delvis løst i fase 3:** kontroller og prosesser er levert på prosessnivå. Resten er funn 17. Risikoens kontroller og prosesskontekst er Kvalitets data. Kvalitet er ikke en modul API-et betjener (`ApiRouteContractTest`), feltvalget for Kvalitet er ikke vurdert, og KVA-02 (godkjent versjon eller arbeidsversjon) er ikke besluttet. Fase 2 skulle ikke endre Kvalitet. | RIS-02 er delvis levert. Koblingene kan leveres sammen med MOK-06 når Kvalitet kan leses (fase 3). | Fase 3 |
 | 14 | **Presentasjonen er ikke delt med webgrensesnittet.** Fase 2 forutsatte at presentasjonen ble trukket ut av webkontrollerne. API-presentasjonsklassene bruker de samme domenetjenestene som websidene (tilgang, oppmerksomhet, vurdering, tiltak, aksept, verifisering, målinger), men webkontrollerne er ikke endret. Oppgaven sa at ordinære brukeres funksjonalitet ikke skulle endres og at omfattende refaktorering ikke skulle gjøres. | Feltutvalget kan gli fra webgrensesnittet, men reglene kan ikke det. Funn 10 står fortsatt. | Senere opprydding |
 | 15 | **`/me` har ingen egen linje for forbedringer.** `deviations` i `/me` og Kundemiljø → Integrasjoner gjelder både `/deviations` og `/improvements`: samme modul og samme rettighet. Linjen er ikke endret, så Kundemiljø er uendret. | Kan forveksles. Beskrevet i spesifikasjonen. | Dokumentasjon |
 | 16 | **Tre svar er ikke paginert:** `GET /attention`, `GET /business-areas` og `GET /kpis/{id}/measurements` returnerer hele listen. De er avgrenset av det aktøren kan se, og målehistorikken av én KPI. | Store kunder kan få store svar fra `/attention`. | Følges med i pilot |
+| 17 | **KVA-02 er ikke besluttet, og det stopper alt som leses fra en prosessflyt.** Aktivitetenes navn og roller, publiseringsstatus, kontrollenes plasseringer og funnet `controls_without_activity` leses fra arbeidsversjonen av prosessflyten (`QualityProcessBlueprint`). Den godkjente versjonen ligger i revisjonene. Å vise dem gjennom API-et er å velge versjon. | RIS-02, MOK-06 og KVA-04 er delvis levert. Produkteier må avgjøre om API-et viser godkjent versjon, arbeidsversjon eller begge. | Produkteier |
+| 18 | **Kvalitet har fortsatt ingen lesetjeneste i `QualityAccessService`.** Fase 3-planen forutsatte `visible*`/`findVisible*` der. API-et leser kundens elementer direkte under Kvalitets egen leseregel (`QualityProcessContextReader::canRead`, som brukes av alle moduler som leser Kvalitet). Kvalitet har ingen fagområder, så resultatet er det samme. | Ingen ny tilgangsmekanisme. En samlet lesetjeneste kan komme med KVA-02. | Senere opprydding |
+| 19 | **Ledelsens gjennomgang: grunnlagstallene og beslutningstekstene er utelatt.** Grunnlaget er andre modulers data og kan leses gjennom deres egne endepunkter. Beslutnings- og tiltakstekst er fritekst (D8). En beslutning vises med type, ansvarlig, frist, oppfølging og status, ikke med hva den gikk ut på. | Om beslutningsteksten skal regnes som tittel, er en produktbeslutning. | Produkteier |
+| 20 | **Etterlevelse: oppmerksomhetstjenesten gir `not_assessed` for et bibliotekskrav med åpen relevans,** mens Etterlevelsesvurdering grupperer det som `relevance_open`. API-et speiler begge tjenestene uendret: `attention` følger `ComplianceAttentionService`, og `compliance.group` følger `ComplianceAssessmentOverview`. | Kan virke motstridende for klienten. Beskrevet i spesifikasjonen. | Dokumentasjon |
+| 21 | **Kundemiljø → Integrasjoner viser fire nye linjer, og Avvik-linjen heter nå «Avvik og forbedringer».** Linjene kommer fra samme oppsummering som `/me`. Moduler uten fagområder vises som «hele kundemiljøet» og har `business_areas: null` i `/me`. | Synlig endring for System Owner, i tråd med hva integrasjonen faktisk kan lese. | – |
+| 22 | **Organisasjonsnummer er med i leverandørregisteret.** Det er et offentlig identifikator-felt, men for enkeltpersonforetak kan det peke på en person. | Tas med i DPIA (D14). | Personvern |
