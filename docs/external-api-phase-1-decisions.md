@@ -1,6 +1,6 @@
 # Eksternt API – beslutningsgrunnlag for fase 1
 
-**Status:** Første leveranse er bygget 2026-10-23 (§15): autentisering, kundetildeling, feilformat, `GET /api/v1/me` og `GET /api/v1/risks`. D13 er besluttet og gjennomført 2026-10-24 sammen med beskyttelsen av integrasjonsidentiteter (§16). Øvrige endepunkter venter på vurdering. Ingenting er satt i produksjon.
+**Status:** API fase 1 er **lesebasert**. Første leveranse (§15) og D13 med beskyttelse av integrasjonsidentiteter (§16) er bygget. Kontrollen 2026-10-24 (§17) har rettet Entra-innloggingen og dokumentert hvordan skriving kan utvides senere. Øvrige endepunkter venter på vurdering. Ekte Entra-, Azure- og Siggjo-testing er utsatt fordi miljøene ikke er tilgjengelige. Ingenting er satt i produksjon.
 **Dato:** 2026-10-23
 **Gren:** `feature/external-api-foundation`
 **Bygger på:** [`external-api-architecture.md`](external-api-architecture.md) (særlig §4, §5, §8.3, §9 og §15), [`external-api-phase-0-plan.md`](external-api-phase-0-plan.md) §2n, [`operations/entra-sso.md`](operations/entra-sso.md), [`operations/security.md`](operations/security.md) §9 og [`AGENTS.md`](../AGENTS.md).
@@ -511,7 +511,7 @@ Ingen klienter eller tildelinger er opprettet i utviklings- eller produksjonsmil
 
 **Konsekvens:** `EntraOidcClient::validateIdToken()` (vanlig innlogging med Entra) bruker `parseKeySet($jwks)` uten standardalgoritme og vil avvise **hvert** ekte ID-token. Entra-innlogging virker derfor ikke mot Microsoft i dag. Testene fanget det ikke, fordi de enten erstatter OIDC-klienten eller bruker en nøkkelliste med `alg`.
 
-**Det krever egen retting.** Den er ikke gjort i denne runden:
+**Det krevde egen retting, og den er gjort 2026-10-24 (§17).** Opprinnelig vurdering:
 
 - Rettingen er å oppgi `'RS256'` som standardalgoritme, slik API-et gjør. Det svekker ikke signaturvalideringen: biblioteket krever fortsatt at tokenets `alg` er lik nøkkelens, så bare RS256-signerte tokens godtas, og `none` og HMAC avvises.
 - Rettingen bør komme med en test som bruker en nøkkelliste uten `alg` (som Microsofts).
@@ -528,4 +528,92 @@ Dette kan ikke testes uten Siggjos og Advanias registreringer:
 5. **Verifisere på et ekte token:** `ver` er `2.0`, `iss` er `https://login.microsoftonline.com/{tid}/v2.0`, `azp` er Siggjos applikasjons-ID, `roles` inneholder `Procynia.Read.All`, og det finnes ingen `scp`. Kontroller også `idtyp` og `azpacr`. Avklar om `azpacr = 2` skal kreves (D5).
 6. **Negative prøver i staging (V4):** feil `aud`, token fra en annen tenant, fremmed app med samme rolle, deaktivert klient, tilbakekalt tildeling og `Procynia-Customer` for en kunde uten tildeling.
 7. **Nøkkelrotasjon:** at en ny `kid` fra Microsoft blir godtatt innen cache-tiden (1 time).
+
+---
+
+## 17. Kontroll før flere endepunkter (2026-10-24)
+
+### Rammer som gjelder
+
+- **API fase 1 er lesebasert.** Ingen API-rute skriver, og en integrasjon har bare leserettigheter (`*.view`), både i API-et og i domenetjenestene.
+- **Avgrensede skriveoperasjoner er fortsatt et arkitekturmål.** Senere skal AI-agenter kunne registrere og foreslå, men aldri ta menneskelige beslutninger. Modellen står under. Ingenting er åpnet.
+- **Ekte Entra-, Azure- og Siggjo-testing er utsatt** fordi miljøene ikke er tilgjengelige. Det som gjenstår, står i §16 («Gjenstår for testing med ekte Entra-token fra Siggjo») og i V1–V4 (§11).
+- **Lokal testing fortsetter med simulerte tokens og isolerte testdata.** Testene signerer med et nøkkelpar laget i testen, nøkkellisten fra Microsoft er falsk, og E2E bruker egne data i det isolerte miljøet. Ingen test krever Entra, Azure eller produksjonsdata.
+
+### 1. Integrasjoner og fremtidige skriverettigheter
+
+**Hvor begrensningen ligger i dag.** Regelen «en integrasjon leser bare» ligger ett sted og leses tre steder:
+
+| Sted | Hva |
+|---|---|
+| `CustomerPermissionCatalog::integrationPermissions()` | Listen over nøkler en integrasjon kan ha: de åtte `*.view`-nøklene. |
+| `CustomerPermissionService::has()` / `effectivePermissions()` | Alle rettighetssjekker som går via katalogen (Kvalitet, Wiki, Etterlevelse, Leverandør, Ledelsens gjennomgang). |
+| `withheldFromIntegration()` i `RiskAccessService`, `ObjectiveAccessService` og `ImprovementCaseAccessService` | Fagområdetjenestene, som leser roller direkte (`BusinessAreaGrants`). |
+
+Anbudsmatrisen (`User::tenderMatrixAllows()`) og System Owner, QA og Wiki-godkjenner er usanne for en integrasjon uansett. Det er ikke en del av lese-regelen, og skal ikke utvides.
+
+**Konsekvens i domenetjenestene i dag.** Alle skrivetjenester spør tilgangstjenesten med aktøren. En integrasjon nektes derfor med 403 i hver av dem, også ved direkte tjenestekall. Det er bevist i tjenestetestene som ble skrevet om i §16. Ingen jobb, kommando eller webrute skriver som en integrasjon, så det er ingen eksisterende arbeidsflyt som påvirkes. Integrasjonsidentiteter har aldri eksistert i utviklings- eller produksjonsdatabasen.
+
+**Kan utvides kontrollert, uten å endre `HumanDecisionGuard` eller svekke kundeseparasjonen.** Det følger av at de tre lagene er uavhengige:
+
+1. **Menneskelige beslutninger:** `HumanDecisionGuard` nekter enhver integrasjon og enhver forespørsel på API-kanalen, uavhengig av rettigheter. Databasetriggerne (`human_decision_actor`, 44 kolonner) nekter integrasjonsaktører uavhengig av applikasjonen. Ingen av dem leser `integrationPermissions()`, så en utvidelse av listen berører dem ikke.
+2. **Kundeseparasjon:** aktøren er tildelingens integrasjonsidentitet, med kunden fra tildelingen. Tjenestene kontrollerer kunden selv (`canInArea`, `may()`/`authorize()` med egen kunde). En rettighet sier *hva*, aldri *hvilken kunde*.
+3. **Rettighetsnøkler:** bare dette laget endres ved en utvidelse.
+
+**Anbefalt utvidelsesmodell (ikke bygget):**
+
+1. **To lister i katalogen:** `integrationPermissions()` (lesing, som i dag) og en ny `machineWritablePermissions()`, som er de skrivenøklene Procynia tillater for maskiner i det hele tatt. En test krever at den andre listen ikke overlapper `humanOnlyPermissions()`.
+2. **Eksplisitt samtykke per tildeling.** System Owner slår på bestemte skriverettigheter for en tildeling, som et eget valg ved siden av rollene (for eksempel `api_client_customer_grants.write_permissions` eller en egen koblingstabell). Rollene ble gitt i tro på at integrasjonen bare leser, så en rolle alene skal aldri gi skriving.
+3. **Effektive rettigheter** for en integrasjon = rollenes nøkler ∩ (lesenøkler ∪ (tildelingens skrivevalg ∩ `machineWritablePermissions()`)). Beregnes ett sted i `CustomerPermissionService`. De tre `withheldFromIntegration()`-metodene kaller den i stedet for å ha egen kopi.
+4. **API-siden:** egen app-rolle `Procynia.Propose.All` som tak (D4). `Idempotency-Key` på alle skrivekall. `api_request_log` med påvirkede id-er (D10 sa: senest ved skrive-API). `ApiRouteContractTest` tillater `POST` bare på navngitte forslagsruter.
+
+**Arkitekturutfordringer som må løses før skriving åpnes:**
+
+| # | Utfordring | Hvorfor |
+|---|---|---|
+| S1 | **Nøklene er grove.** De ti nøklene som kunne vært aktuelle (`quality.create`, `quality.edit`, `wiki.knowledge.handoff`, `risk.create`, `risk.edit`, `objective.edit`, `improvement.edit`, `compliance.edit`, `supplier.edit`, `management_review.edit`), dekker også endring av eksisterende registrert innhold. `risk.edit` endrer for eksempel felt, status, tiltak og koblinger. | En agent som skal *foreslå*, bør ikke kunne skrive om en registrert risiko. Anbefaling: smale, formålsbygde operasjoner (avvik opprettes som «Åpen», kunnskapsoverføring som kildedokument, en generisk forslagsmodell, se arkitektur §10.1) framfor å gi eksisterende redigeringsnøkler. |
+| S2 | **Visning av opphav.** 145 relasjoner til `User`, hvorav minst 38 er `created_by`/`uploaded_by`/`changed_by`, går gjennom `HumanUsersScope`. En post opprettet av en integrasjon vil vise opphavet som tomt. | Opphavet må vises som «Integrasjon: …» der historikk vises. Det krever en egen visningsregel eller en uscopet relasjon på de feltene som kan få en integrasjon som aktør. Det er ingen feil i dag, fordi ingen integrasjon skriver. |
+| S3 | **Tidligere produktbeslutninger:** B6 (ingen agentopplasting av kildedokumenter) og B7 (ingen maskinregistrerte KPI-målinger). | Må tas opp igjen eksplisitt dersom slike operasjoner skal tillates. |
+| S4 | **AI-kostnad.** D11 nekter AI på API-kanalen. En forslagsoperasjon som starter AI-arbeid i en køjobb (for eksempel en Wiki-kjøring etter kunnskapsoverføring), kjører utenfor kanalen. | Det må besluttes om agentutløst AI-arbeid er tillatt, og hvordan kostnaden henføres og begrenses. |
+| S5 | **Samtidighet og konflikter.** Kvalitet krever `base_hash` (A22, A32). Andre moduler bruker radlås. | Skriveendepunktene må gi 409 med felles feilformat (A10 dekker formatet). |
+| S6 | **Varsler.** En integrasjon kan aldri være eier eller mottaker. Den kan likevel utløse varsler til personer, for eksempel ved å sette en person som eier. | Bør være et bevisst valg per operasjon. |
+
+### 2. Entra-innlogging rettet
+
+- **Feilen:** Microsofts nøkkelliste har ikke `alg` (§16). `EntraOidcClient::validateIdToken()` leste nøklene uten standardalgoritme, og hver ekte innlogging med Entra feilet.
+- **Rettingen:** tokenets header må oppgi `RS256` før noen nøkkel hentes, og nøklene leses som RS256-nøkler (`JWK::parseKeySet($jwks, 'RS256')`). Biblioteket krever fortsatt at tokenets algoritme er lik nøkkelens, så `none`, HMAC og RS512 avvises. Kontrollene av signatur, issuer (som også låser v2-endepunktet), audience, tenant, nonce og utløp er uendret.
+- **Regresjonstest:** `EntraIdTokenValidationTest` bruker en nøkkelliste formet som Microsofts (`kty`, `use`, `kid`, `x5t`, `n`, `e`, `x5c`, `issuer`, `cloud_instance_name`, ingen `alg`) og to nøkler. Den dekker gyldig token, `none`, HS256, RS512 og uleselig token (avvist før nøkler hentes), fremmed nøkkel, ukjent `kid`, feil nonce, audience, issuer, v1-issuer og tenant, utløpt, ikke ennå gyldig, manglende utløp, og en nøkkel som oppgir en annen algoritme. Testen feiler uten rettingen.
+- **Gjenstår:** verifisering mot et ekte Entra-token. Den krever en registrert tenant og er utsatt (§16).
+
+### 3. Kontroll av integrasjonsidentitetene
+
+| Område | Resultat |
+|---|---|
+| Historiske beslutninger og aktørreferanser | Uendret. Ingen integrasjonsidentitet har eksistert utenfor tester, og en integrasjon kan ikke skrive eller beslutte, så ingen historikk peker på en. Beslutningskolonnene er beskyttet av databasetriggerne. Opphavsvisning ved fremtidig skriving er S2 over. |
+| Tilgangs- og revisjonslogger | `CustomerAccessChangeRecorder::userSnapshot()` bruker `fresh()`, som går forbi scopet. Tildelingene logges med aktør (System Owner) og integrasjonens id i øyeblikksbildet. `api_client_changes` og `customer_access_changes` er uendret og beskyttet. Testet. |
+| Kundeseparasjon | Scopet legger bare til `role != 'integration'`. Kunden kommer fortsatt fra tildelingen og kontrolleres i tjenestene. Alle tester for kundeseparasjon består. |
+| Tjenester som må gjenkjenne en integrasjon | `HumanDecisionGuard` og `CustomerPermissionService` får brukerobjektet direkte. Tildelingens relasjon og `User::integrationIdentities()` går forbi scopet med vilje. Køjobber gjenoppretter modeller uten globale scopes. Testet. |
+| Kundesletting | Ingen applikasjonsvei sletter kunder. Ved sletting i databasen setter `users.customer_id` seg til `NULL` for alle brukere, også personer, og tildelingene slettes med kunden. En integrasjon uten tildeling kan ikke autentisere. Uendret oppførsel, ingen retting. |
+| **Funnet feil** | `UniqueUserEmail` leste brukere gjennom scopet, så en integrasjons adresse så ledig ut. En kollisjon ville gitt databasefeil (500) i stedet for valideringsfeil. **Rettet**: unikhet gjelder hele tabellen, og regelen står på listen i den strukturelle testen. |
+
+### 4. Regresjonstesting
+
+**PHP, hele suiten**, kjørt på `609f72f6`, etter rettingen av SQLite-fiksturene, Entra-rettingen og rettingen av e-postunikheten. Kommando: `docker exec procynia-app php -d memory_limit=-1 vendor/bin/phpunit`.
+
+- **8667 tester, 56 718 assertions: 0 feilet, 0 feil (errors), 3 hoppet over.** Tid 38:38.
+- **Hoppet over, ikke verifisert:** de tre kjente testene i `RedisRuntimeContractTest` (`test_cache_and_queue_coexist_on_database_zero_without_colliding`, `test_a_real_job_pushed_to_redis_can_be_popped_back`, `test_session_can_be_driven_by_redis`). Årsak: «NOAUTH Authentication required». Testen kobler til den lokale Redis-en uten passord. Uendret fra fase 0, og fortsatt V1 (§11).
+- **Ingen andre feil eller hoppede tester.**
+
+**Tilleggstester for Entra:** `EntraIdTokenValidationTest` (4 tester, 19 assertions), `EntraAuthenticationTest` og hele `tests/Feature/Api` består. Mutasjonssjekk: uten standardalgoritmen feiler regresjonstesten.
+
+**Kontrollen av integrasjonsidentitetene:** `IntegrationIdentityProtectionTest` har nå 9 tester. Mutasjonssjekk: uten rettingen i `UniqueUserEmail` feiler testen for adressen.
+
+**JS:** ikke kjørt på nytt. Ingen frontendkode er endret siden forrige kjøring (2134 av 2134).
+
+**E2E**, i det isolerte miljøet: `auth.spec.js`, `roles-on-user-edit.spec.js` og `customer-integrations.spec.js`, 8 av 8. De berøres av innloggingen og av e-postvalideringen ved redigering av brukere.
+
+### Endringer i brukeropplevelsen
+
+- **Innlogging med Entra virker nå mot Microsofts faktiske nøkler.** Før feilet den alltid ved validering av ID-tokenet. Det er ennå ikke verifisert mot en ekte tenant. Innlogging med passord er uendret.
+- Ingen andre synlige endringer.
 
