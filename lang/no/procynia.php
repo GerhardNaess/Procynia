@@ -2251,6 +2251,7 @@ return [
         'advanced' => 'Avansert',
         'hide_advanced' => 'Skjul avansert',
         'analyze_requirements' => 'Analyser krav',
+        'assessment_refresh_failed' => 'AI-vurdering feilet for :failed av :total krav. Kravene er merket «Feilet». Velg «:action» for å prøve igjen.',
         'manual_requirement_overline' => 'Legg til krav',
         'manual_requirement_title' => 'Opprett et nytt krav manuelt',
         'manual_requirement_description' => 'Bruk dette når AI ikke foreslår kravet, eller når krav-ID må korrigeres før videre arbeid.',

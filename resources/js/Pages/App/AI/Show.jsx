@@ -3497,7 +3497,7 @@ export default function AiShow({
                                                                                     {tai.assessment_missing_basis_label}
                                                                                 </div>
                                                                                 <p className="mt-2 text-base leading-6 text-slate-700">
-                                                                                    {assessment.missing_information ?? '—'}
+                                                                                    {assessment.missing_information || '—'}
                                                                                 </p>
                                                                             </div>
 

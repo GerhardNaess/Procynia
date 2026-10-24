@@ -99,7 +99,7 @@ class RequirementWikiAssessmentAiClient
 
         $requirementSummary = $this->requiredString($decoded, 'requirement_summary');
         $coverageRationale = $this->requiredString($decoded, 'coverage_rationale');
-        $missingInformation = $this->requiredString($decoded, 'missing_information');
+        $missingInformation = $this->missingInformation($decoded, $coverageStatus);
         $recommendedNextStep = $this->requiredString($decoded, 'recommended_next_step');
 
         return [
@@ -111,6 +111,25 @@ class RequirementWikiAssessmentAiClient
             'missing_information' => $missingInformation,
             'recommended_next_step' => $recommendedNextStep,
         ];
+    }
+
+    /**
+     * The prompt asks for "" when coverage is "covered" and nothing is missing, so an empty value is
+     * the right answer there and only there. A partial or missing coverage must name what is missing.
+     */
+    private function missingInformation(array $decoded, string $coverageStatus): string
+    {
+        $value = $decoded['missing_information'] ?? null;
+
+        if (! is_string($value)) {
+            throw new RuntimeException('RequirementWikiAssessmentAiClient: response is missing a usable [missing_information].');
+        }
+
+        if (trim($value) === '' && $coverageStatus === SavedNoticeAiRequirementAssessment::COVERAGE_STATUS_COVERED) {
+            return '';
+        }
+
+        return $this->requiredString($decoded, 'missing_information');
     }
 
     private function requiredString(array $decoded, string $key): string

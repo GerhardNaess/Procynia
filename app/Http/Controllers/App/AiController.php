@@ -1354,14 +1354,26 @@ class AiController extends Controller
                 ]);
 
                 return back()->with('error', app(AiCostControlPresenter::class)->message($exception, $record->customer));
-            } catch (Throwable) {
+            } catch (Throwable $exception) {
+                Log::warning('[PROCYNIA][ASSESSMENT_REFRESH] Requirement assessment failed.', [
+                    'saved_notice_id' => $record->id,
+                    'requirement_id' => $requirement->id,
+                    'error' => $exception->getMessage(),
+                ]);
                 $this->persistFailedRequirementAssessment($requirement, $userId);
                 $failedCount++;
             }
         }
 
         if ($failedCount > 0) {
-            return back()->with('warning', 'AI-vurdering feilet for ett eller flere krav.');
+            $message = __('procynia.ai.assessment_refresh_failed', [
+                'failed' => $failedCount,
+                'total' => $confirmedRequirements->count(),
+                'action' => __('procynia.ai.analyze_requirements'),
+            ]);
+
+            // Nothing assessed is a failed action; some assessed is a result that needs attention.
+            return back()->with($failedCount === $confirmedRequirements->count() ? 'error' : 'warning', $message);
         }
 
         return back()->with('success', 'Krav analysert.');

@@ -15,7 +15,9 @@ use App\Services\Ai\Wiki\EnterpriseWikiSemanticSearchPlanAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAssessmentAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAssessmentService;
 use App\Services\Ai\Wiki\RequirementWikiResearchAiClient;
+use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Mockery\MockInterface;
@@ -308,7 +310,14 @@ class RequirementWikiAssessmentControllerTest extends TestCase
             ->post(route('app.ai.requirements.assessment.refresh', ['savedNotice' => $savedNotice->id]));
 
         $response->assertRedirect();
-        $response->assertSessionHas('warning', 'AI-vurdering feilet for ett eller flere krav.');
+        // Nothing was assessed, so the action failed: an error, which the next page shows.
+        $response->assertSessionHas('error', 'AI-vurdering feilet for 2 av 2 krav. Kravene er merket «Feilet». Velg «Analyser krav» for å prøve igjen.');
+        $response->assertSessionMissing('warning');
+
+        $flash = $this->inertiaPageFromResponse(
+            $this->actingAs($context['user'])->get(route('app.ai.show', ['savedNotice' => $savedNotice->id])),
+        )['props']['flash'];
+        $this->assertSame('AI-vurdering feilet for 2 av 2 krav. Kravene er merket «Feilet». Velg «Analyser krav» for å prøve igjen.', $flash['error']);
 
         // The prior completed assessment must be preserved untouched, never downgraded to failed.
         $this->assertDatabaseHas('saved_notice_ai_requirement_assessments', [
@@ -329,6 +338,120 @@ class RequirementWikiAssessmentControllerTest extends TestCase
             ->firstOrFail();
         $this->assertSame([], $failedAssessment->wiki_sources_snapshot);
         $this->assertNull($failedAssessment->assessed_at);
+    }
+
+    /**
+     * V2-F1: the real assessment client (only the OpenAI transport is faked) accepts the empty
+     * missing_information its prompt asks for on full coverage, and the row is completed.
+     */
+    public function test_full_coverage_with_empty_missing_information_completes_through_the_real_client(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'WIKI-ASSESS-007', 'Wiki assessment full coverage case');
+        $document = $this->createAiDocument($savedNotice);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive kriterier for full gjennomgang.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal beskrive kriterier for full gjennomgang.',
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+        ]);
+
+        $this->mock(OpenAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('createResponse')
+            ->once()
+            ->andReturn(['id' => 'resp_test', 'status' => 'completed', 'output' => [], 'output_text' => json_encode([
+                'coverage_status' => SavedNoticeAiRequirementAssessment::COVERAGE_STATUS_COVERED,
+                'has_possible_conflict' => false,
+                'risk_level' => SavedNoticeAiRequirementAssessment::RISK_LEVEL_LOW,
+                'requirement_summary' => 'Kravet gjelder kriterier for full gjennomgang.',
+                'coverage_rationale' => 'Wiki-siden dokumenterer kriteriene.',
+                'missing_information' => '',
+                'recommended_next_step' => 'Ingen handling nødvendig.',
+            ])]));
+
+        $response = $this->actingAs($context['user'])
+            ->post(route('app.ai.requirements.assessment.refresh', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertRedirect();
+        $response->assertSessionHas('success', 'Krav analysert.');
+        $this->assertDatabaseHas('saved_notice_ai_requirement_assessments', [
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'assessment_status' => SavedNoticeAiRequirementAssessment::ASSESSMENT_STATUS_COMPLETED,
+            'coverage_status' => SavedNoticeAiRequirementAssessment::COVERAGE_STATUS_COVERED,
+            'missing_information' => '',
+        ]);
+    }
+
+    /**
+     * V2-F2: when only some requirements fail, the person is told how many and what to do, the
+     * message reaches the page, and each failure is logged with its cause.
+     */
+    public function test_a_partial_failure_is_shown_with_counts_and_logged(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'WIKI-ASSESS-008', 'Wiki assessment partial failure case');
+        $document = $this->createAiDocument($savedNotice);
+        $chunkA = $this->createAiDocumentChunk($document, 'Krav A: vurderes.');
+        $chunkB = $this->createAiDocumentChunk($document, 'Krav B: vurdering feiler.', 1);
+        $assessedRequirement = $this->createAiRequirement($savedNotice, $document, $chunkA, [
+            'requirement_identifier' => '1.1',
+            'requirement_text' => 'Krav A: vurderes.',
+        ]);
+        $failingRequirement = $this->createAiRequirement($savedNotice, $document, $chunkB, [
+            'requirement_identifier' => '1.2',
+            'requirement_text' => 'Krav B: vurdering feiler.',
+        ]);
+
+        $this->mock(RequirementWikiResearchAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('selectNextAction'));
+        $this->mock(RequirementWikiAssessmentAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('assessRequirement')
+            ->twice()
+            ->andReturnUsing(function (string $identifier): array {
+                if ($identifier === '1.2') {
+                    throw new \RuntimeException('RequirementWikiAssessmentAiClient: response is missing a usable [risk_level].');
+                }
+
+                return [
+                    'coverage_status' => SavedNoticeAiRequirementAssessment::COVERAGE_STATUS_MISSING,
+                    'has_possible_conflict' => false,
+                    'risk_level' => SavedNoticeAiRequirementAssessment::RISK_LEVEL_MEDIUM,
+                    'requirement_summary' => 'Krav A.',
+                    'coverage_rationale' => 'Ingen Wiki-sider.',
+                    'missing_information' => 'Rutinen er ikke dokumentert.',
+                    'recommended_next_step' => 'Dokumenter rutinen.',
+                ];
+            }));
+
+        Log::spy();
+
+        $response = $this->actingAs($context['user'])
+            ->post(route('app.ai.requirements.assessment.refresh', ['savedNotice' => $savedNotice->id]));
+
+        $message = 'AI-vurdering feilet for 1 av 2 krav. Kravene er merket «Feilet». Velg «Analyser krav» for å prøve igjen.';
+        $response->assertRedirect();
+        $response->assertSessionHas('warning', $message);
+        $response->assertSessionMissing('error');
+
+        $flash = $this->inertiaPageFromResponse(
+            $this->actingAs($context['user'])->get(route('app.ai.show', ['savedNotice' => $savedNotice->id])),
+        )['props']['flash'];
+        $this->assertSame($message, $flash['warning']);
+
+        Log::shouldHaveReceived('warning')
+            ->with('[PROCYNIA][ASSESSMENT_REFRESH] Requirement assessment failed.', \Mockery::on(
+                fn (array $context): bool => $context['saved_notice_id'] === $savedNotice->id
+                    && $context['requirement_id'] === $failingRequirement->id
+                    && str_contains($context['error'], '[risk_level]'),
+            ))
+            ->once();
+
+        $this->assertDatabaseHas('saved_notice_ai_requirement_assessments', [
+            'saved_notice_ai_requirement_id' => $assessedRequirement->id,
+            'assessment_status' => SavedNoticeAiRequirementAssessment::ASSESSMENT_STATUS_COMPLETED,
+        ]);
+        $this->assertDatabaseHas('saved_notice_ai_requirement_assessments', [
+            'saved_notice_ai_requirement_id' => $failingRequirement->id,
+            'assessment_status' => SavedNoticeAiRequirementAssessment::ASSESSMENT_STATUS_FAILED,
+        ]);
     }
 
     private function customerAdminContext(string $customerName = 'Wiki Assessment Controller Test AS'): array

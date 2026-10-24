@@ -2247,6 +2247,7 @@ return [
         'advanced' => 'Advanced',
         'hide_advanced' => 'Hide advanced',
         'analyze_requirements' => 'Analyze requirements',
+        'assessment_refresh_failed' => 'The AI assessment failed for :failed of :total requirements. They are marked «Failed». Choose «:action» to try again.',
         'manual_requirement_overline' => 'Add requirement',
         'manual_requirement_title' => 'Create a new requirement manually',
         'manual_requirement_description' => 'Use this when the AI does not suggest the requirement, or when the requirement ID must be corrected before further work.',
