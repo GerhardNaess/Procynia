@@ -134,7 +134,7 @@ Faseplanen ble vedtatt 2026-10-24. Endringer i rekkefølge eller innhold krever 
 | **2** | Fullføre lesing i modulene som er påbegynt | Risiko, Mål og KPI, Avvik og forbedringer | 🟩 Fullført lokalt 2026-10-24. RIS-02 ble fullført etter D15. Ikke produksjonsklar. |
 | **3** | Lesing i resten av styringsmodulene | Etterlevelse og revisjon, Leverandøroppfølging, Ledelsens gjennomgang, Kvalitet | 🟩 Fullført lokalt 2026-10-24, med restpunktene løst etter D15–D17. Ikke produksjonsklar. |
 | **4** | Avgrensede registreringer (utkast og forslag) | Styringsmodulene | 🟧 Påbegynt. AVF-04 og AVF-05 levert lokalt 2026-10-24. Andre registreringer (for eksempel RIS-05) krever beslutning per operasjon. |
-| **5** | Tilgang på vegne av en person | Mine oppgaver, personlige dashboards | 🟥 Blokkert av D2 |
+| **5** | Tilgang på vegne av en person | Mine oppgaver, personlige dashboards | 🟥 Blokkert av D2. Kontrollert 2026-10-24: ingen av fasens funksjoner kan bygges før D2 er opphevet (funn 27). Ingenting er implementert. |
 | **6** | Wiki gjennom den felles kunnskapskjernen | Enterprise Wiki | 🟥 Blokkert av Wiki-arkitekturbeslutning, A23 og S4 |
 | **7** | Anbud | Anbud | 🟥 Blokkert av K16, `isBidManager()`, avdelingsomfang og A46 |
 | **8** | Kopi av data og agentlag | Siggjos datamodell, MCP | 🟥 Blokkert av D7 og D14 |
@@ -169,6 +169,7 @@ Detaljer står i del 4.
 | 10 | Anbud: delte arbeidsflytfelt på kunngjøringer (K16), avdelingsomfang og A46 | Fase 7 | Produkteier / arkitektur |
 | 11 | ~~KVA-02: skal API-et vise godkjent versjon av prosessflyten, arbeidsversjonen eller begge?~~ **Besluttet 2026-10-24 (D15): bare godkjent versjon.** | Ingenting lenger. RIS-02, MOK-06 og KVA-02 kan implementeres. | Produkteier |
 | 12 | ~~Skal beslutningstekstene i Ledelsens gjennomgang eksponeres?~~ **Besluttet 2026-10-24 (D16): nei, ikke før innholdet er vurdert som egnet.** | Ingenting. API-et oppfyller dette allerede. | Produkteier |
+| 14 | **D2: skal delegert modus (tilgang på vegne av en person) bygges?** I dag gjelder D2: bare applikasjonsmodus. Hvis ja: hvilke scopes, om FEL-05 (varsler) skal være med, og om LDG-06 (statusoppdatering på egne tiltak) skal være en skriveoperasjon i delegert modus. | Hele fase 5 (FEL-04, FEL-05, LDG-06). Se funn 27. | Produkteier |
 | 13 | ~~D17: hvordan skal `controls_without_activity` vurderes i API-et?~~ **Besluttet 2026-10-24 (D17): utelates fra API-et.** Kvalitets regler og visning endres ikke, og det lages ingen egen API-regel. | Ingenting. KVA-04 er fullført. | Produkteier |
 
 ### Neste anbefalte milepæl
@@ -494,6 +495,7 @@ Prinsipper: bruk eksisterende domenetjenester og tilgangstjenester, gjenbruk mø
 | **Avhengigheter** | Beslutning om å oppheve D2. Fase 1. |
 | **Kompleksitet** | Middels–høy |
 | **Ferdig når** | Et delegert token ser det samme som personen i webgrensesnittet. Sperren for menneskelige beslutninger gjelder fortsatt (B2), og tester viser det. |
+| **Status** | 🟥 Ikke startet. Kontrollert 2026-10-24: alle tre funksjonene er B-funksjoner som bare gir mening i delegert modus, og D2 er ikke opphevet. Det finnes ingen uavhengig del som kan bygges først (funn 27). |
 
 ### Fase 6 – Wiki gjennom den felles kunnskapskjernen
 
@@ -532,7 +534,7 @@ Prinsipper: bruk eksisterende domenetjenester og tilgangstjenester, gjenbruk mø
 
 ## Del 5 – Funn fra denne gjennomgangen
 
-Kontrollert i koden 2026-10-24. Funn 1, 13 og 17 er løst (se radene). Funn 13–16 kom fra fase 2, funn 17–22 fra fase 3 og funn 23–26 fra fase 4.
+Kontrollert i koden 2026-10-24. Funn 1, 13 og 17 er løst (se radene). Funn 13–16 kom fra fase 2, funn 17–22 fra fase 3, funn 23–26 fra fase 4 og funn 27 fra fase 5.
 
 | # | Funn | Betydning | Hører til |
 |---|---|---|---|
@@ -562,3 +564,4 @@ Kontrollert i koden 2026-10-24. Funn 1, 13 og 17 er løst (se radene). Funn 13�
 | 24 | **Opphavet vises bare i Avvik og forbedringer.** Saksiden viser «Registrert av: Integrasjonen …» for en sak, og ved tiltak som en integrasjon har registrert. Navnet leses fra tildelingen (`ApiClientCustomerGrant::clientNamesFor`), som risikosiden nå også bruker. Statushistorikk, varsler og andre moduler som viser saken (for eksempel Ledelsens gjennomgang) viser fortsatt ingen avsender. | Ingen feil, fordi integrasjonen bare registrerer. Andre steder må vurderes hvis integrasjoner får flere operasjoner. | Fase 4 |
 | 25 | **Varsler følger webgrensesnittets regel.** Den ansvarlige får det vanlige varselet om tildeling (`AssignmentObserver`), med integrasjonen som `assigned_by_user_id`, akkurat som for risikotiltak. Det er ikke laget en egen varselregel for integrasjoner (S6). | System Owner bestemmer hvem som kan få varsler fra en integrasjon gjennom hvilke fagområder den kan lese. | Fase 4 |
 | 26 | **Beskrivelsen er fritekst som skrives, men aldri leses tilbake.** Domeneregelen krever beskrivelse på en sak. API-et tar den imot og lagrer den, men svarene inneholder den ikke (D8). | Integrasjonen kan ikke kontrollere hva den skrev. Tas med i DPIA (D14), fordi avvik kan inneholde særlige kategorier av personopplysninger. | Personvern |
+| 27 | **Fase 5 er blokkert i sin helhet av D2.** FEL-04 (Mine oppgaver), FEL-05 (varsler) og LDG-06 (statusoppdatering på egne tiltak) gjelder en bestemt person og har ingen mening for en integrasjon i applikasjonsmodus. Delegert modus krever i tillegg en ny innloggingsvei (delegerte scopes i Entra, kobling `oid` → `user_identities`, on-behalf-of hos Siggjo), som er både en produktbeslutning og en ny generell sikkerhetsmekanisme. Ingen av delene er bygget, og `EntraAccessTokenValidator` avviser fortsatt delegerte tokens med 403. | Ingen kode er endret i fase 5. Fasen kan startes når produkteier har opphevet D2 og tatt stilling til FEL-05 og LDG-06 (avhengighet 14 i del 1). Verifisering krever også Entra-registreringen fra fase 1. | Fase 5 |
