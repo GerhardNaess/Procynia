@@ -144,6 +144,8 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $table->id();
             $table->string('name');
             $table->string('email')->nullable();
+            // Every read of users leaves integration identities out (HumanUsersScope).
+            $table->string('role')->default('user');
             $table->timestamps();
         });
 
