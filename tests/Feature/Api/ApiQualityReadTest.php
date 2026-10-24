@@ -13,6 +13,7 @@ use App\Models\QualityActivityControl;
 use App\Models\QualityControlDetail;
 use App\Models\QualityItem;
 use App\Models\QualityItemDocument;
+use App\Models\QualityItemRelation;
 use App\Models\QualityProcessBlueprint;
 use App\Models\QualityTool;
 use App\Models\Risk;
@@ -126,6 +127,9 @@ class ApiQualityReadTest extends TestCase
         $area = $this->businessArea($customer, 'Drift');
         $process = $this->process($customer, 'Lønnskjøring', ['Beregn lønn', 'Godkjenn utbetaling']);
         $whole = $this->process($customer, 'Innkjøp', ['Bestill']);
+        // Approved: the activities are named from the approved flow (D15).
+        $this->approve($customer, $process);
+        $this->approve($customer, $whole);
         $control = $this->item($customer, QualityItem::TYPE_CONTROL, 'Tilgangsgjennomgang');
         QualityControlDetail::query()->create(['customer_id' => $customer->id, 'quality_item_id' => $control->id, 'criterion' => 'FRITEKST-KRITERIUM']);
         QualityActivityControl::query()->create(['customer_id' => $customer->id, 'quality_item_id' => $process->id, 'activity_key' => 'beregn-lonn', 'control_item_id' => $control->id]);
@@ -147,13 +151,17 @@ class ApiQualityReadTest extends TestCase
         $riskDetail = $this->get("/api/v1/risks/{$risk->id}", $headers)->assertOk();
         $riskDetail->assertJsonPath('data.controls', [['id' => $control->id, 'title' => 'Tilgangsgjennomgang', 'code' => null, 'status' => 'active']]);
         $processes = collect($riskDetail->json('data.processes'))->keyBy('id');
-        $this->assertSame(['id' => $whole->id, 'title' => 'Innkjøp', 'code' => null, 'whole_process' => true, 'activity_count' => 0], $processes[$whole->id]);
-        $this->assertSame(['id' => $process->id, 'title' => 'Lønnskjøring', 'code' => null, 'whole_process' => false, 'activity_count' => 1], $processes[$process->id]);
+        $this->assertSame(['id' => $whole->id, 'title' => 'Innkjøp', 'code' => null, 'whole_process' => true, 'activity_count' => 0, 'activities' => []], $processes[$whole->id]);
+        $this->assertSame([
+            'id' => $process->id, 'title' => 'Lønnskjøring', 'code' => null, 'whole_process' => false, 'activity_count' => 1,
+            'activities' => [['key' => 'beregn-lonn', 'label' => 'Beregn lønn', 'role' => 'Lønnsansvarlig']],
+        ], $processes[$process->id]);
 
         $kpiDetail = $this->get("/api/v1/kpis/{$kpi->id}", $headers)->assertOk();
         $kpiDetail->assertJsonPath('data.id', $kpi->id);
         $kpiProcesses = collect($kpiDetail->json('data.processes'))->keyBy('id');
         $this->assertSame(2, $kpiProcesses[$process->id]['activity_count']);
+        $this->assertSame(['Beregn lønn', 'Godkjenn utbetaling'], array_column($kpiProcesses[$process->id]['activities'], 'label'));
         $this->assertTrue($kpiProcesses[$whole->id]['whole_process']);
         // The rest of the KPI is exactly its row in GET /kpis.
         $listed = $this->get('/api/v1/kpis', $headers)->json('data.0');
@@ -162,7 +170,7 @@ class ApiQualityReadTest extends TestCase
         foreach ([$riskDetail, $kpiDetail] as $response) {
             $body = (string) $response->getContent();
 
-            foreach (['FRITEKST', 'Beregn lønn', 'Godkjenn', 'Lønnsansvarlig', 'placements', 'criterion', '/app/'] as $absent) {
+            foreach (['FRITEKST', 'placements', 'criterion', 'has_unpublished_changes', '/app/'] as $absent) {
                 $this->assertStringNotContainsString($absent, $body);
             }
         }
@@ -234,6 +242,141 @@ class ApiQualityReadTest extends TestCase
         $this->assertSame($before, $this->domainState($customer));
     }
 
+    public function test_one_process_shows_only_its_approved_flow_never_the_working_version(): void
+    {
+        $client = $this->apiClient();
+        $customer = $this->apiCustomer();
+        $process = $this->process($customer, 'Lønnskjøring', ['Beregn lønn', 'Godkjenn utbetaling']);
+        $this->approve($customer, $process);
+        $approvedAt = $process->fresh()->updated_at;
+        // Changed after approval: a step renamed and one added. None of it is approved.
+        $this->storeFlow($customer, $process, ['Beregn lønn ARBEIDSVERSJON', 'Godkjenn utbetaling', 'Ny kontroll ARBEIDSVERSJON'], ['beregn-lonn', 'godkjenn-utbetaling', 'ny-kontroll']);
+        $control = $this->item($customer, QualityItem::TYPE_CONTROL, 'Lønnskontroll');
+        QualityActivityControl::query()->create(['customer_id' => $customer->id, 'quality_item_id' => $process->id, 'activity_key' => 'beregn-lonn', 'control_item_id' => $control->id]);
+        QualityActivityControl::query()->create(['customer_id' => $customer->id, 'quality_item_id' => $process->id, 'activity_key' => 'ny-kontroll', 'control_item_id' => $control->id]);
+        $policy = $this->item($customer, QualityItem::TYPE_POLICY, 'Lønnspolicy');
+        QualityItemRelation::query()->create(['customer_id' => $customer->id, 'from_item_id' => $policy->id, 'to_item_id' => $process->id, 'relation_type' => QualityItemRelation::TYPE_GOVERNS]);
+        $this->grantReader($client, $customer);
+        $headers = $this->asCustomer($this->accessToken(), $customer);
+
+        $response = $this->get("/api/v1/quality/items/{$process->id}", $headers);
+
+        $response->assertOk();
+        $response->assertExactJsonStructure(['data' => [...self::ROW_KEYS, 'relations', 'publication', 'approved_flow' => ['lanes', 'nodes', 'edges'], 'placed_controls'], 'meta' => ['as_of', 'request_id']]);
+        $response->assertJsonPath('data.publication.state', 'approved');
+        $response->assertJsonPath('data.publication.revision_number', 1);
+        $this->assertNotNull($response->json('data.publication.approved_at'));
+        $response->assertJsonPath('data.approved_flow.lanes', [['key' => 'lonn', 'label' => 'Lønnsansvarlig']]);
+        $steps = collect($response->json('data.approved_flow.nodes'))->where('type', 'step')->values();
+        // The approved labels and steps — not the renamed one, not the added one.
+        $this->assertSame(['Beregn lønn', 'Godkjenn utbetaling'], $steps->pluck('label')->all());
+        $this->assertSame(['key' => 'beregn-lonn', 'type' => 'step', 'label' => 'Beregn lønn', 'lane' => 'lonn', 'subprocess_item_id' => null], $steps[0]);
+        $response->assertJsonPath('data.placed_controls', [['activity_key' => 'beregn-lonn', 'control_id' => $control->id]]);
+        $response->assertJsonPath('data.relations', [[
+            'relation_type' => 'governs', 'direction' => 'incoming',
+            'item' => ['id' => $policy->id, 'quality_type' => 'policy', 'title' => 'Lønnspolicy', 'code' => null, 'status' => 'active'],
+        ]]);
+
+        // The control is placed where the approved flow has it, and nowhere else.
+        $this->get("/api/v1/quality/items/{$control->id}", $headers)
+            ->assertOk()
+            ->assertJsonPath('data.placements', [['process_id' => $process->id, 'activity_key' => 'beregn-lonn', 'activity_label' => 'Beregn lønn', 'activity_role' => 'Lønnsansvarlig']]);
+
+        $body = (string) $response->getContent().$this->get("/api/v1/quality/items/{$control->id}", $headers)->getContent();
+
+        foreach (['ARBEIDSVERSJON', 'ny-kontroll', 'has_unpublished_changes', 'current_with_changes', 'FRITEKST', 'description', 'approved_by', '/app/'] as $absent) {
+            $this->assertStringNotContainsString($absent, $body);
+        }
+    }
+
+    public function test_a_process_without_an_approved_flow_or_retired_has_no_flow_and_links_name_only_approved_activities(): void
+    {
+        $client = $this->apiClient();
+        $customer = $this->apiCustomer();
+        $area = $this->businessArea($customer, 'Drift');
+        $draft = $this->process($customer, 'Utkast', ['Første steg UTKAST']);
+        $approved = $this->process($customer, 'Lønnskjøring', ['Beregn lønn', 'Godkjenn utbetaling']);
+        $this->approve($customer, $approved);
+        $this->storeFlow($customer, $approved, ['Beregn lønn', 'Godkjenn utbetaling', 'Nytt steg ARBEIDSVERSJON']);
+        $retired = $this->process($customer, 'Gammel prosess', ['Gammelt steg']);
+        $this->approve($customer, $retired);
+        $retired->forceFill(['status' => QualityItem::STATUS_RETIRED])->save();
+        $risk = Risk::query()->create(['customer_id' => $customer->id, 'business_area_id' => $area->id, 'title' => 'Feil lønn', 'status' => Risk::STATUS_IDENTIFIED]);
+        RiskActivity::query()->create(['customer_id' => $customer->id, 'risk_id' => $risk->id, 'quality_item_id' => $approved->id, 'activity_key' => 'beregn-lonn']);
+        RiskActivity::query()->create(['customer_id' => $customer->id, 'risk_id' => $risk->id, 'quality_item_id' => $approved->id, 'activity_key' => 'nytt-steg-arbeidsversjon']);
+        RiskActivity::query()->create(['customer_id' => $customer->id, 'risk_id' => $risk->id, 'quality_item_id' => $draft->id, 'activity_key' => 'forste-steg-utkast']);
+        RiskProcess::query()->create(['customer_id' => $customer->id, 'risk_id' => $risk->id, 'quality_item_id' => $retired->id]);
+        $objective = Objective::query()->create(['customer_id' => $customer->id, 'business_area_id' => $area->id, 'title' => 'Riktig lønn']);
+        $kpi = Kpi::query()->create(['customer_id' => $customer->id, 'objective_id' => $objective->id, 'title' => 'Feilutbetalinger', 'unit' => Kpi::UNIT_COUNT, 'target_max' => '0']);
+        KpiActivity::query()->create(['customer_id' => $customer->id, 'kpi_id' => $kpi->id, 'quality_process_id' => $approved->id, 'activity_key' => 'godkjenn-utbetaling']);
+        KpiActivity::query()->create(['customer_id' => $customer->id, 'kpi_id' => $kpi->id, 'quality_process_id' => $draft->id, 'activity_key' => 'forste-steg-utkast']);
+        $identity = $this->integrationIdentity($customer);
+        $this->giveRole($identity, [CustomerPermissionCatalog::RISK_VIEW, CustomerPermissionCatalog::OBJECTIVE_VIEW, CustomerPermissionCatalog::QUALITY_VIEW]);
+        $this->grantTo($client, $customer, $identity);
+        $headers = $this->asCustomer($this->accessToken(), $customer);
+
+        $this->get("/api/v1/quality/items/{$draft->id}", $headers)->assertOk()
+            ->assertJsonPath('data.publication', ['state' => 'not_approved', 'revision_number' => null, 'approved_at' => null])
+            ->assertJsonPath('data.approved_flow', null)
+            ->assertJsonPath('data.placed_controls', []);
+        $retiredRead = $this->get("/api/v1/quality/items/{$retired->id}", $headers)->assertOk();
+        $retiredRead->assertJsonPath('data.publication.state', 'retired')->assertJsonPath('data.approved_flow', null);
+
+        // The risk: the approved activity named, the working-only one and the unapproved process left
+        // out; the retired process linked as a whole, with no activities.
+        $processes = collect($this->get("/api/v1/risks/{$risk->id}", $headers)->assertOk()->json('data.processes'))->keyBy('id');
+        $this->assertSame([$approved->id, $retired->id], $processes->keys()->sort()->values()->all());
+        $this->assertSame([
+            'id' => $approved->id, 'title' => 'Lønnskjøring', 'code' => null, 'whole_process' => false, 'activity_count' => 1,
+            'activities' => [['key' => 'beregn-lonn', 'label' => 'Beregn lønn', 'role' => 'Lønnsansvarlig']],
+        ], $processes[$approved->id]);
+        $this->assertSame([], $processes[$retired->id]['activities']);
+        $this->assertTrue($processes[$retired->id]['whole_process']);
+
+        $kpiProcesses = $this->get("/api/v1/kpis/{$kpi->id}", $headers)->assertOk()->json('data.processes');
+        $this->assertSame([[
+            'id' => $approved->id, 'title' => 'Lønnskjøring', 'code' => null, 'whole_process' => false, 'activity_count' => 1,
+            'activities' => [['key' => 'godkjenn-utbetaling', 'label' => 'Godkjenn utbetaling', 'role' => 'Lønnsansvarlig']],
+        ]], $kpiProcesses);
+
+        $body = (string) $this->get("/api/v1/risks/{$risk->id}", $headers)->getContent().$this->get("/api/v1/kpis/{$kpi->id}", $headers)->getContent();
+
+        foreach (['ARBEIDSVERSJON', 'UTKAST', 'Utkast', 'forste-steg', 'Gammelt steg'] as $absent) {
+            $this->assertStringNotContainsString($absent, $body);
+        }
+    }
+
+    public function test_one_item_of_another_customer_or_missing_is_not_found_and_needs_quality_view(): void
+    {
+        $client = $this->apiClient();
+        $customer = $this->apiCustomer();
+        $foreign = $this->item($this->apiCustomer('Annen kunde'), QualityItem::TYPE_POLICY, 'Annen kundes policy');
+        $own = $this->item($customer, QualityItem::TYPE_POLICY, 'Hemmelig policy');
+        $grant = $this->grantReader($client, $customer);
+        $headers = $this->asCustomer($this->accessToken(), $customer);
+
+        foreach ([$foreign->id, 999999999] as $id) {
+            $this->get("/api/v1/quality/items/{$id}", $headers)->assertNotFound()->assertJsonPath('error.code', 'not_found');
+        }
+
+        $this->get("/api/v1/quality/items/{$own->id}", $headers)->assertOk()->assertJsonPath('data.relations', []);
+        $this->assertArrayNotHasKey('approved_flow', $this->get("/api/v1/quality/items/{$own->id}", $headers)->json('data'));
+
+        $grant->forceFill(['revoked_at' => now()])->save();
+        $identity = $this->integrationIdentity($customer);
+        $this->giveRole($identity, [CustomerPermissionCatalog::RISK_VIEW, CustomerPermissionCatalog::QUALITY_EDIT]);
+        $this->grantTo($client, $customer, $identity);
+        $response = $this->get("/api/v1/quality/items/{$own->id}", $this->asCustomer($this->accessToken(), $customer));
+        $response->assertForbidden()->assertJsonPath('error.code', 'forbidden');
+        $this->assertStringNotContainsString('Hemmelig', (string) $response->getContent());
+    }
+
+    /** Approved through Kvalitet's own service, by a person who may approve: the revision in force. */
+    private function approve(Customer $customer, QualityItem $process): void
+    {
+        app(QualityProcessBlueprintService::class)->approve((int) $customer->id, $process->fresh(), $this->qualitySystemOwner((int) $customer->id));
+    }
+
     private function grantReader($client, Customer $customer): ApiClientCustomerGrant
     {
         $identity = $this->integrationIdentity($customer);
@@ -262,9 +405,21 @@ class ApiQualityReadTest extends TestCase
             'status' => QualityItem::STATUS_DRAFT,
         ]);
 
+        return $this->storeFlow($customer, $process, $steps);
+    }
+
+    /**
+     * Saves the working version of the flow, step keys from their labels — or from $keys when given,
+     * so a step can be renamed while keeping its key.
+     *
+     * @param  list<string>  $steps
+     * @param  list<string>|null  $keys
+     */
+    private function storeFlow(Customer $customer, QualityItem $process, array $steps, ?array $keys = null): QualityItem
+    {
         $nodes = [['key' => 'start', 'lane' => 'lonn', 'type' => 'start', 'label' => 'Start']];
-        foreach ($steps as $step) {
-            $nodes[] = ['key' => Str::slug($step), 'lane' => 'lonn', 'type' => 'step', 'label' => $step];
+        foreach ($steps as $index => $step) {
+            $nodes[] = ['key' => $keys[$index] ?? Str::slug($step), 'lane' => 'lonn', 'type' => 'step', 'label' => $step, 'description' => 'FRITEKST-NODE'];
         }
         $nodes[] = ['key' => 'slutt', 'lane' => 'lonn', 'type' => 'end', 'label' => 'Slutt'];
         $edges = [];

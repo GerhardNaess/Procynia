@@ -1070,3 +1070,23 @@ API-et oppfyller dette allerede i dag: `GET /api/v1/management-reviews/{reviewId
 | **KVA-01 / KVA-03** (allerede implementert) | Uten publiseringsstatus og plasseringer | Kan utvides med fakta fra den godkjente revisjonen: revisjonsnummer, godkjent tidspunkt, og plasseringer på aktiviteter som finnes i den. Aldri med `has_unpublished_changes`. | Valgfri utvidelse, ikke en manglende A-funksjon. |
 
 Ingen ny API-operasjon er bygget som følge av beslutningene, og faseplanen er uendret.
+
+### D17 – `controls_without_activity` utelates fra API-et **[BESLUTTET]**
+
+**Beslutning (2026-10-24):** Oppmerksomhetsfunnet `controls_without_activity` utelates fra API-et for godt. Kvalitets eksisterende regel og visning endres ikke, og det lages ingen alternativ beregningsregel for API-et.
+
+**Begrunnelse:** Kvalitets regel vurderer plasseringer mot arbeidsversjonen av prosessflyten. D15 utelukker arbeidsversjonen, og en egen API-regel ville gitt et annet svar enn «Trenger oppmerksomhet» på websiden.
+
+**Konsekvens:** KVA-04 regnes som fullt levert med de tre øvrige funnene. `QualityPresenter::FLOW_DEPENDENT_FINDINGS` holder funnet utenfor både radene og `/attention`.
+
+### Gjennomført etter D15–D17 (2026-10-24)
+
+- **RIS-02 og MOK-06:** de koblede aktivitetene i `GET /risks/{riskId}` og `GET /kpis/{kpiId}` navngis fra den godkjente revisjonen (`activities: [{key, label, role}]`).
+  - En aktivitet som bare finnes i arbeidsversjonen, utelates.
+  - Det samme gjelder en prosess uten godkjent revisjon, og en utgått prosess (dens aktiviteter).
+  - En prosess som da ikke har noe koblet igjen, utelates også.
+  - Hvilke koblinger som finnes, er fortsatt modulens eget svar (`groupedContext()`). Navnene der kommer fra arbeidsversjonen og brukes ikke.
+- **KVA-02:** `GET /api/v1/quality/items/{itemId}` gir relasjoner og publisering (`approved`, `not_approved` eller `retired`, med revisjonsnummer og godkjenningstidspunkt).
+  - For en prosess gir den den godkjente flyten (felt, noder uten beskrivelse, kanter) og kontrollene som er plassert på godkjente aktiviteter.
+  - For en kontroll gir den plasseringene i godkjente flyter.
+  - Arbeidsversjonen, `has_unpublished_changes` og hvem som godkjente, er aldri med.

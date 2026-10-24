@@ -17,6 +17,8 @@ use App\Models\ManagementReviewDecision;
 use App\Models\Objective;
 use App\Models\QualityControlDetail;
 use App\Models\QualityItem;
+use App\Models\QualityItemRelation;
+use App\Models\QualityProcessBlueprint;
 use App\Models\QualityTool;
 use App\Models\Risk;
 use App\Models\RiskTreatmentAction;
@@ -182,6 +184,9 @@ class ApiOpenApiContractTest extends TestCase
             'QualityControlFrequency' => QualityControlDetail::FREQUENCIES,
             'QualityToolCategory' => QualityTool::CATEGORIES,
             'QualityAttentionCode' => array_values(array_diff([QualityAttentionService::CONTROLS_WITHOUT_EVIDENCE, QualityAttentionService::CONTROLS_WITHOUT_ACTIVITY, QualityAttentionService::PROCESSES_WITHOUT_GOVERNING_POLICY, QualityAttentionService::PROCESSES_OVERDUE_FOR_REVIEW], QualityPresenter::FLOW_DEPENDENT_FINDINGS)),
+            'QualityPublicationState' => [QualityPresenter::PUBLICATION_APPROVED, QualityPresenter::PUBLICATION_NOT_APPROVED, QualityPresenter::PUBLICATION_RETIRED],
+            'QualityRelationType' => QualityItemRelation::TYPES,
+            'QualityFlowNodeType' => QualityProcessBlueprint::NODE_TYPES,
             'ManagementReviewStatus' => ManagementReview::STATUSES,
             'ManagementReviewJudgement' => ManagementReview::JUDGEMENTS,
             'ManagementReviewSectionType' => [ReviewSections::TYPE_OWN, ReviewSections::TYPE_MANUAL, ReviewSections::TYPE_MODULE],

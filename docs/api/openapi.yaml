@@ -292,10 +292,10 @@ paths:
         is 404.
 
         The linked controls and processes in Kvalitet are given only to an identity that may read
-        Kvalitet (the module and `quality.view`); otherwise they are null. Processes are given at
-        process level: the activities' names are read from a process flow, whose version the API
-        may show is not decided. Not included: the controls' criterion and placements, and the
-        supplier the risk concerns.
+        Kvalitet (the module and `quality.view`); otherwise they are null. The linked activities are
+        named from the approved flow only (D15); an activity that exists only in the working
+        version, or in a process without an approved flow, is left out. Not included: the controls'
+        criterion and placements, and the supplier the risk concerns.
 
         Requires the Risiko module and `risk.view`.
       parameters:
@@ -1377,11 +1377,11 @@ paths:
         checklists and controls — with ansvarlig, review dates and attention codes. Kvalitet is
         customer-wide; there are no fagområder.
 
-        Nothing read from a process flow is included: not the flow, its publication state or where
-        controls are placed in it. Which version of a flow the API may show (the approved one or the
-        working version) is not decided. For the same reason the attention code
-        `controls_without_activity` is never given. Not included either: purpose, steps, inputs and
-        outputs, checklists, Wiki links and files.
+        The process flow, its publication and the controls' placements are on
+        `GET /v1/quality/items/{itemId}`, from the approved flow only (D15). The attention code
+        `controls_without_activity` is never given (D17): Kvalitet judges it against the working
+        version. Not included either: purpose, steps, inputs and outputs, checklists, Wiki links and
+        files.
 
         Requires the Kvalitet module and `quality.view`.
       parameters:
@@ -1430,8 +1430,8 @@ paths:
       description: |
         The customer's controls with frequency, how much evidence is registered and the tools from
         the library they are carried out with. Not included: the criterion, method and
-        responsibility (free text), the evidence itself, files and where the control is placed in a
-        process flow.
+        responsibility (free text), the evidence itself and files. Where a control is placed is on
+        `GET /v1/quality/items/{itemId}`, in approved flows only.
 
         Requires the Kvalitet module and `quality.view`.
       parameters:
@@ -1479,10 +1479,11 @@ paths:
       description: |
         One KPI the integration identity may read, exactly as `GET /v1/kpis` presents it, with the
         processes in Kvalitet it measures. The processes are given only to an identity that may read
-        Kvalitet (the module and `quality.view`); otherwise `processes` is null. They are given at
-        process level: the activities' names are read from a process flow, whose version the API may
-        show is not decided. A KPI of another customer, under an objective outside the identity's
-        fagområder, or one that does not exist, is 404.
+        Kvalitet (the module and `quality.view`); otherwise `processes` is null. The linked
+        activities are named from the approved flow only (D15); an activity that exists only in the
+        working version, or in a process without an approved flow, is left out. A KPI of another
+        customer, under an objective outside the identity's fagområder, or one that does not exist,
+        is 404.
 
         Requires the Mål og KPI module and `objective.view`.
       parameters:
@@ -1503,6 +1504,57 @@ paths:
                 properties:
                   data:
                     $ref: '#/components/schemas/KpiDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/quality/items/{itemId}:
+    get:
+      tags: [Quality]
+      operationId: getQualityItem
+      summary: One quality item, with the approved process flow
+      description: |
+        One item of Kvalitet's register with its relations to other items and, for a process, its
+        publication and its **approved** flow with the controls placed on it; for a control, where
+        it is placed in approved flows. Only the approved flow is ever given — the latest approved
+        revision, while the process is not retired (D15). The working version is never read for
+        what is shown: neither its flow, its activity names, nor whether it differs from the approved
+        one. A placement on an activity that exists only in the working version is left out.
+
+        Not included: purpose, steps, inputs and outputs, checklists, the flow's node descriptions,
+        who approved, the control's criterion, method and responsibility, Wiki links and files. An
+        item of another customer, or one that does not exist, is 404.
+
+        Requires the Kvalitet module and `quality.view`.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/ItemId'
+      responses:
+        '200':
+          description: The item.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/QualityItemDetail'
                   meta:
                     $ref: '#/components/schemas/Meta'
         '401':
@@ -1715,6 +1767,14 @@ components:
       description: Only items with this status.
       schema:
         $ref: '#/components/schemas/QualityItemStatus'
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      description: The item's id.
+      schema:
+        type: integer
+        minimum: 0
     BusinessAreaId:
       name: business_area_id
       in: query
@@ -3826,8 +3886,8 @@ components:
       type: string
       description: |
         A control without evidence, a process without a governing document in force, a process past
-        its review date. controls_without_activity is not given: it is judged against the working
-        version of the process flows.
+        its review date. controls_without_activity is never given (D17): Kvalitet judges it against
+        the working version of the process flows.
       enum: [controls_without_evidence, processes_without_governing_policy, processes_overdue_for_review]
     QualityItem:
       description: An item in Kvalitet's register.
@@ -3929,9 +3989,10 @@ components:
     LinkedProcess:
       type: object
       description: |
-        A process in Kvalitet linked from another module, at process level: linked as a whole,
-        and/or through some of its activities. The activities' names are not given.
-      required: [id, title, code, whole_process, activity_count]
+        A process in Kvalitet linked from another module: linked as a whole, and/or through some of
+        its activities. Activities are named from the approved flow only; one that exists only in
+        the working version is left out, and a process with nothing left linked is left out.
+      required: [id, title, code, whole_process, activity_count, activities]
       additionalProperties: false
       properties:
         id:
@@ -3944,4 +4005,168 @@ components:
           type: boolean
         activity_count:
           type: integer
-          description: How many of its activities are linked.
+          description: How many of its approved activities are linked.
+        activities:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApprovedActivity'
+
+    ApprovedActivity:
+      type: object
+      description: An activity (a step) of an approved process flow, with its lane as role.
+      required: [key, label, role]
+      additionalProperties: false
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        role:
+          type: [string, 'null']
+    QualityPublicationState:
+      type: string
+      description: approved (an approved flow is in force), not_approved (never approved), retired (the process is retired; its revisions are history).
+      enum: [approved, not_approved, retired]
+    QualityRelationType:
+      type: string
+      enum: [governs, has_procedure, uses, verifies, depends_on]
+    QualityFlowNodeType:
+      type: string
+      enum: [start, step, decision, end]
+    QualityItemDetail:
+      description: One item with relations, and for a process or a control its approved-flow information.
+      allOf:
+        - $ref: '#/components/schemas/QualityItemFields'
+        - type: object
+          required: [relations]
+          properties:
+            relations:
+              type: array
+              items:
+                type: object
+                required: [relation_type, direction, item]
+                additionalProperties: false
+                properties:
+                  relation_type:
+                    $ref: '#/components/schemas/QualityRelationType'
+                  direction:
+                    type: string
+                    enum: [outgoing, incoming]
+                  item:
+                    type: object
+                    required: [id, quality_type, title, code, status]
+                    additionalProperties: false
+                    properties:
+                      id:
+                        type: integer
+                      quality_type:
+                        oneOf:
+                          - $ref: '#/components/schemas/QualityItemType'
+                          - type: 'null'
+                      title:
+                        type: [string, 'null']
+                      code:
+                        type: [string, 'null']
+                      status:
+                        oneOf:
+                          - $ref: '#/components/schemas/QualityItemStatus'
+                          - type: 'null'
+            publication:
+              description: A process only. Never says whether the working version differs.
+              type: object
+              required: [state, revision_number, approved_at]
+              additionalProperties: false
+              properties:
+                state:
+                  $ref: '#/components/schemas/QualityPublicationState'
+                revision_number:
+                  type: [integer, 'null']
+                  description: The latest approved revision, also for a retired process.
+                approved_at:
+                  oneOf:
+                    - $ref: '#/components/schemas/Timestamp'
+                    - type: 'null'
+            approved_flow:
+              description: A process only. The approved flow in force, or null when none is (not approved, or retired).
+              oneOf:
+                - $ref: '#/components/schemas/QualityApprovedFlow'
+                - type: 'null'
+            placed_controls:
+              type: array
+              description: A process only. Controls placed on activities of the approved flow.
+              items:
+                type: object
+                required: [activity_key, control_id]
+                additionalProperties: false
+                properties:
+                  activity_key:
+                    type: string
+                  control_id:
+                    type: integer
+            placements:
+              type: array
+              description: A control only. Where it is placed in approved flows in force.
+              items:
+                type: object
+                required: [process_id, activity_key, activity_label, activity_role]
+                additionalProperties: false
+                properties:
+                  process_id:
+                    type: integer
+                  activity_key:
+                    type: string
+                  activity_label:
+                    type: string
+                  activity_role:
+                    type: [string, 'null']
+      unevaluatedProperties: false
+    QualityApprovedFlow:
+      type: object
+      description: The approved revision's flow. Node descriptions are not included.
+      required: [lanes, nodes, edges]
+      additionalProperties: false
+      properties:
+        lanes:
+          type: array
+          items:
+            type: object
+            required: [key, label]
+            additionalProperties: false
+            properties:
+              key:
+                type: string
+              label:
+                type: string
+                description: The role responsible for the lane.
+        nodes:
+          type: array
+          items:
+            type: object
+            required: [key, type, label, lane, subprocess_item_id]
+            additionalProperties: false
+            properties:
+              key:
+                type: string
+              type:
+                $ref: '#/components/schemas/QualityFlowNodeType'
+              label:
+                type: string
+              lane:
+                type: [string, 'null']
+              subprocess_item_id:
+                type: [integer, 'null']
+                description: A step carried out as another process.
+        edges:
+          type: array
+          items:
+            type: object
+            required: [from, to, label]
+            additionalProperties: false
+            properties:
+              from:
+                type: string
+              to:
+                type: string
+              label:
+                type: [string, 'null']
+                description: A decision's outcome, or null.

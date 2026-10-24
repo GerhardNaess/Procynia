@@ -12,6 +12,7 @@ use App\Services\Quality\QualityProcessContextReader;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -22,9 +23,12 @@ use Illuminate\Validation\Rule;
  * (KVA-03), the controls with frequency, evidence and tools. Both carry the attention codes
  * (KVA-04).
  *
+ * GET /api/v1/quality/items/{itemId} (KVA-02) is one item with its relations and publication, and
+ * for a process its approved flow — never the working version (D15).
+ *
  * Kvalitet is read customer-wide, with no fagområder, under the rule Kvalitet applies to every reader
- * (QualityProcessContextReader::canRead(): the module and quality.view). Nothing here reads a process
- * flow: which version the API may show is not decided (KVA-02).
+ * (QualityProcessContextReader::canRead(): the module and quality.view). Another customer's item or
+ * a missing one is the same 404.
  */
 class QualityController extends Controller
 {
@@ -50,6 +54,19 @@ class QualityController extends Controller
         );
 
         return ApiResponse::ok($presenter->controlRows($page, (int) $context->actor->customer_id), $context, $meta);
+    }
+
+    public function show(ApiRequestContext $context, QualityProcessContextReader $quality, QualityPresenter $presenter, int $itemId): JsonResponse
+    {
+        if (! $quality->canRead($context->actor)) {
+            throw new AuthorizationException;
+        }
+
+        $item = $this->scoped($context)->whereKey($itemId)->first()
+            ?? throw (new ModelNotFoundException)->setModel(QualityItem::class);
+        $context->rows = 1;
+
+        return ApiResponse::ok($presenter->detail($item), $context);
     }
 
     /** @return array<string, mixed> */

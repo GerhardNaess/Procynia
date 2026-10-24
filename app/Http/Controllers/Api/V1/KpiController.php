@@ -123,6 +123,7 @@ class KpiController extends Controller
         ObjectiveAccessService $access,
         KpiPresenter $presenter,
         KpiQualityContextService $quality,
+        QualityPresenter $processes,
         int $kpiId,
     ): JsonResponse {
         $actor = $context->actor;
@@ -139,8 +140,8 @@ class KpiController extends Controller
         $context->rows = 1;
 
         return ApiResponse::ok($presenter->rows(new Collection([$kpi]), CarbonImmutable::parse(now()->toDateString()))[0] + [
-            // The processes it measures, at process level — null, not empty, without Kvalitet read access.
-            'processes' => $quality->canReadQuality($actor) ? QualityPresenter::linkedProcesses($quality->linkedContext($kpi)) : null,
+            // The processes it measures, named from the approved flow only (D15) — null, not empty, without Kvalitet read access.
+            'processes' => $quality->canReadQuality($actor) ? $processes->linkedProcesses((int) $kpi->customer_id, $quality->linkedContext($kpi)) : null,
         ], $context);
     }
 }

@@ -24,9 +24,8 @@ use Illuminate\Support\Collection;
  * frist), the acceptance of residual risk (dates and state) and — only for an identity that may read
  * Kvalitet, as on the risk page — the linked controls and processes. Out: årsak, hendelse, konsekvens,
  * utfyllende informasjon, begrunnelser, tiltak results and every other free text, who assessed,
- * accepted or revoked, the controls' criterion and placements, the activities' names (read from a
- * process flow, whose version the API may show is not decided, KVA-02), the supplier origin and web
- * routes.
+ * accepted or revoked, the controls' criterion and placements, the supplier origin and web routes.
+ * The processes' activities are named from the approved flow only (D15, QualityPresenter).
  *
  * Nothing is computed here that the web does not compute the same way: the latest assessment is
  * RiskAssessment::latestForRisks(), the levels are RiskScoringPolicy, the review dates are
@@ -44,6 +43,7 @@ class RiskPresenter
         private readonly RiskAcceptanceService $acceptances,
         private readonly RiskControlService $controls,
         private readonly RiskQualityContextService $context,
+        private readonly QualityPresenter $quality,
     ) {}
 
     /**
@@ -115,7 +115,7 @@ class RiskPresenter
                 'code' => $control['code'],
                 'status' => $control['status'],
             ], $this->controls->linkedControls($risk)) : null,
-            'processes' => $readsQuality ? QualityPresenter::linkedProcesses($this->context->linkedContext($risk)) : null,
+            'processes' => $readsQuality ? $this->quality->linkedProcesses((int) $risk->customer_id, $this->context->linkedContext($risk)) : null,
         ];
     }
 

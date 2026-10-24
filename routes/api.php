@@ -63,5 +63,6 @@ Route::prefix('v1')
         Route::get('suppliers/control-requirements', [SupplierController::class, 'controlRequirements'])->name('suppliers.control-requirements');
         Route::get('suppliers/{supplierId}', [SupplierController::class, 'show'])->whereNumber('supplierId')->name('suppliers.show');
         Route::get('quality/items', [QualityController::class, 'items'])->name('quality.items');
+        Route::get('quality/items/{itemId}', [QualityController::class, 'show'])->whereNumber('itemId')->name('quality.items.show');
         Route::get('quality/controls', [QualityController::class, 'controls'])->name('quality.controls');
     });
