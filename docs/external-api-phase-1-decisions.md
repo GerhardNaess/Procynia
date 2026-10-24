@@ -1030,3 +1030,43 @@ Feil i felles format (A10): 401 (token), 403 (manglende skriverolle, operasjon i
 ### Tester
 
 Se sluttrapporten for denne leveransen. Nye testfiler: `IntegrationOperationAuthorityTest`, `ApiRiskTreatmentActionCreateTest`; utvidet: `ApiClientGrantAdministrationTest`, `ApiClientAuthenticationTest`, `ApiRouteContractTest` (GET overalt, unntatt navngitte skriveruter bak `api.write`), `customer-integrations.spec.js`.
+
+---
+
+## 21. Produktbeslutninger etter fase 3 (2026-10-24)
+
+Fase 3 er godkjent som lokalt fullført, med restpunktene i [`external-api-coverage-status.md`](external-api-coverage-status.md) (funn 17 og 19). Produkteier har tatt to beslutninger.
+
+### D15 – KVA-02: bare godkjent prosessflyt **[BESLUTTET]**
+
+**Beslutning:** Integrasjoner får bare se den **godkjente prosessflyten**, aldri arbeidsversjonen.
+
+**Hva det betyr i koden:**
+
+- Den godkjente flyten er den nyeste revisjonen i `quality_process_revisions` (`QualityProcessBlueprintService::latestRevision()`). Revisjoner kan ikke endres eller slettes.
+- Arbeidsversjonen er `quality_process_blueprints`. Ingenting som leses derfra, skal gå til API-et:
+  - flyten selv
+  - aktivitetsnavn og roller
+  - om det finnes ikke-godkjente endringer (`has_unpublished_changes`)
+  - vurderinger som bygger på arbeidsversjonen
+- En prosess uten godkjent revisjon har ingen flyt i API-et. Det samme gjelder en utgått prosess, fordi revisjonene da er historikk og ikke gjeldende.
+
+**Hva det ikke endrer:** Webgrensesnittet og Kvalitets egne regler er uendret. Beslutningen gjelder bare hva API-et viser.
+
+### D16 – Ledelsens gjennomgang: ingen beslutningstekster **[BESLUTTET]**
+
+**Beslutning:** Beslutnings- og tiltakstekster i Ledelsens gjennomgang eksponeres ikke i API-et før innholdet er vurdert som egnet.
+
+API-et oppfyller dette allerede i dag: `GET /api/v1/management-reviews/{reviewId}` viser hver beslutning med type, seksjon, ansvarlig, frist, oppfølging og status, ikke med teksten. Det samme gjelder fullføringsnotater. Feltet `text` kan tas opp igjen som en egen beslutning, for eksempel sammen med DPIA (D14).
+
+### Konsekvenser for restpunktene
+
+| Funksjon | Før | Etter D15 | Det som gjenstår |
+|---|---|---|---|
+| **RIS-02** – kontroller og prosesser på en risiko | Aktivitetsnavn og roller holdt tilbake | **Blokkeringen fjernet.** Aktivitetene kan navngis fra den godkjente revisjonen. | Implementering. Regler: navn bare når prosessen har en godkjent revisjon og ikke er utgått, og bare for aktiviteter som finnes i den revisjonen. En kobling til en aktivitet som bare finnes i arbeidsversjonen, telles, men navngis ikke. |
+| **MOK-06** – prosessene en KPI måler | Som RIS-02 | **Blokkeringen fjernet**, med samme regler. | Implementering |
+| **KVA-04** – Kvalitets oppmerksomhet | `controls_without_activity` holdt tilbake | **Ikke fjernet.** Kvalitets regel vurderer plasseringer mot arbeidsversjonen, og D15 utelukker den. En variant mot godkjent versjon ville gitt API-et en annen regel enn «Trenger oppmerksomhet» på websiden. | Ny beslutning (D17, åpen): skal funnet utelates i API-et, skal Kvalitets regel endres til godkjent versjon for alle, eller skal API-et få en egen variant? |
+| **KVA-02** – ett element med prosessflyt | Kunne ikke startes | **Beslutningen er tatt.** Bare den godkjente revisjonen. | Implementering i fase 3. Ikke startet. |
+| **KVA-01 / KVA-03** (allerede implementert) | Uten publiseringsstatus og plasseringer | Kan utvides med fakta fra den godkjente revisjonen: revisjonsnummer, godkjent tidspunkt, og plasseringer på aktiviteter som finnes i den. Aldri med `has_unpublished_changes`. | Valgfri utvidelse, ikke en manglende A-funksjon. |
+
+Ingen ny API-operasjon er bygget som følge av beslutningene, og faseplanen er uendret.
