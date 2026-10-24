@@ -84,6 +84,8 @@ tags:
     description: Mål og KPI.
   - name: Management review
     description: Ledelsens gjennomgang.
+  - name: Suppliers
+    description: Leverandøroppfølging — register, kontrollkrav and follow-up.
   - name: Compliance and audit
     description: Etterlevelse og revisjon — kravregister, status, revisjoner and Kravbiblioteket.
 
@@ -140,13 +142,13 @@ paths:
         Avvik og forbedringer, Mål og KPI and Etterlevelse og revisjon, with the reasons as codes.
         Each module's own rules decide, over the same set as its register's «Trenger
         oppmerksomhet»: risks that are not closed, active avvik and forbedringer, active
-        objectives and their active KPIs, active requirements and audits that are not cancelled.
-        The codes are the same as on the records' own rows.
+        objectives and their active KPIs, active requirements and audits that are not cancelled,
+        and suppliers that have not ended. The codes are the same as on the records' own rows.
 
         A module the customer has not ordered, or the identity may not read, is `false` under
         `modules` and contributes no items. This route needs no module and is returned whole,
-        without pagination: risks, then avvik, forbedringer, objectives, KPIs, requirements and
-        audits, each by id.
+        without pagination: risks, then avvik, forbedringer, objectives, KPIs, requirements,
+        audits and suppliers, each by id.
       parameters:
         - $ref: '#/components/parameters/ProcyniaCustomer'
       responses:
@@ -1217,6 +1219,148 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /v1/suppliers:
+    get:
+      tags: [Suppliers]
+      operationId: listSuppliers
+      summary: The leverandørregister
+      description: |
+        The customer's suppliers, with category, status, criticality, review dates, ansvarlig,
+        kravstatus and attention codes. The register is customer-wide; there are no fagområder.
+
+        Not included: the leveranse description, contact details and notes.
+
+        Requires the Leverandøroppfølging module and `supplier.view`. Leverandøroppfølging is an explicit-grant domain: the identity holds the permission only through a role the System Owner gave it.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/SupplierStatusFilter'
+        - $ref: '#/components/parameters/SupplierCriticalityFilter'
+        - $ref: '#/components/parameters/SupplierCategoryFilter'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of suppliers.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Supplier'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/suppliers/{supplierId}:
+    get:
+      tags: [Suppliers]
+      operationId: getSupplier
+      summary: One supplier with requirements, aktsomhet, plan and links
+      description: |
+        One supplier with the fields of the register, the control requirements that apply to it
+        with their status and next control, the aktsomhetsvurdering, the follow-up plan, and the
+        ids of its linked risks, cases and requirements in the modules the identity may read. A
+        supplier of another customer, or one that does not exist, is 404.
+
+        Not included: rationales, comments, descriptions and guidance, documents and files, the
+        profile answers, the assessments' ratings, every person who assessed, controlled or changed
+        something, and the histories.
+
+        Requires the Leverandøroppfølging module and `supplier.view`. Leverandøroppfølging is an explicit-grant domain: the identity holds the permission only through a role the System Owner gave it.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/SupplierId'
+      responses:
+        '200':
+          description: The supplier.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SupplierDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/suppliers/control-requirements:
+    get:
+      tags: [Suppliers]
+      operationId: listSupplierControlRequirements
+      summary: The kontrollkrav catalogue
+      description: |
+        The customer's catalogue of control requirements, in Kontrollkrav's order (theme, level,
+        title), each with how many suppliers it applies to now. Returned whole, without pagination.
+
+        Requires the Leverandøroppfølging module and `supplier.view`. Leverandøroppfølging is an explicit-grant domain: the identity holds the permission only through a role the System Owner gave it.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+      responses:
+        '200':
+          description: The catalogue.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SupplierControlRequirementCatalogueRow'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
 components:
   securitySchemes:
     entraApplicationToken:
@@ -1371,6 +1515,35 @@ components:
       description: Only audits of this type.
       schema:
         $ref: '#/components/schemas/ComplianceAuditType'
+    SupplierId:
+      name: supplierId
+      in: path
+      required: true
+      description: The supplier's id.
+      schema:
+        type: integer
+        minimum: 0
+    SupplierStatusFilter:
+      name: status
+      in: query
+      required: false
+      description: Only suppliers with this status.
+      schema:
+        $ref: '#/components/schemas/SupplierStatus'
+    SupplierCriticalityFilter:
+      name: criticality
+      in: query
+      required: false
+      description: Only suppliers with this criticality.
+      schema:
+        $ref: '#/components/schemas/SupplierCriticality'
+    SupplierCategoryFilter:
+      name: category
+      in: query
+      required: false
+      description: Only suppliers in this category.
+      schema:
+        $ref: '#/components/schemas/SupplierCategory'
     BusinessAreaId:
       name: business_area_id
       in: query
@@ -1657,7 +1830,7 @@ components:
         modules:
           type: object
           description: The modules this API serves, by the key of their endpoints.
-          required: [risk, deviations, objectives, management_review, compliance]
+          required: [risk, deviations, objectives, management_review, compliance, suppliers]
           additionalProperties: false
           properties:
             risk:
@@ -1675,6 +1848,9 @@ components:
             compliance:
               $ref: '#/components/schemas/ModuleAccess'
               description: Etterlevelse og revisjon — `GET /v1/compliance/…`. Customer-wide, so `business_areas` is null.
+            suppliers:
+              $ref: '#/components/schemas/ModuleAccess'
+              description: Leverandøroppfølging — `GET /v1/suppliers…`. Customer-wide, so `business_areas` is null.
     ModuleAccess:
       type: object
       required: [entitled, readable, business_areas]
@@ -1712,7 +1888,7 @@ components:
       enum: [risk, deviations, objectives]
     AttentionItemType:
       type: string
-      enum: [risk, deviation, improvement, objective, kpi, compliance_requirement, compliance_audit]
+      enum: [risk, deviation, improvement, objective, kpi, compliance_requirement, compliance_audit, supplier]
     AttentionOverview:
       type: object
       required: [modules, items]
@@ -1721,7 +1897,7 @@ components:
         modules:
           type: object
           description: Per module, whether the identity reads it. A module that is `false` contributes no items.
-          required: [risk, deviations, objectives, compliance]
+          required: [risk, deviations, objectives, compliance, suppliers]
           additionalProperties: false
           properties:
             risk:
@@ -1731,6 +1907,8 @@ components:
             objectives:
               type: boolean
             compliance:
+              type: boolean
+            suppliers:
               type: boolean
         items:
           type: array
@@ -1769,6 +1947,7 @@ components:
               - $ref: '#/components/schemas/KpiAttentionCode'
               - $ref: '#/components/schemas/ComplianceRequirementAttentionCode'
               - $ref: '#/components/schemas/ComplianceAuditAttentionCode'
+              - $ref: '#/components/schemas/SupplierAttentionCode'
     BusinessArea:
       type: object
       description: A fagområde. Its description is not included.
@@ -3118,3 +3297,305 @@ components:
         requirement_id:
           type: [integer, 'null']
           description: The customer's requirement for this node, when it has activated the standard.
+
+    SupplierStatus:
+      type: string
+      enum: [onboarding, active, ended]
+    SupplierCategory:
+      type: string
+      enum: [it_cloud, consulting, goods, construction, transport_logistics, operations_facilities, other]
+    SupplierCriticality:
+      type: string
+      enum: [standard, important, critical]
+    SupplierRequirementState:
+      type: string
+      description: Kravstatus over the requirements that apply now — a mandatory one open, one needing follow-up, or all in order.
+      enum: [mandatory_open, follow_up_required, in_order]
+    SupplierAttentionCode:
+      type: string
+      description: Why a supplier that has not ended needs attention, in SupplierAttentionService's order.
+      enum: [mandatory_open, control_overdue, requirement_not_evaluated, profile_incomplete, due_diligence_missing, due_diligence_unclear, due_diligence_overdue, not_assessed, review_overdue, missing_owner, document_expired, document_expiring]
+    Supplier:
+      description: A supplier in the register.
+      allOf:
+        - $ref: '#/components/schemas/SupplierFields'
+      unevaluatedProperties: false
+    SupplierFields:
+      type: object
+      required: [id, name, organization_number, category, status, criticality, review_interval_months, last_assessed_on, next_review_on, owner, requirement_status, attention, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        organization_number:
+          type: [string, 'null']
+        category:
+          $ref: '#/components/schemas/SupplierCategory'
+        status:
+          $ref: '#/components/schemas/SupplierStatus'
+        criticality:
+          description: Null when not yet classified.
+          oneOf:
+            - $ref: '#/components/schemas/SupplierCriticality'
+            - type: 'null'
+        review_interval_months:
+          description: How often the supplier is assessed, or null.
+          oneOf:
+            - type: integer
+              enum: [6, 12, 24, 36]
+            - type: 'null'
+        last_assessed_on:
+          type: [string, 'null']
+          format: date
+        next_review_on:
+          type: [string, 'null']
+          format: date
+        owner:
+          oneOf:
+            - $ref: '#/components/schemas/Person'
+            - type: 'null'
+        requirement_status:
+          description: Null when no requirement applies, and always for an ended supplier.
+          oneOf:
+            - $ref: '#/components/schemas/SupplierRequirementState'
+            - type: 'null'
+        attention:
+          type: array
+          description: Empty for an ended supplier.
+          items:
+            $ref: '#/components/schemas/SupplierAttentionCode'
+        created_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        updated_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    SupplierControlRequirementTheme:
+      type: string
+      enum: [human_rights, labour_conditions, environment, information_security, privacy, quality, continuity, ethics, financial]
+    SupplierControlRequirementLevel:
+      type: string
+      enum: [mandatory, important, standard]
+    SupplierControlPoint:
+      type: string
+      enum: [before_contract, ongoing, on_change]
+    SupplierControlRequirementStatus:
+      type: string
+      enum: [active, retired]
+    SupplierDocumentType:
+      type: string
+      enum: [agreement, data_processing_agreement, confidentiality_agreement, certificate, insurance_certificate, security_documentation, self_declaration, code_of_conduct, audit_report, control_report, subcontractor_list, public_certificate, financial_statement, environmental_documentation, policy, other]
+    SupplierControlRequirementFields:
+      type: object
+      required: [id, title, theme, level, control_point, control_interval_months, accepted_document_types, status, supplier_specific, compliance_requirement_id]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        theme:
+          $ref: '#/components/schemas/SupplierControlRequirementTheme'
+        level:
+          $ref: '#/components/schemas/SupplierControlRequirementLevel'
+        control_point:
+          $ref: '#/components/schemas/SupplierControlPoint'
+        control_interval_months:
+          description: How often it is controlled again, or null.
+          oneOf:
+            - type: integer
+              enum: [3, 6, 12, 24, 36]
+            - type: 'null'
+        accepted_document_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/SupplierDocumentType'
+        status:
+          $ref: '#/components/schemas/SupplierControlRequirementStatus'
+        supplier_specific:
+          type: boolean
+          description: The supplier's own requirement, not from the catalogue.
+        compliance_requirement_id:
+          type: [integer, 'null']
+          description: The requirement in Etterlevelse it is anchored in, when the identity may read it there.
+    SupplierControlRequirementCatalogueRow:
+      allOf:
+        - $ref: '#/components/schemas/SupplierControlRequirementFields'
+        - type: object
+          required: [applies_to_count, template]
+          properties:
+            applies_to_count:
+              type: integer
+              description: Suppliers that have not ended that it applies to now.
+            template:
+              description: The template it was created from, or null.
+              oneOf:
+                - type: object
+                  required: [name, version]
+                  additionalProperties: false
+                  properties:
+                    name:
+                      type: string
+                    version:
+                      type: [string, integer, 'null']
+                - type: 'null'
+      unevaluatedProperties: false
+    SupplierRequirementDisplayStatus:
+      type: string
+      enum: [documented, partially_documented, missing, not_evaluated, temporarily_accepted, renewal_due, acceptance_expired]
+    SupplierRequirementEvaluationStatus:
+      type: string
+      enum: [documented, partially_documented, missing, temporarily_accepted]
+    SupplierApplicableRequirement:
+      allOf:
+        - $ref: '#/components/schemas/SupplierControlRequirementFields'
+        - type: object
+          required: [display_status, evaluated, current, follow_up]
+          properties:
+            display_status:
+              $ref: '#/components/schemas/SupplierRequirementDisplayStatus'
+            evaluated:
+              type: boolean
+            current:
+              description: The control in force, or null. Not its rationale, nor who controlled.
+              oneOf:
+                - type: object
+                  required: [status, evaluated_on, accepted_until]
+                  additionalProperties: false
+                  properties:
+                    status:
+                      $ref: '#/components/schemas/SupplierRequirementEvaluationStatus'
+                    evaluated_on:
+                      type: [string, 'null']
+                      format: date
+                    accepted_until:
+                      type: [string, 'null']
+                      format: date
+                - type: 'null'
+            follow_up:
+              type: object
+              required: [next_control_on, control_overdue, document_renewal_due, accepted_until, acceptance_expired]
+              additionalProperties: false
+              properties:
+                next_control_on:
+                  type: [string, 'null']
+                  format: date
+                control_overdue:
+                  type: boolean
+                document_renewal_due:
+                  type: boolean
+                accepted_until:
+                  type: [string, 'null']
+                  format: date
+                acceptance_expired:
+                  type: boolean
+      unevaluatedProperties: false
+    SupplierDueDiligenceStatus:
+      type: string
+      description: Whether an aktsomhetsvurdering is expected from the profile — not whether one is done.
+      enum: [required, must_clarify, not_required]
+    SupplierDueDiligenceConclusion:
+      type: string
+      enum: [no_significant_risk, monitor, measures_required]
+    SupplierDueDiligenceLevel:
+      type: string
+      enum: [low, elevated, high, unknown]
+    SupplierFollowUpKind:
+      type: string
+      enum: [acceptance, control, document_renewal, document, assessment, due_diligence]
+    SupplierDetail:
+      allOf:
+        - $ref: '#/components/schemas/SupplierFields'
+        - type: object
+          required: [requirements, due_diligence, follow_up_plan, links]
+          properties:
+            requirements:
+              description: The control requirements that apply now. Null when the customer has no control requirements.
+              oneOf:
+                - type: array
+                  items:
+                    $ref: '#/components/schemas/SupplierApplicableRequirement'
+                - type: 'null'
+            due_diligence:
+              description: The aktsomhetsvurdering. Null for a customer that has not started Leverandørkontroll and a supplier never assessed.
+              oneOf:
+                - type: object
+                  required: [status, next_on, is_overdue, latest]
+                  additionalProperties: false
+                  properties:
+                    status:
+                      $ref: '#/components/schemas/SupplierDueDiligenceStatus'
+                    next_on:
+                      type: [string, 'null']
+                      format: date
+                    is_overdue:
+                      type: boolean
+                    latest:
+                      description: The latest assessment, or null. Not its descriptions, summary or rationale.
+                      oneOf:
+                        - type: object
+                          required: [conclusion, areas, assessed_on, review_interval_months]
+                          additionalProperties: false
+                          properties:
+                            conclusion:
+                              $ref: '#/components/schemas/SupplierDueDiligenceConclusion'
+                            areas:
+                              type: object
+                              description: The risk level per area.
+                              additionalProperties:
+                                oneOf:
+                                  - $ref: '#/components/schemas/SupplierDueDiligenceLevel'
+                                  - type: 'null'
+                            assessed_on:
+                              type: [string, 'null']
+                              format: date
+                            review_interval_months:
+                              type: integer
+                        - type: 'null'
+                - type: 'null'
+            follow_up_plan:
+              description: The coming controls, renewals and assessments, by date. Null for an ended supplier and a customer without control requirements.
+              oneOf:
+                - type: array
+                  items:
+                    type: object
+                    required: [kind, date, is_overdue, requirement_id, document_type]
+                    additionalProperties: false
+                    properties:
+                      kind:
+                        $ref: '#/components/schemas/SupplierFollowUpKind'
+                      date:
+                        type: [string, 'null']
+                        format: date
+                      is_overdue:
+                        type: boolean
+                      requirement_id:
+                        type: [integer, 'null']
+                      document_type:
+                        description: The document concerned, by type only.
+                        oneOf:
+                          - $ref: '#/components/schemas/SupplierDocumentType'
+                          - type: 'null'
+                - type: 'null'
+            links:
+              type: object
+              description: Each list is null when the identity may not read that module.
+              required: [risk_ids, improvement_case_ids, compliance_requirement_ids]
+              additionalProperties: false
+              properties:
+                risk_ids:
+                  type: [array, 'null']
+                  items:
+                    type: integer
+                improvement_case_ids:
+                  type: [array, 'null']
+                  items:
+                    type: integer
+                compliance_requirement_ids:
+                  type: [array, 'null']
+                  description: Earlier links to requirements in Etterlevelse, kept read-only.
+                  items:
+                    type: integer
+      unevaluatedProperties: false

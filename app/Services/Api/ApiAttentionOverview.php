@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\ImprovementCase;
 use App\Models\Objective;
 use App\Models\Risk;
+use App\Models\Supplier;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
 use App\Services\Compliance\ComplianceAttentionService;
@@ -18,6 +19,8 @@ use App\Services\Objectives\ObjectiveAccessService;
 use App\Services\Objectives\ObjectiveAttentionService;
 use App\Services\Risk\RiskAccessService;
 use App\Services\Risk\RiskAttentionService;
+use App\Services\Suppliers\SupplierAccessService;
+use App\Services\Suppliers\SupplierAttentionService;
 use Carbon\CarbonImmutable;
 
 /**
@@ -46,11 +49,13 @@ class ApiAttentionOverview
         private readonly ComplianceAccessService $compliance,
         private readonly ComplianceAttentionService $requirementAttention,
         private readonly ComplianceAuditAttentionService $auditAttention,
+        private readonly SupplierAccessService $suppliers,
+        private readonly SupplierAttentionService $supplierAttention,
     ) {}
 
     /**
      * @return array{
-     *     modules: array{risk: bool, deviations: bool, objectives: bool, compliance: bool},
+     *     modules: array{risk: bool, deviations: bool, objectives: bool, compliance: bool, suppliers: bool},
      *     items: list<array<string, mixed>>
      * }
      */
@@ -62,6 +67,7 @@ class ApiAttentionOverview
             'deviations' => $summary['deviations']['readable'],
             'objectives' => $summary['objectives']['readable'],
             'compliance' => $summary['compliance']['readable'],
+            'suppliers' => $summary['suppliers']['readable'],
         ];
 
         return [
@@ -71,6 +77,7 @@ class ApiAttentionOverview
                 ...($readable['deviations'] ? $this->cases($identity, $today) : []),
                 ...($readable['objectives'] ? $this->objectives($identity, $today) : []),
                 ...($readable['compliance'] ? $this->compliance($identity, $today) : []),
+                ...($readable['suppliers'] ? $this->suppliers($identity, $today) : []),
             ],
         ];
     }
@@ -216,6 +223,32 @@ class ApiAttentionOverview
         foreach ($audits as $audit) {
             if (($auditReasons[(int) $audit->id] ?? []) !== []) {
                 $items[] = $this->item('compliance_audit', (int) $audit->id, $audit->title, null, null, $auditReasons[(int) $audit->id]);
+            }
+        }
+
+        return $items;
+    }
+
+    /**
+     * Suppliers that are not ended — the register's panel — each with SupplierAttentionService's
+     * finding keys once, in its order. Suppliers have no fagområde.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function suppliers(User $identity, CarbonImmutable $today): array
+    {
+        $suppliers = $this->suppliers->visibleSuppliers($identity)
+            ->where('suppliers.status', '!=', Supplier::STATUS_ENDED)
+            ->orderBy('suppliers.id')
+            ->get(['suppliers.*']);
+        $findings = $this->supplierAttention->findingsForSuppliers($suppliers, $today);
+        $items = [];
+
+        foreach ($suppliers as $supplier) {
+            $codes = array_values(array_unique(array_column($findings[(int) $supplier->id] ?? [], 'key')));
+
+            if ($codes !== []) {
+                $items[] = $this->item('supplier', (int) $supplier->id, $supplier->name, null, null, $codes);
             }
         }
 

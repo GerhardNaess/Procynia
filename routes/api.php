@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\ObjectiveController;
 use App\Http\Controllers\Api\V1\RiskController;
 use App\Http\Controllers\Api\V1\RiskTreatmentActionController;
+use App\Http\Controllers\Api\V1\SupplierController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -56,4 +57,7 @@ Route::prefix('v1')
         Route::get('compliance/audits/{auditId}', [ComplianceAuditController::class, 'show'])->whereNumber('auditId')->name('compliance.audits.show');
         Route::get('compliance/frameworks', [ComplianceFrameworkController::class, 'index'])->name('compliance.frameworks.index');
         Route::get('compliance/frameworks/{frameworkId}', [ComplianceFrameworkController::class, 'show'])->whereNumber('frameworkId')->name('compliance.frameworks.show');
+        Route::get('suppliers', [SupplierController::class, 'index'])->name('suppliers.index');
+        Route::get('suppliers/control-requirements', [SupplierController::class, 'controlRequirements'])->name('suppliers.control-requirements');
+        Route::get('suppliers/{supplierId}', [SupplierController::class, 'show'])->whereNumber('supplierId')->name('suppliers.show');
     });

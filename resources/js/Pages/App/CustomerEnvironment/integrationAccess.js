@@ -9,6 +9,7 @@ const MODULE_LABELS = {
     objectives: 'Mål og KPI',
     management_review: 'Ledelsens gjennomgang',
     compliance: 'Etterlevelse og revisjon',
+    suppliers: 'Leverandøroppfølging',
 };
 
 export function integrationAccessLines(access = {}, t = {}) {

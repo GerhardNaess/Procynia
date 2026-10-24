@@ -2806,6 +2806,7 @@ return [
                 'objectives' => 'Mål og KPI',
                 'management_review' => 'Ledelsens gjennomgang',
                 'compliance' => 'Etterlevelse og revisjon',
+                'suppliers' => 'Leverandøroppfølging',
             ],
             'granted_meta' => 'Tilgang gitt :date av :name',
             'unknown_person' => 'ukjent',

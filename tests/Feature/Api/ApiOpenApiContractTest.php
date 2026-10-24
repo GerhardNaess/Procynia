@@ -17,6 +17,11 @@ use App\Models\ManagementReviewDecision;
 use App\Models\Objective;
 use App\Models\Risk;
 use App\Models\RiskTreatmentAction;
+use App\Models\Supplier;
+use App\Models\SupplierControlRequirement;
+use App\Models\SupplierDocument;
+use App\Models\SupplierDueDiligenceAssessment;
+use App\Models\SupplierRequirementEvaluation;
 use App\Services\Api\ApiErrorResponder;
 use App\Services\Compliance\ComplianceAssessmentOverview;
 use App\Services\Compliance\ComplianceAttentionService;
@@ -29,6 +34,10 @@ use App\Services\Objectives\KpiTargetPolicy;
 use App\Services\Objectives\ObjectiveAttentionService;
 use App\Services\Risk\RiskAttentionService;
 use App\Services\Risk\RiskScoringPolicy;
+use App\Services\Suppliers\Assurance\SupplierAssuranceResolver;
+use App\Services\Suppliers\Assurance\SupplierFollowUpPlan;
+use App\Services\Suppliers\Assurance\SupplierProfilePredicates;
+use App\Services\Suppliers\SupplierAttentionService;
 use App\Support\ApiOperationCatalog;
 use App\Support\Objectives\KpiPresenter as KpiPagePresenter;
 use Illuminate\Routing\Route;
@@ -147,6 +156,22 @@ class ApiOpenApiContractTest extends TestCase
             'ComplianceFindingType' => ComplianceAuditFinding::TYPES,
             'ComplianceRelevance' => [ComplianceRequirement::APPLICABILITY_APPLIES, ComplianceAssessmentOverview::NOT_APPLICABLE, ComplianceAssessmentOverview::RELEVANCE_OPEN],
             'ComplianceFrameworkNodeKind' => [ComplianceFrameworkNode::KIND_SECTION, ComplianceFrameworkNode::KIND_REQUIREMENT],
+            'SupplierStatus' => Supplier::STATUSES,
+            'SupplierCategory' => Supplier::CATEGORIES,
+            'SupplierCriticality' => Supplier::CRITICALITIES,
+            'SupplierRequirementState' => [SupplierAssuranceResolver::STATE_MANDATORY_OPEN, SupplierAssuranceResolver::STATE_FOLLOW_UP_REQUIRED, SupplierAssuranceResolver::STATE_IN_ORDER],
+            'SupplierAttentionCode' => SupplierAttentionService::CATEGORIES,
+            'SupplierControlRequirementTheme' => SupplierControlRequirement::THEMES,
+            'SupplierControlRequirementLevel' => SupplierControlRequirement::LEVELS,
+            'SupplierControlPoint' => SupplierControlRequirement::CONTROL_POINTS,
+            'SupplierControlRequirementStatus' => SupplierControlRequirement::STATUSES,
+            'SupplierDocumentType' => SupplierDocument::TYPES,
+            'SupplierRequirementDisplayStatus' => SupplierAssuranceResolver::DISPLAY_STATUSES,
+            'SupplierRequirementEvaluationStatus' => SupplierRequirementEvaluation::STATUSES,
+            'SupplierDueDiligenceStatus' => [SupplierProfilePredicates::DUE_DILIGENCE_REQUIRED, SupplierProfilePredicates::DUE_DILIGENCE_MUST_CLARIFY, SupplierProfilePredicates::DUE_DILIGENCE_NOT_REQUIRED],
+            'SupplierDueDiligenceConclusion' => SupplierDueDiligenceAssessment::CONCLUSIONS,
+            'SupplierDueDiligenceLevel' => SupplierDueDiligenceAssessment::LEVELS,
+            'SupplierFollowUpKind' => SupplierFollowUpPlan::KINDS,
             'ManagementReviewStatus' => ManagementReview::STATUSES,
             'ManagementReviewJudgement' => ManagementReview::JUDGEMENTS,
             'ManagementReviewSectionType' => [ReviewSections::TYPE_OWN, ReviewSections::TYPE_MANUAL, ReviewSections::TYPE_MODULE],
@@ -156,7 +181,7 @@ class ApiOpenApiContractTest extends TestCase
             'ManagementReviewDecisionStatus' => ManagementReviewDecision::STATUSES,
             // The keys of ApiAccessSummary::for() and the item types of ApiAttentionOverview.
             'ApiModule' => ['risk', 'deviations', 'objectives'],
-            'AttentionItemType' => ['risk', 'deviation', 'improvement', 'objective', 'kpi', 'compliance_requirement', 'compliance_audit'],
+            'AttentionItemType' => ['risk', 'deviation', 'improvement', 'objective', 'kpi', 'compliance_requirement', 'compliance_audit', 'supplier'],
         ];
 
         foreach ($expected as $schema => $values) {

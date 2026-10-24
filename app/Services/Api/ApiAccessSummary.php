@@ -11,6 +11,7 @@ use App\Services\ManagementReview\ManagementReviewAccessService;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Objectives\ObjectiveAccessService;
 use App\Services\Risk\RiskAccessService;
+use App\Services\Suppliers\SupplierAccessService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 
@@ -31,6 +32,7 @@ class ApiAccessSummary
         private readonly ObjectiveAccessService $objectives,
         private readonly ManagementReviewAccessService $managementReviews,
         private readonly ComplianceAccessService $compliance,
+        private readonly SupplierAccessService $suppliers,
     ) {}
 
     /**
@@ -68,6 +70,11 @@ class ApiAccessSummary
             'compliance' => $this->customerWide(
                 $this->compliance->canReadFromAnotherModule($identity),
                 $this->entitlements->hasModule($customer, 'compliance'),
+            ),
+            // GET /api/v1/suppliers…: Leverandøroppfølging. Customer-wide, an explicit-grant domain.
+            'suppliers' => $this->customerWide(
+                $this->suppliers->canReadFromAnotherModule($identity),
+                $this->entitlements->hasModule($customer, 'supplier'),
             ),
         ];
     }
