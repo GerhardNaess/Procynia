@@ -9,6 +9,7 @@ use App\Services\Api\ApiRequestContext;
 use App\Services\Api\ApiResponse;
 use App\Services\Api\Presenters\RiskPresenter;
 use App\Services\Risk\RiskAccessService;
+use App\Services\Risk\RiskControlService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
@@ -87,6 +88,7 @@ class RiskController extends Controller
         ApiRequestContext $context,
         RiskAccessService $access,
         RiskPresenter $presenter,
+        RiskControlService $controls,
         int $riskId,
     ): JsonResponse {
         $actor = $context->actor;
@@ -100,6 +102,6 @@ class RiskController extends Controller
         $risk->load(['businessArea:id,name', 'owner:id,name']);
         $context->rows = 1;
 
-        return ApiResponse::ok($presenter->detail($risk, now()), $context);
+        return ApiResponse::ok($presenter->detail($risk, now(), $controls->canReadQuality($actor)), $context);
     }
 }

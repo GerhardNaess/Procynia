@@ -15,6 +15,9 @@ use App\Models\Kpi;
 use App\Models\ManagementReview;
 use App\Models\ManagementReviewDecision;
 use App\Models\Objective;
+use App\Models\QualityControlDetail;
+use App\Models\QualityItem;
+use App\Models\QualityTool;
 use App\Models\Risk;
 use App\Models\RiskTreatmentAction;
 use App\Models\Supplier;
@@ -23,6 +26,7 @@ use App\Models\SupplierDocument;
 use App\Models\SupplierDueDiligenceAssessment;
 use App\Models\SupplierRequirementEvaluation;
 use App\Services\Api\ApiErrorResponder;
+use App\Services\Api\Presenters\QualityPresenter;
 use App\Services\Compliance\ComplianceAssessmentOverview;
 use App\Services\Compliance\ComplianceAttentionService;
 use App\Services\Compliance\ComplianceAuditAttentionService;
@@ -32,6 +36,7 @@ use App\Services\ManagementReview\ManagementReviewSectionCatalog as ReviewSectio
 use App\Services\Objectives\KpiTarget;
 use App\Services\Objectives\KpiTargetPolicy;
 use App\Services\Objectives\ObjectiveAttentionService;
+use App\Services\Quality\QualityAttentionService;
 use App\Services\Risk\RiskAttentionService;
 use App\Services\Risk\RiskScoringPolicy;
 use App\Services\Suppliers\Assurance\SupplierAssuranceResolver;
@@ -172,6 +177,11 @@ class ApiOpenApiContractTest extends TestCase
             'SupplierDueDiligenceConclusion' => SupplierDueDiligenceAssessment::CONCLUSIONS,
             'SupplierDueDiligenceLevel' => SupplierDueDiligenceAssessment::LEVELS,
             'SupplierFollowUpKind' => SupplierFollowUpPlan::KINDS,
+            'QualityItemType' => QualityItem::TYPES,
+            'QualityItemStatus' => QualityItem::STATUSES,
+            'QualityControlFrequency' => QualityControlDetail::FREQUENCIES,
+            'QualityToolCategory' => QualityTool::CATEGORIES,
+            'QualityAttentionCode' => array_values(array_diff([QualityAttentionService::CONTROLS_WITHOUT_EVIDENCE, QualityAttentionService::CONTROLS_WITHOUT_ACTIVITY, QualityAttentionService::PROCESSES_WITHOUT_GOVERNING_POLICY, QualityAttentionService::PROCESSES_OVERDUE_FOR_REVIEW], QualityPresenter::FLOW_DEPENDENT_FINDINGS)),
             'ManagementReviewStatus' => ManagementReview::STATUSES,
             'ManagementReviewJudgement' => ManagementReview::JUDGEMENTS,
             'ManagementReviewSectionType' => [ReviewSections::TYPE_OWN, ReviewSections::TYPE_MANUAL, ReviewSections::TYPE_MODULE],
@@ -181,7 +191,7 @@ class ApiOpenApiContractTest extends TestCase
             'ManagementReviewDecisionStatus' => ManagementReviewDecision::STATUSES,
             // The keys of ApiAccessSummary::for() and the item types of ApiAttentionOverview.
             'ApiModule' => ['risk', 'deviations', 'objectives'],
-            'AttentionItemType' => ['risk', 'deviation', 'improvement', 'objective', 'kpi', 'compliance_requirement', 'compliance_audit', 'supplier'],
+            'AttentionItemType' => ['risk', 'deviation', 'improvement', 'objective', 'kpi', 'compliance_requirement', 'compliance_audit', 'supplier', 'quality_item'],
         ];
 
         foreach ($expected as $schema => $values) {

@@ -2807,6 +2807,7 @@ return [
                 'management_review' => 'Ledelsens gjennomgang',
                 'compliance' => 'Etterlevelse og revisjon',
                 'suppliers' => 'Leverandøroppfølging',
+                'quality' => 'Kvalitet',
             ],
             'granted_meta' => 'Tilgang gitt :date av :name',
             'unknown_person' => 'ukjent',

@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\V1\KpiController;
 use App\Http\Controllers\Api\V1\ManagementReviewController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\ObjectiveController;
+use App\Http\Controllers\Api\V1\QualityController;
 use App\Http\Controllers\Api\V1\RiskController;
 use App\Http\Controllers\Api\V1\RiskTreatmentActionController;
 use App\Http\Controllers\Api\V1\SupplierController;
@@ -47,6 +48,7 @@ Route::prefix('v1')
         Route::get('objectives', [ObjectiveController::class, 'index'])->name('objectives.index');
         Route::get('objectives/{objectiveId}', [ObjectiveController::class, 'show'])->whereNumber('objectiveId')->name('objectives.show');
         Route::get('kpis', [KpiController::class, 'index'])->name('kpis.index');
+        Route::get('kpis/{kpiId}', [KpiController::class, 'show'])->whereNumber('kpiId')->name('kpis.show');
         Route::get('kpis/{kpiId}/measurements', [KpiController::class, 'measurements'])->whereNumber('kpiId')->name('kpis.measurements');
         Route::get('management-reviews', [ManagementReviewController::class, 'index'])->name('management-reviews.index');
         Route::get('management-reviews/{reviewId}', [ManagementReviewController::class, 'show'])->whereNumber('reviewId')->name('management-reviews.show');
@@ -60,4 +62,6 @@ Route::prefix('v1')
         Route::get('suppliers', [SupplierController::class, 'index'])->name('suppliers.index');
         Route::get('suppliers/control-requirements', [SupplierController::class, 'controlRequirements'])->name('suppliers.control-requirements');
         Route::get('suppliers/{supplierId}', [SupplierController::class, 'show'])->whereNumber('supplierId')->name('suppliers.show');
+        Route::get('quality/items', [QualityController::class, 'items'])->name('quality.items');
+        Route::get('quality/controls', [QualityController::class, 'controls'])->name('quality.controls');
     });

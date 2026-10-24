@@ -6,6 +6,8 @@ use App\Models\Risk;
 use App\Models\RiskAssessment;
 use App\Services\Risk\RiskAcceptanceService;
 use App\Services\Risk\RiskAttentionService;
+use App\Services\Risk\RiskControlService;
+use App\Services\Risk\RiskQualityContextService;
 use App\Services\Risk\RiskReviewSchedule;
 use App\Services\Risk\RiskScoringPolicy;
 use App\Services\Risk\RiskTreatmentService;
@@ -19,9 +21,11 @@ use Illuminate\Support\Collection;
  * In: identifiers, title, status, behandlingsvalg, fagområde, eier, the latest assessment's
  * inherent and residual scoring, the periodic review and the reasons it needs attention, as codes.
  * The detail adds the assessment history (scoring and date), the tiltak (title, status, ansvarlig,
- * frist) and the acceptance of residual risk (dates and state). Out: årsak, hendelse, konsekvens,
+ * frist), the acceptance of residual risk (dates and state) and — only for an identity that may read
+ * Kvalitet, as on the risk page — the linked controls and processes. Out: årsak, hendelse, konsekvens,
  * utfyllende informasjon, begrunnelser, tiltak results and every other free text, who assessed,
- * accepted or revoked, the Kvalitet links (controls, process context), the supplier origin and web
+ * accepted or revoked, the controls' criterion and placements, the activities' names (read from a
+ * process flow, whose version the API may show is not decided, KVA-02), the supplier origin and web
  * routes.
  *
  * Nothing is computed here that the web does not compute the same way: the latest assessment is
@@ -38,6 +42,8 @@ class RiskPresenter
         private readonly RiskAttentionService $attention,
         private readonly RiskTreatmentService $treatments,
         private readonly RiskAcceptanceService $acceptances,
+        private readonly RiskControlService $controls,
+        private readonly RiskQualityContextService $context,
     ) {}
 
     /**
@@ -69,7 +75,7 @@ class RiskPresenter
      * @param  Risk  $risk  already reached through RiskAccessService::findVisible(), with businessArea and owner loaded
      * @return array<string, mixed>
      */
-    public function detail(Risk $risk, CarbonInterface $today): array
+    public function detail(Risk $risk, CarbonInterface $today, bool $readsQuality): array
     {
         $acceptance = $this->acceptances->decisionFor($risk);
 
@@ -102,6 +108,14 @@ class RiskPresenter
                 'current' => $acceptance['current'] !== null ? $this->acceptance($acceptance['current']) : null,
                 'history' => array_map(fn (array $row): array => $this->acceptance($row), $acceptance['history']),
             ],
+            // null, not empty, without Kvalitet read access: nothing is said about Kvalitet.
+            'controls' => $readsQuality ? array_map(fn (array $control): array => [
+                'id' => $control['id'],
+                'title' => $control['title'],
+                'code' => $control['code'],
+                'status' => $control['status'],
+            ], $this->controls->linkedControls($risk)) : null,
+            'processes' => $readsQuality ? QualityPresenter::linkedProcesses($this->context->linkedContext($risk)) : null,
         ];
     }
 

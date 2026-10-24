@@ -33,7 +33,7 @@ class ApiRiskDetailReadTest extends TestCase
     private const DETAIL_KEYS = [
         'id', 'title', 'status', 'treatment_strategy', 'business_area', 'owner', 'inherent', 'residual',
         'last_assessed_on', 'review_interval_months', 'next_review_on', 'is_review_overdue', 'attention', 'updated_at',
-        'assessments', 'treatment_actions', 'acceptance',
+        'assessments', 'treatment_actions', 'acceptance', 'controls', 'processes',
     ];
 
     protected function setUp(): void
@@ -152,10 +152,14 @@ class ApiRiskDetailReadTest extends TestCase
             ]],
         ]);
 
-        // No free text, no assessor or acceptor, no Kvalitet links, no web routes.
+        // Without Kvalitet read access: null, not empty — nothing is said about Kvalitet.
+        $response->assertJsonPath('data.controls', null);
+        $response->assertJsonPath('data.processes', null);
+
+        // No free text, no assessor or acceptor, no web routes.
         $body = (string) $response->getContent();
 
-        foreach (['FRITEKST', 'Vera Vurderer', 'rationale', 'outcome_note', 'controls', 'quality_context', 'supplier', '/app/'] as $absent) {
+        foreach (['FRITEKST', 'Vera Vurderer', 'rationale', 'outcome_note', 'quality_context', 'supplier', '/app/'] as $absent) {
             $this->assertStringNotContainsString($absent, $body);
         }
     }

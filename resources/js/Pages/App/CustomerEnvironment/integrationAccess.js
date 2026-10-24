@@ -10,6 +10,7 @@ const MODULE_LABELS = {
     management_review: 'Ledelsens gjennomgang',
     compliance: 'Etterlevelse og revisjon',
     suppliers: 'Leverandøroppfølging',
+    quality: 'Kvalitet',
 };
 
 export function integrationAccessLines(access = {}, t = {}) {

@@ -79,6 +79,7 @@ class ApiCustomerGrantTest extends TestCase
                     // The customer has not ordered Etterlevelse og revisjon.
                     'compliance' => ['entitled' => false, 'readable' => false, 'business_areas' => null],
                     'suppliers' => ['entitled' => false, 'readable' => false, 'business_areas' => null],
+                    'quality' => ['entitled' => true, 'readable' => false, 'business_areas' => null],
                 ],
             ],
             'meta' => [

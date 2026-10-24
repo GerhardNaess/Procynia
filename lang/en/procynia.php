@@ -2803,6 +2803,7 @@ return [
                 'management_review' => 'Management review',
                 'compliance' => 'Compliance and audit',
                 'suppliers' => 'Supplier management',
+                'quality' => 'Quality',
             ],
             'granted_meta' => 'Access given :date by :name',
             'unknown_person' => 'unknown',

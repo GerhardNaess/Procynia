@@ -10,6 +10,7 @@ use App\Services\Improvements\ImprovementCaseAccessService;
 use App\Services\ManagementReview\ManagementReviewAccessService;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Objectives\ObjectiveAccessService;
+use App\Services\Quality\QualityProcessContextReader;
 use App\Services\Risk\RiskAccessService;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Support\CustomerPermissionCatalog;
@@ -33,6 +34,7 @@ class ApiAccessSummary
         private readonly ManagementReviewAccessService $managementReviews,
         private readonly ComplianceAccessService $compliance,
         private readonly SupplierAccessService $suppliers,
+        private readonly QualityProcessContextReader $quality,
     ) {}
 
     /**
@@ -75,6 +77,11 @@ class ApiAccessSummary
             'suppliers' => $this->customerWide(
                 $this->suppliers->canReadFromAnotherModule($identity),
                 $this->entitlements->hasModule($customer, 'supplier'),
+            ),
+            // GET /api/v1/quality/…: Kvalitet. Customer-wide.
+            'quality' => $this->customerWide(
+                $this->quality->canRead($identity),
+                $this->entitlements->hasModule($customer, 'quality'),
             ),
         ];
     }

@@ -7,9 +7,11 @@ use App\Models\ComplianceRequirement;
 use App\Models\Customer;
 use App\Models\ImprovementCase;
 use App\Models\Objective;
+use App\Models\QualityItem;
 use App\Models\Risk;
 use App\Models\Supplier;
 use App\Models\User;
+use App\Services\Api\Presenters\QualityPresenter;
 use App\Services\Compliance\ComplianceAccessService;
 use App\Services\Compliance\ComplianceAttentionService;
 use App\Services\Compliance\ComplianceAuditAttentionService;
@@ -51,11 +53,12 @@ class ApiAttentionOverview
         private readonly ComplianceAuditAttentionService $auditAttention,
         private readonly SupplierAccessService $suppliers,
         private readonly SupplierAttentionService $supplierAttention,
+        private readonly QualityPresenter $quality,
     ) {}
 
     /**
      * @return array{
-     *     modules: array{risk: bool, deviations: bool, objectives: bool, compliance: bool, suppliers: bool},
+     *     modules: array{risk: bool, deviations: bool, objectives: bool, compliance: bool, suppliers: bool, quality: bool},
      *     items: list<array<string, mixed>>
      * }
      */
@@ -68,6 +71,7 @@ class ApiAttentionOverview
             'objectives' => $summary['objectives']['readable'],
             'compliance' => $summary['compliance']['readable'],
             'suppliers' => $summary['suppliers']['readable'],
+            'quality' => $summary['quality']['readable'],
         ];
 
         return [
@@ -78,6 +82,7 @@ class ApiAttentionOverview
                 ...($readable['objectives'] ? $this->objectives($identity, $today) : []),
                 ...($readable['compliance'] ? $this->compliance($identity, $today) : []),
                 ...($readable['suppliers'] ? $this->suppliers($identity, $today) : []),
+                ...($readable['quality'] ? $this->quality($identity) : []),
             ],
         ];
     }
@@ -253,6 +258,30 @@ class ApiAttentionOverview
         }
 
         return $items;
+    }
+
+    /**
+     * Kvalitet's items with QualityAttentionService's codes — the customer's whole register, which is
+     * what quality.view reads — without the code that is judged against a process flow's working
+     * version (QualityPresenter::FLOW_DEPENDENT_FINDINGS). Kvalitet has no fagområder.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function quality(User $identity): array
+    {
+        $codes = $this->quality->attentionByItem((int) $identity->customer_id);
+
+        if ($codes === []) {
+            return [];
+        }
+
+        return QualityItem::query()
+            ->where('customer_id', (int) $identity->customer_id)
+            ->whereIn('id', array_keys($codes))
+            ->orderBy('id')
+            ->get(['id', 'title'])
+            ->map(fn (QualityItem $item): array => $this->item('quality_item', (int) $item->id, $item->title, null, null, $codes[(int) $item->id]))
+            ->all();
     }
 
     /**

@@ -26,8 +26,9 @@ describe('what an integration can read', () => {
                 management_review: { entitled: true, readable: true, business_areas: null },
                 compliance: { entitled: true, readable: true, business_areas: null },
                 suppliers: { entitled: true, readable: true, business_areas: null },
+                quality: { entitled: true, readable: true, business_areas: null },
             }),
-            ['Risiko: alle fagområder', 'Avvik og forbedringer: alle fagområder', 'Mål og KPI: Salg', 'Ledelsens gjennomgang: hele kundemiljøet', 'Etterlevelse og revisjon: hele kundemiljøet', 'Leverandøroppfølging: hele kundemiljøet'],
+            ['Risiko: alle fagområder', 'Avvik og forbedringer: alle fagområder', 'Mål og KPI: Salg', 'Ledelsens gjennomgang: hele kundemiljøet', 'Etterlevelse og revisjon: hele kundemiljøet', 'Leverandøroppfølging: hele kundemiljøet', 'Kvalitet: hele kundemiljøet'],
         );
     });
 

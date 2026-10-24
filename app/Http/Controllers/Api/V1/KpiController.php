@@ -8,9 +8,12 @@ use App\Services\Api\ApiCursor;
 use App\Services\Api\ApiRequestContext;
 use App\Services\Api\ApiResponse;
 use App\Services\Api\Presenters\KpiPresenter;
+use App\Services\Api\Presenters\QualityPresenter;
+use App\Services\Objectives\KpiQualityContextService;
 use App\Services\Objectives\ObjectiveAccessService;
 use Carbon\CarbonImmutable;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,7 +27,8 @@ use Illuminate\Validation\Rule;
  * may read, and nothing else. A KPI has no fagområde of its own, so business_area_id filters on its
  * objective's. Filters and the cursor narrow that list and cannot widen it.
  *
- * GET /api/v1/kpis/{kpiId}/measurements is one visible KPI's whole målehistorikk: a KPI of another
+ * GET /api/v1/kpis/{kpiId} is one visible KPI with the processes it measures (MOK-06), for an
+ * identity that may read Kvalitet; GET /api/v1/kpis/{kpiId}/measurements is its whole målehistorikk: a KPI of another
  * customer, under an objective the identity cannot read, or not there at all is the same 404.
  */
 class KpiController extends Controller
@@ -112,5 +116,31 @@ class KpiController extends Controller
         $context->rows = count($history);
 
         return ApiResponse::ok($history, $context);
+    }
+
+    public function show(
+        ApiRequestContext $context,
+        ObjectiveAccessService $access,
+        KpiPresenter $presenter,
+        KpiQualityContextService $quality,
+        int $kpiId,
+    ): JsonResponse {
+        $actor = $context->actor;
+
+        if (! $access->canOpenModule($actor)) {
+            throw new AuthorizationException;
+        }
+
+        $kpi = $access->visibleKpis($actor)
+            ->whereKey($kpiId)
+            ->with(['owner:id,name', 'objective.owner:id,name', 'objective.businessArea:id,name'])
+            ->first()
+            ?? throw (new ModelNotFoundException)->setModel(Kpi::class);
+        $context->rows = 1;
+
+        return ApiResponse::ok($presenter->rows(new Collection([$kpi]), CarbonImmutable::parse(now()->toDateString()))[0] + [
+            // The processes it measures, at process level — null, not empty, without Kvalitet read access.
+            'processes' => $quality->canReadQuality($actor) ? QualityPresenter::linkedProcesses($quality->linkedContext($kpi)) : null,
+        ], $context);
     }
 }

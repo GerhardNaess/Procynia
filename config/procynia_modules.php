@@ -158,6 +158,7 @@ return [
         'api.v1.management-reviews.' => 'management_review',
         'api.v1.compliance.' => 'compliance',
         'api.v1.suppliers.' => 'supplier',
+        'api.v1.quality.' => 'quality',
     ],
 
 ];

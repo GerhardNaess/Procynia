@@ -86,6 +86,8 @@ tags:
     description: Ledelsens gjennomgang.
   - name: Suppliers
     description: Leverandøroppfølging — register, kontrollkrav and follow-up.
+  - name: Quality
+    description: Kvalitet — the register, controls and attention, without process flows.
   - name: Compliance and audit
     description: Etterlevelse og revisjon — kravregister, status, revisjoner and Kravbiblioteket.
 
@@ -143,12 +145,13 @@ paths:
         Each module's own rules decide, over the same set as its register's «Trenger
         oppmerksomhet»: risks that are not closed, active avvik and forbedringer, active
         objectives and their active KPIs, active requirements and audits that are not cancelled,
-        and suppliers that have not ended. The codes are the same as on the records' own rows.
+        suppliers that have not ended, and Kvalitet's items. The codes are the same as on the
+        records' own rows.
 
         A module the customer has not ordered, or the identity may not read, is `false` under
         `modules` and contributes no items. This route needs no module and is returned whole,
         without pagination: risks, then avvik, forbedringer, objectives, KPIs, requirements,
-        audits and suppliers, each by id.
+        audits, suppliers and quality items, each by id.
       parameters:
         - $ref: '#/components/parameters/ProcyniaCustomer'
       responses:
@@ -288,8 +291,11 @@ paths:
         A risk of another customer, outside the identity's fagområder, or one that does not exist
         is 404.
 
-        Not included: the links to Kvalitet (controls, process context), which become available
-        when Kvalitet can be read through the API, and the supplier the risk concerns.
+        The linked controls and processes in Kvalitet are given only to an identity that may read
+        Kvalitet (the module and `quality.view`); otherwise they are null. Processes are given at
+        process level: the activities' names are read from a process flow, whose version the API
+        may show is not decided. Not included: the controls' criterion and placements, and the
+        supplier the risk concerns.
 
         Requires the Risiko module and `risk.view`.
       parameters:
@@ -1361,6 +1367,157 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /v1/quality/items:
+    get:
+      tags: [Quality]
+      operationId: listQualityItems
+      summary: Kvalitet's register
+      description: |
+        The customer's quality items — policies, processes, procedures, work instructions,
+        checklists and controls — with ansvarlig, review dates and attention codes. Kvalitet is
+        customer-wide; there are no fagområder.
+
+        Nothing read from a process flow is included: not the flow, its publication state or where
+        controls are placed in it. Which version of a flow the API may show (the approved one or the
+        working version) is not decided. For the same reason the attention code
+        `controls_without_activity` is never given. Not included either: purpose, steps, inputs and
+        outputs, checklists, Wiki links and files.
+
+        Requires the Kvalitet module and `quality.view`.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/QualityTypeFilter'
+        - $ref: '#/components/parameters/QualityStatusFilter'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of items.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/QualityItem'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/quality/controls:
+    get:
+      tags: [Quality]
+      operationId: listQualityControls
+      summary: The control register
+      description: |
+        The customer's controls with frequency, how much evidence is registered and the tools from
+        the library they are carried out with. Not included: the criterion, method and
+        responsibility (free text), the evidence itself, files and where the control is placed in a
+        process flow.
+
+        Requires the Kvalitet module and `quality.view`.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/QualityStatusFilter'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of controls.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/QualityControl'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/kpis/{kpiId}:
+    get:
+      tags: [Objectives and KPIs]
+      operationId: getKpi
+      summary: One KPI with the processes it measures
+      description: |
+        One KPI the integration identity may read, exactly as `GET /v1/kpis` presents it, with the
+        processes in Kvalitet it measures. The processes are given only to an identity that may read
+        Kvalitet (the module and `quality.view`); otherwise `processes` is null. They are given at
+        process level: the activities' names are read from a process flow, whose version the API may
+        show is not decided. A KPI of another customer, under an objective outside the identity's
+        fagområder, or one that does not exist, is 404.
+
+        Requires the Mål og KPI module and `objective.view`.
+      parameters:
+        - $ref: '#/components/parameters/ProcyniaCustomer'
+        - $ref: '#/components/parameters/KpiId'
+      responses:
+        '200':
+          description: The KPI.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    $ref: '#/components/schemas/KpiDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
 components:
   securitySchemes:
     entraApplicationToken:
@@ -1544,6 +1701,20 @@ components:
       description: Only suppliers in this category.
       schema:
         $ref: '#/components/schemas/SupplierCategory'
+    QualityTypeFilter:
+      name: type
+      in: query
+      required: false
+      description: Only items of this type.
+      schema:
+        $ref: '#/components/schemas/QualityItemType'
+    QualityStatusFilter:
+      name: status
+      in: query
+      required: false
+      description: Only items with this status.
+      schema:
+        $ref: '#/components/schemas/QualityItemStatus'
     BusinessAreaId:
       name: business_area_id
       in: query
@@ -1830,7 +2001,7 @@ components:
         modules:
           type: object
           description: The modules this API serves, by the key of their endpoints.
-          required: [risk, deviations, objectives, management_review, compliance, suppliers]
+          required: [risk, deviations, objectives, management_review, compliance, suppliers, quality]
           additionalProperties: false
           properties:
             risk:
@@ -1851,6 +2022,9 @@ components:
             suppliers:
               $ref: '#/components/schemas/ModuleAccess'
               description: Leverandøroppfølging — `GET /v1/suppliers…`. Customer-wide, so `business_areas` is null.
+            quality:
+              $ref: '#/components/schemas/ModuleAccess'
+              description: Kvalitet — `GET /v1/quality/…`, and the Kvalitet links of risks and KPIs. Customer-wide, so `business_areas` is null.
     ModuleAccess:
       type: object
       required: [entitled, readable, business_areas]
@@ -1888,7 +2062,7 @@ components:
       enum: [risk, deviations, objectives]
     AttentionItemType:
       type: string
-      enum: [risk, deviation, improvement, objective, kpi, compliance_requirement, compliance_audit, supplier]
+      enum: [risk, deviation, improvement, objective, kpi, compliance_requirement, compliance_audit, supplier, quality_item]
     AttentionOverview:
       type: object
       required: [modules, items]
@@ -1897,7 +2071,7 @@ components:
         modules:
           type: object
           description: Per module, whether the identity reads it. A module that is `false` contributes no items.
-          required: [risk, deviations, objectives, compliance, suppliers]
+          required: [risk, deviations, objectives, compliance, suppliers, quality]
           additionalProperties: false
           properties:
             risk:
@@ -1909,6 +2083,8 @@ components:
             compliance:
               type: boolean
             suppliers:
+              type: boolean
+            quality:
               type: boolean
         items:
           type: array
@@ -1948,6 +2124,7 @@ components:
               - $ref: '#/components/schemas/ComplianceRequirementAttentionCode'
               - $ref: '#/components/schemas/ComplianceAuditAttentionCode'
               - $ref: '#/components/schemas/SupplierAttentionCode'
+              - $ref: '#/components/schemas/QualityAttentionCode'
     BusinessArea:
       type: object
       description: A fagområde. Its description is not included.
@@ -2072,13 +2249,27 @@ components:
             - type: 'null'
     RiskDetail:
       description: |
-        A risk with its history and follow-up. Not included: rationales, tiltak results, who
-        assessed, accepted or revoked, and the Kvalitet links.
+        A risk with its history and follow-up. Not included: rationales, tiltak results and who
+        assessed, accepted or revoked.
       allOf:
         - $ref: '#/components/schemas/RiskFields'
         - type: object
-          required: [assessments, treatment_actions, acceptance]
+          required: [assessments, treatment_actions, acceptance, controls, processes]
           properties:
+            controls:
+              description: The Kvalitet controls handling the risk. Null without Kvalitet read access.
+              oneOf:
+                - type: array
+                  items:
+                    $ref: '#/components/schemas/QualityReference'
+                - type: 'null'
+            processes:
+              description: The processes the risk belongs in. Null without Kvalitet read access.
+              oneOf:
+                - type: array
+                  items:
+                    $ref: '#/components/schemas/LinkedProcess'
+                - type: 'null'
             assessments:
               type: array
               description: Every assessment, newest first.
@@ -2550,13 +2741,32 @@ components:
           $ref: '#/components/schemas/KpiResult'
           description: Against the målverdi that applied when the measurement was registered, not today's.
     Kpi:
+      description: A KPI, as in the list.
+      allOf:
+        - $ref: '#/components/schemas/KpiFields'
+      unevaluatedProperties: false
+    KpiDetail:
+      description: A KPI with the processes it measures.
+      allOf:
+        - $ref: '#/components/schemas/KpiFields'
+        - type: object
+          required: [processes]
+          properties:
+            processes:
+              description: The processes in Kvalitet it measures. Null without Kvalitet read access.
+              oneOf:
+                - type: array
+                  items:
+                    $ref: '#/components/schemas/LinkedProcess'
+                - type: 'null'
+      unevaluatedProperties: false
+    KpiFields:
       type: object
       description: |
         A KPI, structured fields only. Not included: beskrivelse, measurement comments, who
         registered or withdrew a measurement, withdrawal reasons, withdrawn and superseded
         measurements, and the process context.
       required: [id, objective_id, business_area, title, status, owner, unit, unit_label, currency_code, target, baseline, frequency, reporting_grace_days, latest_measurement, result, measurements, attention, created_at, updated_at]
-      additionalProperties: false
       properties:
         id:
           type: integer
@@ -3599,3 +3809,139 @@ components:
                   items:
                     type: integer
       unevaluatedProperties: false
+
+    QualityItemType:
+      type: string
+      enum: [policy, process, procedure, work_instruction, checklist, control]
+    QualityItemStatus:
+      type: string
+      enum: [draft, active, under_review, retired]
+    QualityControlFrequency:
+      type: string
+      enum: [continuous, daily, weekly, monthly, quarterly, annually, ad_hoc]
+    QualityToolCategory:
+      type: string
+      enum: [guide, checklist, template, method, standard_text, reference]
+    QualityAttentionCode:
+      type: string
+      description: |
+        A control without evidence, a process without a governing document in force, a process past
+        its review date. controls_without_activity is not given: it is judged against the working
+        version of the process flows.
+      enum: [controls_without_evidence, processes_without_governing_policy, processes_overdue_for_review]
+    QualityItem:
+      description: An item in Kvalitet's register.
+      allOf:
+        - $ref: '#/components/schemas/QualityItemFields'
+      unevaluatedProperties: false
+    QualityItemFields:
+      type: object
+      required: [id, quality_type, title, code, status, owner, review_interval_months, last_reviewed_on, next_review_on, attention, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+        quality_type:
+          $ref: '#/components/schemas/QualityItemType'
+        title:
+          type: string
+        code:
+          type: [string, 'null']
+        status:
+          $ref: '#/components/schemas/QualityItemStatus'
+        owner:
+          oneOf:
+            - $ref: '#/components/schemas/Person'
+            - type: 'null'
+        review_interval_months:
+          type: [integer, 'null']
+        last_reviewed_on:
+          type: [string, 'null']
+          format: date
+        next_review_on:
+          type: [string, 'null']
+          format: date
+        attention:
+          type: array
+          items:
+            $ref: '#/components/schemas/QualityAttentionCode'
+        created_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        updated_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    QualityControl:
+      description: A control with frequency, evidence and tools.
+      allOf:
+        - $ref: '#/components/schemas/QualityItemFields'
+        - type: object
+          required: [frequency, evidence, tools]
+          properties:
+            frequency:
+              oneOf:
+                - $ref: '#/components/schemas/QualityControlFrequency'
+                - type: 'null'
+            evidence:
+              type: object
+              description: The evidence registered and not withdrawn.
+              required: [count, latest_added_at]
+              additionalProperties: false
+              properties:
+                count:
+                  type: integer
+                latest_added_at:
+                  oneOf:
+                    - $ref: '#/components/schemas/Timestamp'
+                    - type: 'null'
+            tools:
+              type: array
+              description: The tools from Kvalitet's library the control is carried out with.
+              items:
+                type: object
+                required: [id, title, category]
+                additionalProperties: false
+                properties:
+                  id:
+                    type: integer
+                  title:
+                    type: string
+                  category:
+                    oneOf:
+                      - $ref: '#/components/schemas/QualityToolCategory'
+                      - type: 'null'
+      unevaluatedProperties: false
+    QualityReference:
+      type: object
+      description: A Kvalitet item referred to from another module.
+      required: [id, title, code, status]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        code:
+          type: [string, 'null']
+        status:
+          $ref: '#/components/schemas/QualityItemStatus'
+    LinkedProcess:
+      type: object
+      description: |
+        A process in Kvalitet linked from another module, at process level: linked as a whole,
+        and/or through some of its activities. The activities' names are not given.
+      required: [id, title, code, whole_process, activity_count]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        code:
+          type: [string, 'null']
+        whole_process:
+          type: boolean
+        activity_count:
+          type: integer
+          description: How many of its activities are linked.
