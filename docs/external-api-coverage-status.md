@@ -20,7 +20,55 @@
 | **Lokalt verifisert** | Ja. Alle 214 API-tester består (kjørt 2026-10-24, etter fase 7). Siste fulle kjøring av PHP-suiten ga 8667 tester og 0 feil (2026-10-24, før OpenAPI og fase 2 og 3). |
 | **Produksjonsklart** | **Nei.** Grenen er ikke flettet inn i `main`, migreringene er ikke kjørt i Azure, og API-et er ikke prøvd med et ekte token fra Microsoft Entra ID eller med Siggjo. |
 | **API-spesifikasjon** | 🟩 OpenAPI 3.1 for alle 40 operasjoner i [`api/openapi.yaml`](api/openapi.yaml), validert og låst mot rutene med en kontrakttest. 335 ekte svar fra API-testene er kontrollert mot skjemaene uten avvik (2026-10-24, etter fase 3), og 26 svar fra Wiki-testene etter fase 6. |
-| **Neste milepæl** | **Pilotklar API på testkunde:** dagens seks operasjoner flettet inn, beskrevet i en API-spesifikasjon og prøvd med ekte Entra-token i staging (fase 1 under). |
+| **Neste milepæl** | **Pilotklar API på testkunde:** dagens 40 operasjoner flettet inn, beskrevet i API-spesifikasjonen og prøvd med ekte Entra-token i staging (fase 1 under). |
+
+### Samlet status etter fase 7 (2026-10-24)
+
+Fase 7 er godkjent som lokalt levert. Fase 8 er utsatt etter D7 og D14: det bygges ingen kopi av data og ikke noe eget agentlag. Det startes ingen nye utredninger eller ny implementering nå.
+
+**1. Faser som er fullført lokalt**
+
+| Fase | Lokal status |
+|---|---|
+| 2 – Lesing i Risiko, Mål og KPI, Avvik og forbedringer | 🟩 Fullført |
+| 3 – Lesing i Etterlevelse og revisjon, Leverandøroppfølging, Ledelsens gjennomgang og Kvalitet | 🟩 Fullført (med D15–D17) |
+| 4 – Avgrensede registreringer | 🟧 AVF-04 og AVF-05 levert. Andre registreringer krever beslutning per operasjon. |
+| 6 – Wiki | 🟩 WIK-01–03 levert (D18–D22). WIK-05 er utsatt. |
+| 7 – Anbud | 🟩 ANB-01 og ANB-02 levert (D23–D28). Godkjent som lokalt levert. |
+| 1 – Pilot i produksjon | 🟧 Bare OpenAPI-spesifikasjonen er ferdig. Resten avhenger av eksterne miljøer. |
+| 5 – På vegne av en person | 🟥 Blokkert av D2 |
+| 8 – Kopi av data og agentlag | ⏸ Utsatt (D7, D14) |
+
+Alt ligger lokalt på `feature/external-api-foundation`. Grenen er ikke pushet eller flettet inn i `main`.
+
+**2. Implementerte API-operasjoner:** 40 i alt: 34 for lesing, 5 for skriving og 1 AI-spørsmål («Spør Wiki»). De dekker alle 32 A-funksjoner og 6 B-funksjoner (KVA-02, WIK-01–03, ANB-01, ANB-02).
+
+**3. Blokkerte funksjoner og beslutninger som gjenstår**
+
+| Det som er blokkert | Hva som må avgjøres | Hvem |
+|---|---|---|
+| Flere registreringer (for eksempel RIS-05), opplasting av kildedokumenter og KPI-målinger (B6, B7) | Én beslutning per operasjon, og om idempotens skal bygges før flere skriveoperasjoner (funn 23) | Produkteier |
+| Fase 5: Mine oppgaver, varsler og statusoppdatering på egne tiltak (FEL-04, FEL-05, LDG-06) | Om D2 skal oppheves (delegert modus) | Produkteier |
+| Kunnskapsoverføring til Wiki (WIK-05 og tilsvarende i modulene) | Kostnad og grenser for agentutløst AI-arbeid (S4, D22) | Produkteier |
+| Kvalitets AI-forslag | Tilgangskontroll i tjenesten (A23) | Arkitektur |
+| Søk i kunngjøringer (ANB-03) | Avgrensning per kunde (funn 31) | Arkitektur |
+| Saks- og kravarbeid i Anbud (ANB-04–09) | Utsatt (D28). ANB-05 og ANB-06 venter også på A46. Avdelingsavgrensning for integrasjoner er ikke besluttet. | Produkteier / arkitektur |
+| Fase 8: kopi av data og MCP-lag | Alternativ B (D7), DPIA (D14) og om MCP-laget skal bestilles | Produkteier |
+
+Til sammen er 37 B-funksjoner blokkert. 8 B-funksjoner er ikke anbefalt, og de 34 C-funksjonene er menneskelige beslutninger som aldri skal inn i API-et.
+
+**4. Dette må gjøres før ekte integrasjon med Siggjo og produksjonsbruk**
+
+| # | Tiltak | Kreves før | Hvem |
+|---|---|---|---|
+| 1 | Gjennomføre verifiseringene V1–V3, kjøre hele PHP-suiten som merge-kontroll (siste fulle kjøring var før fase 2) og flette grenen inn i `main` | Pilot | Produkteier |
+| 2 | Kjøre migreringene i staging og senere i Azure-produksjon | Pilot | Drift |
+| 3 | Registrere «Procynia API» i Entra med app-rollene `Procynia.Read.All` og `Procynia.Write.All` | Pilot | Advania |
+| 4 | Registrere Siggjos identitet, gi den tilgang hos en testkunde og slå på bare de navngitte operasjonene som skal brukes (`wiki.ask` krever at kunden har definert AI-kapasitet) | Pilot | Advania / System Owner hos testkunden |
+| 5 | Gjennomføre og signere sjekklisten V4 med ekte token i staging, også de negative prøvene | Pilot | Advania / Siggjo |
+| 6 | Publisere [`api/openapi.yaml`](api/openapi.yaml) til Siggjo og avtale at skrivekall ikke prøves på nytt automatisk (ingen idempotens, funn 23) | Pilot | Produkteier / Siggjo |
+| 7 | Beslutte WAF eller API Management og retensjon i Log Analytics (D12) | Første kunde med ekte data | Produkteier / drift |
+| 8 | Gjennomføre DPIA og inngå databehandleravtaler (D14), med funn 22 og 26 | Ekte kundedata til Siggjo | Produkteier / juridisk |
 
 ### Implementerte API-operasjoner
 
@@ -144,8 +192,8 @@ Faseplanen ble vedtatt 2026-10-24. Endringer i rekkefølge eller innhold krever 
 | **4** | Avgrensede registreringer (utkast og forslag) | Styringsmodulene | 🟧 Påbegynt. AVF-04 og AVF-05 levert lokalt 2026-10-24. Andre registreringer (for eksempel RIS-05) krever beslutning per operasjon. |
 | **5** | Tilgang på vegne av en person | Mine oppgaver, personlige dashboards | 🟥 Blokkert av D2. Kontrollert 2026-10-24: ingen av fasens funksjoner kan bygges før D2 er opphevet (funn 27). Ingenting er implementert. |
 | **6** | Wiki gjennom den felles kunnskapskjernen | Enterprise Wiki | 🟧 Levert lokalt 2026-10-24: WIK-01–03 etter D18–D22. Kunnskapsoverføring (WIK-05) er utsatt (D22, S4). Ikke produksjonsklar. |
-| **7** | Anbud | Anbud | 🟧 Levert lokalt 2026-10-24: ANB-01 og ANB-02 etter D23–D28. ANB-03–09 er utsatt (D28), og ANB-11–12 eksponeres aldri. Ikke produksjonsklar. |
-| **8** | Kopi av data og agentlag | Siggjos datamodell, MCP | 🟥 Blokkert av D7 og D14. Kontrollert 2026-10-24: alternativ B er ikke valgt (D7), og MCP-laget er ikke besluttet (funn 29). Ingenting er implementert. |
+| **7** | Anbud | Anbud | 🟩 Godkjent som lokalt levert 2026-10-24: ANB-01 og ANB-02 etter D23–D28. ANB-03–09 er utsatt (D28), og ANB-11–12 eksponeres aldri. Ikke produksjonsklar. |
+| **8** | Kopi av data og agentlag | Siggjos datamodell, MCP | ⏸ Utsatt 2026-10-24 etter D7 og D14. Det bygges ingen kopi av data og ikke noe eget agentlag (funn 29). Ingenting er implementert. |
 
 ### Vedtatt rekkefølge for de neste leveransene
 
@@ -185,7 +233,7 @@ Detaljer står i del 4.
 
 **Milepæl: «API klart for pilot på testkunde».** Den er nådd når:
 
-1. Dagens seks operasjoner er flettet inn i `main` etter V1–V3 (fase 0-verifiseringene).
+1. Dagens 40 operasjoner er flettet inn i `main` etter V1–V3 (fase 0-verifiseringene).
 2. En OpenAPI-spesifikasjon beskriver de seks operasjonene, og en test sikrer at spesifikasjonen og rutene stemmer overens. **Ferdig lokalt 2026-10-24.**
 3. «Procynia API» er registrert i Entra med rollene `Procynia.Read.All` og `Procynia.Write.All`. Siggjos identitet er registrert og har fått tilgang hos en testkunde.
 4. Sjekklisten V4 med ekte token er gjennomført og signert i staging.
@@ -540,7 +588,7 @@ Prinsipper: bruk eksisterende domenetjenester og tilgangstjenester, gjenbruk mø
 | **Avhengigheter** | D7 (alternativ B), D14 (DPIA), databehandleravtaler |
 | **Kompleksitet** | Høy |
 | **Ferdig når** | Rettighetsendringer og slettinger når Siggjo innen avtalt frist. Hvert MCP-verktøy svarer til ett API-endepunkt, og ingen verktøy tar beslutninger. |
-| **Status** | 🟥 Ikke startet. Kontrollert 2026-10-24: D7 valgte øyeblikksbilde uten tilgangsprojeksjon, så leveransene for alternativ B er ikke bestilt. MCP-laget er ikke besluttet som leveranse (funn 29). |
+| **Status** | ⏸ Utsatt 2026-10-24 etter eksisterende beslutninger. Kontrollert 2026-10-24: D7 valgte øyeblikksbilde uten tilgangsprojeksjon, så leveransene for alternativ B er ikke bestilt. MCP-laget er ikke besluttet som leveranse (funn 29). |
 
 ---
 
